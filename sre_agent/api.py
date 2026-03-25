@@ -7,11 +7,11 @@ with the OpenShift Pulse web UI.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
 import re
-import threading
 import time
 from contextlib import asynccontextmanager
 
@@ -154,8 +154,6 @@ async def _run_agent_ws(
             ).result(timeout=5)
 
             # Block the agent thread — wait for the UI to set the future result
-            # asyncio.Future → wrap with concurrent.futures style wait
-            import concurrent.futures
             waiter = concurrent.futures.Future()
 
             def _on_done(f):
@@ -262,11 +260,9 @@ async def websocket_agent(websocket: WebSocket, mode: str):
 
     # Message queue for incoming messages while agent is running
     incoming: asyncio.Queue = asyncio.Queue()
-    agent_running = False
 
     async def _receive_loop():
         """Receive messages from the WebSocket and route them."""
-        nonlocal agent_running
         try:
             while True:
                 raw = await websocket.receive_text()
