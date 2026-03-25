@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 
-from .k8s_client import get_apps_client, get_core_client, get_custom_client, safe
+from .k8s_client import get_apps_client, get_core_client, get_custom_client
 
 
 @beta_tool
@@ -222,61 +222,4 @@ def correlate_incident(
     return "\n".join(lines)
 
 
-@beta_tool
-def get_recent_changes(namespace: str = "default", minutes_back: int = 60) -> str:
-    """List all changes (deployments, rollouts, config changes) in a namespace within a time window. Use this to find what changed before an incident.
-
-    Args:
-        namespace: Namespace to check.
-        minutes_back: How many minutes of history (1-240).
-    """
-    minutes_back = min(max(1, minutes_back), 240)
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes_back)
-    changes = []
-
-    apps = get_apps_client()
-    core = get_core_client()
-
-    # Deployment changes
-    if namespace.upper() == "ALL":
-        deploys = safe(lambda: apps.list_deployment_for_all_namespaces())
-    else:
-        deploys = safe(lambda: apps.list_namespaced_deployment(namespace))
-
-    if not isinstance(deploys, str):
-        for dep in deploys.items:
-            for cond in dep.status.conditions or []:
-                ts = cond.last_transition_time
-                if ts is None:
-                    continue
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
-                if ts >= cutoff and cond.type == "Progressing":
-                    changes.append(
-                        f"{ts.isoformat()[:19]}  Deployment  "
-                        f"{dep.metadata.namespace}/{dep.metadata.name}  "
-                        f"{cond.reason}: {cond.message}"
-                    )
-
-    # ConfigMap changes (recent creation)
-    if namespace.upper() != "ALL":
-        cms = safe(lambda: core.list_namespaced_config_map(namespace))
-        if not isinstance(cms, str):
-            for cm in cms.items:
-                ts = cm.metadata.creation_timestamp
-                if ts is None:
-                    continue
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
-                if ts >= cutoff:
-                    changes.append(
-                        f"{ts.isoformat()[:19]}  ConfigMap   "
-                        f"{cm.metadata.namespace}/{cm.metadata.name}  created"
-                    )
-
-    changes.sort()
-    return "\n".join(changes) or f"No changes found in the last {minutes_back} minutes."
-
-
-# get_recent_changes is already in k8s_tools.py — only export correlate_incident
 TIMELINE_TOOLS = [correlate_incident]

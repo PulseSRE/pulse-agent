@@ -17,20 +17,23 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
-from .agent import create_client, run_agent_streaming
-from .k8s_tools import ALL_TOOLS as SRE_ALL_TOOLS, WRITE_TOOLS
+from .agent import (
+    create_client,
+    run_agent_streaming,
+    ALL_TOOLS as SRE_ALL_TOOLS,
+    WRITE_TOOLS,
+    SYSTEM_PROMPT as SRE_SYSTEM_PROMPT,
+    TOOL_DEFS as SRE_TOOL_DEFS,
+    TOOL_MAP as SRE_TOOL_MAP,
+)
 from .security_agent import (
     ALL_TOOLS as SEC_ALL_TOOLS,
     SECURITY_SYSTEM_PROMPT,
     TOOL_DEFS as SEC_TOOL_DEFS,
     TOOL_MAP as SEC_TOOL_MAP,
 )
-from .agent import SYSTEM_PROMPT as SRE_SYSTEM_PROMPT
 
 logger = logging.getLogger("pulse_agent.api")
-
-SRE_TOOL_DEFS = [t.to_dict() for t in SRE_ALL_TOOLS]
-SRE_TOOL_MAP = {t.name: t for t in SRE_ALL_TOOLS}
 
 # Pending confirmation requests keyed by connection
 _pending_confirms: dict[int, asyncio.Future] = {}

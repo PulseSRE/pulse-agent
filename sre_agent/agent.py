@@ -187,6 +187,17 @@ def _sanitize_content(content) -> list[dict]:
     return result
 
 
+_REDACTED_FIELDS = {"new_content", "yaml_content", "content"}
+
+
+def _redact_input(name: str, input_data: dict) -> dict:
+    """Redact sensitive fields from tool input for audit logging."""
+    return {
+        k: f"<redacted {len(str(v))} chars>" if k in _REDACTED_FIELDS else v
+        for k, v in input_data.items()
+    }
+
+
 def _execute_tool(name: str, input_data: dict, tool_map: dict) -> str:
     """Execute a tool by name and return the result string."""
     tool = tool_map.get(name)
@@ -197,7 +208,7 @@ def _execute_tool(name: str, input_data: dict, tool_map: dict) -> str:
         logger.info(json.dumps({
             "event": "tool_executed",
             "tool": name,
-            "input": input_data,
+            "input": _redact_input(name, input_data),
             "result_length": len(result),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }))
@@ -206,7 +217,7 @@ def _execute_tool(name: str, input_data: dict, tool_map: dict) -> str:
         logger.error(json.dumps({
             "event": "tool_error",
             "tool": name,
-            "input": input_data,
+            "input": _redact_input(name, input_data),
             "error": str(type(e).__name__),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }))

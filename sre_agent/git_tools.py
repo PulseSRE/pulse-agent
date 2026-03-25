@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import posixpath
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -17,6 +18,28 @@ from anthropic import beta_tool
 
 from .k8s_client import get_custom_client
 from kubernetes.client.rest import ApiException
+
+# Per-session PR counter to prevent runaway PR creation
+_pr_count = 0
+_MAX_PRS_PER_SESSION = int(os.environ.get("PULSE_AGENT_MAX_PRS", "5"))
+
+
+def _get_allowed_repos() -> set[str]:
+    """Get the set of allowed repos from PULSE_ALLOWED_REPOS env var."""
+    raw = os.environ.get("PULSE_ALLOWED_REPOS", "")
+    if not raw:
+        return set()
+    return {r.strip() for r in raw.split(",") if r.strip()}
+
+
+def _validate_file_path(path: str) -> str | None:
+    """Validate file_path for path traversal. Returns error message or None."""
+    if ".." in path.split("/"):
+        return "Error: file_path contains '..' — path traversal is not allowed."
+    normalized = posixpath.normpath(path)
+    if normalized.startswith("/") or normalized.startswith(".."):
+        return "Error: file_path must be a relative path within the repository."
+    return None
 
 
 def _github_api(method: str, path: str, body: dict | None = None, token: str = "") -> dict:
@@ -61,12 +84,28 @@ def propose_git_change(
         pr_body: Pull request description (optional).
         branch_name: Branch name for the PR (auto-generated if empty).
     """
+    global _pr_count
+
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
         return "Error: GITHUB_TOKEN environment variable is not set. Cannot create PRs."
 
     if "/" not in repo or len(repo.split("/")) != 2:
         return f"Error: Invalid repo format '{repo}'. Use 'owner/repo'."
+
+    # Repo allow-list check
+    allowed = _get_allowed_repos()
+    if allowed and repo not in allowed:
+        return f"Error: Repository '{repo}' is not in the allowed list. Allowed: {', '.join(sorted(allowed))}"
+
+    # Path traversal check
+    path_err = _validate_file_path(file_path)
+    if path_err:
+        return path_err
+
+    # Per-session rate limit
+    if _pr_count >= _MAX_PRS_PER_SESSION:
+        return f"Error: PR rate limit reached ({_MAX_PRS_PER_SESSION} per session). Set PULSE_AGENT_MAX_PRS to increase."
 
     try:
         # 1. Get the default branch and its SHA
@@ -122,18 +161,21 @@ def propose_git_change(
             "base": default_branch,
         })
 
+        _pr_count += 1
+
         return (
             f"Pull Request created successfully!\n"
             f"  PR: {pr['html_url']}\n"
             f"  Branch: {branch_name}\n"
             f"  File: {file_path}\n"
-            f"  Status: Open — awaiting review"
+            f"  Status: Open — awaiting review\n"
+            f"  PRs this session: {_pr_count}/{_MAX_PRS_PER_SESSION}"
         )
 
     except RuntimeError as e:
         return f"Error creating PR: {e}"
     except Exception as e:
-        return f"Error: {type(e).__name__}"
+        return f"Error: {type(e).__name__}: {e}"
 
 
 @beta_tool
@@ -159,8 +201,10 @@ def get_argo_app_source(name: str, namespace: str = "openshift-gitops") -> str:
     # Convert Git URL to owner/repo format for GitHub
     github_repo = ""
     if "github.com" in repo:
-        parts = repo.rstrip("/").rstrip(".git").split("github.com")[-1].strip("/:")
-        github_repo = parts
+        clean = repo.rstrip("/")
+        if clean.endswith(".git"):
+            clean = clean[:-4]
+        github_repo = clean.split("github.com")[-1].strip("/:")
 
     return json.dumps({
         "repo_url": repo,
