@@ -17,6 +17,50 @@ _ARGO_GROUP = "argoproj.io"
 _ARGO_VERSION = "v1alpha1"
 
 
+def check_argo_auto_sync(namespace: str, kind: str = "", name: str = "") -> str | None:
+    """Check if a resource is managed by an ArgoCD app with automated sync.
+
+    Returns a warning string if auto-sync is on, None if safe to edit.
+    """
+    try:
+        apps = get_custom_client().list_cluster_custom_object(
+            _ARGO_GROUP, _ARGO_VERSION, "applications"
+        )
+    except ApiException:
+        return None  # ArgoCD not installed, safe to proceed
+
+    for app in apps.get("items", []):
+        spec = app.get("spec", {})
+        dest_ns = spec.get("destination", {}).get("namespace", "")
+        sync_policy = spec.get("syncPolicy", {})
+        automated = sync_policy.get("automated")
+
+        if not automated:
+            continue
+
+        # Check if this app manages the target namespace
+        if namespace and dest_ns == namespace:
+            app_name = app["metadata"]["name"]
+            self_heal = automated.get("selfHeal", False)
+            prune = automated.get("prune", False)
+
+            warning = (
+                f"WARNING: Namespace '{namespace}' is managed by ArgoCD application "
+                f"'{app_name}' with automated sync"
+            )
+            if self_heal:
+                warning += " + selfHeal (changes WILL be reverted)"
+            if prune:
+                warning += " + prune"
+            warning += (
+                ". Direct cluster edits will be overwritten on the next sync. "
+                "Use propose_git_change to make a permanent change via PR instead."
+            )
+            return warning
+
+    return None
+
+
 @beta_tool
 def get_argo_applications(namespace: str = "ALL") -> str:
     """List ArgoCD Applications with their sync status, health, and source repo.

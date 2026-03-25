@@ -37,6 +37,8 @@ logger = logging.getLogger("pulse_agent.api")
 
 # Pending confirmation requests keyed by connection
 _pending_confirms: dict[int, asyncio.Future] = {}
+# JIT nonces for confirmation — prevents replay/forgery
+_pending_nonces: dict[int, str] = {}
 
 # Max WebSocket message size (1MB)
 MAX_MESSAGE_SIZE = 1_048_576
@@ -195,14 +197,18 @@ async def _run_agent_ws(
 
 
 async def _create_and_register_future(ws_id: int, tool_name: str, tool_input: dict, websocket: WebSocket):
-    """Create a Future on the event loop and send the confirm request."""
+    """Create a Future on the event loop and send the confirm request with a JIT nonce."""
+    import secrets
     loop = asyncio.get_running_loop()
     future = loop.create_future()
+    nonce = secrets.token_urlsafe(16)
     _pending_confirms[ws_id] = future
+    _pending_nonces[ws_id] = nonce
     await websocket.send_json({
         "type": "confirm_request",
         "tool": tool_name,
         "input": tool_input,
+        "nonce": nonce,
     })
     return future
 
@@ -280,12 +286,18 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                 # Confirm responses are handled immediately (even while agent runs)
                 if msg_type == "confirm_response":
                     future = _pending_confirms.get(ws_id)
-                    if future and not future.done():
-                        # We're already on the event loop — set directly
-                        future.set_result(data.get("approved", False))
-                        logger.info("Confirmation received: approved=%s", data.get("approved"))
-                    else:
+                    expected_nonce = _pending_nonces.get(ws_id)
+                    received_nonce = data.get("nonce", "")
+
+                    if not future or future.done():
                         logger.warning("Confirm response received but no pending future (ws_id=%s)", ws_id)
+                    elif expected_nonce and received_nonce != expected_nonce:
+                        logger.warning("Confirm response nonce mismatch — possible replay (ws_id=%s)", ws_id)
+                        future.set_result(False)
+                    else:
+                        future.set_result(data.get("approved", False))
+                        logger.info("Confirmation received: approved=%s nonce=%s", data.get("approved"), received_nonce[:8])
+                    _pending_nonces.pop(ws_id, None)
                     continue
 
                 if msg_type == "clear":
@@ -378,3 +390,4 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         future = _pending_confirms.pop(ws_id, None)
         if future and not future.done():
             future.cancel()
+        _pending_nonces.pop(ws_id, None)

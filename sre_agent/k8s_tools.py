@@ -1805,6 +1805,12 @@ def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = True) -> 
     if kind in _BLOCKED_KINDS:
         return f"Error: Creating/modifying {kind} resources is not allowed via apply_yaml for security reasons."
 
+    # Check ArgoCD auto-sync — warn if changes will be reverted
+    from .gitops_tools import check_argo_auto_sync
+    argo_warning = check_argo_auto_sync(ns, kind, name)
+    if argo_warning and not dry_run:
+        return argo_warning
+
     # Build API path
     if "/" in api_version:
         group, version = api_version.split("/", 1)
