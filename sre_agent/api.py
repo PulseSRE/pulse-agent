@@ -134,6 +134,9 @@ async def _run_agent_ws(
     def on_tool_use(name: str):
         _schedule_send({"type": "tool_use", "tool": name})
 
+    def on_component(name: str, spec: dict):
+        _schedule_send({"type": "component", "spec": spec, "tool": name})
+
     def on_confirm(tool_name: str, tool_input: dict) -> bool:
         """Request confirmation from the web UI and block until response."""
         try:
@@ -180,6 +183,7 @@ async def _run_agent_ws(
         on_thinking=on_thinking,
         on_tool_use=on_tool_use,
         on_confirm=on_confirm,
+        on_component=on_component,
     )
 
     return full_response

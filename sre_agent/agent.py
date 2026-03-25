@@ -200,21 +200,27 @@ def _redact_input(name: str, input_data: dict) -> dict:
     }
 
 
-def _execute_tool(name: str, input_data: dict, tool_map: dict) -> str:
-    """Execute a tool by name and return the result string."""
+def _execute_tool(name: str, input_data: dict, tool_map: dict) -> tuple[str, dict | None]:
+    """Execute a tool by name. Returns (text_result, component_spec_or_None)."""
     tool = tool_map.get(name)
     if not tool:
-        return f"Error: unknown tool '{name}'"
+        return f"Error: unknown tool '{name}'", None
     try:
         result = tool.call(input_data)
+        # Tools can return a tuple (text, component_spec) for rich UI rendering
+        if isinstance(result, tuple) and len(result) == 2:
+            text, component = result
+        else:
+            text, component = result, None
         logger.info(json.dumps({
             "event": "tool_executed",
             "tool": name,
             "input": _redact_input(name, input_data),
-            "result_length": len(result),
+            "result_length": len(text),
+            "has_component": component is not None,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }))
-        return result
+        return text, component
     except Exception as e:
         logger.error(json.dumps({
             "event": "tool_error",
@@ -223,7 +229,7 @@ def _execute_tool(name: str, input_data: dict, tool_map: dict) -> str:
             "error": str(type(e).__name__),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }))
-        return f"Error executing {name}: {type(e).__name__}"
+        return f"Error executing {name}: {type(e).__name__}", None
 
 
 def run_agent_streaming(
@@ -237,6 +243,7 @@ def run_agent_streaming(
     on_thinking=None,
     on_tool_use=None,
     on_confirm=None,
+    on_component=None,
 ) -> str:
     """Run an agent turn with streaming, handling the tool loop manually.
 
@@ -253,6 +260,7 @@ def run_agent_streaming(
         on_thinking: Callback for thinking deltas.
         on_tool_use: Callback when a tool is invoked (name, input).
         on_confirm: Callback to confirm write operations. Returns True to proceed.
+        on_component: Callback when a tool returns a UI component spec (name, spec).
 
     Returns the full final text response.
     """
@@ -336,12 +344,14 @@ def run_agent_streaming(
                             })
                             continue
 
-                    result = _execute_tool(block.name, block.input, tool_map)
+                    text_result, component_spec = _execute_tool(block.name, block.input, tool_map)
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": result,
+                        "content": text_result,
                     })
+                    if component_spec and on_component:
+                        on_component(block.name, component_spec)
             messages.append({"role": "user", "content": tool_results})
         elif response.stop_reason == "pause_turn":
             continue
@@ -364,6 +374,7 @@ def run_agent_turn_streaming(
     on_thinking=None,
     on_tool_use=None,
     on_confirm=None,
+    on_component=None,
 ) -> str:
     """Run the SRE agent. Delegates to the shared agent loop."""
     effective_defs = TOOL_DEFS + (extra_tool_defs or [])
@@ -380,4 +391,5 @@ def run_agent_turn_streaming(
         on_thinking=on_thinking,
         on_tool_use=on_tool_use,
         on_confirm=on_confirm,
+        on_component=on_component,
     )

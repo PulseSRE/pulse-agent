@@ -82,6 +82,7 @@ def list_pods(namespace: str = "default", label_selector: str = "", field_select
         return result
 
     lines = []
+    rows = []
     for pod in result.items[:MAX_RESULTS]:
         restarts = sum(
             (cs.restart_count for cs in (pod.status.container_statuses or [])),
@@ -92,10 +93,32 @@ def list_pods(namespace: str = "default", label_selector: str = "", field_select
             f"{ns}/{pod.metadata.name}  Status={pod.status.phase}  "
             f"Restarts={restarts}  Age={age(pod.metadata.creation_timestamp)}"
         )
+        rows.append({
+            "namespace": ns,
+            "name": pod.metadata.name,
+            "status": pod.status.phase or "Unknown",
+            "restarts": restarts,
+            "age": age(pod.metadata.creation_timestamp),
+            "node": pod.spec.node_name or "",
+        })
     total = len(result.items)
     if total > MAX_RESULTS:
         lines.append(f"... and {total - MAX_RESULTS} more pods (truncated)")
-    return "\n".join(lines) or "No pods found."
+    text = "\n".join(lines) or "No pods found."
+    component = {
+        "kind": "data_table",
+        "title": f"Pods ({len(rows)})",
+        "columns": [
+            {"id": "namespace", "header": "Namespace"},
+            {"id": "name", "header": "Name"},
+            {"id": "status", "header": "Status"},
+            {"id": "restarts", "header": "Restarts"},
+            {"id": "age", "header": "Age"},
+            {"id": "node", "header": "Node"},
+        ],
+        "rows": rows,
+    } if rows else None
+    return (text, component)
 
 
 @beta_tool
@@ -293,13 +316,34 @@ def get_events(namespace: str = "default", resource_kind: str = "", resource_nam
     )[:50]
 
     lines = []
+    rows = []
     for e in events:
         lines.append(
             f"{age(e.last_timestamp)} ago  {e.type}  {e.reason}  "
             f"{e.involved_object.kind}/{e.involved_object.name}  "
             f"{e.message}"
         )
-    return "\n".join(lines) or "No events found."
+        rows.append({
+            "age": age(e.last_timestamp) + " ago",
+            "type": e.type or "Normal",
+            "reason": e.reason or "",
+            "resource": f"{e.involved_object.kind}/{e.involved_object.name}",
+            "message": (e.message or "")[:120],
+        })
+    text = "\n".join(lines) or "No events found."
+    component = {
+        "kind": "data_table",
+        "title": f"Events ({len(rows)})",
+        "columns": [
+            {"id": "age", "header": "Age"},
+            {"id": "type", "header": "Type"},
+            {"id": "reason", "header": "Reason"},
+            {"id": "resource", "header": "Resource"},
+            {"id": "message", "header": "Message"},
+        ],
+        "rows": rows,
+    } if rows else None
+    return (text, component)
 
 
 @beta_tool
@@ -318,16 +362,42 @@ def list_deployments(namespace: str = "default") -> str:
         return result
 
     lines = []
+    rows = []
     for dep in result.items[:MAX_RESULTS]:
         s = dep.status
+        ready = s.ready_replicas or 0
+        desired = s.replicas or 0
         lines.append(
             f"{dep.metadata.namespace}/{dep.metadata.name}  "
-            f"Ready={s.ready_replicas or 0}/{s.replicas or 0}  "
+            f"Ready={ready}/{desired}  "
             f"Updated={s.updated_replicas or 0}  "
             f"Available={s.available_replicas or 0}  "
             f"Age={age(dep.metadata.creation_timestamp)}"
         )
-    return "\n".join(lines) or "No deployments found."
+        rows.append({
+            "namespace": dep.metadata.namespace,
+            "name": dep.metadata.name,
+            "ready": f"{ready}/{desired}",
+            "status": "Healthy" if ready == desired and desired > 0 else ("Degraded" if ready > 0 else "Unavailable"),
+            "updated": s.updated_replicas or 0,
+            "available": s.available_replicas or 0,
+            "age": age(dep.metadata.creation_timestamp),
+        })
+    text = "\n".join(lines) or "No deployments found."
+    component = {
+        "kind": "data_table",
+        "title": f"Deployments ({len(rows)})",
+        "columns": [
+            {"id": "namespace", "header": "Namespace"},
+            {"id": "name", "header": "Name"},
+            {"id": "ready", "header": "Ready"},
+            {"id": "status", "header": "Status"},
+            {"id": "updated", "header": "Updated"},
+            {"id": "age", "header": "Age"},
+        ],
+        "rows": rows,
+    } if rows else None
+    return (text, component)
 
 
 @beta_tool
@@ -1388,12 +1458,33 @@ def top_pods_by_restarts(namespace: str = "ALL", limit: int = 20) -> str:
         return "No pods with restarts found."
 
     lines = []
+    rows = []
     for restarts, pod in pods_with_restarts[:limit]:
         lines.append(
             f"Restarts={restarts}  {pod.metadata.namespace}/{pod.metadata.name}  "
             f"Status={pod.status.phase}  Age={age(pod.metadata.creation_timestamp)}"
         )
-    return "\n".join(lines)
+        rows.append({
+            "restarts": restarts,
+            "namespace": pod.metadata.namespace,
+            "name": pod.metadata.name,
+            "status": pod.status.phase or "Unknown",
+            "age": age(pod.metadata.creation_timestamp),
+        })
+    text = "\n".join(lines)
+    component = {
+        "kind": "data_table",
+        "title": f"Top Pods by Restarts ({len(rows)})",
+        "columns": [
+            {"id": "restarts", "header": "Restarts"},
+            {"id": "namespace", "header": "Namespace"},
+            {"id": "name", "header": "Name"},
+            {"id": "status", "header": "Status"},
+            {"id": "age", "header": "Age"},
+        ],
+        "rows": rows,
+    } if rows else None
+    return (text, component)
 
 
 @beta_tool
