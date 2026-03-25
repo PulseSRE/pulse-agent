@@ -2,6 +2,9 @@ FROM registry.access.redhat.com/ubi9/python-312:latest
 
 WORKDIR /opt/app-root/src
 
+# Upgrade pip first for faster dependency resolution
+RUN pip install --no-cache-dir --upgrade pip
+
 # Layer 1: Install dependencies only (cached unless pyproject.toml changes)
 COPY pyproject.toml .
 RUN pip install --no-cache-dir \
