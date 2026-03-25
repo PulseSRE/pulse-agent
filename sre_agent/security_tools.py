@@ -446,7 +446,10 @@ def scan_secrets(namespace: str = "ALL") -> str:
     for s in secrets.items:
         if s.type in ("kubernetes.io/service-account-token", "kubernetes.io/dockercfg", "kubernetes.io/dockerconfigjson"):
             continue
-        age_days = (now - s.metadata.creation_timestamp.replace(tzinfo=timezone.utc)).days
+        ts = s.metadata.creation_timestamp
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        age_days = (now - ts.astimezone(timezone.utc)).days
         if age_days > 90:
             old_secrets.append(f"  {s.metadata.namespace}/{s.metadata.name} ({age_days} days old, type={s.type})")
 

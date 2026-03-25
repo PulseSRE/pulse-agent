@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: quay.io/yourorg/openshift-sre-agent
-  tag: "0.1.0"
+  tag: "0.2.0"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -17,9 +17,6 @@ vertexAI:
   projectId: ""
   region: ""
 
-  # NOT RECOMMENDED for production. Use existingSecret or Workload Identity instead.
-  # serviceAccountKey: ""
-
   # Reference a pre-created secret containing the GCP service account key
   existingSecret: ""
   existingSecretKey: "key.json"
@@ -32,10 +29,25 @@ vertexAI:
 # RBAC — controls what the agent can do on the cluster
 rbac:
   create: true
-  # read-only by default; set to true to allow scale/restart/cordon/delete
   allowWriteOperations: false
-  # set to true to allow the security scanner to list/read secrets metadata
   allowSecretAccess: false
+
+# Self-improving memory system
+memory:
+  enabled: false
+  dbPath: "/tmp/pulse_agent/memory.db"
+  # For persistent memory across pod restarts, enable a PVC
+  persistence:
+    enabled: false
+    storageClass: ""
+    size: 1Gi
+
+# WebSocket authentication
+wsAuth:
+  # Set a token for WebSocket authentication
+  # Create with: kubectl create secret generic pulse-ws-token --from-literal=token=your-secret-token
+  existingSecret: ""
+  secretKey: "token"
 
 resources:
   requests:

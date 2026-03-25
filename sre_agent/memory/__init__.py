@@ -22,16 +22,7 @@ def is_memory_enabled() -> bool:
 
 
 class MemoryManager:
-    """Orchestrates the self-improving agent layer.
-
-    Usage:
-        mm = MemoryManager()
-        prompt = mm.augment_prompt(base_prompt, user_query)
-        mm.start_turn()
-        # ... run agent ...
-        mm.record_tool_call(name, input, rejected)
-        result = mm.finish_turn(query, response)
-    """
+    """Orchestrates the self-improving agent layer."""
 
     def __init__(self, db_path: str | None = None):
         self.store = IncidentStore(db_path)
@@ -40,6 +31,10 @@ class MemoryManager:
         self._tool_calls: list[dict] = []
         self._rejected_count: int = 0
         self._last_incident_id: int | None = None
+        # Preserved copies for feedback after a new turn starts
+        self._prev_tool_calls: list[dict] = []
+        self._prev_rejected_count: int = 0
+        self._prev_turn_duration: float = 0
 
     def augment_prompt(self, base_prompt: str, user_query: str) -> str:
         memory_context = build_memory_context(self.store, user_query)
@@ -51,6 +46,11 @@ class MemoryManager:
         return MEMORY_TOOLS
 
     def start_turn(self):
+        # Preserve previous turn's data before resetting
+        self._prev_tool_calls = self._tool_calls[:]
+        self._prev_rejected_count = self._rejected_count
+        self._prev_turn_duration = time.time() - self._turn_start if self._turn_start else 0
+        # Reset for new turn
         self._turn_start = time.time()
         self._tool_calls = []
         self._rejected_count = 0
@@ -83,7 +83,7 @@ class MemoryManager:
         incident_id = self.store.record_incident(
             query=user_query,
             tool_sequence=self._tool_calls,
-            resolution=final_response[:2000],
+            resolution=final_response,
             outcome=outcome,
             namespace=namespace,
             resource_type=resource_type,
@@ -116,25 +116,30 @@ class MemoryManager:
         }
 
     def update_last_outcome(self, resolved: bool) -> dict | None:
-        """Update the last incident's outcome after user feedback."""
+        """Update the last incident's outcome after user feedback.
+
+        Uses preserved data from the previous turn to avoid stale-state bugs.
+        """
         if self._last_incident_id is None:
             return None
-        outcome = "resolved" if resolved else "unresolved"
-        score_adj = 1.0 if resolved else 0.0
-        # Re-evaluate with confirmed resolution
+
+        # Use preserved previous turn data (not current turn which may have reset)
+        tool_calls = self._prev_tool_calls or self._tool_calls
+        rejected = self._prev_rejected_count if self._prev_tool_calls else self._rejected_count
+        duration = self._prev_turn_duration if self._prev_tool_calls else (time.time() - self._turn_start)
+
         eval_result = evaluate_interaction(
-            tool_calls=self._tool_calls,
-            rejected_count=self._rejected_count,
+            tool_calls=tool_calls,
+            rejected_count=rejected,
             user_confirmed_resolution=resolved,
-            duration_seconds=time.time() - self._turn_start,
+            duration_seconds=duration,
             final_response="",
         )
-        self.store.update_incident_outcome(self._last_incident_id, outcome, eval_result.score)
+        self.store.update_incident_outcome(self._last_incident_id, "resolved" if resolved else "unresolved", eval_result.score)
 
-        # Extract runbook if resolved
         runbook_id = None
-        if resolved and len(self._tool_calls) >= 2:
-            if not is_duplicate_runbook(self.store, self._tool_calls):
+        if resolved and len(tool_calls) >= 2:
+            if not is_duplicate_runbook(self.store, tool_calls):
                 runbook_id = extract_runbook(self.store, self._last_incident_id)
 
         return {"incident_id": self._last_incident_id, "score": eval_result.score, "runbook_id": runbook_id}
@@ -144,10 +149,11 @@ class MemoryManager:
 
 
 def _extract_namespace(text: str) -> str:
+    """Extract namespace from query text."""
     patterns = [
-        r'namespace[s]?\s+(\S+)',
-        r'in\s+(\S+)\s+namespace',
-        r'ns[/:](\S+)',
+        r'namespace[s]?\s+([a-zA-Z0-9][\w.-]*)',
+        r'in\s+([a-zA-Z0-9][\w.-]*)\s+namespace',
+        r'ns[/:]([a-zA-Z0-9][\w.-]*)',
     ]
     for p in patterns:
         m = re.search(p, text, re.IGNORECASE)

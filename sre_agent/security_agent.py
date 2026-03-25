@@ -95,4 +95,5 @@ def run_security_scan_streaming(
         on_text=on_text,
         on_thinking=on_thinking,
         on_tool_use=on_tool_use,
+        on_confirm=on_confirm,
     )

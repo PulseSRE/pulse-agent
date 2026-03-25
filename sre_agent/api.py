@@ -9,8 +9,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import threading
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -35,6 +37,9 @@ _pending_confirms: dict[int, asyncio.Future] = {}
 
 # Max WebSocket message size (1MB)
 MAX_MESSAGE_SIZE = 1_048_576
+
+# Rate limiting: max messages per minute per connection
+MAX_MESSAGES_PER_MINUTE = 10
 
 # Allowed characters in context fields (K8s name rules + slashes/dots)
 _SAFE_CONTEXT = re.compile(r'^[a-zA-Z0-9\-._/: ]{0,253}$')
@@ -61,7 +66,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Pulse Agent API", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Pulse Agent API", version="0.2.0", lifespan=lifespan)
 
 
 @app.get("/healthz")
@@ -108,8 +113,6 @@ async def _run_agent_ws(
 
     def on_confirm(tool_name: str, tool_input: dict) -> bool:
         """Request confirmation from the web UI and block until response."""
-        future = loop.call_soon_threadsafe(loop.create_future)
-        # create_future via call_soon_threadsafe returns None; create it properly
         confirm_future = asyncio.run_coroutine_threadsafe(
             _create_and_register_future(ws_id, tool_name, tool_input, websocket),
             loop,
@@ -193,9 +196,19 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         await websocket.close(code=4000, reason="Invalid mode. Use 'sre' or 'security'.")
         return
 
+    # Token authentication
+    expected_token = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
+    if expected_token:
+        client_token = websocket.query_params.get("token", "")
+        if client_token != expected_token:
+            await websocket.close(code=4001, reason="Unauthorized. Invalid or missing token.")
+            return
+
     await websocket.accept()
     ws_id = id(websocket)
     messages: list[dict] = []
+    # Rate limiting state
+    message_timestamps: list[float] = []
 
     if mode == "sre":
         system_prompt = SRE_SYSTEM_PROMPT
@@ -239,6 +252,14 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                 continue
 
             if msg_type == "message":
+                # Rate limiting
+                now = time.time()
+                message_timestamps[:] = [t for t in message_timestamps if now - t < 60]
+                if len(message_timestamps) >= MAX_MESSAGES_PER_MINUTE:
+                    await websocket.send_json({"type": "error", "message": "Rate limited. Max 10 messages per minute."})
+                    continue
+                message_timestamps.append(now)
+
                 content = data.get("content", "").strip()
                 if not content:
                     continue

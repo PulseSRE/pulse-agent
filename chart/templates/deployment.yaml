@@ -58,6 +58,19 @@ spec:
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: /var/secrets/google/key.json
             {{- end }}
+            {{- if .Values.memory.enabled }}
+            - name: PULSE_AGENT_MEMORY
+              value: "1"
+            - name: PULSE_AGENT_MEMORY_PATH
+              value: {{ .Values.memory.dbPath | quote }}
+            {{- end }}
+            {{- if .Values.wsAuth.existingSecret }}
+            - name: PULSE_AGENT_WS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.wsAuth.existingSecret }}
+                  key: {{ .Values.wsAuth.secretKey }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
@@ -68,6 +81,10 @@ spec:
               mountPath: /var/secrets/google
               readOnly: true
             {{- end }}
+            {{- if and .Values.memory.enabled .Values.memory.persistence.enabled }}
+            - name: memory-data
+              mountPath: {{ dir .Values.memory.dbPath }}
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
@@ -75,6 +92,11 @@ spec:
         - name: gcp-sa-key
           secret:
             secretName: {{ .Values.vertexAI.existingSecret }}
+        {{- end }}
+        {{- if and .Values.memory.enabled .Values.memory.persistence.enabled }}
+        - name: memory-data
+          persistentVolumeClaim:
+            claimName: {{ include "sre-agent.fullname" . }}-memory
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

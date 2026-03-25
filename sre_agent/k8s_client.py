@@ -78,7 +78,10 @@ def age(ts: Optional[datetime]) -> str:
     """Format a timestamp as a human-readable age string."""
     if ts is None:
         return "unknown"
-    delta = datetime.now(timezone.utc) - ts.replace(tzinfo=timezone.utc)
+    # Use astimezone to handle both naive and aware datetimes safely
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - ts.astimezone(timezone.utc)
     secs = int(delta.total_seconds())
     if secs < 60:
         return f"{secs}s"
