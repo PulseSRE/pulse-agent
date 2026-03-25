@@ -1,0 +1,138 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "sre-agent.fullname" . }}
+  labels:
+    {{- include "sre-agent.labels" . | nindent 4 }}
+rules:
+  # Read-only access for diagnostics
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - nodes
+      - events
+      - services
+      - services/proxy
+      - namespaces
+      - configmaps
+      - persistentvolumeclaims
+      - resourcequotas
+      - serviceaccounts
+    verbs: ["get", "list", "watch"]
+  # RBAC read access (security scanning)
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources:
+      - clusterroles
+      - clusterrolebindings
+      - roles
+      - rolebindings
+    verbs: ["get", "list"]
+  # Network policy read + create
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - networkpolicies
+      - ingresses
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
+      - daemonsets
+    verbs: ["get", "list", "watch"]
+  # Batch API (jobs, cronjobs)
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["get", "list"]
+  # Autoscaling (HPA)
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: ["get", "list"]
+  # Metrics API (for get_node_metrics, get_pod_metrics)
+  - apiGroups: ["metrics.k8s.io"]
+    resources:
+      - nodes
+      - pods
+    verbs: ["get", "list"]
+  # OLM Operator Subscriptions
+  - apiGroups: ["operators.coreos.com"]
+    resources:
+      - subscriptions
+      - clusterserviceversions
+    verbs: ["get", "list"]
+  # OpenShift-specific read access
+  - apiGroups: ["config.openshift.io"]
+    resources:
+      - clusterversions
+      - clusteroperators
+    verbs: ["get", "list"]
+  - apiGroups: ["route.openshift.io"]
+    resources:
+      - routes
+    verbs: ["get", "list"]
+  # Monitoring (alertmanager, prometheus)
+  - apiGroups: ["monitoring.coreos.com"]
+    resources:
+      - alertmanagers
+      - prometheuses
+    verbs: ["get", "list"]
+  # OpenShift SCC read access (security scanning)
+  - apiGroups: ["security.openshift.io"]
+    resources:
+      - securitycontextconstraints
+    verbs: ["get", "list"]
+  {{- if .Values.rbac.allowSecretAccess }}
+  # Secret access (opt-in, for security scanning)
+  - apiGroups: [""]
+    resources:
+      - secrets
+    verbs: ["get", "list"]
+  {{- end }}
+  {{- if .Values.rbac.allowWriteOperations }}
+  # Write operations (scale, restart, cordon, delete pod)
+  - apiGroups: [""]
+    resources:
+      - pods
+    verbs: ["delete"]
+  - apiGroups: [""]
+    resources:
+      - nodes
+    verbs: ["patch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - deployments/scale
+    verbs: ["patch", "update"]
+  # Network policy creation
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - networkpolicies
+    verbs: ["create"]
+  # Audit ConfigMap write access
+  - apiGroups: [""]
+    resources:
+      - configmaps
+    verbs: ["create", "update", "patch"]
+  # Server-side apply for apply_yaml (scoped to safe resources)
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+      - daemonsets
+    verbs: ["patch", "create"]
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["patch", "create"]
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: ["patch", "create"]
+  {{- end }}
+{{- end }}

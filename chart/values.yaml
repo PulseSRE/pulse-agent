@@ -1,0 +1,50 @@
+replicaCount: 1
+
+image:
+  repository: quay.io/yourorg/openshift-sre-agent
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Vertex AI configuration
+vertexAI:
+  projectId: ""
+  region: ""
+
+  # NOT RECOMMENDED for production. Use existingSecret or Workload Identity instead.
+  # serviceAccountKey: ""
+
+  # Reference a pre-created secret containing the GCP service account key
+  existingSecret: ""
+  existingSecretKey: "key.json"
+
+# Direct Anthropic API (alternative to Vertex AI)
+# anthropicApiKey:
+#   existingSecret: ""
+#   existingSecretKey: "api-key"
+
+# RBAC — controls what the agent can do on the cluster
+rbac:
+  create: true
+  # read-only by default; set to true to allow scale/restart/cordon/delete
+  allowWriteOperations: false
+  # set to true to allow the security scanner to list/read secrets metadata
+  allowSecretAccess: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
