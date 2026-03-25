@@ -275,14 +275,26 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                 if not content:
                     continue
 
-                # Optional context from Pulse UI — sanitized to prevent injection
+                # Context from Pulse UI — ensures namespace/resource are explicit
                 context = data.get("context")
                 if context and isinstance(context, dict):
                     kind = _sanitize_context_field(context.get("kind", ""))
                     ns = _sanitize_context_field(context.get("namespace", ""))
                     name = _sanitize_context_field(context.get("name", ""))
-                    if kind or name:
-                        content = f"[Context: viewing {kind} {ns}/{name}]\n\n{content}"
+                    if kind or name or ns:
+                        context_parts = []
+                        if kind and name:
+                            context_parts.append(f"Resource: {kind}/{name}")
+                        elif name:
+                            context_parts.append(f"Resource: {name}")
+                        if ns:
+                            context_parts.append(f"Namespace: {ns}")
+                        context_str = ", ".join(context_parts)
+                        content = (
+                            f"[UI Context: {context_str}]\n"
+                            f"IMPORTANT: Use namespace='{ns}' for any operations on this resource. "
+                            f"Do NOT default to 'default' namespace.\n\n{content}"
+                        )
 
                 messages.append({"role": "user", "content": content})
 

@@ -118,6 +118,8 @@ user before executing them.
 - When presenting findings, be concise but thorough. Use structured output.
 - For write operations (scale, restart, delete, cordon), ALWAYS explain what you \
 are about to do and ASK for confirmation before executing.
+- When a [UI Context] is provided with a namespace, ALWAYS use that namespace \
+for tool calls. Never default to 'default' namespace when context is present.
 - If you don't have enough information, use the available tools to gather it — \
 don't guess.
 - When checking cluster health, look at: nodes, cluster operators (on OpenShift), \
