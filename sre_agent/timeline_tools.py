@@ -7,12 +7,15 @@ a unified timeline to answer "why did this happen?"
 from __future__ import annotations
 
 import json
+import os
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone, timedelta
 
 from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 
-from .k8s_client import get_apps_client, get_core_client, get_custom_client
+from .k8s_client import get_apps_client, get_core_client, get_custom_client, safe
 
 
 @beta_tool
@@ -119,37 +122,49 @@ def correlate_incident(
                     "namespace": rs.metadata.namespace,
                 })
 
-    # 4. Prometheus alerts (symptoms — via Alertmanager service proxy)
-    try:
-        alert_result = core.connect_get_namespaced_service_proxy_with_path(
-            "alertmanager-main:web",
-            "openshift-monitoring",
-            path="api/v2/alerts",
-            _preload_content=False,
-        )
-        alerts = json.loads(alert_result.data)
-        for a in alerts:
-            if a.get("status", {}).get("state") != "active":
-                continue
-            starts = a.get("startsAt", "")
-            if starts:
-                try:
-                    ts = datetime.fromisoformat(starts.replace("Z", "+00:00"))
-                    if ts >= cutoff:
-                        labels = a.get("labels", {})
-                        annotations = a.get("annotations", {})
-                        timeline.append({
-                            "time": ts.isoformat(),
-                            "source": "alert",
-                            "severity": labels.get("severity", "warning"),
-                            "summary": f"[ALERT] {labels.get('alertname', '?')}: "
-                                       f"{annotations.get('summary', annotations.get('message', ''))}",
-                            "namespace": labels.get("namespace", "cluster"),
-                        })
-                except (ValueError, TypeError):
-                    pass
-    except Exception:
-        pass  # Alertmanager not reachable
+    # 4. Prometheus alerts (symptoms — via configurable Alertmanager)
+    alertmanager_url = os.environ.get("ALERTMANAGER_URL", "")
+    alerts = None
+    if alertmanager_url:
+        # Direct URL mode
+        try:
+            req = urllib.request.Request(f"{alertmanager_url.rstrip('/')}/api/v2/alerts")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                alerts = json.loads(resp.read())
+        except Exception:
+            pass
+    if alerts is None:
+        # Fallback: OpenShift service proxy
+        try:
+            alert_svc = os.environ.get("ALERTMANAGER_SVC", "alertmanager-main:web")
+            alert_ns = os.environ.get("ALERTMANAGER_NS", "openshift-monitoring")
+            alert_result = core.connect_get_namespaced_service_proxy_with_path(
+                alert_svc, alert_ns, path="api/v2/alerts", _preload_content=False,
+            )
+            alerts = json.loads(alert_result.data)
+        except Exception:
+            alerts = []
+
+    for a in (alerts or []):
+        if a.get("status", {}).get("state") != "active":
+            continue
+        starts = a.get("startsAt", "")
+        if starts:
+            try:
+                ts = datetime.fromisoformat(starts.replace("Z", "+00:00"))
+                if ts >= cutoff:
+                    labels = a.get("labels", {})
+                    annotations = a.get("annotations", {})
+                    timeline.append({
+                        "time": ts.isoformat(),
+                        "source": "alert",
+                        "severity": labels.get("severity", "warning"),
+                        "summary": f"[ALERT] {labels.get('alertname', '?')}: "
+                                   f"{annotations.get('summary', annotations.get('message', ''))}",
+                        "namespace": labels.get("namespace", "cluster"),
+                    })
+            except (ValueError, TypeError):
+                pass
 
     # 5. ArgoCD sync events (if available)
     try:

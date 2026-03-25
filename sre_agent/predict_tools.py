@@ -7,6 +7,10 @@ resource exhaustion, detecting HPA thrashing, and suggesting fixes.
 from __future__ import annotations
 
 import json
+import os
+import urllib.request
+import urllib.error
+import urllib.parse
 from datetime import datetime, timezone
 
 from anthropic import beta_tool
@@ -14,6 +18,50 @@ from kubernetes.client.rest import ApiException
 
 from .k8s_client import get_autoscaling_client, get_core_client, get_custom_client, safe
 from .units import parse_cpu_millicores, parse_memory_bytes, format_cpu, format_memory
+
+
+def _query_prometheus_trend(query: str, hours: int = 24) -> float | None:
+    """Query Prometheus for a linear growth rate over the given time window.
+
+    Returns the per-hour growth rate, or None if Prometheus is unreachable.
+    """
+    thanos_url = os.environ.get("THANOS_URL", "")
+    if not thanos_url:
+        # Try OpenShift Thanos via service proxy
+        try:
+            core = get_core_client()
+            # Use deriv() for rate of change over the window
+            prom_query = f"deriv({query}[{hours}h])"
+            path = f"api/v1/query?{urllib.parse.urlencode({'query': prom_query})}"
+            result = core.connect_get_namespaced_service_proxy_with_path(
+                "thanos-querier:web", "openshift-monitoring",
+                path=path, _preload_content=False,
+            )
+            data = json.loads(result.data)
+            if data.get("status") == "success":
+                results = data.get("data", {}).get("result", [])
+                if results:
+                    # deriv returns per-second rate, convert to per-hour
+                    rate_per_sec = float(results[0].get("value", [0, "0"])[1])
+                    return rate_per_sec * 3600
+        except Exception:
+            pass
+        return None
+
+    try:
+        prom_query = f"deriv({query}[{hours}h])"
+        url = f"{thanos_url.rstrip('/')}/api/v1/query?{urllib.parse.urlencode({'query': prom_query})}"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        if data.get("status") == "success":
+            results = data.get("data", {}).get("result", [])
+            if results:
+                rate_per_sec = float(results[0].get("value", [0, "0"])[1])
+                return rate_per_sec * 3600
+    except Exception:
+        pass
+    return None
 
 
 @beta_tool
@@ -69,12 +117,30 @@ def forecast_quota_exhaustion(namespace: str) -> str:
             usage_pct = (used_n / hard_n) * 100
             remaining = hard_n - used_n
 
-            # Estimate growth: assume linear growth based on current usage / pod count
-            if pod_count > 0 and used_n > 0:
+            # Try Prometheus-based trending first (real growth rate)
+            hours_until_limit = None
+            trend_source = ""
+            if resource in ("cpu", "requests.cpu", "limits.cpu"):
+                rate = _query_prometheus_trend(
+                    f'namespace_cpu:kube_pod_container_resource_requests:sum{{namespace="{namespace}"}}',
+                )
+                if rate and rate > 0 and remaining > 0:
+                    hours_until_limit = remaining / rate
+                    trend_source = "prometheus"
+            elif resource in ("memory", "requests.memory", "limits.memory"):
+                rate = _query_prometheus_trend(
+                    f'namespace_memory:kube_pod_container_resource_requests:sum{{namespace="{namespace}"}}',
+                )
+                if rate and rate > 0 and remaining > 0:
+                    hours_until_limit = remaining / rate
+                    trend_source = "prometheus"
+
+            # Fallback: estimate from current usage / pod count
+            pods_until_limit = float("inf")
+            if hours_until_limit is None and pod_count > 0 and used_n > 0:
                 per_pod = used_n / pod_count
                 pods_until_limit = remaining / per_pod if per_pod > 0 else float("inf")
-            else:
-                pods_until_limit = float("inf")
+                trend_source = "estimate"
 
             severity = "OK"
             if usage_pct >= 95:
@@ -87,8 +153,15 @@ def forecast_quota_exhaustion(namespace: str) -> str:
             forecast_line = (
                 f"[{severity}] {resource}: {used_val}/{hard_val} ({usage_pct:.0f}%)"
             )
-            if pods_until_limit < float("inf"):
-                forecast_line += f"  ~{pods_until_limit:.0f} more pods until limit"
+            if hours_until_limit is not None:
+                if hours_until_limit < 1:
+                    forecast_line += f"  EXHAUSTION IN ~{int(hours_until_limit * 60)}min ({trend_source})"
+                elif hours_until_limit < 48:
+                    forecast_line += f"  EXHAUSTION IN ~{hours_until_limit:.0f}h ({trend_source})"
+                else:
+                    forecast_line += f"  EXHAUSTION IN ~{hours_until_limit / 24:.0f}d ({trend_source})"
+            elif pods_until_limit < float("inf"):
+                forecast_line += f"  ~{pods_until_limit:.0f} more pods until limit ({trend_source})"
 
             forecasts.append(forecast_line)
 
