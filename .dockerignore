@@ -4,3 +4,7 @@ __pycache__
 .env
 *.egg-info
 chart/
+tests/
+*.md
+.gitignore
+pulse_agent_audit.log
