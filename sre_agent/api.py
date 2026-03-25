@@ -84,10 +84,25 @@ async def healthz():
 
 @app.get("/tools")
 async def list_tools():
-    """List all available tools grouped by mode."""
+    """List all available tools grouped by mode, with write-op flags."""
     return {
-        "sre": [{"name": t.name, "description": t.description} for t in SRE_ALL_TOOLS],
-        "security": [{"name": t.name, "description": t.description} for t in SEC_ALL_TOOLS],
+        "sre": [
+            {
+                "name": t.name,
+                "description": t.description,
+                "requires_confirmation": t.name in WRITE_TOOLS,
+            }
+            for t in SRE_ALL_TOOLS
+        ],
+        "security": [
+            {
+                "name": t.name,
+                "description": t.description,
+                "requires_confirmation": False,
+            }
+            for t in SEC_ALL_TOOLS
+        ],
+        "write_tools": sorted(WRITE_TOOLS),
     }
 
 
