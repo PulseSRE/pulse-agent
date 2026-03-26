@@ -1,9 +1,9 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/release-v1.0.0-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-54-10b981?style=for-the-badge" alt="Tools">
-  <img src="https://img.shields.io/badge/tests-152-10b981?style=for-the-badge" alt="Tests">
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.1.0"><img src="https://img.shields.io/badge/release-v1.1.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <img src="https://img.shields.io/badge/tools-62-10b981?style=for-the-badge" alt="Tools">
+  <img src="https://img.shields.io/badge/tests-231-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 
@@ -28,6 +28,12 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Image Security** — Flag `:latest` tags, missing digest pins, untrusted registries (configurable)
 - **SCC Analysis** — Review Security Context Constraints and pod SCC assignments (OpenShift)
 - **Secret Hygiene** — Find old unrotated secrets, env-exposed secrets, unused secrets
+
+### Error Intelligence
+- **Structured Error Types** — ToolError classification with 7 categories (permission, not_found, conflict, validation, server, network, quota) and actionable suggestions
+- **Error Tracking** — Thread-safe ring buffer (500 entries) with per-category aggregation and top-tool breakdown
+- **Health Endpoint** — `/health` returns circuit breaker state, error summary, and recent errors
+- **SQLite Resilience** — `@db_safe` decorator on all memory operations prevents crashes on database errors
 
 ### Self-Improving Agent
 - **Incident Memory** — Stores every interaction with query, tool sequence, resolution, and outcome in SQLite
@@ -256,7 +262,8 @@ pulse-agent-api  # Starts on port 8080
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /healthz` | Health check |
+| `GET /healthz` | Liveness probe |
+| `GET /health` | Full health: circuit breaker state, error summary, recent errors |
 | `GET /version` | Protocol version, tool count, features |
 | `GET /tools` | List all available tools |
 | `WS /ws/sre?token=...` | SRE agent WebSocket |
@@ -276,7 +283,7 @@ pulse-agent-api  # Starts on port 8080
 - `{"type": "component", "spec": {...}, "tool": "..."}` — Rich UI component
 - `{"type": "confirm_request", "tool": "...", "input": {...}}` — Write op confirmation
 - `{"type": "done", "full_response": "..."}` — Turn complete
-- `{"type": "error", "message": "..."}` — Error
+- `{"type": "error", "message": "...", "category": "...", "suggestions": [...]}` — Structured error
 
 ### Component Specs
 
@@ -293,6 +300,7 @@ Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_val
 
 | Pulse Agent | OpenShift Pulse UI | Protocol |
 |------------|-------------------|----------|
+| v1.1.0 | v5.5.0+ | 1 |
 | v1.0.0 | v5.3.0+ | 1 |
 
 The `/version` endpoint returns the protocol version. The UI checks this on connect and warns on mismatch.
@@ -341,8 +349,10 @@ helm install pulse-agent ./chart \
 sre_agent/
 ├── main.py              # Interactive CLI with streaming, confirmation gate, memory
 ├── serve.py             # FastAPI server with WebSocket support
-├── api.py               # API routes
+├── api.py               # API routes, /health endpoint
 ├── agent.py             # Shared agent loop, Claude API client, audit logging
+├── errors.py            # ToolError classification, classify_api_error, classify_exception
+├── error_tracker.py     # Thread-safe ring buffer for error aggregation
 ├── security_agent.py    # Security scanner (read-only, delegates to shared loop)
 ├── k8s_client.py        # Shared Kubernetes client with lazy initialization
 ├── k8s_tools.py         # 35+ Kubernetes/OpenShift tools (@beta_tool)
@@ -378,12 +388,12 @@ pip install -e '.[test]'
 python -m pytest tests/ -v
 ```
 
-152 tests covering all tools, agent loop safety mechanisms, unit parsing, and the memory system. All tests run without a cluster or API key (fully mocked).
+231 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, unit parsing, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ---
 
 <p align="center">
-  <strong>54 tools</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>152 tests</strong> &bull; <strong>Protocol v1</strong>
+  <strong>62 tools</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>231 tests</strong> &bull; <strong>Protocol v1</strong>
 </p>
 
 <p align="center">
