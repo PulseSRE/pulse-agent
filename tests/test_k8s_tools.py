@@ -92,7 +92,7 @@ class TestListPods:
         mock_k8s["core"].list_namespaced_pod.return_value = _list_result([])
         list_pods.call({"namespace": "default", "label_selector": "app=web", "field_selector": "status.phase=Running"})
         mock_k8s["core"].list_namespaced_pod.assert_called_once_with(
-            "default", label_selector="app=web", field_selector="status.phase=Running"
+            "default", limit=200, label_selector="app=web", field_selector="status.phase=Running"
         )
 
 

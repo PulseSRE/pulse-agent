@@ -10,6 +10,7 @@ import base64
 import json
 import os
 import posixpath
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -19,9 +20,17 @@ from anthropic import beta_tool
 from .k8s_client import get_custom_client
 from kubernetes.client.rest import ApiException
 
-# Per-session PR counter to prevent runaway PR creation
-_pr_count = 0
+# Per-thread PR counter to prevent runaway PR creation (thread-safe)
+_pr_local = threading.local()
 _MAX_PRS_PER_SESSION = int(os.environ.get("PULSE_AGENT_MAX_PRS", "5"))
+
+
+def _get_pr_count() -> int:
+    return getattr(_pr_local, 'count', 0)
+
+
+def _increment_pr_count():
+    _pr_local.count = _get_pr_count() + 1
 
 
 def _get_allowed_repos() -> set[str]:
@@ -84,7 +93,7 @@ def propose_git_change(
         pr_body: Pull request description (optional).
         branch_name: Branch name for the PR (auto-generated if empty).
     """
-    global _pr_count
+    # Per-thread PR rate limiting
 
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
@@ -104,7 +113,7 @@ def propose_git_change(
         return path_err
 
     # Per-session rate limit
-    if _pr_count >= _MAX_PRS_PER_SESSION:
+    if _get_pr_count() >= _MAX_PRS_PER_SESSION:
         return f"Error: PR rate limit reached ({_MAX_PRS_PER_SESSION} per session). Set PULSE_AGENT_MAX_PRS to increase."
 
     try:
@@ -161,7 +170,7 @@ def propose_git_change(
             "base": default_branch,
         })
 
-        _pr_count += 1
+        _increment_pr_count()
 
         return (
             f"Pull Request created successfully!\n"
@@ -169,7 +178,7 @@ def propose_git_change(
             f"  Branch: {branch_name}\n"
             f"  File: {file_path}\n"
             f"  Status: Open — awaiting review\n"
-            f"  PRs this session: {_pr_count}/{_MAX_PRS_PER_SESSION}"
+            f"  PRs this session: {_get_pr_count()}/{_MAX_PRS_PER_SESSION}"
         )
 
     except RuntimeError as e:

@@ -215,6 +215,9 @@ def _redact_input(name: str, input_data: dict) -> dict:
     }
 
 
+MAX_TOOL_RESULT_LENGTH = 50_000  # ~50KB cap to prevent WebSocket overflow
+
+
 def _execute_tool(name: str, input_data: dict, tool_map: dict) -> tuple[str, dict | None]:
     """Execute a tool by name. Returns (text_result, component_spec_or_None)."""
     tool = tool_map.get(name)
@@ -227,6 +230,10 @@ def _execute_tool(name: str, input_data: dict, tool_map: dict) -> tuple[str, dic
             text, component = result
         else:
             text, component = result, None
+        # Cap result size to prevent WebSocket overflow
+        if len(text) > MAX_TOOL_RESULT_LENGTH:
+            original_len = len(text)
+            text = text[:MAX_TOOL_RESULT_LENGTH] + f"\n\n... (truncated, {original_len} total chars)"
         logger.info(json.dumps({
             "event": "tool_executed",
             "tool": name,

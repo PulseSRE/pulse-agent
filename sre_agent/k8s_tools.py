@@ -76,7 +76,7 @@ MAX_RESULTS = 200
 @beta_tool
 def list_namespaces() -> str:
     """List all namespaces in the cluster with their status."""
-    result = safe(lambda: get_core_client().list_namespace())
+    result = safe(lambda: get_core_client().list_namespace(limit=MAX_RESULTS))
     if isinstance(result, str):
         return result
     lines = []
@@ -102,9 +102,9 @@ def list_pods(namespace: str = "default", label_selector: str = "", field_select
 
     core = get_core_client()
     if namespace.upper() == "ALL":
-        result = safe(lambda: core.list_pod_for_all_namespaces(**kwargs))
+        result = safe(lambda: core.list_pod_for_all_namespaces(limit=MAX_RESULTS, **kwargs))
     else:
-        result = safe(lambda: core.list_namespaced_pod(namespace, **kwargs))
+        result = safe(lambda: core.list_namespaced_pod(namespace, limit=MAX_RESULTS, **kwargs))
     if isinstance(result, str):
         return result
 
@@ -382,9 +382,9 @@ def list_deployments(namespace: str = "default") -> str:
     """
     apps = get_apps_client()
     if namespace.upper() == "ALL":
-        result = safe(lambda: apps.list_deployment_for_all_namespaces())
+        result = safe(lambda: apps.list_deployment_for_all_namespaces(limit=MAX_RESULTS))
     else:
-        result = safe(lambda: apps.list_namespaced_deployment(namespace))
+        result = safe(lambda: apps.list_namespaced_deployment(namespace, limit=MAX_RESULTS))
     if isinstance(result, str):
         return result
 
@@ -1608,14 +1608,17 @@ def get_tls_certificates(namespace: str = "ALL") -> str:
         namespace: Kubernetes namespace. Use 'ALL' for all namespaces.
     """
     import base64
-    import ssl
-    from datetime import datetime as dt
+    from cryptography import x509
 
     core = get_core_client()
     if namespace.upper() == "ALL":
-        result = safe(lambda: core.list_secret_for_all_namespaces(field_selector="type=kubernetes.io/tls"))
+        result = safe(lambda: core.list_secret_for_all_namespaces(
+            field_selector="type=kubernetes.io/tls", limit=MAX_RESULTS,
+        ))
     else:
-        result = safe(lambda: core.list_namespaced_secret(namespace, field_selector="type=kubernetes.io/tls"))
+        result = safe(lambda: core.list_namespaced_secret(
+            namespace, field_selector="type=kubernetes.io/tls", limit=MAX_RESULTS,
+        ))
     if isinstance(result, str):
         return result
 
@@ -1631,44 +1634,54 @@ def get_tls_certificates(namespace: str = "ALL") -> str:
             continue
 
         try:
-            pem = base64.b64decode(cert_data)
-            # Parse just the first cert in the chain
-            cert = ssl._ssl._test_decode_cert(None)  # type: ignore
-            # Fallback: parse expiry from PEM manually
-            pem_str = pem.decode("utf-8", errors="replace")
-            # Use openssl-style parsing if available, otherwise just report the secret
-            expiry_str = "unknown"
-            days_left = -1
+            pem_bytes = base64.b64decode(cert_data)
+            cert = x509.load_pem_x509_certificate(pem_bytes)
+            not_after = cert.not_valid_after_utc
+            days_left = (not_after - now).days
 
-            # Try to extract CN from subject
+            # Extract CN from subject
             cn = "unknown"
-            for line in pem_str.split("\n"):
-                if "Subject:" in line and "CN=" in line:
-                    cn = line.split("CN=")[-1].strip()
-                    break
+            try:
+                cn_attrs = cert.subject.get_attributes_for_oid(x509.oid.NameOID.COMMON_NAME)
+                if cn_attrs:
+                    cn = cn_attrs[0].value
+            except Exception:
+                pass
 
+            status = "OK" if days_left > 30 else "EXPIRING" if days_left > 0 else "EXPIRED"
             certs.append({
                 "namespace": secret.metadata.namespace,
                 "name": secret.metadata.name,
                 "cn": cn,
-                "age": age(secret.metadata.creation_timestamp),
-                "size": len(pem),
+                "expires": not_after.strftime("%Y-%m-%d"),
+                "days_left": days_left,
+                "status": status,
             })
         except Exception:
             certs.append({
                 "namespace": secret.metadata.namespace,
                 "name": secret.metadata.name,
                 "cn": "parse-error",
-                "age": age(secret.metadata.creation_timestamp),
-                "size": len(base64.b64decode(cert_data)) if cert_data else 0,
+                "expires": "unknown",
+                "days_left": -1,
+                "status": "UNKNOWN",
             })
 
-    lines = [f"TLS Secrets ({len(certs)}):"]
-    for c in sorted(certs, key=lambda x: x["name"]):
+    # Sort by days_left (most urgent first)
+    certs.sort(key=lambda c: c["days_left"])
+
+    lines = [f"TLS Certificates ({len(certs)}):"]
+    lines.append(f"  {'NAMESPACE':<20} {'NAME':<30} {'CN':<25} {'EXPIRES':<12} {'DAYS':>5}  STATUS")
+    for c in certs:
         lines.append(
-            f"  {c['namespace']}/{c['name']}  "
-            f"Age={c['age']}  Size={c['size']}B"
+            f"  {c['namespace']:<20} {c['name']:<30} {c['cn'][:24]:<25} "
+            f"{c['expires']:<12} {c['days_left']:>5}  {c['status']}"
         )
+
+    expiring = [c for c in certs if c["status"] in ("EXPIRING", "EXPIRED")]
+    if expiring:
+        lines.append(f"\n⚠️  {len(expiring)} certificate(s) need attention!")
+
     return "\n".join(lines)
 
 

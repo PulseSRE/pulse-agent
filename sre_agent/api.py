@@ -40,6 +40,10 @@ logger = logging.getLogger("pulse_agent.api")
 _pending_confirms: dict[str, asyncio.Future] = {}
 # JIT nonces for confirmation — prevents replay/forgery
 _pending_nonces: dict[str, str] = {}
+# Timestamps for TTL-based cleanup
+_pending_timestamps: dict[str, float] = {}
+# TTL for stale pending state (5 minutes)
+_PENDING_TTL_SECONDS = 300
 
 # Max WebSocket message size (1MB)
 MAX_MESSAGE_SIZE = 1_048_576
@@ -211,14 +215,30 @@ async def _run_agent_ws(
     return full_response
 
 
+def _cleanup_stale_pending():
+    """Remove stale pending confirms/nonces older than TTL."""
+    now = time.time()
+    stale = [sid for sid, ts in _pending_timestamps.items() if now - ts > _PENDING_TTL_SECONDS]
+    for sid in stale:
+        future = _pending_confirms.pop(sid, None)
+        if future and not future.done():
+            future.cancel()
+        _pending_nonces.pop(sid, None)
+        _pending_timestamps.pop(sid, None)
+    if stale:
+        logger.info("Cleaned up %d stale pending confirmation(s)", len(stale))
+
+
 async def _create_and_register_future(ws_id: str, tool_name: str, tool_input: dict, websocket: WebSocket):
     """Create a Future on the event loop and send the confirm request with a JIT nonce."""
     import secrets
+    _cleanup_stale_pending()  # Opportunistic cleanup
     loop = asyncio.get_running_loop()
     future = loop.create_future()
     nonce = secrets.token_urlsafe(16)
     _pending_confirms[ws_id] = future
     _pending_nonces[ws_id] = nonce
+    _pending_timestamps[ws_id] = time.time()
     await websocket.send_json({
         "type": "confirm_request",
         "tool": tool_name,
@@ -416,3 +436,4 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         if future and not future.done():
             future.cancel()
         _pending_nonces.pop(session_id, None)
+        _pending_timestamps.pop(session_id, None)

@@ -88,8 +88,9 @@ class TestProposeGitChange:
         monkeypatch.setenv("GITHUB_TOKEN", "fake")
         monkeypatch.delenv("PULSE_ALLOWED_REPOS", raising=False)
         import sre_agent.git_tools as gt
-        old_count = gt._pr_count
-        gt._pr_count = gt._MAX_PRS_PER_SESSION
+        # Set the thread-local PR count to the limit
+        old_count = gt._get_pr_count()
+        gt._pr_local.count = gt._MAX_PRS_PER_SESSION
         try:
             result = propose_git_change.call({
                 "repo": "org/repo", "file_path": "f.yaml",
@@ -97,7 +98,7 @@ class TestProposeGitChange:
             })
             assert "rate limit" in result.lower()
         finally:
-            gt._pr_count = old_count
+            gt._pr_local.count = old_count
 
 
 class TestGetArgoAppSource:

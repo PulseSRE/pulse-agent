@@ -221,5 +221,22 @@ class IncidentStore:
         row = self.conn.execute("SELECT COUNT(*) as c FROM incidents").fetchone()
         return row["c"]
 
+    def cleanup(self, max_age_days: int = 90) -> int:
+        """Delete incidents older than max_age_days. Returns number of deleted rows."""
+        cutoff = datetime.now(timezone.utc)
+        # SQLite datetime comparison: timestamps stored as ISO strings
+        from datetime import timedelta
+        cutoff_str = (cutoff - timedelta(days=max_age_days)).isoformat()
+        cur = self.conn.execute(
+            "DELETE FROM incidents WHERE timestamp < ?", (cutoff_str,)
+        )
+        # Clean up orphaned metrics too
+        self.conn.execute(
+            "DELETE FROM metrics WHERE timestamp < ?", (cutoff_str,)
+        )
+        self.conn.execute("VACUUM")
+        self.conn.commit()
+        return cur.rowcount
+
     def close(self):
         self.conn.close()
