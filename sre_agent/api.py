@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -35,10 +36,10 @@ from .security_agent import (
 
 logger = logging.getLogger("pulse_agent.api")
 
-# Pending confirmation requests keyed by connection
-_pending_confirms: dict[int, asyncio.Future] = {}
+# Pending confirmation requests keyed by session ID (uuid4, NOT id(websocket))
+_pending_confirms: dict[str, asyncio.Future] = {}
 # JIT nonces for confirmation — prevents replay/forgery
-_pending_nonces: dict[int, str] = {}
+_pending_nonces: dict[str, str] = {}
 
 # Max WebSocket message size (1MB)
 MAX_MESSAGE_SIZE = 1_048_576
@@ -128,10 +129,11 @@ async def _run_agent_ws(
     tool_defs: list,
     tool_map: dict,
     write_tools: set[str],
+    session_id: str,
 ):
     """Run an agent turn and stream results over WebSocket."""
     client = create_client()
-    ws_id = id(websocket)
+    ws_id = session_id
 
     # Capture the running loop BEFORE entering the thread
     loop = asyncio.get_running_loop()
@@ -209,7 +211,7 @@ async def _run_agent_ws(
     return full_response
 
 
-async def _create_and_register_future(ws_id: int, tool_name: str, tool_input: dict, websocket: WebSocket):
+async def _create_and_register_future(ws_id: str, tool_name: str, tool_input: dict, websocket: WebSocket):
     """Create a Future on the event loop and send the confirm request with a JIT nonce."""
     import secrets
     loop = asyncio.get_running_loop()
@@ -261,7 +263,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         return
 
     await websocket.accept()
-    ws_id = id(websocket)
+    session_id = str(uuid.uuid4())
     messages: list[dict] = []
     # Rate limiting state
     message_timestamps: list[float] = []
@@ -298,19 +300,19 @@ async def websocket_agent(websocket: WebSocket, mode: str):
 
                 # Confirm responses are handled immediately (even while agent runs)
                 if msg_type == "confirm_response":
-                    future = _pending_confirms.get(ws_id)
-                    expected_nonce = _pending_nonces.get(ws_id)
+                    future = _pending_confirms.get(session_id)
+                    expected_nonce = _pending_nonces.get(session_id)
                     received_nonce = data.get("nonce", "")
 
                     if not future or future.done():
-                        logger.warning("Confirm response received but no pending future (ws_id=%s)", ws_id)
+                        logger.warning("Confirm response received but no pending future (session=%s)", session_id)
                     elif expected_nonce and received_nonce != expected_nonce:
-                        logger.warning("Confirm response nonce mismatch — possible replay (ws_id=%s)", ws_id)
+                        logger.warning("Confirm response nonce mismatch — possible replay (session=%s)", session_id)
                         future.set_result(False)
                     else:
                         future.set_result(data.get("approved", False))
                         logger.info("Confirmation received: approved=%s nonce=%s", data.get("approved"), received_nonce[:8])
-                    _pending_nonces.pop(ws_id, None)
+                    _pending_nonces.pop(session_id, None)
                     continue
 
                 if msg_type == "clear":
@@ -389,7 +391,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
             try:
                 full_response = await _run_agent_ws(
                     websocket, messages, system_prompt,
-                    tool_defs, tool_map, write_tools,
+                    tool_defs, tool_map, write_tools, session_id,
                 )
                 messages.append({"role": "assistant", "content": full_response})
                 await websocket.send_json({
@@ -410,7 +412,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
     finally:
         receive_task.cancel()
         # Cancel any pending confirmation future so agent thread unblocks immediately
-        future = _pending_confirms.pop(ws_id, None)
+        future = _pending_confirms.pop(session_id, None)
         if future and not future.done():
             future.cancel()
-        _pending_nonces.pop(ws_id, None)
+        _pending_nonces.pop(session_id, None)

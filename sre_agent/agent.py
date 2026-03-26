@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -57,34 +58,38 @@ class CircuitBreaker:
         self.state = self.CLOSED
         self.failure_count = 0
         self.last_failure_time: float = 0
+        self._lock = threading.Lock()
 
     def allow_request(self) -> bool:
-        if self.state == self.CLOSED:
-            return True
-        if self.state == self.OPEN:
-            if time.time() - self.last_failure_time >= self.recovery_timeout:
-                self.state = self.HALF_OPEN
-                logger.info("Circuit breaker: HALF_OPEN — testing recovery")
+        with self._lock:
+            if self.state == self.CLOSED:
                 return True
-            return False
-        # HALF_OPEN — allow one request to test
-        return True
+            if self.state == self.OPEN:
+                if time.time() - self.last_failure_time >= self.recovery_timeout:
+                    self.state = self.HALF_OPEN
+                    logger.info("Circuit breaker: HALF_OPEN — testing recovery")
+                    return True
+                return False
+            # HALF_OPEN — allow one request to test
+            return True
 
     def record_success(self):
-        if self.state == self.HALF_OPEN:
-            logger.info("Circuit breaker: CLOSED — API recovered")
-        self.state = self.CLOSED
-        self.failure_count = 0
+        with self._lock:
+            if self.state == self.HALF_OPEN:
+                logger.info("Circuit breaker: CLOSED — API recovered")
+            self.state = self.CLOSED
+            self.failure_count = 0
 
     def record_failure(self):
-        self.failure_count += 1
-        self.last_failure_time = time.time()
-        if self.failure_count >= self.failure_threshold:
-            self.state = self.OPEN
-            logger.warning(
-                "Circuit breaker: OPEN — Silent Mode activated after %d failures. "
-                "Will retry in %ds.", self.failure_count, self.recovery_timeout
-            )
+        with self._lock:
+            self.failure_count += 1
+            self.last_failure_time = time.time()
+            if self.failure_count >= self.failure_threshold:
+                self.state = self.OPEN
+                logger.warning(
+                    "Circuit breaker: OPEN — Silent Mode activated after %d failures. "
+                    "Will retry in %ds.", self.failure_count, self.recovery_timeout
+                )
 
     @property
     def is_open(self) -> bool:
@@ -232,13 +237,15 @@ def _execute_tool(name: str, input_data: dict, tool_map: dict) -> tuple[str, dic
         }))
         return text, component
     except Exception as e:
-        logger.error(json.dumps({
+        logger.exception(json.dumps({
             "event": "tool_error",
             "tool": name,
             "input": _redact_input(name, input_data),
             "error": str(type(e).__name__),
+            "error_detail": str(e)[:500],
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }))
+        # Only return type name to LLM — don't leak internal details
         return f"Error executing {name}: {type(e).__name__}", None
 
 

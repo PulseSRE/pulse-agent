@@ -7,11 +7,38 @@ generates JSON schemas and the tool runner can execute them.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 
 from anthropic import beta_tool
 from kubernetes import client
 from kubernetes.client.rest import ApiException
+
+# RFC 1123 name validation for K8s resources
+_K8S_NAME_RE = re.compile(r'^[a-z0-9]([a-z0-9\-\.]{0,251}[a-z0-9])?$')
+_K8S_NAMESPACE_RE = re.compile(r'^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$')
+
+
+def _validate_k8s_name(value: str, field: str = "name") -> str | None:
+    """Validate a K8s resource name. Returns error message or None if valid."""
+    if not value:
+        return f"Error: {field} is required."
+    if len(value) > 253:
+        return f"Error: {field} too long (max 253 chars)."
+    if not _K8S_NAME_RE.match(value):
+        return f"Error: {field} '{value}' is not a valid Kubernetes name (RFC 1123)."
+    return None
+
+
+def _validate_k8s_namespace(value: str) -> str | None:
+    """Validate a K8s namespace name. Returns error message or None if valid."""
+    if not value:
+        return None  # namespace is often optional
+    if len(value) > 63:
+        return "Error: namespace too long (max 63 chars)."
+    if not _K8S_NAMESPACE_RE.match(value):
+        return f"Error: namespace '{value}' is not a valid Kubernetes namespace name."
+    return None
 
 from .k8s_client import (
     age,
@@ -583,6 +610,8 @@ def scale_deployment(namespace: str, name: str, replicas: int) -> str:
         name: Name of the deployment to scale.
         replicas: Desired number of replicas (0-100).
     """
+    if err := _validate_k8s_namespace(namespace): return err
+    if err := _validate_k8s_name(name): return err
     replicas = min(max(0, replicas), MAX_REPLICAS)
     result = safe(lambda: get_apps_client().patch_namespaced_deployment_scale(
         name, namespace, body={"spec": {"replicas": replicas}}
@@ -600,6 +629,8 @@ def restart_deployment(namespace: str, name: str) -> str:
         namespace: Kubernetes namespace.
         name: Name of the deployment to restart.
     """
+    if err := _validate_k8s_namespace(namespace): return err
+    if err := _validate_k8s_name(name): return err
     now = datetime.now(timezone.utc).isoformat()
     body = {
         "spec": {
@@ -623,6 +654,7 @@ def cordon_node(node_name: str) -> str:
     Args:
         node_name: Name of the node to cordon.
     """
+    if err := _validate_k8s_name(node_name, "node_name"): return err
     result = safe(lambda: get_core_client().patch_node(node_name, body={"spec": {"unschedulable": True}}))
     if isinstance(result, str):
         return result
@@ -636,6 +668,7 @@ def uncordon_node(node_name: str) -> str:
     Args:
         node_name: Name of the node to uncordon.
     """
+    if err := _validate_k8s_name(node_name, "node_name"): return err
     result = safe(lambda: get_core_client().patch_node(node_name, body={"spec": {"unschedulable": False}}))
     if isinstance(result, str):
         return result
@@ -651,6 +684,8 @@ def delete_pod(namespace: str, pod_name: str, grace_period_seconds: int = 30) ->
         pod_name: Name of the pod to delete.
         grace_period_seconds: Grace period before force killing (1-300).
     """
+    if err := _validate_k8s_namespace(namespace): return err
+    if err := _validate_k8s_name(pod_name, "pod_name"): return err
     grace_period_seconds = min(max(1, grace_period_seconds), 300)
     result = safe(lambda: get_core_client().delete_namespaced_pod(
         pod_name, namespace,
@@ -1651,6 +1686,8 @@ def rollback_deployment(namespace: str, name: str, revision: int = 0) -> str:
         name: Name of the deployment to rollback.
         revision: Target revision number (0 = previous revision).
     """
+    if err := _validate_k8s_namespace(namespace): return err
+    if err := _validate_k8s_name(name): return err
     # Get current ReplicaSets to find the target revision
     apps = get_apps_client()
     rs_result = safe(lambda: apps.list_namespaced_replica_set(namespace))
@@ -1712,6 +1749,7 @@ def drain_node(node_name: str) -> str:
     Args:
         node_name: Name of the node to drain.
     """
+    if err := _validate_k8s_name(node_name, "node_name"): return err
     core = get_core_client()
 
     # Step 1: Cordon
@@ -1796,14 +1834,23 @@ def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = True) -> 
     if not name:
         return "Error: Resource must have metadata.name."
 
-    # Block sensitive resource types to prevent privilege escalation
-    _BLOCKED_KINDS = {
-        "ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding",
-        "Secret", "ServiceAccount", "Pod", "Namespace",
-        "MutatingWebhookConfiguration", "ValidatingWebhookConfiguration",
+    if err := _validate_k8s_name(name): return err
+    if err := _validate_k8s_namespace(ns): return err
+
+    # Allowlist — only these resource types can be created/modified via apply_yaml.
+    # Everything else is blocked to prevent privilege escalation.
+    _ALLOWED_KINDS = {
+        "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob",
+        "Service", "ConfigMap", "Ingress",
+        "NetworkPolicy", "HorizontalPodAutoscaler",
+        "LimitRange", "ResourceQuota",
+        "PersistentVolumeClaim",
     }
-    if kind in _BLOCKED_KINDS:
-        return f"Error: Creating/modifying {kind} resources is not allowed via apply_yaml for security reasons."
+    if kind not in _ALLOWED_KINDS:
+        return (
+            f"Error: Creating/modifying {kind} resources is not allowed via apply_yaml. "
+            f"Allowed kinds: {', '.join(sorted(_ALLOWED_KINDS))}"
+        )
 
     # Check ArgoCD auto-sync — warn if changes will be reverted
     from .gitops_tools import check_argo_auto_sync
