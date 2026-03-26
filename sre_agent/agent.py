@@ -27,8 +27,8 @@ from .harness import (
 
 ALL_TOOLS = _K8S_TOOLS + FLEET_TOOLS + GITOPS_TOOLS + TIMELINE_TOOLS + GIT_TOOLS + PREDICT_TOOLS
 
-# Add git PR tool to write tools (requires confirmation)
-WRITE_TOOLS = WRITE_TOOLS | {"propose_git_change"}
+# Add tools that require confirmation
+WRITE_TOOLS = WRITE_TOOLS | {"propose_git_change", "install_gitops_operator", "create_argo_application"}
 
 logger = logging.getLogger("pulse_agent")
 

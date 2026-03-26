@@ -76,12 +76,21 @@ rules:
       - nodes
       - pods
     verbs: ["get", "list"]
-  # OLM Operator Subscriptions
+  # OLM Operator Subscriptions (read + create for operator install)
   - apiGroups: ["operators.coreos.com"]
     resources:
       - subscriptions
       - clusterserviceversions
-    verbs: ["get", "list"]
+      - operatorgroups
+      - catalogsources
+    verbs: ["get", "list", "create"]
+  # ArgoCD CRDs (read + create + patch for GitOps setup)
+  - apiGroups: ["argoproj.io"]
+    resources:
+      - applications
+      - appprojects
+      - applicationsets
+    verbs: ["get", "list", "create", "patch", "update"]
   # OpenShift-specific read access
   - apiGroups: ["config.openshift.io"]
     resources:
@@ -110,6 +119,11 @@ rules:
       - secrets
     verbs: ["get", "list"]
   {{- end }}
+  # Namespace create (for GitOps operator setup)
+  - apiGroups: [""]
+    resources:
+      - namespaces
+    verbs: ["create"]
   {{- if .Values.rbac.allowWriteOperations }}
   # Write operations (scale, restart, cordon, delete pod)
   - apiGroups: [""]

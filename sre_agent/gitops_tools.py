@@ -11,7 +11,7 @@ import json
 from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 
-from .k8s_client import get_custom_client, safe
+from .k8s_client import get_custom_client, get_core_client, safe
 
 _ARGO_GROUP = "argoproj.io"
 _ARGO_VERSION = "v1alpha1"
@@ -282,9 +282,172 @@ def get_argo_sync_diff(name: str, namespace: str = "openshift-gitops") -> str:
     return f"Diff for '{name}':\n\n" + "\n\n".join(diffs)
 
 
+@beta_tool
+def install_gitops_operator() -> str:
+    """Install the OpenShift GitOps operator (ArgoCD) on the cluster. REQUIRES USER CONFIRMATION.
+
+    This creates a Subscription in the openshift-operators namespace to install
+    the openshift-gitops-operator from the redhat-operators catalog. Once installed,
+    ArgoCD will be available in the openshift-gitops namespace with a default
+    ArgoCD instance and AppProject.
+    """
+    custom = get_custom_client()
+    core = get_core_client()
+
+    # Check if already installed
+    try:
+        subs = custom.list_namespaced_custom_object(
+            "operators.coreos.com", "v1alpha1", "openshift-operators", "subscriptions"
+        )
+        for sub in subs.get("items", []):
+            if sub.get("spec", {}).get("name") == "openshift-gitops-operator":
+                status = sub.get("status", {})
+                csv = status.get("installedCSV", "unknown")
+                return f"OpenShift GitOps operator is already installed.\n  Subscription: {sub['metadata']['name']}\n  CSV: {csv}\n  Namespace: openshift-gitops"
+    except ApiException:
+        pass  # OLM might not be queryable, proceed with install attempt
+
+    # Check if ArgoCD API already exists (operator installed via other means)
+    try:
+        custom.get_cluster_custom_object("argoproj.io", "v1alpha1", "applications", "")
+    except ApiException as e:
+        if e.status != 404:
+            # API group exists but no resources — ArgoCD is installed
+            return "ArgoCD API (argoproj.io) is already available on this cluster. The operator appears to be installed."
+    except Exception:
+        pass
+
+    # Create the Subscription
+    subscription = {
+        "apiVersion": "operators.coreos.com/v1alpha1",
+        "kind": "Subscription",
+        "metadata": {
+            "name": "openshift-gitops-operator",
+            "namespace": "openshift-operators",
+        },
+        "spec": {
+            "channel": "latest",
+            "installPlanApproval": "Automatic",
+            "name": "openshift-gitops-operator",
+            "source": "redhat-operators",
+            "sourceNamespace": "openshift-marketplace",
+        },
+    }
+
+    try:
+        custom.create_namespaced_custom_object(
+            "operators.coreos.com", "v1alpha1", "openshift-operators", "subscriptions",
+            body=subscription,
+        )
+    except ApiException as e:
+        if e.status == 409:
+            return "Subscription already exists. The operator may be installing — check `oc get csv -n openshift-gitops` in a few minutes."
+        return f"Error creating Subscription: {e.reason} (HTTP {e.status})"
+
+    return (
+        "OpenShift GitOps operator installation started.\n\n"
+        "What happens next:\n"
+        "1. OLM will download and install the operator (1-3 minutes)\n"
+        "2. ArgoCD will be deployed in the openshift-gitops namespace\n"
+        "3. A default ArgoCD instance and AppProject will be created\n"
+        "4. The ArgoCD console will be available via route in openshift-gitops\n\n"
+        "To check progress: `oc get csv -n openshift-gitops`\n"
+        "To get the ArgoCD route: `oc get route -n openshift-gitops`\n\n"
+        "Once installed, you can create Applications to track your cluster's Git manifests."
+    )
+
+
+@beta_tool
+def create_argo_application(
+    name: str,
+    repo_url: str,
+    path: str = "manifests",
+    target_namespace: str = "default",
+    project: str = "default",
+    auto_sync: bool = True,
+) -> str:
+    """Create an ArgoCD Application to track a Git repository. REQUIRES USER CONFIRMATION.
+
+    Args:
+        name: Name for the ArgoCD Application (e.g., 'my-app', 'cluster-config').
+        repo_url: Git repository URL (e.g., 'https://github.com/org/repo.git').
+        path: Path within the repo containing Kubernetes manifests.
+        target_namespace: Target namespace on the cluster for deployed resources.
+        project: ArgoCD project (use 'default' unless you have custom projects).
+        auto_sync: Enable automatic sync with prune and self-heal.
+    """
+    custom = get_custom_client()
+
+    # Validate ArgoCD is installed
+    try:
+        custom.list_cluster_custom_object(_ARGO_GROUP, _ARGO_VERSION, "applications")
+    except ApiException as e:
+        if e.status == 404:
+            return (
+                "Error: ArgoCD is not installed on this cluster.\n"
+                "Run install_gitops_operator first to install the OpenShift GitOps operator."
+            )
+        return f"Error checking ArgoCD: {e.reason}"
+
+    # Build the Application spec
+    sync_policy = {}
+    if auto_sync:
+        sync_policy = {
+            "automated": {"prune": True, "selfHeal": True},
+            "syncOptions": ["CreateNamespace=true"],
+        }
+
+    application = {
+        "apiVersion": f"{_ARGO_GROUP}/{_ARGO_VERSION}",
+        "kind": "Application",
+        "metadata": {
+            "name": name,
+            "namespace": "openshift-gitops",
+        },
+        "spec": {
+            "project": project,
+            "source": {
+                "repoURL": repo_url,
+                "targetRevision": "HEAD",
+                "path": path,
+            },
+            "destination": {
+                "server": "https://kubernetes.default.svc",
+                "namespace": target_namespace,
+            },
+            "syncPolicy": sync_policy,
+        },
+    }
+
+    try:
+        custom.create_namespaced_custom_object(
+            _ARGO_GROUP, _ARGO_VERSION, "openshift-gitops", "applications",
+            body=application,
+        )
+    except ApiException as e:
+        if e.status == 409:
+            return f"Application '{name}' already exists in openshift-gitops namespace."
+        return f"Error creating Application: {e.reason} (HTTP {e.status})"
+
+    sync_info = "Auto-sync enabled (prune + self-heal)" if auto_sync else "Manual sync — you'll need to trigger syncs manually"
+
+    return (
+        f"ArgoCD Application '{name}' created successfully.\n\n"
+        f"  Repository: {repo_url}\n"
+        f"  Path:       {path}\n"
+        f"  Target:     {target_namespace}\n"
+        f"  Project:    {project}\n"
+        f"  Sync:       {sync_info}\n\n"
+        f"ArgoCD will now monitor the Git repo and sync changes to the cluster.\n"
+        f"View in Pulse: Navigate to GitOps → Applications"
+    )
+
+
 GITOPS_TOOLS = [
     get_argo_applications,
     get_argo_app_detail,
     detect_gitops_drift,
     get_argo_sync_diff,
+    install_gitops_operator,
+    create_argo_application,
 ]
