@@ -32,6 +32,11 @@ rbac:
   allowWriteOperations: false
   allowSecretAccess: false
 
+# Network Policy — restricts egress to DNS + HTTPS only.
+# Disable if the agent can't reach cloud APIs (e.g., GCP OAuth).
+networkPolicy:
+  disabled: false
+
 # Self-improving memory system
 memory:
   enabled: false
