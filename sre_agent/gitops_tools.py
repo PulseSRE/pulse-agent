@@ -279,7 +279,10 @@ def get_argo_sync_diff(name: str, namespace: str = "openshift-gitops") -> str:
     if not diffs:
         return f"Application '{name}' is OutOfSync but no resource-level diffs are available via the CRD. Use 'argocd app diff {name}' for full diff."
 
-    return f"Diff for '{name}':\n\n" + "\n\n".join(diffs)
+    output = f"Diff for '{name}':\n\n" + "\n\n".join(diffs)
+    if len(output) > 10000:
+        output = output[:10000] + "\n\n... [output truncated — exceeded 10000 chars]"
+    return output
 
 
 @beta_tool

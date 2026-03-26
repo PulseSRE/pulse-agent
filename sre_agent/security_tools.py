@@ -210,6 +210,13 @@ def scan_rbac_risks() -> str:
 
     if not findings:
         return "No significant RBAC risks found."
+
+    MAX_FINDINGS = 100
+    if len(findings) > MAX_FINDINGS:
+        total = len(findings)
+        findings = findings[:MAX_FINDINGS]
+        findings.append(f"... truncated ({total - MAX_FINDINGS} more findings omitted)")
+
     return f"RBAC risks ({len(findings)}):\n" + "\n".join(f"  - {f}" for f in findings)
 
 

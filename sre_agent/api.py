@@ -36,6 +36,9 @@ from .security_agent import (
 
 logger = logging.getLogger("pulse_agent.api")
 
+# WebSocket connection liveness tracking
+_ws_alive: dict[str, bool] = {}
+
 # Pending confirmation requests keyed by session ID (uuid4, NOT id(websocket))
 _pending_confirms: dict[str, asyncio.Future] = {}
 # JIT nonces for confirmation — prevents replay/forgery
@@ -189,6 +192,10 @@ async def _run_agent_ws(
     def on_confirm(tool_name: str, tool_input: dict) -> bool:
         """Request confirmation from the web UI and block until response."""
         try:
+            # Check if the WebSocket is still alive before waiting
+            if not _ws_alive.get(ws_id, True):
+                return False
+
             # Create the future and send the confirm request to the UI
             confirm_future = asyncio.run_coroutine_threadsafe(
                 _create_and_register_future(ws_id, tool_name, tool_input, websocket),
@@ -305,6 +312,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
 
     await websocket.accept()
     session_id = str(uuid.uuid4())
+    _ws_alive[session_id] = True
     messages: list[dict] = []
     # Rate limiting state
     message_timestamps: list[float] = []
@@ -364,8 +372,10 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                 # Queue other messages for the main loop
                 await incoming.put(data)
         except WebSocketDisconnect:
+            _ws_alive[session_id] = False
             await incoming.put(None)  # Signal disconnect
         except Exception:
+            _ws_alive[session_id] = False
             await incoming.put(None)
 
     # Start the receive loop as a concurrent task
@@ -461,3 +471,4 @@ async def websocket_agent(websocket: WebSocket, mode: str):
             future.cancel()
         _pending_nonces.pop(session_id, None)
         _pending_timestamps.pop(session_id, None)
+        _ws_alive.pop(session_id, None)

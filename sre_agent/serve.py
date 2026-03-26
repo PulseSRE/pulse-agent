@@ -33,6 +33,9 @@ def _signal_handler(signum, frame):
 
 
 def main():
+    from .config import validate_config
+    validate_config()
+
     # Register cleanup for normal exit, SIGTERM (k8s pod shutdown), and SIGINT
     atexit.register(_cleanup_socket)
     signal.signal(signal.SIGTERM, _signal_handler)

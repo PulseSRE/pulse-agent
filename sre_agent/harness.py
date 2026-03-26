@@ -190,86 +190,80 @@ def build_cached_system_prompt(
 # ---------------------------------------------------------------------------
 
 def gather_cluster_context() -> str:
-    """Pre-fetch key cluster state to inject into the system prompt.
-
-    This gives Claude immediate context about the cluster without needing
-    tool calls, saving 2-3 tool round-trips on every query.
-    """
+    """Pre-fetch key cluster state concurrently."""
     from .k8s_client import get_core_client, get_custom_client, safe
+    from .errors import ToolError
+    import concurrent.futures
 
-    context_parts = []
-
-    # Node summary
-    try:
+    def _fetch_nodes():
         nodes = safe(lambda: get_core_client().list_node())
-        if not isinstance(nodes, str):
-            total = len(nodes.items)
-            ready = sum(
-                1 for n in nodes.items
-                if any(c.type == "Ready" and c.status == "True" for c in (n.status.conditions or []))
-            )
-            roles = {}
-            for n in nodes.items:
-                for label in (n.metadata.labels or {}):
-                    if label.startswith("node-role.kubernetes.io/"):
-                        role = label.split("/")[-1]
-                        roles[role] = roles.get(role, 0) + 1
-            role_str = ", ".join(f"{r}={c}" for r, c in sorted(roles.items()))
-            context_parts.append(f"Nodes: {ready}/{total} Ready ({role_str})")
-    except Exception:
-        pass
+        if isinstance(nodes, ToolError): return None
+        total = len(nodes.items)
+        ready = sum(1 for n in nodes.items if any(c.type == "Ready" and c.status == "True" for c in (n.status.conditions or [])))
+        roles = {}
+        for n in nodes.items:
+            for label in (n.metadata.labels or {}):
+                if label.startswith("node-role.kubernetes.io/"):
+                    role = label.split("/")[-1]
+                    roles[role] = roles.get(role, 0) + 1
+        role_str = ", ".join(f"{r}={c}" for r, c in sorted(roles.items()))
+        return f"Nodes: {ready}/{total} Ready ({role_str})"
 
-    # Namespace count
-    try:
+    def _fetch_namespaces():
         ns = safe(lambda: get_core_client().list_namespace())
-        if not isinstance(ns, str):
-            context_parts.append(f"Namespaces: {len(ns.items)}")
-    except Exception:
-        pass
+        if isinstance(ns, ToolError): return None
+        return f"Namespaces: {len(ns.items)}"
 
-    # Cluster version
-    try:
-        cv = get_custom_client().get_cluster_custom_object(
-            "config.openshift.io", "v1", "clusterversions", "version"
-        )
-        version = cv.get("status", {}).get("desired", {}).get("version", "unknown")
-        channel = cv.get("spec", {}).get("channel", "unknown")
-        context_parts.append(f"OpenShift: {version} (channel: {channel})")
-    except Exception:
-        pass
+    def _fetch_version():
+        try:
+            cv = get_custom_client().get_cluster_custom_object("config.openshift.io", "v1", "clusterversions", "version")
+            version = cv.get("status", {}).get("desired", {}).get("version", "unknown")
+            channel = cv.get("spec", {}).get("channel", "unknown")
+            return f"OpenShift: {version} (channel: {channel})"
+        except Exception:
+            return None
 
-    # Failing pods count
-    try:
-        pods = safe(lambda: get_core_client().list_pod_for_all_namespaces(
-            field_selector="status.phase!=Running,status.phase!=Succeeded"
-        ))
-        if not isinstance(pods, str):
-            failing = [p for p in pods.items if p.status.phase not in ("Running", "Succeeded", "Pending")]
-            if failing:
-                context_parts.append(f"Failing pods: {len(failing)}")
-    except Exception:
-        pass
+    def _fetch_failing_pods():
+        pods = safe(lambda: get_core_client().list_pod_for_all_namespaces(field_selector="status.phase!=Running,status.phase!=Succeeded"))
+        if isinstance(pods, ToolError): return None
+        failing = [p for p in pods.items if p.status.phase not in ("Running", "Succeeded", "Pending")]
+        return f"Failing pods: {len(failing)}" if failing else None
 
-    # Firing alerts count
-    try:
-        core = get_core_client()
-        result = core.connect_get_namespaced_service_proxy_with_path(
-            "alertmanager-main:web", "openshift-monitoring",
-            path="api/v2/alerts", _preload_content=False,
-        )
-        alerts = json.loads(result.data)
-        firing = [a for a in alerts if a.get("status", {}).get("state") == "active"]
-        if firing:
+    def _fetch_alerts():
+        try:
+            core = get_core_client()
+            result = core.connect_get_namespaced_service_proxy_with_path(
+                "alertmanager-main:web", "openshift-monitoring",
+                path="api/v2/alerts", _preload_content=False,
+            )
+            alerts = json.loads(result.data)
+            firing = [a for a in alerts if a.get("status", {}).get("state") == "active"]
+            if not firing: return None
             critical = sum(1 for a in firing if a.get("labels", {}).get("severity") == "critical")
             warning = sum(1 for a in firing if a.get("labels", {}).get("severity") == "warning")
-            context_parts.append(f"Firing alerts: {len(firing)} ({critical} critical, {warning} warning)")
-    except Exception:
-        pass
+            return f"Firing alerts: {len(firing)} ({critical} critical, {warning} warning)"
+        except Exception:
+            return None
 
-    if not context_parts:
+    results = {}
+    fetchers = {"nodes": _fetch_nodes, "namespaces": _fetch_namespaces, "version": _fetch_version, "pods": _fetch_failing_pods, "alerts": _fetch_alerts}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
+        futures = {pool.submit(fn): key for key, fn in fetchers.items()}
+        for future in concurrent.futures.as_completed(futures, timeout=10):
+            key = futures[future]
+            try:
+                result = future.result(timeout=5)
+                if result:
+                    results[key] = result
+            except Exception:
+                pass
+
+    if not results:
         return ""
 
-    return "\n## Live Cluster State (auto-gathered)\n" + "\n".join(f"- {p}" for p in context_parts)
+    parts = [results[k] for k in ("nodes", "namespaces", "version", "pods", "alerts") if k in results]
+    return "\n## Live Cluster State (auto-gathered)\n" + "\n".join(f"- {p}" for p in parts)
 
 
 # Cached cluster context — refreshed every 60 seconds

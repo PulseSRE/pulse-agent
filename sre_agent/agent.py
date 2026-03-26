@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import os
@@ -261,6 +262,27 @@ def _execute_tool(name: str, input_data: dict, tool_map: dict) -> tuple[str, dic
         return f"Error executing {name}: {type(e).__name__}", None
 
 
+TOOL_TIMEOUT = int(os.environ.get("PULSE_AGENT_TOOL_TIMEOUT", "30"))
+
+def _execute_tool_with_timeout(name: str, input_data: dict, tool_map: dict, timeout: int | None = None) -> tuple[str, dict | None]:
+    """Execute a tool with a timeout guard."""
+    timeout = timeout or TOOL_TIMEOUT
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(_execute_tool, name, input_data, tool_map)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            logger.error(json.dumps({
+                "event": "tool_timeout", "tool": name, "timeout": timeout,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }))
+            from .errors import ToolError
+            from .error_tracker import get_tracker
+            err = ToolError(message=f"{name} timed out after {timeout}s", category="server", operation=name)
+            get_tracker().record(err)
+            return f"Error: {name} timed out after {timeout}s", None
+
+
 def run_agent_streaming(
     client,
     messages: list[dict],
@@ -333,24 +355,52 @@ def run_agent_streaming(
     while iterations < MAX_ITERATIONS:
         iterations += 1
 
-        try:
-            stream_ctx = client.messages.stream(
-                model=model,
-                max_tokens=max_tokens,
-                system=effective_system,
-                thinking={"type": "adaptive"},
-                tools=tool_defs,
-                messages=messages,
-            )
-        except (anthropic.APIConnectionError, anthropic.APIStatusError) as e:
-            _circuit_breaker.record_failure()
-            if _circuit_breaker.is_open:
-                return (
-                    "The agent has entered **Silent Mode** — the Claude API is unreachable "
-                    f"after {_circuit_breaker.failure_count} consecutive failures. "
-                    f"Will retry in {int(_circuit_breaker.recovery_timeout)}s."
+        MAX_RETRIES = 3
+        RETRY_DELAYS = [1, 3, 8]
+
+        stream_ctx = None
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                stream_ctx = client.messages.stream(
+                    model=model,
+                    max_tokens=max_tokens,
+                    system=effective_system,
+                    thinking={"type": "adaptive"},
+                    tools=tool_defs,
+                    messages=messages,
                 )
-            raise
+                break
+            except anthropic.APIStatusError as e:
+                if hasattr(e, 'status_code') and e.status_code in (429, 529) and attempt < MAX_RETRIES:
+                    delay = RETRY_DELAYS[attempt]
+                    logger.warning("API %d, retrying in %ds (attempt %d/%d)", e.status_code, delay, attempt + 1, MAX_RETRIES)
+                    if on_text:
+                        on_text(f"\n*Rate limited, retrying in {delay}s...*\n")
+                    time.sleep(min(delay, 30))
+                    continue
+                _circuit_breaker.record_failure()
+                if _circuit_breaker.is_open:
+                    return (
+                        "The agent has entered **Silent Mode** — the Claude API is unreachable "
+                        f"after {_circuit_breaker.failure_count} consecutive failures. "
+                        f"Will retry in {int(_circuit_breaker.recovery_timeout)}s."
+                    )
+                raise
+            except anthropic.APIConnectionError:
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_DELAYS[attempt])
+                    continue
+                _circuit_breaker.record_failure()
+                if _circuit_breaker.is_open:
+                    return (
+                        "The agent has entered **Silent Mode** — the Claude API is unreachable "
+                        f"after {_circuit_breaker.failure_count} consecutive failures. "
+                        f"Will retry in {int(_circuit_breaker.recovery_timeout)}s."
+                    )
+                raise
+
+        if stream_ctx is None:
+            return "Failed to connect to Claude API after retries."
 
         with stream_ctx as stream:
             for event in stream:
@@ -379,28 +429,44 @@ def run_agent_streaming(
 
         if response.stop_reason == "tool_use":
             tool_results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    # Confirmation gate for write operations — deny by default
-                    if block.name in write_tools:
-                        confirmed = on_confirm(block.name, block.input) if on_confirm else False
-                        if not confirmed:
-                            tool_results.append({
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": "Operation denied. No confirmation callback or user rejected.",
-                                "is_error": True,
-                            })
-                            continue
+            tool_blocks = [b for b in response.content if b.type == "tool_use"]
+            read_blocks = [b for b in tool_blocks if b.name not in write_tools]
+            write_blocks = [b for b in tool_blocks if b.name in write_tools]
+            results_map: dict[str, tuple[str, dict | None]] = {}
 
-                    text_result, component_spec = _execute_tool(block.name, block.input, tool_map)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": text_result,
-                    })
-                    if component_spec and on_component:
-                        on_component(block.name, component_spec)
+            # Execute read tools in parallel
+            if read_blocks:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(read_blocks), 5)) as pool:
+                    futures = {
+                        pool.submit(_execute_tool_with_timeout, b.name, b.input, tool_map): b
+                        for b in read_blocks
+                    }
+                    for future in concurrent.futures.as_completed(futures):
+                        block = futures[future]
+                        try:
+                            results_map[block.id] = future.result()
+                        except Exception:
+                            results_map[block.id] = (f"Error executing {block.name}", None)
+
+            # Execute write tools sequentially (need confirmation gate)
+            for block in write_blocks:
+                confirmed = on_confirm(block.name, block.input) if on_confirm else False
+                if not confirmed:
+                    results_map[block.id] = ("Operation denied. No confirmation callback or user rejected.", None)
+                    continue
+                results_map[block.id] = _execute_tool_with_timeout(block.name, block.input, tool_map)
+
+            # Assemble results in original order
+            for block in tool_blocks:
+                text, component = results_map.get(block.id, (f"Error: no result for {block.name}", None))
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": text,
+                })
+                if component and on_component:
+                    on_component(block.name, component)
+
             messages.append({"role": "user", "content": tool_results})
         elif response.stop_reason == "pause_turn":
             continue
