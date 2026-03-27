@@ -72,6 +72,9 @@ def _sanitize_context_field(value: str) -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Verify k8s connectivity and auth config on startup."""
+    # Ensure pulse_agent loggers are at INFO so monitor scan output is visible
+    logging.getLogger("pulse_agent").setLevel(logging.INFO)
+
     if not os.environ.get("PULSE_AGENT_WS_TOKEN"):
         logger.critical(
             "PULSE_AGENT_WS_TOKEN is not set. WebSocket endpoint is UNAUTHENTICATED. "
