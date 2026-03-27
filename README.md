@@ -335,6 +335,7 @@ docker push your-registry/pulse-agent:1.3.0
 
 ### Helm Install
 
+**Vertex AI:**
 ```bash
 kubectl create secret generic gcp-sa-key \
   --from-file=key.json=./sa-key.json \
@@ -342,20 +343,45 @@ kubectl create secret generic gcp-sa-key \
 
 helm install pulse-agent ./chart \
   -n pulse-agent --create-namespace \
-  --set image.repository=your-registry/pulse-agent \
   --set vertexAI.projectId=your-gcp-project \
   --set vertexAI.region=us-east5 \
   --set vertexAI.existingSecret=gcp-sa-key
 ```
 
-Enable write operations, security scanning, and memory:
+**Anthropic API:**
 ```bash
+kubectl create secret generic anthropic-api-key \
+  --from-literal=api-key=sk-ant-... \
+  -n pulse-agent
+
 helm install pulse-agent ./chart \
   -n pulse-agent --create-namespace \
+  --set anthropicApiKey.existingSecret=anthropic-api-key
+```
+
+The chart **requires** either `vertexAI.projectId` or `anthropicApiKey.existingSecret` — `helm install` will fail with a clear error if neither is set.
+
+Enable write operations, security scanning, and memory:
+```bash
+helm upgrade pulse-agent ./chart \
   --set rbac.allowWriteOperations=true \
   --set rbac.allowSecretAccess=true \
   --set memory.enabled=true
 ```
+
+### WebSocket Token
+
+A WS auth token is **auto-generated** as a Kubernetes Secret on first install (`<release>-ws-token`). Both the agent and the [Pulse UI](https://github.com/alimobrem/OpenshiftPulse) reference this shared secret — no manual token management needed.
+
+To use a pre-created token instead:
+```bash
+kubectl create secret generic pulse-ws-token --from-literal=token=your-secret
+helm install pulse-agent ./chart --set wsAuth.existingSecret=pulse-ws-token
+```
+
+### Rolling Updates
+
+The chart uses `maxSurge: 0, maxUnavailable: 1` to stay within tight namespace CPU quotas during rolling updates. One old pod is terminated before a new one starts.
 
 ### GCP Authentication
 
@@ -398,7 +424,24 @@ chart/                   # Helm chart
     ├── serviceaccount.yaml
     ├── clusterrole.yaml         # Least-privilege RBAC (no wildcards)
     ├── clusterrolebinding.yaml
+    ├── ws-token-secret.yaml     # Auto-generated WS auth token
     └── networkpolicy.yaml       # Ingress on 8080, egress DNS + HTTPS
+
+.claude/                 # Claude Code agents & hooks
+├── settings.json        # Hook configuration (deploy-validator, tool-auditor, etc.)
+├── agents/              # 8 specialized agents
+│   ├── tool-writer.md           # Writes new @beta_tool K8s tools
+│   ├── runbook-writer.md        # Writes diagnostic runbooks
+│   ├── protocol-checker.md      # Validates WebSocket protocol vs API_CONTRACT.md
+│   ├── tool-auditor.md          # Audits tools for quality and security
+│   ├── memory-auditor.md        # Audits memory system integrity
+│   ├── security-hardener.md     # Reviews security across code, containers, Helm
+│   ├── test-writer.md           # Writes pytest tests following project patterns
+│   └── deploy-validator.md      # Validates deploy config before rollout
+└── hooks/               # Hook scripts triggered by Claude Code
+    ├── deploy-validator.sh      # PreToolUse: validates deploy/helm commands
+    ├── post-edit.sh             # PostToolUse: routes edits to auditor agents
+    └── stop-checks.sh           # Stop: suggests tests for changed files
 ```
 
 ## Testing

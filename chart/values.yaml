@@ -23,9 +23,10 @@ vertexAI:
   existingSecretKey: "key.json"
 
 # Direct Anthropic API (alternative to Vertex AI)
-# anthropicApiKey:
-#   existingSecret: ""
-#   existingSecretKey: "api-key"
+# Create with: kubectl create secret generic anthropic-api-key --from-literal=api-key=sk-ant-...
+anthropicApiKey:
+  existingSecret: ""
+  existingSecretKey: "api-key"
 
 # RBAC — controls what the agent can do on the cluster
 rbac:
@@ -51,9 +52,10 @@ memory:
     size: 1Gi
 
 # WebSocket authentication
+# A token secret is auto-generated if existingSecret is empty.
+# To use a pre-created secret: kubectl create secret generic pulse-ws-token --from-literal=token=your-secret-token
+# Then set wsAuth.existingSecret=pulse-ws-token
 wsAuth:
-  # Set a token for WebSocket authentication
-  # Create with: kubectl create secret generic pulse-ws-token --from-literal=token=your-secret-token
   existingSecret: ""
   secretKey: "token"
 

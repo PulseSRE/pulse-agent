@@ -50,3 +50,23 @@ ServiceAccount name.
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Validate AI backend credentials — fail at install time if missing.
+*/}}
+{{- define "sre-agent.validateCredentials" -}}
+{{- if and (not .Values.vertexAI.projectId) (not .Values.anthropicApiKey.existingSecret) }}
+{{- fail "AI backend not configured. Set vertexAI.projectId (for Vertex AI) or anthropicApiKey.existingSecret (for Anthropic API). See values.yaml for details." }}
+{{- end }}
+{{- end }}
+
+{{/*
+WS auth token secret name — auto-generates a secret if wsAuth.existingSecret is not set.
+*/}}
+{{- define "sre-agent.wsTokenSecretName" -}}
+{{- if .Values.wsAuth.existingSecret }}
+{{- .Values.wsAuth.existingSecret }}
+{{- else }}
+{{- printf "%s-ws-token" (include "sre-agent.fullname" .) }}
+{{- end }}
+{{- end }}

@@ -1,3 +1,4 @@
+{{- include "sre-agent.validateCredentials" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,6 +7,11 @@ metadata:
     {{- include "sre-agent.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       {{- include "sre-agent.selectorLabels" . | nindent 6 }}
@@ -58,6 +64,7 @@ spec:
             capabilities:
               drop: ["ALL"]
           env:
+            {{- if .Values.vertexAI.projectId }}
             - name: ANTHROPIC_VERTEX_PROJECT_ID
               value: {{ .Values.vertexAI.projectId | quote }}
             - name: CLOUD_ML_REGION
@@ -66,19 +73,25 @@ spec:
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: /var/secrets/google/key.json
             {{- end }}
+            {{- end }}
+            {{- if .Values.anthropicApiKey.existingSecret }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.anthropicApiKey.existingSecret }}
+                  key: {{ .Values.anthropicApiKey.existingSecretKey }}
+            {{- end }}
             {{- if .Values.memory.enabled }}
             - name: PULSE_AGENT_MEMORY
               value: "1"
             - name: PULSE_AGENT_MEMORY_PATH
               value: {{ .Values.memory.dbPath | quote }}
             {{- end }}
-            {{- if .Values.wsAuth.existingSecret }}
             - name: PULSE_AGENT_WS_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.wsAuth.existingSecret }}
+                  name: {{ include "sre-agent.wsTokenSecretName" . }}
                   key: {{ .Values.wsAuth.secretKey }}
-            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
