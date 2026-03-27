@@ -5,6 +5,10 @@
 # Usage: ./deploy/quick-deploy.sh [namespace]
 set -e
 
+# Prerequisites
+command -v oc &>/dev/null || { echo "ERROR: 'oc' not found. Install the OpenShift CLI."; exit 1; }
+oc whoami &>/dev/null || { echo "ERROR: Not logged in. Run 'oc login' first."; exit 1; }
+
 NS="${1:-openshiftpulse}"
 DEPLOY="pulse-agent-openshift-sre-agent"
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,10 +26,10 @@ if command -v podman &>/dev/null && podman info &>/dev/null && [[ -n "$REGISTRY"
 
     echo "==> Logging into registry..."
     SA_TOKEN=$(oc create token builder -n "$NS" 2>/dev/null || oc whoami -t)
-    podman login "$REGISTRY" -u unused -p "$SA_TOKEN" --tls-verify=false 2>&1 | tail -1
+    podman login "$REGISTRY" -u unused -p "$SA_TOKEN" --tls-verify=false 2>&1 | tail -1  # Internal registry only — TLS not required for pod-to-registry traffic
 
     echo "==> Pushing image..."
-    podman push "$IMAGE" --tls-verify=false 2>&1 | tail -5
+    podman push "$IMAGE" --tls-verify=false 2>&1 | tail -5  # Internal registry only — TLS not required for pod-to-registry traffic
 
     echo "==> Pinning image digest..."
     DIGEST=$(oc get istag pulse-agent:latest -n "$NS" -o jsonpath='{.image.dockerImageReference}')
@@ -57,17 +61,18 @@ echo "==> Restarting deployment..."
 oc rollout restart "deployment/$DEPLOY" -n "$NS"
 oc rollout status "deployment/$DEPLOY" -n "$NS" --timeout=60s
 
-# Health verification
 echo "==> Verifying health..."
-sleep 3
-AGENT_POD=$(oc get pod -l app.kubernetes.io/name=openshift-sre-agent -n "$NS" --field-selector=status.phase=Running -o name 2>/dev/null | head -1)
-if [[ -n "$AGENT_POD" ]]; then
-    HEALTH=$(oc exec "$AGENT_POD" -n "$NS" -- curl -sf localhost:8080/healthz 2>/dev/null || echo "")
-    if [[ "$HEALTH" == *"ok"* ]]; then
-        echo "==> Agent is healthy!"
-    else
-        echo "WARNING: Agent health check returned: $HEALTH"
+for i in 1 2 3; do
+    sleep 5
+    AGENT_POD=$(oc get pod -l app.kubernetes.io/instance=pulse-agent -n "$NS" --field-selector=status.phase=Running -o name 2>/dev/null | head -1)
+    if [[ -n "$AGENT_POD" ]]; then
+        HEALTH=$(oc exec "$AGENT_POD" -n "$NS" -- curl -sf localhost:8080/healthz 2>/dev/null || echo "")
+        if [[ "$HEALTH" == *"ok"* ]]; then
+            echo "==> Agent is healthy!"
+            break
+        fi
     fi
-fi
+    [[ $i -eq 3 ]] && echo "WARNING: Agent health check failed after 3 attempts"
+done
 
 echo "==> Done!"

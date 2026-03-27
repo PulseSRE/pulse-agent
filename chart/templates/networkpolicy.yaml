@@ -18,18 +18,22 @@ spec:
         - protocol: TCP
           port: 8080
   egress:
-    # Allow DNS resolution
+    # DNS resolution
+    - to:
+      - namespaceSelector: {}
+      ports:
+      - protocol: UDP
+        port: 53
+      - protocol: TCP
+        port: 53
+    # HTTPS (cloud APIs, OAuth, Anthropic)
     - to: []
       ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
-    # Allow HTTPS to Kubernetes API and Claude API (Vertex AI)
+      - protocol: TCP
+        port: 443
+    # Kubernetes API
     - to: []
       ports:
-        - protocol: TCP
-          port: 443
-        - protocol: TCP
-          port: 6443
+      - protocol: TCP
+        port: 6443
 {{- end }}

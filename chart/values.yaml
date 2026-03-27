@@ -1,9 +1,10 @@
 replicaCount: 1
 
 image:
-  repository: quay.io/yourorg/openshift-sre-agent
+  repository: ""  # Set by deploy.sh or --set. Uses internal registry when empty.
   tag: "0.2.0"
   pullPolicy: IfNotPresent
+  internalRegistry: true  # When true, image is built and pushed to the internal OpenShift registry
 
 imagePullSecrets: []
 

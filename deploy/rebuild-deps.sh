@@ -4,11 +4,15 @@
 # Usage: ./deploy/rebuild-deps.sh [namespace]
 set -e
 
+# Prerequisites
+command -v oc &>/dev/null || { echo "ERROR: 'oc' not found. Install the OpenShift CLI."; exit 1; }
+oc whoami &>/dev/null || { echo "ERROR: Not logged in. Run 'oc login' first."; exit 1; }
+
 NS="${1:-openshiftpulse}"
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Compute deps hash for cache invalidation label
-DEPS_HASH=$(md5 -q "$SCRIPT_DIR/pyproject.toml" 2>/dev/null || md5sum "$SCRIPT_DIR/pyproject.toml" | cut -d' ' -f1)
+DEPS_HASH=$(shasum -a 256 "$SCRIPT_DIR/pyproject.toml" | cut -d' ' -f1)
 
 # Ensure ImageStream exists
 oc create imagestream pulse-agent-deps -n "$NS" 2>/dev/null || true

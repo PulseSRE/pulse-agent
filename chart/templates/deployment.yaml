@@ -13,6 +13,10 @@ spec:
     metadata:
       labels:
         {{- include "sre-agent.selectorLabels" . | nindent 8 }}
+      {{- if not .Values.vertexAI.projectId }}
+      annotations:
+        pulse.openshift.io/ai-backend: "not-configured"
+      {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -26,7 +30,11 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sre-agent
+          {{- if and (not .Values.image.repository) .Values.image.internalRegistry }}
+          image: "image-registry.openshift-image-registry.svc:5000/{{ .Release.Namespace }}/pulse-agent:{{ .Values.image.tag | default "latest" }}"
+          {{- else }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          {{- end }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
@@ -83,7 +91,7 @@ spec:
             {{- end }}
             {{- if and .Values.memory.enabled .Values.memory.persistence.enabled }}
             - name: memory-data
-              mountPath: {{ dir .Values.memory.dbPath }}
+              mountPath: {{ regexReplaceAll "/[^/]+$" .Values.memory.dbPath "" | default "/tmp/pulse_agent" }}
             {{- end }}
       volumes:
         - name: tmp
