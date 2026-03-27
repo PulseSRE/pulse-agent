@@ -1,9 +1,9 @@
 """FastAPI WebSocket server for the Pulse Agent.
 
-Protocol Version: 1 (see API_CONTRACT.md for full specification)
+Protocol Version: 2 (see API_CONTRACT.md for full specification)
 
 Exposes the SRE and Security agents over WebSocket for integration
-with the OpenShift Pulse web UI.
+with the OpenShift Pulse web UI. V2 adds /ws/monitor for autonomous scanning.
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Pulse Agent API", version="0.2.0", lifespan=lifespan)
 
 
-PROTOCOL_VERSION = "1"
+PROTOCOL_VERSION = "2"
 
 @app.get("/healthz")
 async def healthz():
@@ -101,9 +101,9 @@ async def version():
     """API protocol version. UI checks this on connect to detect mismatches."""
     return {
         "protocol": PROTOCOL_VERSION,
-        "agent": "0.3.0",
+        "agent": "1.4.0",
         "tools": len(SRE_ALL_TOOLS) + len(SEC_ALL_TOOLS),
-        "features": ["component_specs", "ws_token_auth", "rate_limiting"],
+        "features": ["component_specs", "ws_token_auth", "rate_limiting", "monitor", "fix_history", "predictions"],
     }
 
 
@@ -298,7 +298,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         {"type": "error", "message": "..."}
     """
     if mode not in ("sre", "security"):
-        await websocket.close(code=4000, reason="Invalid mode. Use 'sre' or 'security'.")
+        await websocket.close(code=4000, reason="Invalid mode. Use 'sre' or 'security'. For monitoring, use /ws/monitor.")
         return
 
     # Token authentication — mandatory unless explicitly disabled
@@ -474,3 +474,129 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         _pending_nonces.pop(session_id, None)
         _pending_timestamps.pop(session_id, None)
         _ws_alive.pop(session_id, None)
+
+
+# ── Protocol v2: /ws/monitor ──────────────────────────────────────────────
+
+from .monitor import MonitorSession, get_fix_history, get_action_detail
+
+
+@app.websocket("/ws/monitor")
+async def websocket_monitor(websocket: WebSocket):
+    """WebSocket endpoint for autonomous cluster monitoring (Protocol v2).
+
+    Server pushes: finding, prediction, action_report, monitor_status
+    Client sends: subscribe_monitor, action_response, get_fix_history
+    """
+    # Token authentication
+    import hmac as _hmac
+    expected_token = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
+    if not expected_token:
+        await websocket.close(code=4001, reason="Server not configured. PULSE_AGENT_WS_TOKEN is required.")
+        return
+    client_token = websocket.query_params.get("token", "")
+    if not _hmac.compare_digest(client_token, expected_token):
+        await websocket.close(code=4001, reason="Unauthorized.")
+        return
+
+    await websocket.accept()
+    logger.info("Monitor client connected")
+
+    # Wait for subscribe_monitor message to get config
+    trust_level = 1
+    auto_fix_categories: list[str] = []
+
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=10)
+        data = json.loads(raw)
+        if data.get("type") == "subscribe_monitor":
+            trust_level = data.get("trustLevel", 1)
+            auto_fix_categories = data.get("autoFixCategories", [])
+            logger.info("Monitor subscribed: trust=%d categories=%s", trust_level, auto_fix_categories)
+    except (asyncio.TimeoutError, Exception):
+        pass  # Use defaults
+
+    session = MonitorSession(websocket, trust_level, auto_fix_categories)
+
+    # Start scan loop as background task
+    scan_task = asyncio.create_task(session.run_loop())
+
+    # Listen for client messages
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+
+            msg_type = data.get("type")
+
+            if msg_type == "action_response":
+                action_id = data.get("actionId", "")
+                approved = data.get("approved", False)
+                logger.info("Action response: id=%s approved=%s", action_id, approved)
+                # TODO: wire up to autonomous action execution
+
+            elif msg_type == "get_fix_history":
+                filters = data.get("filters")
+                page = data.get("page", 1)
+                result = get_fix_history(page=page, filters=filters)
+                await websocket.send_json({"type": "fix_history", **result})
+
+    except WebSocketDisconnect:
+        logger.info("Monitor client disconnected")
+    except Exception as e:
+        logger.error("Monitor WebSocket error: %s", e)
+    finally:
+        session.running = False
+        scan_task.cancel()
+        try:
+            await scan_task
+        except asyncio.CancelledError:
+            pass
+
+
+# ── Protocol v2: REST endpoints ───────────────────────────────────────────
+
+from fastapi import Query
+
+
+@app.get("/fix-history")
+async def rest_fix_history(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    status: str | None = Query(None),
+    category: str | None = Query(None),
+    since: int | None = Query(None),
+    search: str | None = Query(None),
+):
+    """Paginated fix history (Protocol v2)."""
+    filters = {}
+    if status:
+        filters["status"] = status
+    if category:
+        filters["category"] = category
+    if since:
+        filters["since"] = since
+    if search:
+        filters["search"] = search
+    return get_fix_history(page=page, page_size=page_size, filters=filters or None)
+
+
+@app.get("/fix-history/{action_id}")
+async def rest_action_detail(action_id: str):
+    """Single action detail with before/after state (Protocol v2)."""
+    result = get_action_detail(action_id)
+    if result is None:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"error": "Action not found"})
+    return result
+
+
+@app.get("/predictions")
+async def rest_predictions():
+    """Active predictions from the most recent scan (Protocol v2)."""
+    # Predictions are pushed via WebSocket; this endpoint returns cached results
+    # For now, return empty — predictions will be populated when scanner runs
+    return {"predictions": [], "total": 0}
