@@ -510,6 +510,55 @@ python -m pytest tests/ -v
 
 239 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, and the memory system. All tests run without a cluster or API key (fully mocked).
 
+## Evaluation Framework
+
+Pulse Agent includes a deterministic evaluation framework for release gating and regression detection.
+
+```bash
+# Run the core eval suite
+python -m sre_agent.evals.cli --suite core
+
+# Run release-gating suite (expected to pass)
+python -m sre_agent.evals.cli --suite release --fail-on-gate
+
+# Run safety/integration suites (diagnostic, non-gating by default)
+python -m sre_agent.evals.cli --suite safety
+python -m sre_agent.evals.cli --suite integration
+
+# Generate weekly outcome/regression report from fix history DB
+python -m sre_agent.evals.outcomes_cli --current-days 7 --baseline-days 7
+python -m sre_agent.evals.outcomes_cli --format json --output artifacts/outcomes.json
+python -m sre_agent.evals.outcomes_cli --policy-file sre_agent/evals/policies/outcome_regression_policy.yaml
+
+# Generate weekly markdown digest (gate + outcomes + top failures)
+python -m sre_agent.evals.weekly_digest_cli --current-days 7 --baseline-days 7 --output artifacts/weekly-digest.md
+
+# Emit JSON (for CI artifacts)
+python -m sre_agent.evals.cli --suite release --format json --output artifacts/release.json
+
+# Fail process if release gate fails
+python -m sre_agent.evals.cli --suite release --fail-on-gate
+```
+
+Current eval dimensions:
+- task success
+- safety/compliance
+- tool efficiency
+- operational quality
+- reliability
+
+Hard blocker categories:
+- `policy_violation`
+- `hallucinated_tool`
+- `missing_confirmation`
+
+Suites:
+- `release` — primary gating suite for CI
+- `safety` — adversarial safety checks
+- `integration` — reliability/failure-mode checks
+- `core` — mixed baseline coverage (includes intentional blocker scenarios)
+- `outcomes` — compares current vs baseline action outcomes from fix history telemetry
+
 ---
 
 <p align="center">

@@ -1,0 +1,126 @@
+name: Eval Framework
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+
+      - name: Run unit tests
+        run: python -m pytest tests/ -q
+
+      - name: Run release eval gate
+        run: |
+          python -m sre_agent.evals.cli --suite release --format json --output artifacts/release.json --fail-on-gate
+          python -m sre_agent.evals.cli --suite release --format text --output artifacts/release.txt --fail-on-gate
+
+      - name: Run safety and integration evals (non-gating)
+        run: |
+          python -m sre_agent.evals.cli --suite safety --format json --output artifacts/safety.json
+          python -m sre_agent.evals.cli --suite integration --format json --output artifacts/integration.json
+
+      - name: Generate outcome regression report (non-gating)
+        run: |
+          python -m sre_agent.evals.outcomes_cli --current-days 7 --baseline-days 7 --policy-file sre_agent/evals/policies/outcome_regression_policy.yaml --format json --output artifacts/outcomes.json
+          python -m sre_agent.evals.outcomes_cli --current-days 7 --baseline-days 7 --policy-file sre_agent/evals/policies/outcome_regression_policy.yaml --format text --output artifacts/outcomes.txt
+
+      - name: Generate weekly markdown digest
+        run: |
+          python -m sre_agent.evals.weekly_digest_cli --current-days 7 --baseline-days 7 --output artifacts/weekly-digest.md
+
+      - name: Stage regression policy artifact
+        run: |
+          mkdir -p artifacts
+          cp sre_agent/evals/policies/outcome_regression_policy.yaml artifacts/outcome_regression_policy.yaml
+
+      - name: Publish eval check summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          artifacts = Path("artifacts")
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          lines: list[str] = ["## Pulse Agent Eval Summary", ""]
+
+          def read_json(path: Path):
+              if not path.exists():
+                  return None
+              try:
+                  return json.loads(path.read_text(encoding="utf-8"))
+              except Exception:
+                  return None
+
+          release = read_json(artifacts / "release.json")
+          safety = read_json(artifacts / "safety.json")
+          integration = read_json(artifacts / "integration.json")
+          outcomes = read_json(artifacts / "outcomes.json")
+
+          if release:
+              lines.append(
+                  f"- release gate: {'PASS' if release.get('gate_passed') else 'FAIL'} "
+                  f"(scenarios={release.get('scenario_count')}, avg={release.get('average_overall')})"
+              )
+          if safety:
+              lines.append(
+                  f"- safety suite: {'PASS' if safety.get('gate_passed') else 'FAIL'} "
+                  f"(scenarios={safety.get('scenario_count')})"
+              )
+          if integration:
+              lines.append(
+                  f"- integration suite: {'PASS' if integration.get('gate_passed') else 'FAIL'} "
+                  f"(scenarios={integration.get('scenario_count')})"
+              )
+          if outcomes:
+              policy = outcomes.get("policy", {})
+              thresholds = policy.get("thresholds", {})
+              lines.append(
+                  f"- outcomes gate: {'PASS' if outcomes.get('gate_passed') else 'FAIL'} "
+                  f"(current_actions={outcomes.get('current', {}).get('total_actions')}, "
+                  f"baseline_actions={outcomes.get('baseline', {}).get('total_actions')})"
+              )
+              if thresholds:
+                  lines.append(
+                      "- regression policy thresholds: "
+                      f"success_rate_delta_min={thresholds.get('success_rate_delta_min')}, "
+                      f"rollback_rate_delta_max={thresholds.get('rollback_rate_delta_max')}, "
+                      f"p95_duration_ms_delta_max={thresholds.get('p95_duration_ms_delta_max')}"
+                  )
+
+          lines.append("")
+          lines.append("Artifacts include JSON, text, weekly digest, and policy snapshot.")
+          text = "\n".join(lines) + "\n"
+
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as fh:
+                  fh.write(text)
+          print(text)
+          PY
+
+      - name: Upload eval artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulse-agent-eval-artifacts
+          path: artifacts/

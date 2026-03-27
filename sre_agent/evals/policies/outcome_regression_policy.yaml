@@ -1,0 +1,5 @@
+version: 1
+thresholds:
+  success_rate_delta_min: -0.05
+  rollback_rate_delta_max: 0.03
+  p95_duration_ms_delta_max: 500.0

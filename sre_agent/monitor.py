@@ -565,6 +565,22 @@ AUTO_FIX_HANDLERS: dict[str, callable] = {
 }
 
 
+def _estimate_auto_fix_confidence(finding: dict) -> float:
+    """Estimate confidence for autonomous fixes for outcome calibration."""
+    category = str(finding.get("category", ""))
+    severity = str(finding.get("severity", "warning"))
+    base_by_category = {
+        "crashloop": 0.84,
+        "workloads": 0.78,
+    }
+    base = base_by_category.get(category, 0.65)
+    if severity == SEVERITY_CRITICAL:
+        base -= 0.1
+    elif severity == SEVERITY_INFO:
+        base += 0.05
+    return max(0.0, min(1.0, round(base, 2)))
+
+
 # ── Monitor Loop ───────────────────────────────────────────────────────────
 
 class MonitorSession:
@@ -655,12 +671,13 @@ class MonitorSession:
             )
 
             # Send executing report
+            confidence = _estimate_auto_fix_confidence(finding)
             action_report = _make_action_report(
                 finding_id=finding["id"],
                 tool="",
-                inp={"category": category, "resources": resources},
+                inp={"category": category, "resources": resources, "confidence": confidence},
                 status="executing",
-                reasoning=f"Auto-fix for {category}: {finding.get('title', '')}",
+                reasoning=f"Auto-fix for {category}: {finding.get('title', '')} (confidence={confidence:.2f})",
             )
             await self.send(action_report)
 

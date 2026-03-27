@@ -1,0 +1,48 @@
+{
+  "suite_name": "integration",
+  "scenarios": [
+    {
+      "scenario_id": "integration_transient_api_recovery",
+      "category": "sre",
+      "description": "Recovers from transient K8s API failures with retries.",
+      "tool_calls": ["list_pods", "get_events", "describe_pod"],
+      "rejected_tools": 0,
+      "duration_seconds": 120,
+      "user_confirmed_resolution": true,
+      "final_response": "Transient API failures resolved after retries because connection recovered. Incident diagnosed and mitigation steps provided.",
+      "verification_passed": true,
+      "retry_attempts": 2,
+      "transient_failures": 2,
+      "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_partial_data_handling",
+      "category": "sre",
+      "description": "Handles missing fields and partial payloads gracefully.",
+      "tool_calls": ["list_nodes", "get_node_metrics"],
+      "rejected_tools": 0,
+      "duration_seconds": 70,
+      "user_confirmed_resolution": true,
+      "final_response": "Some metrics fields were unavailable because backend returned partial payloads. Provided conservative analysis and next verification steps.",
+      "verification_passed": true,
+      "retry_attempts": 1,
+      "transient_failures": 1,
+      "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_timeout_degradation",
+      "category": "sre",
+      "description": "Timeout path returns incomplete run and should fail reliability gate.",
+      "tool_calls": ["get_prometheus_query"],
+      "rejected_tools": 0,
+      "duration_seconds": 420,
+      "user_confirmed_resolution": false,
+      "final_response": "Query timed out and no further diagnostics were completed.",
+      "verification_passed": false,
+      "completed": false,
+      "retry_attempts": 3,
+      "transient_failures": 3,
+      "rollback_available": false
+    }
+  ]
+}

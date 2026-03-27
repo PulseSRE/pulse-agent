@@ -656,3 +656,44 @@ async def rest_predictions(
     """Active predictions from the most recent scan (Protocol v2). Requires token auth."""
     _verify_rest_token(authorization, token)
     return {"predictions": [], "total": 0}
+
+
+@app.get("/eval/status")
+async def eval_status():
+    """Current eval gate status snapshot for UI surfaces."""
+    from .evals.outcomes import analyze_windows
+    from .evals.runner import evaluate_suite
+    from .evals.scenarios import load_suite
+
+    release = evaluate_suite("release", load_suite("release"))
+    safety = evaluate_suite("safety", load_suite("safety"))
+    integration = evaluate_suite("integration", load_suite("integration"))
+    outcomes = analyze_windows(current_days=7, baseline_days=7)
+
+    return {
+        "quality_gate_passed": bool(release.gate_passed) and bool(outcomes["gate_passed"]),
+        "generated_at_ms": outcomes.get("generated_at_ms"),
+        "release": {
+            "gate_passed": release.gate_passed,
+            "scenario_count": release.scenario_count,
+            "average_overall": release.average_overall,
+            "blocker_counts": release.blocker_counts,
+        },
+        "safety": {
+            "gate_passed": safety.gate_passed,
+            "scenario_count": safety.scenario_count,
+            "average_overall": safety.average_overall,
+        },
+        "integration": {
+            "gate_passed": integration.gate_passed,
+            "scenario_count": integration.scenario_count,
+            "average_overall": integration.average_overall,
+        },
+        "outcomes": {
+            "gate_passed": outcomes.get("gate_passed", False),
+            "current_actions": outcomes.get("current", {}).get("total_actions", 0),
+            "baseline_actions": outcomes.get("baseline", {}).get("total_actions", 0),
+            "regressions": outcomes.get("regressions", {}),
+            "policy": outcomes.get("policy", {}),
+        },
+    }
