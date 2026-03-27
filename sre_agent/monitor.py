@@ -510,6 +510,61 @@ ALL_SCANNERS = [
 ]
 
 
+# ── Auto-fix functions ────────────────────────────────────────────────────
+
+
+def _fix_crashloop(finding: dict) -> tuple[str, str, str]:
+    """Delete crashlooping pod. Returns (tool, before_state, after_state) or raises."""
+    resources = finding.get("resources", [])
+    if not resources:
+        raise ValueError("No resources to fix")
+    r = resources[0]
+    core = get_core_client()
+    # Get current state
+    pod = core.read_namespaced_pod(r["name"], r["namespace"])
+    restart_count = 0
+    if pod.status.container_statuses:
+        restart_count = pod.status.container_statuses[0].restart_count
+    before = f"Pod {r['name']} in {r['namespace']}: restarts={restart_count}"
+    # Delete it — controller will recreate
+    core.delete_namespaced_pod(r["name"], r["namespace"])
+    return ("delete_pod", before, f"Pod {r['name']} deleted — controller will recreate")
+
+
+def _fix_workloads(finding: dict) -> tuple[str, str, str]:
+    """Restart a failed deployment. Returns (tool, before_state, after_state) or raises."""
+    resources = finding.get("resources", [])
+    if not resources:
+        raise ValueError("No resources to fix")
+    r = resources[0]
+    apps = get_apps_client()
+    # Get current state
+    dep = apps.read_namespaced_deployment(r["name"], r["namespace"])
+    desired = dep.spec.replicas or 0
+    available = dep.status.available_replicas or 0
+    before = f"Deployment {r['name']} in {r['namespace']}: {available}/{desired} available"
+    # Trigger rolling restart
+    from datetime import datetime as _dt
+    now = _dt.now(timezone.utc).isoformat()
+    body = {
+        "spec": {
+            "template": {
+                "metadata": {
+                    "annotations": {"kubectl.kubernetes.io/restartedAt": now}
+                }
+            }
+        }
+    }
+    apps.patch_namespaced_deployment(r["name"], r["namespace"], body=body)
+    return ("restart_deployment", before, f"Deployment {r['name']} rolling restart triggered")
+
+
+AUTO_FIX_HANDLERS: dict[str, callable] = {
+    "crashloop": _fix_crashloop,
+    "workloads": _fix_workloads,
+}
+
+
 # ── Monitor Loop ───────────────────────────────────────────────────────────
 
 class MonitorSession:
@@ -531,6 +586,70 @@ class MonitorSession:
         except Exception:
             self.running = False
             return False
+
+    async def auto_fix(self, findings: list[dict]) -> None:
+        """Attempt to auto-fix findings when trust level permits."""
+        for finding in findings:
+            if not finding.get("autoFixable"):
+                continue
+
+            category = finding.get("category", "")
+
+            # Trust level 3: only fix categories in self.auto_fix_categories
+            # Trust level 4: fix ALL auto-fixable findings
+            if self.trust_level == 3 and category not in self.auto_fix_categories:
+                continue
+
+            handler = AUTO_FIX_HANDLERS.get(category)
+            if not handler:
+                continue
+
+            # Send executing report
+            action_report = _make_action_report(
+                finding_id=finding["id"],
+                tool="",
+                inp={"category": category, "resources": finding.get("resources", [])},
+                status="executing",
+                reasoning=f"Auto-fix for {category}: {finding.get('title', '')}",
+            )
+            await self.send(action_report)
+
+            start_ms = _ts()
+            try:
+                tool, before_state, after_state = await asyncio.to_thread(handler, finding)
+                duration_ms = _ts() - start_ms
+
+                # Update report with success
+                action_report["tool"] = tool
+                action_report["status"] = "completed"
+                action_report["beforeState"] = before_state
+                action_report["afterState"] = after_state
+                action_report["durationMs"] = duration_ms
+
+                logger.info(
+                    "Auto-fix completed: category=%s finding=%s tool=%s duration=%dms",
+                    category, finding["id"], tool, duration_ms,
+                )
+            except Exception as e:
+                duration_ms = _ts() - start_ms
+                action_report["status"] = "failed"
+                action_report["error"] = str(e)
+                action_report["durationMs"] = duration_ms
+
+                logger.info(
+                    "Auto-fix failed: category=%s finding=%s error=%s",
+                    category, finding["id"], e,
+                )
+
+            # Send completed/failed report
+            await self.send(action_report)
+
+            # Persist to fix history
+            save_action(
+                action_report,
+                category=category,
+                resources=finding.get("resources"),
+            )
 
     async def run_scan(self) -> None:
         """Run all scanners and push new findings."""
@@ -565,6 +684,13 @@ class MonitorSession:
             if not await self.send(f):
                 return
 
+        # Send snapshot of all active finding IDs so UI can remove stale ones
+        await self.send({
+            "type": "findings_snapshot",
+            "activeIds": [f["id"] for f in all_findings],
+            "timestamp": _ts(),
+        })
+
         # Push monitor status
         scan_duration = time.time() - scan_start
         await self.send({
@@ -579,6 +705,10 @@ class MonitorSession:
             "Scan complete: %d total findings (%d new) in %.1fs",
             len(self._last_findings), len(new_findings), scan_duration,
         )
+
+        # Auto-fix at trust level 3+
+        if self.trust_level >= 3:
+            await self.auto_fix(all_findings)
 
     async def run_loop(self) -> None:
         """Main monitor loop — scan periodically until disconnected."""
