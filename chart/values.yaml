@@ -34,9 +34,11 @@ rbac:
   allowSecretAccess: false
 
 # Network Policy — restricts egress to DNS + HTTPS only.
-# Disable if the agent can't reach cloud APIs (e.g., GCP OAuth).
+# Disabled by default because managed clusters (ROSA, ARO, GKE) route DNS
+# through the host network, which namespaceSelector-based rules can't reach.
+# Enable on self-managed clusters where you control the CNI.
 networkPolicy:
-  disabled: false
+  disabled: true
 
 # Self-improving memory system
 memory:
