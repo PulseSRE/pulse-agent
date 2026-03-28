@@ -29,7 +29,11 @@ def _use_temp_db(monkeypatch, tmp_path):
     """Use a temp database for each test."""
     db_path = str(tmp_path / "test_fix_history.db")
     monkeypatch.setattr("sre_agent.monitor._FIX_DB_PATH", db_path)
+    # Reset the cached connection so each test gets a fresh DB
+    import sre_agent.monitor as _mon
+    _mon._fix_db_conn = None
     yield
+    _mon._fix_db_conn = None
 
 
 class TestMakeHelpers:

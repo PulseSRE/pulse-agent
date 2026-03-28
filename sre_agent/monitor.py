@@ -7,6 +7,8 @@ Protocol v2 addition. See API_CONTRACT.md for the full specification.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -156,10 +158,22 @@ CREATE INDEX IF NOT EXISTS idx_investigations_finding ON investigations(finding_
 """
 
 
+_fix_db_conn: sqlite3.Connection | None = None
+
+
 def _get_fix_db() -> sqlite3.Connection:
+    global _fix_db_conn
+    if _fix_db_conn is not None:
+        try:
+            _fix_db_conn.execute("SELECT 1")
+            return _fix_db_conn
+        except sqlite3.Error:
+            _fix_db_conn = None
+
     os.makedirs(os.path.dirname(_FIX_DB_PATH), exist_ok=True)
     conn = sqlite3.connect(_FIX_DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(_FIX_SCHEMA)
     # Lightweight migrations for existing databases
     for stmt in (
@@ -171,41 +185,43 @@ def _get_fix_db() -> sqlite3.Connection:
             conn.execute(stmt)
         except sqlite3.OperationalError:
             pass
+    _fix_db_conn = conn
     return conn
 
 
 def save_action(action: dict, category: str = "", resources: list[dict] | None = None) -> None:
     """Persist an action report to SQLite."""
     try:
-        with _get_fix_db() as conn:
-            conn.execute(
-                """INSERT OR REPLACE INTO actions
-                   (id, finding_id, timestamp, category, tool, input, status,
-                    before_state, after_state, error, reasoning, duration_ms,
-                    rollback_available, rollback_action, resources, verification_status,
-                    verification_evidence, verification_timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    action["id"],
-                    action.get("findingId", ""),
-                    action.get("timestamp", _ts()),
-                    category,
-                    action.get("tool", ""),
-                    json.dumps(action.get("input", {})),
-                    action.get("status", ""),
-                    action.get("beforeState", ""),
-                    action.get("afterState", ""),
-                    action.get("error"),
-                    action.get("reasoning", ""),
-                    action.get("durationMs", 0),
-                    0,  # rollback not available — delete_pod/restart_deployment are irreversible
-                    "",
-                    json.dumps(resources or []),
-                    action.get("verificationStatus"),
-                    action.get("verificationEvidence"),
-                    action.get("verificationTimestamp"),
-                ),
-            )
+        conn = _get_fix_db()
+        conn.execute(
+            """INSERT OR REPLACE INTO actions
+               (id, finding_id, timestamp, category, tool, input, status,
+                before_state, after_state, error, reasoning, duration_ms,
+                rollback_available, rollback_action, resources, verification_status,
+                verification_evidence, verification_timestamp)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                action["id"],
+                action.get("findingId", ""),
+                action.get("timestamp", _ts()),
+                category,
+                action.get("tool", ""),
+                json.dumps(action.get("input", {})),
+                action.get("status", ""),
+                action.get("beforeState", ""),
+                action.get("afterState", ""),
+                action.get("error"),
+                action.get("reasoning", ""),
+                action.get("durationMs", 0),
+                0,  # rollback not available — delete_pod/restart_deployment are irreversible
+                "",
+                json.dumps(resources or []),
+                action.get("verificationStatus"),
+                action.get("verificationEvidence"),
+                action.get("verificationTimestamp"),
+            ),
+        )
+        conn.commit()
     except Exception as e:
         logger.error("Failed to save action: %s", e)
 
@@ -215,57 +231,57 @@ def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = N
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
     try:
-        with _get_fix_db() as conn:
-            where_parts = []
-            params: list[Any] = []
+        conn = _get_fix_db()
+        where_parts = []
+        params: list[Any] = []
 
-            if filters:
-                if filters.get("status"):
-                    where_parts.append("status = ?")
-                    params.append(filters["status"])
-                if filters.get("category"):
-                    where_parts.append("category = ?")
-                    params.append(filters["category"])
-                if filters.get("since"):
-                    where_parts.append("timestamp >= ?")
-                    params.append(filters["since"])
-                if filters.get("search"):
-                    where_parts.append("(tool LIKE ? OR reasoning LIKE ?)")
-                    params.extend([f"%{filters['search']}%", f"%{filters['search']}%"])
+        if filters:
+            if filters.get("status"):
+                where_parts.append("status = ?")
+                params.append(filters["status"])
+            if filters.get("category"):
+                where_parts.append("category = ?")
+                params.append(filters["category"])
+            if filters.get("since"):
+                where_parts.append("timestamp >= ?")
+                params.append(filters["since"])
+            if filters.get("search"):
+                where_parts.append("(tool LIKE ? OR reasoning LIKE ?)")
+                params.extend([f"%{filters['search']}%", f"%{filters['search']}%"])
 
-            where = "WHERE " + " AND ".join(where_parts) if where_parts else ""
+        where = "WHERE " + " AND ".join(where_parts) if where_parts else ""
 
-            total = conn.execute(f"SELECT COUNT(*) FROM actions {where}", params).fetchone()[0]
-            offset = (page - 1) * page_size
-            rows = conn.execute(
-                f"SELECT * FROM actions {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-                params + [page_size, offset],
-            ).fetchall()
+        total = conn.execute(f"SELECT COUNT(*) FROM actions {where}", params).fetchone()[0]
+        offset = (page - 1) * page_size
+        rows = conn.execute(
+            f"SELECT * FROM actions {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+            params + [page_size, offset],
+        ).fetchall()
 
-            actions = []
-            for r in rows:
-                actions.append({
-                    "id": r["id"],
-                    "findingId": r["finding_id"],
-                    "timestamp": r["timestamp"],
-                    "category": r["category"],
-                    "tool": r["tool"],
-                    "input": json.loads(r["input"]) if r["input"] else {},
-                    "status": r["status"],
-                    "beforeState": r["before_state"],
-                    "afterState": r["after_state"],
-                    "error": r["error"],
-                    "reasoning": r["reasoning"],
-                    "durationMs": r["duration_ms"],
-                    "rollbackAvailable": bool(r["rollback_available"]),
-                    "rollbackAction": json.loads(r["rollback_action"]) if r["rollback_action"] else None,
-                    "resources": json.loads(r["resources"]) if r["resources"] else [],
-                    "verificationStatus": r["verification_status"],
-                    "verificationEvidence": r["verification_evidence"],
-                    "verificationTimestamp": r["verification_timestamp"],
-                })
+        actions = []
+        for r in rows:
+            actions.append({
+                "id": r["id"],
+                "findingId": r["finding_id"],
+                "timestamp": r["timestamp"],
+                "category": r["category"],
+                "tool": r["tool"],
+                "input": json.loads(r["input"]) if r["input"] else {},
+                "status": r["status"],
+                "beforeState": r["before_state"],
+                "afterState": r["after_state"],
+                "error": r["error"],
+                "reasoning": r["reasoning"],
+                "durationMs": r["duration_ms"],
+                "rollbackAvailable": bool(r["rollback_available"]),
+                "rollbackAction": json.loads(r["rollback_action"]) if r["rollback_action"] else None,
+                "resources": json.loads(r["resources"]) if r["resources"] else [],
+                "verificationStatus": r["verification_status"],
+                "verificationEvidence": r["verification_evidence"],
+                "verificationTimestamp": r["verification_timestamp"],
+            })
 
-            return {"actions": actions, "total": total, "page": page, "pageSize": page_size}
+        return {"actions": actions, "total": total, "page": page, "pageSize": page_size}
     except Exception as e:
         logger.error("Failed to get fix history: %s", e)
         return {"actions": [], "total": 0, "page": page, "pageSize": page_size}
@@ -274,30 +290,30 @@ def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = N
 def get_action_detail(action_id: str) -> dict | None:
     """Get a single action by ID."""
     try:
-        with _get_fix_db() as conn:
-            row = conn.execute("SELECT * FROM actions WHERE id = ?", (action_id,)).fetchone()
-            if not row:
-                return None
-            return {
-                "id": row["id"],
-                "findingId": row["finding_id"],
-                "timestamp": row["timestamp"],
-                "category": row["category"],
-                "tool": row["tool"],
-                "input": json.loads(row["input"]) if row["input"] else {},
-                "status": row["status"],
-                "beforeState": row["before_state"],
-                "afterState": row["after_state"],
-                "error": row["error"],
-                "reasoning": row["reasoning"],
-                "durationMs": row["duration_ms"],
-                "rollbackAvailable": bool(row["rollback_available"]),
-                "rollbackAction": json.loads(row["rollback_action"]) if row["rollback_action"] else None,
-                "resources": json.loads(row["resources"]) if row["resources"] else [],
-                "verificationStatus": row["verification_status"],
-                "verificationEvidence": row["verification_evidence"],
-                "verificationTimestamp": row["verification_timestamp"],
-            }
+        conn = _get_fix_db()
+        row = conn.execute("SELECT * FROM actions WHERE id = ?", (action_id,)).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "findingId": row["finding_id"],
+            "timestamp": row["timestamp"],
+            "category": row["category"],
+            "tool": row["tool"],
+            "input": json.loads(row["input"]) if row["input"] else {},
+            "status": row["status"],
+            "beforeState": row["before_state"],
+            "afterState": row["after_state"],
+            "error": row["error"],
+            "reasoning": row["reasoning"],
+            "durationMs": row["duration_ms"],
+            "rollbackAvailable": bool(row["rollback_available"]),
+            "rollbackAction": json.loads(row["rollback_action"]) if row["rollback_action"] else None,
+            "resources": json.loads(row["resources"]) if row["resources"] else [],
+            "verificationStatus": row["verification_status"],
+            "verificationEvidence": row["verification_evidence"],
+            "verificationTimestamp": row["verification_timestamp"],
+        }
     except Exception as e:
         logger.error("Failed to get action detail: %s", e)
         return None
@@ -306,27 +322,28 @@ def get_action_detail(action_id: str) -> dict | None:
 def save_investigation(report: dict, finding: dict) -> None:
     """Persist a proactive investigation report."""
     try:
-        with _get_fix_db() as conn:
-            conn.execute(
-                """INSERT OR REPLACE INTO investigations
-                   (id, finding_id, timestamp, category, severity, status, summary,
-                    suspected_cause, recommended_fix, confidence, error, resources)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    report.get("id"),
-                    report.get("findingId", ""),
-                    report.get("timestamp", _ts()),
-                    finding.get("category", ""),
-                    finding.get("severity", ""),
-                    report.get("status", ""),
-                    report.get("summary", ""),
-                    report.get("suspectedCause", ""),
-                    report.get("recommendedFix", ""),
-                    float(report.get("confidence") or 0.0),
-                    report.get("error"),
-                    json.dumps(finding.get("resources", [])),
-                ),
-            )
+        conn = _get_fix_db()
+        conn.execute(
+            """INSERT OR REPLACE INTO investigations
+               (id, finding_id, timestamp, category, severity, status, summary,
+                suspected_cause, recommended_fix, confidence, error, resources)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                report.get("id"),
+                report.get("findingId", ""),
+                report.get("timestamp", _ts()),
+                finding.get("category", ""),
+                finding.get("severity", ""),
+                report.get("status", ""),
+                report.get("summary", ""),
+                report.get("suspectedCause", ""),
+                report.get("recommendedFix", ""),
+                float(report.get("confidence") or 0.0),
+                report.get("error"),
+                json.dumps(finding.get("resources", [])),
+            ),
+        )
+        conn.commit()
     except Exception as e:
         logger.error("Failed to save investigation: %s", e)
 
@@ -345,26 +362,27 @@ def execute_rollback(action_id: str) -> dict:
 def update_action_verification(action_id: str, status: str, evidence: str) -> None:
     """Persist verification result for an action."""
     try:
-        with _get_fix_db() as conn:
-            conn.execute(
-                """UPDATE actions
-                   SET verification_status = ?, verification_evidence = ?, verification_timestamp = ?
-                   WHERE id = ?""",
-                (status, evidence, _ts(), action_id),
-            )
+        conn = _get_fix_db()
+        conn.execute(
+            """UPDATE actions
+               SET verification_status = ?, verification_evidence = ?, verification_timestamp = ?
+               WHERE id = ?""",
+            (status, evidence, _ts(), action_id),
+        )
+        conn.commit()
     except Exception as e:
         logger.error("Failed to update action verification: %s", e)
 
 
 # ── Scan Functions ─────────────────────────────────────────────────────────
 
-def scan_crashlooping_pods() -> list[dict]:
+def scan_crashlooping_pods(pods=None) -> list[dict]:
     """Find pods in CrashLoopBackOff or high restart counts."""
     crashloop_threshold = int(os.environ.get("PULSE_AGENT_CRASHLOOP_THRESHOLD", "3"))
     findings = []
     try:
-        core = get_core_client()
-        pods = safe(lambda: core.list_pod_for_all_namespaces())
+        if pods is None:
+            pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
         if isinstance(pods, ToolError):
             return findings
         for pod in pods.items:
@@ -603,12 +621,12 @@ def scan_firing_alerts() -> list[dict]:
     return findings
 
 
-def scan_oom_killed_pods() -> list[dict]:
+def scan_oom_killed_pods(pods=None) -> list[dict]:
     """Find pods with OOMKilled exit code in last terminated state."""
     findings = []
     try:
-        core = get_core_client()
-        pods = safe(lambda: core.list_pod_for_all_namespaces())
+        if pods is None:
+            pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
         if isinstance(pods, ToolError):
             return findings
         for pod in pods.items:
@@ -631,12 +649,12 @@ def scan_oom_killed_pods() -> list[dict]:
     return findings
 
 
-def scan_image_pull_errors() -> list[dict]:
+def scan_image_pull_errors(pods=None) -> list[dict]:
     """Find pods in ImagePullBackOff or ErrImagePull state."""
     findings = []
     try:
-        core = get_core_client()
-        pods = safe(lambda: core.list_pod_for_all_namespaces())
+        if pods is None:
+            pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
         if isinstance(pods, ToolError):
             return findings
         for pod in pods.items:
@@ -761,6 +779,7 @@ ALL_SCANNERS = [
 # ── Webhook escalation ─────────────────────────────────────────────────────
 
 WEBHOOK_URL = os.environ.get("PULSE_AGENT_WEBHOOK_URL", "")
+WEBHOOK_SECRET = os.environ.get("PULSE_AGENT_WEBHOOK_SECRET", "")
 
 
 async def _send_webhook(finding: dict) -> None:
@@ -776,9 +795,12 @@ async def _send_webhook(finding: dict) -> None:
             "resources": finding.get("resources", []),
             "timestamp": finding.get("timestamp"),
         }).encode()
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if WEBHOOK_SECRET:
+            sig = hmac.new(WEBHOOK_SECRET.encode(), payload, hashlib.sha256).hexdigest()
+            headers["X-Pulse-Signature"] = f"sha256={sig}"
         req = urllib.request.Request(
-            WEBHOOK_URL, data=payload,
-            headers={"Content-Type": "application/json"},
+            WEBHOOK_URL, data=payload, headers=headers,
         )
         await asyncio.to_thread(urllib.request.urlopen, req, timeout=5)
     except Exception as e:
@@ -849,30 +871,45 @@ def _fix_workloads(finding: dict) -> tuple[str, str, str]:
 
 
 def _fix_image_pull(finding: dict) -> tuple[str, str, str]:
-    """Restart deployment for ImagePullBackOff pods — clears the backoff timer."""
+    """Restart deployment/statefulset/daemonset for ImagePullBackOff pods — clears the backoff timer."""
     resources = finding.get("resources", [])
     if not resources:
         raise ValueError("No resources to fix")
     r = resources[0]
+    ns = r.get("namespace", "default")
     core = get_core_client()
-    pod = core.read_namespaced_pod(r["name"], r.get("namespace", "default"))
-    before = f"Pod {r['name']} in {r.get('namespace', 'default')}: ImagePullBackOff"
-    # Find the owning deployment via ownerReferences
+    pod = core.read_namespaced_pod(r["name"], ns)
+    before = f"Pod {r['name']} in {ns}: ImagePullBackOff"
+
+    # Check for bare pod before attempting any fix
+    if not pod.metadata.owner_references:
+        return ("skip", "", "Skipped: bare pod with no controller — deletion would be permanent")
+
+    # Find the owning controller via ownerReferences
     owner_refs = pod.metadata.owner_references or []
-    rs_name = None
     for ref in owner_refs:
         if ref.kind == "ReplicaSet":
-            rs_name = ref.name
-            break
-    if rs_name:
-        apps = get_apps_client()
-        rs = apps.read_namespaced_replica_set(rs_name, r.get("namespace", "default"))
-        deploy_ref = None
-        for ref in rs.metadata.owner_references or []:
-            if ref.kind == "Deployment":
-                deploy_ref = ref.name
-                break
-        if deploy_ref:
+            # ReplicaSet -> find parent Deployment
+            apps = get_apps_client()
+            rs = apps.read_namespaced_replica_set(ref.name, ns)
+            for rs_ref in rs.metadata.owner_references or []:
+                if rs_ref.kind == "Deployment":
+                    from datetime import datetime as _dt
+                    now = _dt.now(timezone.utc).isoformat()
+                    body = {
+                        "spec": {
+                            "template": {
+                                "metadata": {
+                                    "annotations": {"kubectl.kubernetes.io/restartedAt": now}
+                                }
+                            }
+                        }
+                    }
+                    apps.patch_namespaced_deployment(rs_ref.name, ns, body=body)
+                    return ("restart_deployment", before, f"Deployment {rs_ref.name} rolling restart triggered")
+
+        elif ref.kind == "StatefulSet":
+            apps = get_apps_client()
             from datetime import datetime as _dt
             now = _dt.now(timezone.utc).isoformat()
             body = {
@@ -884,13 +921,30 @@ def _fix_image_pull(finding: dict) -> tuple[str, str, str]:
                     }
                 }
             }
-            apps.patch_namespaced_deployment(deploy_ref, r.get("namespace", "default"), body=body)
-            return ("restart_deployment", before, f"Deployment {deploy_ref} rolling restart triggered")
-    # Check for bare pod before deleting
-    if not pod.metadata.owner_references:
-        return ("skip", "", "Skipped: bare pod with no controller — deletion would be permanent")
-    # Fallback: delete the pod directly
-    core.delete_namespaced_pod(r["name"], r.get("namespace", "default"))
+            apps.patch_namespaced_stateful_set(ref.name, ns, body=body)
+            return ("restart_statefulset", before, f"StatefulSet {ref.name} rolling restart triggered")
+
+        elif ref.kind == "DaemonSet":
+            apps = get_apps_client()
+            from datetime import datetime as _dt
+            now = _dt.now(timezone.utc).isoformat()
+            body = {
+                "spec": {
+                    "template": {
+                        "metadata": {
+                            "annotations": {"kubectl.kubernetes.io/restartedAt": now}
+                        }
+                    }
+                }
+            }
+            apps.patch_namespaced_daemon_set(ref.name, ns, body=body)
+            return ("restart_daemonset", before, f"DaemonSet {ref.name} rolling restart triggered")
+
+        elif ref.kind == "Job":
+            return ("skip", "", "Skipped: Job-owned pod — restart won't help")
+
+    # Fallback: delete the pod directly (has owner but not a recognized type)
+    core.delete_namespaced_pod(r["name"], ns)
     return ("delete_pod", before, f"Pod {r['name']} deleted — controller will recreate")
 
 
@@ -1576,9 +1630,22 @@ class MonitorSession:
         self._recent_investigations = {k: v for k, v in self._recent_investigations.items() if v > eviction_cutoff}
         all_findings: list[dict] = []
 
+        # Fetch pods once and share across pod-based scanners (H1)
+        _POD_SCANNERS = {"crashloop", "oom", "image_pull"}
+        shared_pods = None
+        try:
+            shared_pods = await asyncio.to_thread(
+                lambda: safe(lambda: get_core_client().list_pod_for_all_namespaces())
+            )
+        except Exception as e:
+            logger.error("Failed to fetch shared pod list: %s", e)
+
         for category, scanner in ALL_SCANNERS:
             try:
-                findings = await asyncio.to_thread(scanner)
+                if category in _POD_SCANNERS and shared_pods is not None:
+                    findings = await asyncio.to_thread(scanner, shared_pods)
+                else:
+                    findings = await asyncio.to_thread(scanner)
                 all_findings.extend(findings)
             except Exception as e:
                 logger.error("Scanner %s failed: %s", category, e)
