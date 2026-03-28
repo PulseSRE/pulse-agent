@@ -31,6 +31,23 @@ def build_memory_context(store: IncidentStore, user_query: str) -> str:
             )
         sections.append("## Past Similar Incidents\n" + "\n".join(inc_lines))
 
+    # Anti-patterns: low-scoring incidents to learn from failures (Improvement #3)
+    low_score_incidents = store.search_low_score_incidents(user_query, threshold=0.4, limit=2)
+    if low_score_incidents:
+        anti_lines = []
+        for inc in low_score_incidents:
+            tools = json.loads(inc["tool_sequence"])
+            tool_names = [t["name"] for t in tools[:5]]
+            anti_lines.append(
+                f"- Query: \"{inc['query'][:80]}\" | "
+                f"Tools: {', '.join(tool_names)} | "
+                f"Outcome: {inc['outcome']} | Score: {inc['score']:.1f}"
+            )
+        sections.append(
+            "## Avoid These Approaches (low-scoring past attempts)\n"
+            + "\n".join(anti_lines)
+        )
+
     # Matching runbooks (top 2)
     runbooks = store.find_runbooks(user_query, limit=2)
     if runbooks:

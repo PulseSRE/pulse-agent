@@ -170,6 +170,21 @@ class IncidentStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    @db_safe(default=[])
+    def search_low_score_incidents(self, query: str, threshold: float = 0.4, limit: int = 2) -> list[dict]:
+        """Find similar incidents with low scores to surface anti-patterns."""
+        keywords = extract_keywords(query).split()
+        if not keywords:
+            return []
+        conditions = " OR ".join(["query_keywords LIKE ?"] * len(keywords))
+        params = [f"%{kw}%" for kw in keywords]
+        rows = self.conn.execute(
+            f"""SELECT * FROM incidents WHERE ({conditions}) AND score < ? AND score > 0
+                ORDER BY score ASC, timestamp DESC LIMIT ?""",
+            params + [threshold, limit]
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def save_runbook(self, name: str, description: str, trigger_keywords: str,
                      tool_sequence: list[dict], source_incident_id: int | None = None) -> int:
         now = datetime.now(timezone.utc).isoformat()
@@ -253,6 +268,115 @@ class IncidentStore:
     def get_incident_count(self) -> int:
         row = self.conn.execute("SELECT COUNT(*) as c FROM incidents").fetchone()
         return row["c"]
+
+    @db_safe(default=[])
+    def export_runbooks(self) -> list[dict]:
+        """Export all learned runbooks as JSON-serialisable dicts."""
+        rows = self.conn.execute(
+            "SELECT name, description, trigger_keywords, tool_sequence, "
+            "success_count, failure_count, created_at, updated_at FROM runbooks"
+        ).fetchall()
+        return [
+            {
+                "name": r["name"],
+                "description": r["description"],
+                "trigger_keywords": r["trigger_keywords"],
+                "tool_sequence": json.loads(r["tool_sequence"]),
+                "success_count": r["success_count"],
+                "failure_count": r["failure_count"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            }
+            for r in rows
+        ]
+
+    @db_safe(default=0)
+    def import_runbooks(self, runbooks: list[dict]) -> int:
+        """Import runbooks from JSON. Skips duplicates by name. Returns count imported."""
+        existing_names = {
+            r["name"]
+            for r in self.conn.execute("SELECT name FROM runbooks").fetchall()
+        }
+        imported = 0
+        now = datetime.now(timezone.utc).isoformat()
+        for rb in runbooks:
+            name = rb.get("name", "")
+            if not name or name in existing_names:
+                continue
+            tool_seq = rb.get("tool_sequence", [])
+            self.conn.execute(
+                """INSERT INTO runbooks (name, description, trigger_keywords, tool_sequence,
+                   success_count, failure_count, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    name,
+                    rb.get("description", ""),
+                    rb.get("trigger_keywords", ""),
+                    json.dumps(tool_seq),
+                    rb.get("success_count", 1),
+                    rb.get("failure_count", 0),
+                    rb.get("created_at", now),
+                    now,
+                ),
+            )
+            existing_names.add(name)
+            imported += 1
+        self.conn.commit()
+        return imported
+
+    @db_safe(default=[])
+    def export_patterns(self) -> list[dict]:
+        """Export all detected patterns as JSON-serialisable dicts."""
+        rows = self.conn.execute(
+            "SELECT pattern_type, description, keywords, incident_ids, "
+            "frequency, first_seen, last_seen, metadata FROM patterns"
+        ).fetchall()
+        return [
+            {
+                "pattern_type": r["pattern_type"],
+                "description": r["description"],
+                "keywords": r["keywords"],
+                "incident_ids": json.loads(r["incident_ids"]),
+                "frequency": r["frequency"],
+                "first_seen": r["first_seen"],
+                "last_seen": r["last_seen"],
+                "metadata": json.loads(r["metadata"]),
+            }
+            for r in rows
+        ]
+
+    @db_safe(default=0)
+    def import_patterns(self, patterns: list[dict]) -> int:
+        """Import patterns from JSON. Skips duplicates by description. Returns count imported."""
+        existing_descs = {
+            r["description"]
+            for r in self.conn.execute("SELECT description FROM patterns").fetchall()
+        }
+        imported = 0
+        now = datetime.now(timezone.utc).isoformat()
+        for pat in patterns:
+            desc = pat.get("description", "")
+            if not desc or desc in existing_descs:
+                continue
+            self.conn.execute(
+                """INSERT INTO patterns (pattern_type, description, keywords,
+                   incident_ids, frequency, first_seen, last_seen, metadata)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    pat.get("pattern_type", "imported"),
+                    desc,
+                    pat.get("keywords", ""),
+                    json.dumps(pat.get("incident_ids", [])),
+                    pat.get("frequency", 1),
+                    pat.get("first_seen", now),
+                    now,
+                    json.dumps(pat.get("metadata", {})),
+                ),
+            )
+            existing_descs.add(desc)
+            imported += 1
+        self.conn.commit()
+        return imported
 
     def cleanup(self, max_age_days: int = 90) -> int:
         """Delete incidents older than max_age_days. Returns number of deleted rows."""

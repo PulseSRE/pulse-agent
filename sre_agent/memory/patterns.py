@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from collections import Counter
-from datetime import datetime
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta
 
 from .store import IncidentStore
 
@@ -87,5 +87,51 @@ def detect_patterns(store: IncidentStore) -> list[dict]:
                     metadata={"day_of_week": dow, "hour": hour},
                 )
                 new_patterns.append({"id": pid, "type": "time_based"})
+
+    # Correlation detection: if category A is often followed by category B
+    # within 30 minutes, record the correlation (Improvement #5)
+    category_events: list[tuple[str, datetime, int]] = []
+    for inc in incidents:
+        if inc["error_type"]:
+            try:
+                ts = datetime.fromisoformat(inc["timestamp"])
+                category_events.append((inc["error_type"], ts, inc["id"]))
+            except (ValueError, TypeError):
+                continue
+
+    # Sort chronologically
+    category_events.sort(key=lambda x: x[1])
+
+    # Count how often category A is followed by category B within 30 min
+    correlation_counts: Counter = Counter()
+    correlation_ids: defaultdict[tuple[str, str], list[int]] = defaultdict(list)
+    window = timedelta(minutes=30)
+
+    for i, (cat_a, ts_a, id_a) in enumerate(category_events):
+        for j in range(i + 1, min(i + 20, len(category_events))):  # bounded lookahead
+            cat_b, ts_b, id_b = category_events[j]
+            if ts_b - ts_a > window:
+                break
+            if cat_a != cat_b:
+                pair = (cat_a, cat_b)
+                correlation_counts[pair] += 1
+                correlation_ids[pair].extend([id_a, id_b])
+
+    for (cat_a, cat_b), count in correlation_counts.most_common(5):
+        if count >= 3:
+            ids = sorted(set(correlation_ids[(cat_a, cat_b)]))[:20]
+            existing = store.conn.execute(
+                "SELECT id FROM patterns WHERE pattern_type = 'correlation' AND keywords LIKE ? AND keywords LIKE ?",
+                (f"%{cat_a.lower()}%", f"%{cat_b.lower()}%")
+            ).fetchall()
+            if not existing:
+                pid = store.record_pattern(
+                    pattern_type="correlation",
+                    description=f"{cat_a} is often followed by {cat_b} within 30 minutes ({count} occurrences)",
+                    keywords=f"{cat_a.lower()} {cat_b.lower()}",
+                    incident_ids=ids,
+                    metadata={"category_a": cat_a, "category_b": cat_b, "window_minutes": 30},
+                )
+                new_patterns.append({"id": pid, "type": "correlation", "keywords": f"{cat_a} {cat_b}"})
 
     return new_patterns

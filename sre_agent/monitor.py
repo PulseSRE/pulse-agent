@@ -1372,6 +1372,32 @@ class MonitorSession:
                     except Exception as e:
                         logger.warning("Security followup failed for finding %s: %s", finding.get("id", ""), e)
 
+                # Auto-learn from high-confidence investigations (Improvement #2)
+                if os.environ.get("PULSE_AGENT_MEMORY", "") == "1" and result.get("confidence", 0) >= 0.7:
+                    try:
+                        from .memory import get_manager
+                        manager = get_manager()
+                        if manager:
+                            inv_namespace = ""
+                            inv_resource_type = ""
+                            f_resources = finding.get("resources", [])
+                            if f_resources:
+                                inv_namespace = f_resources[0].get("namespace", "")
+                                inv_resource_type = f_resources[0].get("kind", "").lower()
+                            inv_incident = {
+                                "query": f"Investigation: {finding.get('title', '')}",
+                                "tool_sequence": ["proactive_investigation"],
+                                "resolution": result.get("summary", ""),
+                                "namespace": inv_namespace,
+                                "resource_type": inv_resource_type,
+                                "error_type": finding.get("category", ""),
+                            }
+                            manager.store_incident(inv_incident, confirmed=False)
+                            logger.info("Stored high-confidence investigation: %s (confidence=%.2f)",
+                                        finding.get("title", ""), result.get("confidence", 0))
+                    except Exception as e:
+                        logger.warning("Failed to store investigation: %s", e)
+
             except asyncio.TimeoutError:
                 report["error"] = f"Investigation timed out after {timeout_seconds}s"
             except Exception as e:
@@ -1436,6 +1462,33 @@ class MonitorSession:
             }
             await self.send(verification_report)
             update_action_verification(action_id, status, evidence)
+
+            # Auto-learn from verified fixes (Improvement #1)
+            if status == "verified" and os.environ.get("PULSE_AGENT_MEMORY", "") == "1":
+                try:
+                    from .memory import get_manager
+                    manager = get_manager()
+                    if manager:
+                        # Extract namespace/resource_type from resources
+                        namespace = ""
+                        resource_type = ""
+                        if resources:
+                            r0 = resources[0]
+                            namespace = r0.get("namespace", "")
+                            resource_type = r0.get("kind", "").lower()
+                        incident = {
+                            "query": f"Auto-fix for {category} finding",
+                            "tool_sequence": [payload.get("tool", "unknown") if payload.get("tool") else category],
+                            "resolution": f"Applied {payload.get('tool', category)} — verified healthy on next scan",
+                            "namespace": namespace,
+                            "resource_type": resource_type,
+                            "error_type": category,
+                        }
+                        manager.store_incident(incident, confirmed=True)
+                        logger.info("Auto-learned runbook from verified fix: %s", category)
+                except Exception as e:
+                    logger.warning("Failed to auto-learn from fix: %s", e)
+
             completed_ids.append(action_id)
 
         for action_id in completed_ids:

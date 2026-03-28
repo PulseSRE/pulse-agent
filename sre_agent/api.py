@@ -720,6 +720,42 @@ async def monitor_capabilities(
     }
 
 
+@app.get("/memory/export")
+async def export_memory(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Export learned runbooks and patterns for cross-pod sharing."""
+    _verify_rest_token(authorization, token)
+    from .memory import get_manager
+    manager = get_manager()
+    if not manager:
+        return {"runbooks": [], "patterns": []}
+    return {
+        "runbooks": manager.store.export_runbooks(),
+        "patterns": manager.store.export_patterns(),
+    }
+
+
+@app.post("/memory/import")
+async def import_memory(
+    body: dict,
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Import runbooks and patterns from another pod's export."""
+    _verify_rest_token(authorization, token)
+    from .memory import get_manager
+    manager = get_manager()
+    if not manager:
+        return {"imported_runbooks": 0, "imported_patterns": 0, "error": "Memory system not enabled"}
+    runbooks = body.get("runbooks", [])
+    patterns = body.get("patterns", [])
+    imported_rb = manager.store.import_runbooks(runbooks) if runbooks else 0
+    imported_pat = manager.store.import_patterns(patterns) if patterns else 0
+    return {"imported_runbooks": imported_rb, "imported_patterns": imported_pat}
+
+
 @app.get("/eval/status")
 async def eval_status(
     authorization: str | None = Header(None),

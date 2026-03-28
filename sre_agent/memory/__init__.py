@@ -16,6 +16,20 @@ from .store import IncidentStore
 
 logger = logging.getLogger("pulse_agent")
 
+# Module-level singleton so monitor.py can access memory without plumbing
+_manager_instance: "MemoryManager | None" = None
+
+
+def get_manager() -> "MemoryManager | None":
+    """Return the global MemoryManager singleton, or None if memory is disabled."""
+    return _manager_instance
+
+
+def set_manager(manager: "MemoryManager | None") -> None:
+    """Set the global MemoryManager singleton."""
+    global _manager_instance
+    _manager_instance = manager
+
 
 def is_memory_enabled() -> bool:
     val = os.environ.get("PULSE_AGENT_MEMORY", "1").lower()
@@ -36,6 +50,39 @@ class MemoryManager:
         self._prev_tool_calls: list[dict] = []
         self._prev_rejected_count: int = 0
         self._prev_turn_duration: float = 0
+
+    def store_incident(self, incident: dict, confirmed: bool = False) -> int | None:
+        """Store a learned incident from auto-fix or investigation.
+
+        Args:
+            incident: dict with keys query, tool_sequence, resolution,
+                      namespace, resource_type, error_type.
+            confirmed: True if the fix was verified (sets outcome='resolved').
+        """
+        outcome = "resolved" if confirmed else "unknown"
+        tool_sequence = incident.get("tool_sequence", [])
+        # Normalise tool_sequence to list-of-dicts expected by record_incident
+        normalised = []
+        for t in tool_sequence:
+            if isinstance(t, str):
+                normalised.append({"name": t})
+            else:
+                normalised.append(t)
+
+        incident_id = self.store.record_incident(
+            query=incident.get("query", ""),
+            tool_sequence=normalised,
+            resolution=incident.get("resolution", ""),
+            outcome=outcome,
+            namespace=incident.get("namespace", ""),
+            resource_type=incident.get("resource_type", ""),
+            error_type=incident.get("error_type", ""),
+            score=0.8 if confirmed else 0.5,
+        )
+        if incident_id and incident_id > 0 and confirmed and len(normalised) >= 1:
+            if not is_duplicate_runbook(self.store, normalised):
+                extract_runbook(self.store, incident_id)
+        return incident_id
 
     def augment_prompt(self, base_prompt: str, user_query: str) -> str:
         memory_context = build_memory_context(self.store, user_query)
