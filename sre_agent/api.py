@@ -836,7 +836,7 @@ async def get_shared_context(
 
 
 @app.get("/eval/status")
-async def eval_status(
+def eval_status(
     authorization: str | None = Header(None),
     token: str | None = Query(None),
 ):

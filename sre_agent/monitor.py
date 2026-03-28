@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -159,34 +160,35 @@ CREATE INDEX IF NOT EXISTS idx_investigations_finding ON investigations(finding_
 
 
 _fix_db_conn: sqlite3.Connection | None = None
+_fix_db_lock = threading.Lock()
 
 
 def _get_fix_db() -> sqlite3.Connection:
     global _fix_db_conn
-    if _fix_db_conn is not None:
-        try:
-            _fix_db_conn.execute("SELECT 1")
-            return _fix_db_conn
-        except sqlite3.Error:
-            _fix_db_conn = None
+    with _fix_db_lock:
+        if _fix_db_conn is not None:
+            try:
+                _fix_db_conn.execute("SELECT 1")
+                return _fix_db_conn
+            except sqlite3.Error:
+                _fix_db_conn = None
 
-    os.makedirs(os.path.dirname(_FIX_DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(_FIX_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.executescript(_FIX_SCHEMA)
-    # Lightweight migrations for existing databases
-    for stmt in (
-        "ALTER TABLE actions ADD COLUMN verification_status TEXT",
-        "ALTER TABLE actions ADD COLUMN verification_evidence TEXT",
-        "ALTER TABLE actions ADD COLUMN verification_timestamp INTEGER",
-    ):
-        try:
-            conn.execute(stmt)
-        except sqlite3.OperationalError:
-            pass
-    _fix_db_conn = conn
-    return conn
+        os.makedirs(os.path.dirname(_FIX_DB_PATH), exist_ok=True)
+        conn = sqlite3.connect(_FIX_DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.executescript(_FIX_SCHEMA)
+        for stmt in (
+            "ALTER TABLE actions ADD COLUMN verification_status TEXT",
+            "ALTER TABLE actions ADD COLUMN verification_evidence TEXT",
+            "ALTER TABLE actions ADD COLUMN verification_timestamp INTEGER",
+        ):
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError:
+                pass
+        _fix_db_conn = conn
+        return conn
 
 
 def save_action(action: dict, category: str = "", resources: list[dict] | None = None) -> None:
@@ -948,7 +950,7 @@ def _fix_image_pull(finding: dict) -> tuple[str, str, str]:
     return ("delete_pod", before, f"Pod {r['name']} deleted — controller will recreate")
 
 
-AUTO_FIX_HANDLERS: dict[str, callable] = {
+AUTO_FIX_HANDLERS: dict[str, Callable] = {
     "crashloop": _fix_crashloop,
     "workloads": _fix_workloads,
     "image_pull": _fix_image_pull,
