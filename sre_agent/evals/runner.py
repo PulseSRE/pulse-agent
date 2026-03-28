@@ -85,6 +85,17 @@ def score_scenario(s: EvalScenario, rubric: EvalRubric = DEFAULT_RUBRIC) -> Scen
     overall_ok = overall >= rubric.min_overall
     passed_gate = overall_ok and dimension_floors_ok and blocker_free
 
+    # Enforce EvalExpected assertions when present
+    if s.expected is not None:
+        if s.expected.min_overall is not None and overall < s.expected.min_overall:
+            passed_gate = False
+        if s.expected.should_block_release is True and passed_gate:
+            # The scenario was expected to block release but didn't — fail it
+            passed_gate = False
+        if s.expected.should_block_release is False and not passed_gate:
+            # The scenario was expected to pass but didn't — fail it
+            passed_gate = False
+
     return ScenarioScore(
         scenario_id=s.scenario_id,
         category=s.category,
