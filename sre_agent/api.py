@@ -138,6 +138,7 @@ async def health(
             "recent": tracker.get_recent(limit=5),
         },
         "investigations": get_investigation_stats(),
+        "autofix_paused": is_autofix_paused(),
     }
 
 
@@ -527,7 +528,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
 
 # ── Protocol v2: /ws/monitor ──────────────────────────────────────────────
 
-from .monitor import MonitorSession, get_fix_history, get_action_detail, execute_rollback, get_investigation_stats
+from .monitor import MonitorSession, get_fix_history, get_action_detail, execute_rollback, get_investigation_stats, is_autofix_paused
 
 
 @app.websocket("/ws/monitor")
@@ -563,7 +564,11 @@ async def websocket_monitor(websocket: WebSocket):
         if data.get("type") == "subscribe_monitor":
             requested_trust = data.get("trustLevel", 1)
             # Clamp to server-configured maximum — client cannot escalate
-            trust_level = max(0, min(int(requested_trust), max_trust_level))
+            try:
+                trust_level = max(0, min(int(requested_trust), max_trust_level))
+            except (ValueError, TypeError):
+                logger.warning("Invalid trust level %r, defaulting to 1", requested_trust)
+                trust_level = 1
             auto_fix_categories = [
                 str(c) for c in (data.get("autoFixCategories") or [])
                 if isinstance(c, str) and len(c) < 64
@@ -743,6 +748,32 @@ async def monitor_capabilities(
     }
 
 
+@app.post("/monitor/pause")
+async def pause_autofix(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Emergency kill switch — pause all auto-fix actions."""
+    _verify_rest_token(authorization, token)
+    from .monitor import set_autofix_paused
+    set_autofix_paused(True)
+    logger.warning("Auto-fix PAUSED via /monitor/pause")
+    return {"autofix_paused": True}
+
+
+@app.post("/monitor/resume")
+async def resume_autofix(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """Resume auto-fix actions after a pause."""
+    _verify_rest_token(authorization, token)
+    from .monitor import set_autofix_paused
+    set_autofix_paused(False)
+    logger.info("Auto-fix RESUMED via /monitor/resume")
+    return {"autofix_paused": False}
+
+
 @app.get("/memory/export")
 async def export_memory(
     authorization: str | None = Header(None),
@@ -832,6 +863,7 @@ async def eval_status(
         outcomes = analyze_windows(current_days=7, baseline_days=7)
 
         payload = {
+            "note": "Release gate scores static fixtures. Use 'pulse-eval replay' for live agent testing.",
             "quality_gate_passed": bool(release.gate_passed) and bool(outcomes["gate_passed"]),
             "generated_at_ms": outcomes.get("generated_at_ms"),
             "release": {

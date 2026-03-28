@@ -1,4 +1,6 @@
-replicaCount: 2
+# Default 1 replica when memory persistence is enabled (RWO PVC).
+# Set to 2+ only with ReadWriteMany storage or memory.persistence.enabled=false.
+replicaCount: 1
 
 image:
   repository: ""  # Set by deploy.sh or --set. Uses internal registry when empty.

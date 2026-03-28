@@ -34,7 +34,7 @@ The agent supports trust levels 0-4 when connected via the Monitor endpoint:
 There are two execution paths with different confirmation behavior:
 
 - **Interactive agent (`/ws/sre`):** All write operations require programmatic user approval regardless of trust level. The confirmation gate is enforced in code — the agent cannot bypass it. Every write Kubernetes API call requires a `confirm_request`/`confirm_response` round-trip before execution.
-- **Monitor auto-fix (`/ws/monitor` at trust level 3+):** Fixes execute WITHOUT the confirmation gate. This is by design for autonomous remediation. Safety guardrails are enforced instead: rate limiting (max 3 auto-fixes per scan cycle), cooldown (5-minute per-resource cooldown to prevent fix loops), and bare pod protection (pods without ownerReferences are never deleted, as they would not be recreated by a controller).
+- **Monitor auto-fix (`/ws/monitor` at trust level 3+):** Fixes execute WITHOUT the confirmation gate. This is by design for autonomous remediation. Auto-fix actions (pod deletion, rolling restart) cannot be rolled back — the Kubernetes controller recreates pods automatically. Safety guardrails are enforced instead: rate limiting (max 3 auto-fixes per scan cycle), cooldown (5-minute per-resource cooldown to prevent fix loops), bare pod protection (pods without ownerReferences are never deleted, as they would not be recreated by a controller), and an emergency kill switch (`POST /monitor/pause` or `PULSE_AGENT_AUTOFIX_ENABLED=false`).
 
 ### Input Sanitization
 - Context fields (kind, namespace, name) validated against `^[a-zA-Z0-9\-._/: ]{0,253}$`

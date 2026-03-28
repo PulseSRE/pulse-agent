@@ -198,7 +198,7 @@ def save_action(action: dict, category: str = "", resources: list[dict] | None =
                     action.get("error"),
                     action.get("reasoning", ""),
                     action.get("durationMs", 0),
-                    1 if action.get("status") == "completed" else 0,
+                    0,  # rollback not available — delete_pod/restart_deployment are irreversible
                     "",
                     json.dumps(resources or []),
                     action.get("verificationStatus"),
@@ -332,22 +332,14 @@ def save_investigation(report: dict, finding: dict) -> None:
 
 
 def execute_rollback(action_id: str) -> dict:
-    """Execute rollback for a completed action."""
+    """Rollback is not supported — auto-fix actions (delete_pod, restart_deployment) are irreversible."""
     detail = get_action_detail(action_id)
     if not detail:
         return {"error": "Action not found"}
-    if detail["status"] != "completed":
-        return {"error": f"Cannot rollback action with status '{detail['status']}'"}
-
-    # For delete_pod: can't rollback a deletion (controller recreates anyway)
-    # For restart_deployment: already rolling — no meaningful rollback
-    # Mark as rolled back in DB
-    try:
-        with _get_fix_db() as conn:
-            conn.execute("UPDATE actions SET status = 'rolled_back' WHERE id = ?", (action_id,))
-        return {"status": "rolled_back", "actionId": action_id, "note": "Action marked as rolled back"}
-    except Exception as e:
-        return {"error": str(e)}
+    return {
+        "error": "Rollback not available. Auto-fix actions (pod deletion, rolling restart) "
+                 "cannot be reversed — the controller recreates pods automatically.",
+    }
 
 
 def update_action_verification(action_id: str, status: str, evidence: str) -> None:
@@ -793,6 +785,20 @@ async def _send_webhook(finding: dict) -> None:
         logger.error("Webhook delivery failed: %s", e)
 
 
+# ── Auto-fix kill switch ───────────────────────────────────────────────────
+
+_autofix_paused = False
+
+
+def set_autofix_paused(paused: bool) -> None:
+    global _autofix_paused
+    _autofix_paused = paused
+
+
+def is_autofix_paused() -> bool:
+    return _autofix_paused
+
+
 # ── Auto-fix functions ────────────────────────────────────────────────────
 
 
@@ -880,6 +886,9 @@ def _fix_image_pull(finding: dict) -> tuple[str, str, str]:
             }
             apps.patch_namespaced_deployment(deploy_ref, r.get("namespace", "default"), body=body)
             return ("restart_deployment", before, f"Deployment {deploy_ref} rolling restart triggered")
+    # Check for bare pod before deleting
+    if not pod.metadata.owner_references:
+        return ("skip", "", "Skipped: bare pod with no controller — deletion would be permanent")
     # Fallback: delete the pod directly
     core.delete_namespaced_pod(r["name"], r.get("namespace", "default"))
     return ("delete_pod", before, f"Pod {r['name']} deleted — controller will recreate")
@@ -1138,6 +1147,14 @@ class MonitorSession:
         - Cooldown: skip resources fixed in the last 5 minutes
         - Bare pod protection: never delete pods without ownerReferences
         """
+        if _autofix_paused:
+            logger.info("Auto-fix paused — skipping")
+            return
+
+        if os.environ.get("PULSE_AGENT_AUTOFIX_ENABLED", "true").lower() != "true":
+            logger.info("Auto-fix disabled via PULSE_AGENT_AUTOFIX_ENABLED — skipping")
+            return
+
         fixes_this_cycle = 0
         MAX_FIXES_PER_CYCLE = 3
 
