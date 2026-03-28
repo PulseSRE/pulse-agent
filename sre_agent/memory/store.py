@@ -158,32 +158,46 @@ class IncidentStore:
 
     @db_safe(default=[])
     def search_incidents(self, query: str, limit: int = 5) -> list[dict]:
-        keywords = extract_keywords(query).split()
-        if not keywords:
-            return []
-        conditions = " OR ".join(["query_keywords LIKE ?"] * len(keywords))
-        params = [f"%{kw}%" for kw in keywords]
+        from .retrieval import _tfidf_similarity
+
         rows = self.conn.execute(
-            f"""SELECT * FROM incidents WHERE ({conditions})
-                ORDER BY score DESC, timestamp DESC LIMIT ?""",
-            params + [limit]
+            "SELECT * FROM incidents ORDER BY timestamp DESC LIMIT 200"
         ).fetchall()
-        return [dict(r) for r in rows]
+        if not rows:
+            return []
+
+        incidents = [dict(r) for r in rows]
+        documents = [f"{inc['query']} {inc['resolution']}" for inc in incidents]
+        scores = _tfidf_similarity(query, documents)
+
+        ranked = sorted(
+            zip(scores, incidents),
+            key=lambda x: (-x[0], -x[1].get("score", 0)),
+        )
+        return [inc for sim, inc in ranked if sim > 0.1][:limit]
 
     @db_safe(default=[])
     def search_low_score_incidents(self, query: str, threshold: float = 0.4, limit: int = 2) -> list[dict]:
         """Find similar incidents with low scores to surface anti-patterns."""
-        keywords = extract_keywords(query).split()
-        if not keywords:
-            return []
-        conditions = " OR ".join(["query_keywords LIKE ?"] * len(keywords))
-        params = [f"%{kw}%" for kw in keywords]
+        from .retrieval import _tfidf_similarity
+
         rows = self.conn.execute(
-            f"""SELECT * FROM incidents WHERE ({conditions}) AND score < ? AND score > 0
-                ORDER BY score ASC, timestamp DESC LIMIT ?""",
-            params + [threshold, limit]
+            "SELECT * FROM incidents WHERE score < ? AND score > 0 "
+            "ORDER BY timestamp DESC LIMIT 200",
+            (threshold,),
         ).fetchall()
-        return [dict(r) for r in rows]
+        if not rows:
+            return []
+
+        incidents = [dict(r) for r in rows]
+        documents = [f"{inc['query']} {inc['resolution']}" for inc in incidents]
+        scores = _tfidf_similarity(query, documents)
+
+        ranked = sorted(
+            zip(scores, incidents),
+            key=lambda x: (-x[0],),
+        )
+        return [inc for sim, inc in ranked if sim > 0.1][:limit]
 
     def save_runbook(self, name: str, description: str, trigger_keywords: str,
                      tool_sequence: list[dict], source_incident_id: int | None = None) -> int:

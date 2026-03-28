@@ -3,10 +3,57 @@
 from __future__ import annotations
 
 import json
+import math
+from collections import Counter
 
 from .store import IncidentStore
 
 MAX_MEMORY_CHARS = 1500
+
+# ---------------------------------------------------------------------------
+# TF-IDF similarity helpers (stdlib only, no external deps)
+# ---------------------------------------------------------------------------
+
+def _tokenize(text: str) -> list[str]:
+    """Simple whitespace + lowercase tokenization."""
+    return [w.lower().strip('.,!?()[]{}:;"\'') for w in text.split() if len(w) > 2]
+
+
+def _tfidf_similarity(query: str, documents: list[str]) -> list[float]:
+    """Compute TF-IDF cosine similarity between query and documents."""
+    query_tokens = _tokenize(query)
+    doc_token_lists = [_tokenize(doc) for doc in documents]
+
+    # IDF
+    n_docs = len(documents) + 1
+    all_tokens = set(query_tokens)
+    for tokens in doc_token_lists:
+        all_tokens.update(tokens)
+
+    doc_freq: Counter[str] = Counter()
+    for tokens in doc_token_lists:
+        for token in set(tokens):
+            doc_freq[token] += 1
+
+    idf = {t: math.log((n_docs + 1) / (1 + doc_freq.get(t, 0))) for t in all_tokens}
+
+    # Query vector
+    query_tf = Counter(query_tokens)
+    query_vec = {t: (query_tf[t] / max(len(query_tokens), 1)) * idf.get(t, 0) for t in query_tokens}
+
+    # Document vectors + cosine similarity
+    scores: list[float] = []
+    for tokens in doc_token_lists:
+        doc_tf = Counter(tokens)
+        doc_vec = {t: (doc_tf[t] / max(len(tokens), 1)) * idf.get(t, 0) for t in tokens}
+
+        # Cosine similarity
+        dot = sum(query_vec.get(t, 0) * doc_vec.get(t, 0) for t in all_tokens)
+        mag_q = math.sqrt(sum(v ** 2 for v in query_vec.values())) or 1
+        mag_d = math.sqrt(sum(v ** 2 for v in doc_vec.values())) or 1
+        scores.append(dot / (mag_q * mag_d))
+
+    return scores
 
 
 def build_memory_context(store: IncidentStore, user_query: str) -> str:

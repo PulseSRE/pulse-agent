@@ -2,8 +2,15 @@
 # Quick deploy — local build + push (~30-45s total)
 # Uses Podman with local layer cache to avoid OpenShift's cold Docker builds.
 # Falls back to oc start-build if Podman or registry route is unavailable.
-# Usage: ./deploy/quick-deploy.sh [namespace]
+# Usage: ./deploy/quick-deploy.sh [--skip-tests] [namespace]
 set -e
+
+SKIP_TESTS=false
+for arg in "$@"; do
+    case "$arg" in
+        --skip-tests) SKIP_TESTS=true; shift ;;
+    esac
+done
 
 # Prerequisites
 command -v oc &>/dev/null || { echo "ERROR: 'oc' not found. Install the OpenShift CLI."; exit 1; }
@@ -12,6 +19,13 @@ oc whoami &>/dev/null || { echo "ERROR: Not logged in. Run 'oc login' first."; e
 NS="${1:-openshiftpulse}"
 DEPLOY="pulse-agent-openshift-sre-agent"
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Run tests before building (fail early)
+if [[ "$SKIP_TESTS" == "false" ]]; then
+    echo "==> Running tests..."
+    cd "$SCRIPT_DIR"
+    python3 -m pytest tests/ -q || { echo "ERROR: Tests failed. Use --skip-tests to bypass."; exit 1; }
+fi
 
 # Try to get external registry route
 REGISTRY=$(oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
