@@ -534,16 +534,14 @@ def scan_expiring_certs() -> list[dict]:
                 import ssl
                 import tempfile
                 cert_bytes = base64.b64decode(cert_data)
-                with tempfile.NamedTemporaryFile(suffix=".crt", delete=False) as f:
+                with tempfile.NamedTemporaryFile(suffix=".crt", delete=True) as f:
                     f.write(cert_bytes)
                     f.flush()
-                    # H3: ssl._ssl._test_decode_cert is a CPython-specific private API.
-                    # Wrapped in try/except so certs are skipped on non-CPython runtimes.
                     try:
                         cert_info = ssl._ssl._test_decode_cert(f.name)  # type: ignore[attr-defined]
                     except (AttributeError, Exception) as cert_err:
                         logger.warning(
-                            "Cannot decode cert %s/%s (CPython-specific API unavailable): %s",
+                            "Cannot decode cert %s/%s (CPython-specific API): %s",
                             ns, name, cert_err,
                         )
                         continue
