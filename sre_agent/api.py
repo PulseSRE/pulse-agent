@@ -463,12 +463,35 @@ async def websocket_agent(websocket: WebSocket, mode: str):
 
             messages.append({"role": "user", "content": content})
 
+            # Inject shared context from context bus
+            from .context_bus import get_context_bus, ContextEntry
+            namespace_from_context = ""
+            ns_match = re.search(r"Namespace:\s*'?([a-zA-Z0-9\-._]+)'?", content)
+            if ns_match:
+                namespace_from_context = ns_match.group(1)
+            bus = get_context_bus()
+            shared_context = bus.build_context_prompt(namespace=namespace_from_context)
+            effective_system = system_prompt
+            if shared_context:
+                effective_system = system_prompt + "\n\n" + shared_context
+
             try:
                 full_response = await _run_agent_ws(
-                    websocket, messages, system_prompt,
+                    websocket, messages, effective_system,
                     tool_defs, tool_map, write_tools, session_id,
                 )
                 messages.append({"role": "assistant", "content": full_response})
+
+                # Publish agent response to shared context bus
+                if full_response:
+                    bus.publish(ContextEntry(
+                        source="sre_agent" if mode == "sre" else "security_agent",
+                        category="user_resolution" if "resolved" in full_response.lower() else "diagnosis",
+                        summary=full_response[:200],
+                        details={"mode": mode, "full_length": len(full_response)},
+                        namespace=namespace_from_context,
+                    ))
+
                 await websocket.send_json({
                     "type": "done",
                     "full_response": full_response,
@@ -754,6 +777,31 @@ async def import_memory(
     imported_rb = manager.store.import_runbooks(runbooks) if runbooks else 0
     imported_pat = manager.store.import_patterns(patterns) if patterns else 0
     return {"imported_runbooks": imported_rb, "imported_patterns": imported_pat}
+
+
+@app.get("/context")
+async def get_shared_context(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+):
+    """View recent shared context entries across all agents."""
+    _verify_rest_token(authorization, token)
+    from .context_bus import get_context_bus
+    bus = get_context_bus()
+    entries = bus.get_context_for(limit=20)
+    return {
+        "entries": [
+            {
+                "source": e.source,
+                "category": e.category,
+                "summary": e.summary,
+                "namespace": e.namespace,
+                "timestamp": e.timestamp,
+                "age_seconds": int(time.time() - e.timestamp),
+            }
+            for e in entries
+        ]
+    }
 
 
 @app.get("/eval/status")

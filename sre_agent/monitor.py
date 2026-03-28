@@ -960,7 +960,7 @@ def _build_investigation_prompt(finding: dict) -> str:
         sanitized_resources.append({
             k: _sanitize_for_prompt(str(v)) for k, v in r.items()
         })
-    return (
+    prompt = (
         "Investigate the following Kubernetes issue and return ONLY JSON.\n"
         "Rules:\n"
         "- Use read-only diagnostics tools.\n"
@@ -981,6 +981,16 @@ def _build_investigation_prompt(finding: dict) -> str:
         '  "confidence": 0.0\n'
         "}\n"
     )
+
+    # Inject shared context from the context bus
+    from .context_bus import get_context_bus
+    bus = get_context_bus()
+    namespace = resources[0].get("namespace", "") if resources else ""
+    shared = bus.build_context_prompt(namespace=namespace)
+    if shared:
+        prompt += f"\n\n{shared}\n"
+
+    return prompt
 
 
 # ── Cost / usage tracking ──────────────────────────────────────────────────
@@ -1251,6 +1261,18 @@ class MonitorSession:
                     "Auto-fix completed: category=%s finding=%s tool=%s duration=%dms (%d/%d this cycle)",
                     category, finding["id"], tool, duration_ms, fixes_this_cycle, MAX_FIXES_PER_CYCLE,
                 )
+
+                # Publish fix to shared context bus
+                from .context_bus import get_context_bus, ContextEntry
+                bus = get_context_bus()
+                bus.publish(ContextEntry(
+                    source="monitor",
+                    category="fix",
+                    summary=f"Auto-fixed {category}: {finding.get('title', '')}",
+                    details={"fix_applied": tool, "before_state": before_state, "after_state": after_state},
+                    namespace=resources[0].get("namespace", "") if resources else "",
+                    resources=resources,
+                ))
             except Exception as e:
                 duration_ms = _ts() - start_ms
                 action_report["status"] = "failed"
@@ -1348,6 +1370,22 @@ class MonitorSession:
                 investigations_run += 1
                 self._daily_investigation_count += 1
                 self._recent_investigations[key] = now
+
+                # Publish investigation result to shared context bus
+                from .context_bus import get_context_bus, ContextEntry
+                bus = get_context_bus()
+                bus.publish(ContextEntry(
+                    source="monitor",
+                    category="investigation",
+                    summary=f"Investigated {finding.get('category')}: {result.get('summary', '')}",
+                    details={
+                        "suspected_cause": result.get("suspectedCause", ""),
+                        "recommended_fix": result.get("recommendedFix", ""),
+                        "confidence": result.get("confidence", 0),
+                    },
+                    namespace=finding.get("resources", [{}])[0].get("namespace", ""),
+                    resources=finding.get("resources", []),
+                ))
 
                 # Security followup: max 1 per scan, 10min cooldown
                 if (
@@ -1463,6 +1501,16 @@ class MonitorSession:
             await self.send(verification_report)
             update_action_verification(action_id, status, evidence)
 
+            # Publish verification to shared context bus
+            from .context_bus import get_context_bus, ContextEntry
+            bus = get_context_bus()
+            bus.publish(ContextEntry(
+                source="monitor",
+                category="verification",
+                summary=f"Verification {status}: {evidence}",
+                details={"status": status, "evidence": evidence},
+            ))
+
             # Auto-learn from verified fixes (Improvement #1)
             if status == "verified" and os.environ.get("PULSE_AGENT_MEMORY", "") == "1":
                 try:
@@ -1532,6 +1580,20 @@ class MonitorSession:
         stale_keys = set(self._last_findings.keys()) - current_keys
         for key in stale_keys:
             del self._last_findings[key]
+
+        # Publish critical new findings to shared context bus
+        from .context_bus import get_context_bus, ContextEntry
+        bus = get_context_bus()
+        for f in new_findings:
+            if f.get("severity") == SEVERITY_CRITICAL:
+                bus.publish(ContextEntry(
+                    source="monitor",
+                    category="finding",
+                    summary=f"Critical finding: {f.get('title', '')}",
+                    details={"severity": f.get("severity"), "category": f.get("category")},
+                    namespace=f.get("resources", [{}])[0].get("namespace", ""),
+                    resources=f.get("resources", []),
+                ))
 
         # Push new findings and send webhook for critical ones
         for f in new_findings:

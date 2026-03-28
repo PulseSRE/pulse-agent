@@ -22,10 +22,8 @@ ALL_TESTS=$(echo "$ALL_TESTS" | grep -v '^$' | sort -u || true)
 if [ -n "$ALL_SRC" ] && [ -z "$ALL_TESTS" ]; then
   FILELIST=$(echo "$ALL_SRC" | head -5 | tr '\n' ', ' | sed 's/,$//')
   jq -n --arg files "$FILELIST" '{
-    "hookSpecificOutput": {
-      "hookEventName": "Stop",
-      "additionalContext": ("TEST WRITER: Source files were modified without corresponding test updates: " + $files + ". Consider writing tests for the changes. Use the test patterns from tests/conftest.py (mock_k8s fixture, _make_pod/_make_node helpers, _text() wrapper). Reference: .claude/agents/test-writer.md")
-    }
+    "decision": "block",
+    "reason": ("Source files were modified without corresponding test updates: " + $files + ". Consider writing tests for the changes. Use the test patterns from tests/conftest.py (mock_k8s fixture, _make_pod/_make_node helpers, _text() wrapper). Reference: .claude/agents/test-writer.md")
   }'
 else
   exit 0

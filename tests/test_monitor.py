@@ -401,3 +401,177 @@ class TestSecurityFollowup:
 
         # Should only be called once despite multiple investigations
         assert mock_sec.call_count == 1
+
+
+class TestMonitorAutoLearn:
+    """Tests for auto-learning from investigations and verified fixes."""
+
+    def test_auto_learn_from_high_confidence_investigation(self, monkeypatch, tmp_path):
+        """High-confidence investigations are stored in memory when enabled."""
+        monkeypatch.setenv("PULSE_AGENT_MEMORY", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "10")
+
+        from sre_agent.memory import MemoryManager, set_manager
+        mgr = MemoryManager(db_path=str(tmp_path / "learn.db"))
+        set_manager(mgr)
+
+        sent_messages = []
+
+        class FakeSocket:
+            async def send_json(self, data):
+                sent_messages.append(data)
+
+        session = MonitorSession(FakeSocket(), trust_level=1)
+
+        finding = _make_finding(
+            severity="critical", category="crashloop",
+            title="Pod crashing", summary="restarts",
+            resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
+        )
+
+        mock_inv_result = {
+            "summary": "OOM root cause", "suspectedCause": "mem limit",
+            "recommendedFix": "increase mem", "confidence": 0.85,
+        }
+
+        with patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result), \
+             patch("sre_agent.agent._circuit_breaker") as mock_cb:
+            mock_cb.is_open = False
+            asyncio.get_event_loop().run_until_complete(
+                session.run_investigations([finding])
+            )
+
+        # Verify incident was stored in memory
+        results = mgr.store.search_incidents("investigation", limit=5)
+        assert len(results) >= 1
+        assert results[0]["namespace"] == "prod"
+        assert results[0]["error_type"] == "crashloop"
+        assert results[0]["outcome"] == "unknown"  # not confirmed
+
+        set_manager(None)
+        mgr.close()
+
+    def test_no_auto_learn_below_confidence_threshold(self, monkeypatch, tmp_path):
+        """Low-confidence investigations are NOT stored in memory."""
+        monkeypatch.setenv("PULSE_AGENT_MEMORY", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "10")
+
+        from sre_agent.memory import MemoryManager, set_manager
+        mgr = MemoryManager(db_path=str(tmp_path / "learn2.db"))
+        set_manager(mgr)
+
+        sent_messages = []
+
+        class FakeSocket:
+            async def send_json(self, data):
+                sent_messages.append(data)
+
+        session = MonitorSession(FakeSocket(), trust_level=1)
+
+        finding = _make_finding(
+            severity="warning", category="scheduling",
+            title="Pod pending", summary="pending",
+            resources=[{"kind": "Pod", "name": "api-1", "namespace": "default"}],
+        )
+
+        mock_inv_result = {
+            "summary": "Not sure", "suspectedCause": "unknown",
+            "recommendedFix": "investigate", "confidence": 0.3,
+        }
+
+        with patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result), \
+             patch("sre_agent.agent._circuit_breaker") as mock_cb:
+            mock_cb.is_open = False
+            asyncio.get_event_loop().run_until_complete(
+                session.run_investigations([finding])
+            )
+
+        # No incident stored (confidence too low)
+        results = mgr.store.search_incidents("investigation", limit=5)
+        assert len(results) == 0
+
+        set_manager(None)
+        mgr.close()
+
+    def test_no_auto_learn_when_memory_disabled(self, monkeypatch, tmp_path):
+        """When PULSE_AGENT_MEMORY is not '1', no auto-learn happens."""
+        monkeypatch.delenv("PULSE_AGENT_MEMORY", raising=False)
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "10")
+
+        from sre_agent.memory import set_manager
+        set_manager(None)
+
+        sent_messages = []
+
+        class FakeSocket:
+            async def send_json(self, data):
+                sent_messages.append(data)
+
+        session = MonitorSession(FakeSocket(), trust_level=1)
+
+        finding = _make_finding(
+            severity="critical", category="crashloop",
+            title="Pod crashing", summary="restarts",
+            resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
+        )
+
+        mock_inv_result = {
+            "summary": "cause found", "suspectedCause": "x",
+            "recommendedFix": "y", "confidence": 0.9,
+        }
+
+        with patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result), \
+             patch("sre_agent.agent._circuit_breaker") as mock_cb:
+            mock_cb.is_open = False
+            # Should not raise even without memory
+            asyncio.get_event_loop().run_until_complete(
+                session.run_investigations([finding])
+            )
+
+    def test_auto_learn_from_verified_fix(self, monkeypatch, tmp_path):
+        """Verified fixes are stored in memory as confirmed incidents."""
+        monkeypatch.setenv("PULSE_AGENT_MEMORY", "1")
+
+        from sre_agent.memory import MemoryManager, set_manager
+        mgr = MemoryManager(db_path=str(tmp_path / "learn3.db"))
+        set_manager(mgr)
+
+        sent_messages = []
+
+        class FakeSocket:
+            async def send_json(self, data):
+                sent_messages.append(data)
+
+        session = MonitorSession(FakeSocket(), trust_level=3, auto_fix_categories=["crashloop"])
+
+        # Create a pending action in session state
+        action = _make_action_report(
+            finding_id="f-test",
+            tool="delete_pod",
+            inp={"name": "web-1", "namespace": "prod"},
+            status="completed",
+            reasoning="Auto-fix crashloop",
+        )
+        save_action(action, category="crashloop", resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}])
+        session._pending_verifications[action["id"]] = {
+            "category": "crashloop",
+            "resources": [{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
+            "payload": {"tool": "delete_pod"},
+        }
+
+        # Simulate no active finding → verified
+        asyncio.get_event_loop().run_until_complete(
+            session.process_verifications([])
+        )
+
+        # Check that a confirmed incident was stored
+        results = mgr.store.search_incidents("auto-fix", limit=5)
+        assert len(results) >= 1
+        assert results[0]["outcome"] == "resolved"
+        assert results[0]["error_type"] == "crashloop"
+
+        set_manager(None)
+        mgr.close()
