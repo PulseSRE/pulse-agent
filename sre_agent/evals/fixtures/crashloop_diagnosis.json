@@ -1,0 +1,20 @@
+{
+    "name": "crashloop_diagnosis",
+    "prompt": "A pod named api-server in namespace production is crash-looping. Investigate and tell me the root cause.",
+    "recorded_responses": {
+        "describe_pod": "{\"name\": \"api-server\", \"namespace\": \"production\", \"status\": \"Running\", \"containers\": [{\"name\": \"api-server\", \"image\": \"api:v2.3\", \"ready\": false, \"restarts\": 12, \"state\": \"waiting\", \"reason\": \"CrashLoopBackOff\"}], \"conditions\": [{\"type\": \"Ready\", \"status\": \"False\", \"reason\": \"ContainersNotReady\", \"message\": \"containers with unready status: [api-server]\"}], \"recent_events\": [{\"type\": \"Warning\", \"reason\": \"BackOff\", \"message\": \"Back-off restarting failed container\", \"age\": \"2m\"}]}",
+        "get_pod_logs": "2024-01-15T10:00:01Z [ERROR] Failed to connect to database: connection refused to db-service:5432\n2024-01-15T10:00:01Z [ERROR] Retrying in 5s...\n2024-01-15T10:00:06Z [ERROR] Failed to connect to database: connection refused to db-service:5432\n2024-01-15T10:00:06Z [FATAL] Cannot start without database connection. Exiting.",
+        "get_events": "2m ago  Warning  BackOff  Pod/api-server  Back-off restarting failed container\n5m ago  Warning  Unhealthy  Pod/api-server  Readiness probe failed\n10m ago  Normal  Pulled  Pod/api-server  Container image \"api:v2.3\" already present on machine\n10m ago  Normal  Created  Pod/api-server  Created container api-server\n10m ago  Normal  Started  Pod/api-server  Started container api-server",
+        "list_deployments": "production/api-server  Ready=0/1  Updated=1  Available=0  Age=30d",
+        "list_pods": "production/api-server-6d4b8c9f7-x2k9p  Status=Running  Restarts=12  Age=2h",
+        "describe_deployment": "{\"name\": \"api-server\", \"namespace\": \"production\", \"replicas\": 1, \"strategy\": \"RollingUpdate\", \"containers\": [{\"name\": \"api-server\", \"image\": \"api:v2.3\", \"resources\": {\"requests\": {\"cpu\": \"100m\", \"memory\": \"256Mi\"}, \"limits\": {\"cpu\": \"500m\", \"memory\": \"512Mi\"}}}]}",
+        "get_services": "production/db-service  Type=ClusterIP  ClusterIP=10.96.45.12  Ports=[5432/TCP]",
+        "describe_service": "{\"name\": \"db-service\", \"namespace\": \"production\", \"type\": \"ClusterIP\", \"clusterIP\": \"10.96.45.12\", \"selector\": {\"app\": \"postgres\"}, \"ports\": [{\"name\": \"tcp\", \"port\": 5432, \"targetPort\": \"5432\", \"protocol\": \"TCP\"}], \"endpoints\": [{\"ready\": [], \"notReady\": [], \"ports\": [\"5432/TCP\"]}], \"matchingPods\": 0, \"readyPods\": 0}"
+    },
+    "expected": {
+        "should_mention": ["database", "connection", "db-service"],
+        "should_use_tools": ["describe_pod", "get_pod_logs"],
+        "should_not_use_tools": ["delete_pod", "scale_deployment"],
+        "max_tool_calls": 10
+    }
+}

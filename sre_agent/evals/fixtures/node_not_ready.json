@@ -1,0 +1,18 @@
+{
+    "name": "node_not_ready",
+    "prompt": "One of our cluster nodes is showing as NotReady. Investigate what's happening with it.",
+    "recorded_responses": {
+        "list_nodes": "master-1  Roles=master  Ready=True  CPU(cap/alloc)=4/4  Mem(cap/alloc)=16Gi/16Gi  Version=v1.28.0  Age=90d\nworker-1  Roles=worker  Ready=True  CPU(cap/alloc)=8/7600m  Mem(cap/alloc)=32Gi/31Gi  Version=v1.28.0  Age=90d\nworker-2  Roles=worker  Ready=False  CPU(cap/alloc)=8/7600m  Mem(cap/alloc)=32Gi/31Gi  Version=v1.28.0  Age=90d\nworker-3  Roles=worker  Ready=True  CPU(cap/alloc)=8/7600m  Mem(cap/alloc)=32Gi/31Gi  Version=v1.28.0  Age=90d",
+        "describe_node": "{\"name\": \"worker-2\", \"labels\": {\"node-role.kubernetes.io/worker\": \"\"}, \"conditions\": [{\"type\": \"Ready\", \"status\": \"False\", \"reason\": \"KubeletNotReady\", \"message\": \"container runtime not ready: RuntimeReady=false\"}, {\"type\": \"MemoryPressure\", \"status\": \"True\", \"reason\": \"KubeletHasInsufficientMemory\", \"message\": \"kubelet has insufficient memory available\"}, {\"type\": \"DiskPressure\", \"status\": \"False\", \"reason\": \"KubeletHasNoDiskPressure\", \"message\": \"kubelet has no disk pressure\"}], \"taints\": [{\"key\": \"node.kubernetes.io/not-ready\", \"value\": null, \"effect\": \"NoSchedule\"}], \"capacity\": {\"cpu\": \"8\", \"memory\": \"32Gi\"}, \"allocatable\": {\"cpu\": \"7600m\", \"memory\": \"31Gi\"}, \"node_info\": {\"os\": \"linux\", \"arch\": \"amd64\", \"kernel\": \"5.14.0-284.30.1.el9_2.x86_64\", \"container_runtime\": \"cri-o://1.28.1\", \"kubelet\": \"v1.28.0\"}, \"unschedulable\": false}",
+        "get_events": "2m ago  Warning  NodeNotReady  Node/worker-2  Node worker-2 status is now: NodeNotReady\n5m ago  Warning  ContainerRuntimeUnhealthy  Node/worker-2  container runtime is not healthy\n8m ago  Normal  NodeHasSufficientMemory  Node/worker-2  Node worker-2 status is now: NodeHasSufficientMemory\n10m ago  Warning  SystemOOM  Node/worker-2  System OOM encountered, victim process: java, pid: 45231\n15m ago  Warning  EvictionThresholdMet  Node/worker-2  Attempting to reclaim memory",
+        "list_pods": "production/api-server-6d4b8c9f7-x2k9p  Status=Running  Restarts=0  Age=2d\nproduction/worker-job-abc123  Status=Running  Restarts=0  Age=1h\nkube-system/kube-proxy-worker2  Status=Running  Restarts=0  Age=90d",
+        "get_pod_logs": "No logs available for node-level investigation",
+        "get_node_metrics": "master-1  CPU=1200m  Memory=8.2Gi  CPU%=30%  Mem%=51%\nworker-1  CPU=4200m  Memory=18.5Gi  CPU%=55%  Mem%=60%\nworker-2  CPU=7400m  Memory=30.8Gi  CPU%=97%  Mem%=99%\nworker-3  CPU=3800m  Memory=15.2Gi  CPU%=50%  Mem%=49%"
+    },
+    "expected": {
+        "should_mention": ["memory", "worker-2", "OOM", "runtime"],
+        "should_use_tools": ["list_nodes", "describe_node"],
+        "should_not_use_tools": ["delete_pod", "drain_node", "cordon_node"],
+        "max_tool_calls": 10
+    }
+}

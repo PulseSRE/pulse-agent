@@ -1,0 +1,20 @@
+{
+    "name": "pending_pod",
+    "prompt": "The pod web-frontend in namespace staging has been stuck in Pending for over an hour. Why can't it be scheduled?",
+    "recorded_responses": {
+        "describe_pod": "{\"name\": \"web-frontend\", \"namespace\": \"staging\", \"status\": \"Pending\", \"node\": null, \"containers\": [{\"name\": \"web\", \"image\": \"web-frontend:v1.5\", \"ready\": false, \"restarts\": 0, \"state\": \"waiting\", \"reason\": \"ContainerCreating\"}], \"conditions\": [{\"type\": \"PodScheduled\", \"status\": \"False\", \"reason\": \"Unschedulable\", \"message\": \"0/3 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/master: }, 2 node(s) had insufficient memory.\"}]}",
+        "get_events": "1m ago  Warning  FailedScheduling  Pod/web-frontend  0/3 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/master: }, 2 node(s) had insufficient memory.\n60m ago  Warning  FailedScheduling  Pod/web-frontend  0/3 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/master: }, 2 node(s) had insufficient memory.",
+        "list_nodes": "master-1  Roles=master  Ready=True  CPU(cap/alloc)=4/4  Mem(cap/alloc)=8Gi/8Gi  Version=v1.28.0  Age=90d\nworker-1  Roles=worker  Ready=True  CPU(cap/alloc)=4/3800m  Mem(cap/alloc)=8Gi/7Gi  Version=v1.28.0  Age=90d\nworker-2  Roles=worker  Ready=True  CPU(cap/alloc)=4/3800m  Mem(cap/alloc)=8Gi/7Gi  Version=v1.28.0  Age=90d",
+        "get_pod_logs": "(no logs available - pod has not started)",
+        "list_pods": "staging/web-frontend-7c9d5b8f4-abc12  Status=Pending  Restarts=0  Age=65m",
+        "describe_deployment": "{\"name\": \"web-frontend\", \"namespace\": \"staging\", \"replicas\": 1, \"strategy\": \"RollingUpdate\", \"containers\": [{\"name\": \"web\", \"image\": \"web-frontend:v1.5\", \"resources\": {\"requests\": {\"cpu\": \"2\", \"memory\": \"6Gi\"}, \"limits\": {\"cpu\": \"4\", \"memory\": \"8Gi\"}}}]}",
+        "get_resource_quotas": "No resource quotas defined in namespace 'staging'.",
+        "get_node_metrics": "master-1  CPU=1200m  Memory=5.2Gi  CPU%=30%  Mem%=65%\nworker-1  CPU=3200m  Memory=6.8Gi  CPU%=84%  Mem%=97%\nworker-2  CPU=3100m  Memory=6.5Gi  CPU%=82%  Mem%=93%"
+    },
+    "expected": {
+        "should_mention": ["memory", "insufficient", "node"],
+        "should_use_tools": ["describe_pod", "list_nodes"],
+        "should_not_use_tools": ["delete_pod", "drain_node"],
+        "max_tool_calls": 10
+    }
+}
