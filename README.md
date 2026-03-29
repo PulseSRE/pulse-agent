@@ -3,7 +3,8 @@
 <p>
   <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.5.0"><img src="https://img.shields.io/badge/release-v1.5.0-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-109-10b981?style=for-the-badge" alt="Tools">
-  <img src="https://img.shields.io/badge/tests-239-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/scanners-11-10b981?style=for-the-badge" alt="Scanners">
+  <img src="https://img.shields.io/badge/tests-320-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 
@@ -37,10 +38,15 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 
 ### Autonomous Monitor
 - **Continuous Scanning** — 60-second scan interval via `/ws/monitor` endpoint, pushing findings to the Pulse UI in real time
-- **6 Scanners** — Pod health (crashloops, restarts), workload status (degraded deployments), node conditions, certificate expiry, resource pressure, network policy gaps
+- **11 Scanners** — Crashlooping pods, pending pods, failed deployments, node pressure, certificate expiry, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation
 - **Auto-Fix at Trust Level 3** — Automatically applies fixes for safe categories (crashloop pod deletion, deployment restarts) without user approval
 - **Auto-Fix at Trust Level 4** — Applies all fixable findings automatically, with rollback snapshots for every action
 - **Finding Lifecycle** — Stale finding cleanup after each scan cycle, severity escalation on repeat occurrences
+
+### Orchestrator
+- **Auto-Routing Agent** — `/ws/agent` endpoint classifies each message as SRE or Security intent and routes to the appropriate agent with the correct system prompt and tool set
+- **Keyword-Based Classification** — Fast intent detection via keyword scoring (no LLM call for routing)
+- **Shared Context Bus** — Cross-agent context sharing: SRE and Security agents publish findings to a shared bus, enabling handoff tools (`request_security_scan`, `request_sre_investigation`)
 
 ### Auto-Fix
 - **Trust Level 3 (Safe Categories)** — Fixes only pre-approved safe categories automatically; all others require user approval via the UI
@@ -50,6 +56,13 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
   - `workloads` — Restarts degraded deployments via rollout restart
 - **Rollback** — Every applied fix records a `beforeState` snapshot. Rollback via `POST /api/agent/actions/:id/rollback` or the UI's Actions tab
 - **Confirmation Gate** — Write operations still require the programmatic confirmation round-trip at all trust levels; auto-fix pre-approves on behalf of the user
+
+### Database
+- **PostgreSQL** — Production database for fix history, incident memory, learned runbooks, and patterns. Configured via `PULSE_AGENT_DATABASE_URL`. Auto-generated password as K8s Secret.
+- **SQLite** — Fallback for development/testing when no PostgreSQL URL is configured. Default: `/tmp/pulse_agent/pulse.db`.
+
+### Pydantic Configuration
+- **`PulseAgentSettings`** — All configuration via `pydantic-settings` with `PULSE_AGENT_` env prefix, `.env` file support, and type validation at startup (`config.py`)
 
 ### Self-Improving Agent
 - **Incident Memory** — Stores every interaction with query, tool sequence, resolution, and outcome in the database
@@ -99,8 +112,11 @@ export ANTHROPIC_API_KEY=sk-ant-...
 | `ANTHROPIC_API_KEY` | Direct Anthropic API key (alternative to Vertex) | |
 | `PULSE_AGENT_MODEL` | Claude model to use | `claude-opus-4-6` |
 | `PULSE_AGENT_MAX_TOKENS` | Max output tokens per response | `16000` |
-| `PULSE_AGENT_MEMORY` | Enable self-improving memory (`1`/`true`) | disabled |
+| `PULSE_AGENT_MEMORY` | Enable self-improving memory (`1`/`true`) | `1` (enabled) |
 | `PULSE_AGENT_DATABASE_URL` | Database connection URL (PostgreSQL or SQLite) | `sqlite:///tmp/pulse_agent/pulse.db` |
+| `PULSE_AGENT_AUTOFIX_ENABLED` | Enable/disable monitor auto-fix | `true` |
+| `PULSE_AGENT_MAX_TRUST_LEVEL` | Server-side max trust level cap (0-4) | `3` |
+| `PULSE_AGENT_SCAN_INTERVAL` | Monitor scan interval (seconds) | `60` |
 | `PULSE_AGENT_TRUSTED_REGISTRIES` | Comma-separated trusted image registry prefixes | Red Hat, Quay, OpenShift |
 | `PULSE_AGENT_HARNESS` | Enable Claude harness optimizations | `1` (enabled) |
 | `PULSE_AGENT_WS_TOKEN` | WebSocket authentication token (required for API mode) | |
@@ -161,7 +177,7 @@ sec> Show me all pods running under privileged SCCs
 
 ### Safety Controls
 
-- **Confirmation gate** — All write operations require explicit `y/N` user confirmation. This is enforced programmatically in code, not just via prompt instructions. The agent cannot bypass the confirmation gate regardless of trust level — every write operation requires a `confirm_request`/`confirm_response` round-trip before execution.
+- **Confirmation gate** — All interactive write operations require explicit user confirmation. This is enforced programmatically in code, not just via prompt instructions. Every write operation in `/ws/sre`, `/ws/security`, and `/ws/agent` requires a `confirm_request`/`confirm_response` round-trip with nonce verification before execution. Monitor auto-fix at trust level 3+ bypasses this gate by design, relying on rate limiting and cooldown instead.
 - **Input validation** — Bounds-checked: replicas (0-100), log tail lines (1-1000), grace period (1-300s). Lists truncated at 200 items.
 - **Max iteration guard** — Tool loop capped at 25 iterations.
 - **Audit logging** — Every tool invocation logged to `/tmp/pulse_agent_audit.log` in structured JSON. Cluster audit trail via `record_audit_entry` tool writes to a ConfigMap.
@@ -320,15 +336,23 @@ pulse-agent-api  # Starts on port 8080
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /healthz` | Liveness probe |
-| `GET /health` | Full health: circuit breaker state, error summary, recent errors |
-| `GET /version` | Protocol version, tool count, features |
-| `GET /tools` | List all available tools |
+| `GET /healthz` | Liveness probe (public) |
+| `GET /version` | Protocol version, tool count, features (public) |
+| `GET /health` | Circuit breaker state, error summary, autofix status |
+| `GET /tools` | List all available tools by mode with confirmation flags |
+| `GET /fix-history` | Paginated fix history with filters |
+| `GET /predictions` | Predictions (WebSocket-only, returns empty) |
+| `GET /memory/export` | Export learned runbooks + patterns |
+| `POST /memory/import` | Import runbooks + patterns |
+| `GET /monitor/capabilities` | Monitor trust/capability limits |
+| `POST /monitor/pause` | Emergency kill switch — pause auto-fix |
+| `POST /monitor/resume` | Resume auto-fix |
+| `GET /context` | Shared context bus entries |
+| `GET /eval/status` | Cached eval quality gate snapshot |
 | `WS /ws/sre?token=...` | SRE agent WebSocket |
 | `WS /ws/security?token=...` | Security scanner WebSocket |
-| `WS /ws/monitor?token=...` | Autonomous monitor WebSocket (60s scan interval, 6 scanners, auto-fix) |
-| `GET /monitor/capabilities` | Monitor trust/capability limits for UI alignment |
-| `GET /eval/status` | Cached eval quality gate snapshot for UI |
+| `WS /ws/monitor?token=...` | Autonomous monitor (11 scanners, auto-fix) |
+| `WS /ws/agent?token=...` | Auto-routing orchestrated agent |
 
 ### WebSocket Protocol
 
@@ -460,12 +484,16 @@ sre_agent/
 ├── agent.py             # Shared agent loop, Claude API client, audit logging
 ├── errors.py            # ToolError classification, classify_api_error, classify_exception
 ├── error_tracker.py     # Thread-safe ring buffer for error aggregation
-├── config.py            # Startup config validation
+├── config.py            # Pydantic v2 Settings (PulseAgentSettings with PULSE_AGENT_ prefix)
+├── orchestrator.py      # Auto-routing: classify_intent() + build_orchestrated_config()
+├── tool_registry.py     # Central tool registry — all @beta_tool functions register here
 ├── security_agent.py    # Security scanner (read-only, delegates to shared loop)
 ├── k8s_client.py        # Shared Kubernetes client with lazy initialization
 ├── k8s_tools.py         # 35+ Kubernetes/OpenShift tools (@beta_tool)
 ├── security_tools.py    # 9 security scanning tools (@beta_tool)
+├── handoff_tools.py     # 2 agent-to-agent handoff tools (request_security_scan, request_sre_investigation)
 ├── harness.py           # Claude harness: tool selection, prompt caching, cluster context
+├── context_bus.py       # Shared context bus for cross-agent communication
 ├── units.py             # Kubernetes resource unit parsing (CPU, memory)
 ├── runbooks.py          # Built-in SRE runbooks and alert triage context
 └── memory/              # Self-improving agent layer
@@ -513,7 +541,7 @@ pip install -e '.[test]'
 python -m pytest tests/ -v
 ```
 
-239 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, and the memory system. All tests run without a cluster or API key (fully mocked).
+320 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ## Evaluation Framework
 
@@ -567,7 +595,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>109 tools</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>239 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>109 tools</strong> &bull; <strong>11 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>320 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

@@ -2,49 +2,102 @@
 
 **Protocol Version: 2**
 
-Defines the WebSocket protocol between the Pulse UI and Pulse Agent. Both repos must implement the same protocol version for compatibility.
+Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Both repos must implement the same protocol version for compatibility.
 
 > Source of truth for message schemas. When adding or changing a message type, update this file first, then implement in both repos.
 
 ---
 
-## Endpoints
+## REST Endpoints
 
-### REST
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/healthz` | public | Liveness probe. Returns `{"status": "ok"}` |
+| `GET` | `/version` | public | Protocol version, agent version (dynamic from package), tool count, feature flags |
+| `GET` | `/health` | token | Circuit breaker state, error summary, investigation stats, autofix_paused status |
+| `GET` | `/tools` | token | All tools grouped by mode (sre, security) with `requires_confirmation` flags |
+| `GET` | `/fix-history` | token | Paginated fix history with filters (`status`, `category`, `since`, `search`) |
+| `GET` | `/fix-history/{id}` | token | Single action detail with before/after state |
+| `POST` | `/fix-history/{id}/rollback` | token | Attempt rollback (returns error — rollback not currently supported) |
+| `GET` | `/eval/status` | token | Cached quality gate snapshot (release, safety, integration, outcomes) |
+| `GET` | `/predictions` | token | Returns empty — predictions are WebSocket-only (`/ws/monitor`) |
+| `GET` | `/memory/export` | token | Export learned runbooks and patterns as JSON |
+| `POST` | `/memory/import` | token | Import runbooks and patterns from another pod's export |
+| `GET` | `/monitor/capabilities` | token | Max trust level and supported auto-fix categories |
+| `POST` | `/monitor/pause` | token | Emergency kill switch — pause all auto-fix actions |
+| `POST` | `/monitor/resume` | token | Resume auto-fix actions after a pause |
+| `GET` | `/context` | token | View recent shared context bus entries across all agents |
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/healthz` | Agent health check. Returns `{"status": "ok"}` |
-| `GET` | `/version` | Protocol version + capabilities. UI checks this on connect. |
-| `GET` | `/monitor/capabilities` | Monitor trust cap and supported auto-fix categories. |
-| `GET` | `/eval/status` | Cached quality gate snapshot for UI surfaces. |
+**Authentication:** Token-authenticated endpoints accept `Authorization: Bearer <token>` header or `?token=<token>` query parameter. The token is `PULSE_AGENT_WS_TOKEN`. Unauthenticated requests return 401.
 
-#### `/version` Response
+### `/version` Response
 
 ```json
 {
   "protocol": "2",
-  "agent": "1.4.0",
-  "tools": 68,
+  "agent": "1.5.0",
+  "tools": 109,
   "features": ["component_specs", "ws_token_auth", "rate_limiting", "monitor", "fix_history", "predictions"]
 }
 ```
 
-### WebSocket
+The `agent` version is read dynamically from the installed package metadata. The `tools` count is the sum of SRE + Security tools.
 
-| Path | Description |
-|------|-------------|
-| `ws://.../ws/sre` | SRE agent mode |
-| `ws://.../ws/security` | Security agent mode |
-| `ws://.../ws/monitor` | Autonomous cluster monitoring (Protocol v2) |
+### `/health` Response
+
+```json
+{
+  "status": "ok",
+  "circuit_breaker": {
+    "state": "closed",
+    "failure_count": 0,
+    "recovery_timeout": 60
+  },
+  "errors": {
+    "total": 0,
+    "by_category": {},
+    "recent": []
+  },
+  "investigations": {},
+  "autofix_paused": false
+}
+```
+
+### `/tools` Response
+
+```json
+{
+  "sre": [
+    {"name": "list_pods", "description": "...", "requires_confirmation": false},
+    {"name": "delete_pod", "description": "...", "requires_confirmation": true}
+  ],
+  "security": [
+    {"name": "scan_pod_security", "description": "...", "requires_confirmation": false}
+  ],
+  "write_tools": ["apply_yaml", "cordon_node", "delete_pod", "..."]
+}
+```
 
 ---
 
-## Client-to-Server Messages
+## WebSocket Endpoints
 
-Messages sent by the UI to the agent over WebSocket.
+| Path | Auth | Description |
+|------|------|-------------|
+| `/ws/sre?token=...` | token | SRE agent chat |
+| `/ws/security?token=...` | token | Security scanner chat |
+| `/ws/monitor?token=...` | token | Autonomous cluster monitoring (Protocol v2) |
+| `/ws/agent?token=...` | token | Auto-routing orchestrated agent — classifies intent per message and routes to SRE or Security |
 
-### `message` — Send a chat message
+All WebSocket endpoints require `PULSE_AGENT_WS_TOKEN` via the `token` query parameter. Connections without a valid token are closed with code `4001`.
+
+---
+
+## Chat Protocol (`/ws/sre`, `/ws/security`, `/ws/agent`)
+
+### Client-to-Server Messages
+
+#### `message` — Send a chat message
 
 ```json
 {
@@ -76,12 +129,13 @@ Messages sent by the UI to the agent over WebSocket.
 | `namespace` | `string` | no | Resource namespace (omit for cluster-scoped) |
 | `gvr` | `string` | no | GVR key (`group~version~plural`) |
 
-### `confirm_response` — Respond to a confirmation request
+#### `confirm_response` — Respond to a confirmation request
 
 ```json
 {
   "type": "confirm_response",
-  "approved": true
+  "approved": true,
+  "nonce": "abc123..."
 }
 ```
 
@@ -89,8 +143,9 @@ Messages sent by the UI to the agent over WebSocket.
 |-------|------|----------|-------------|
 | `type` | `"confirm_response"` | yes | |
 | `approved` | `boolean` | yes | Whether the user approved the action |
+| `nonce` | `string` | yes | Must match the nonce from `confirm_request` (replay prevention) |
 
-### `clear` — Clear conversation history
+#### `clear` — Clear conversation history
 
 ```json
 {
@@ -98,7 +153,105 @@ Messages sent by the UI to the agent over WebSocket.
 }
 ```
 
-### `/ws/monitor` Client-to-Server Messages
+### Server-to-Client Events
+
+#### `text_delta` — Streaming text chunk
+
+```json
+{
+  "type": "text_delta",
+  "text": "The pods are crash-looping because"
+}
+```
+
+#### `thinking_delta` — Streaming thinking/reasoning chunk
+
+```json
+{
+  "type": "thinking_delta",
+  "thinking": "Let me check the pod logs first..."
+}
+```
+
+#### `tool_use` — Tool execution started
+
+```json
+{
+  "type": "tool_use",
+  "tool": "get_pod_logs"
+}
+```
+
+#### `component` — Structured UI component from tool result
+
+```json
+{
+  "type": "component",
+  "tool": "list_pods",
+  "spec": {
+    "kind": "data_table",
+    "title": "Pods in production",
+    "columns": [
+      {"id": "name", "header": "Name"},
+      {"id": "status", "header": "Status"}
+    ],
+    "rows": [
+      {"name": "api-server-abc", "status": "Running"}
+    ]
+  }
+}
+```
+
+See [Component Specs](#component-specs) for all `spec.kind` values.
+
+#### `confirm_request` — Request user confirmation for a dangerous action
+
+```json
+{
+  "type": "confirm_request",
+  "tool": "delete_resource",
+  "input": {"kind": "Pod", "name": "my-pod", "namespace": "default"},
+  "nonce": "abc123..."
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tool` | `string` | Tool name requiring confirmation |
+| `input` | `object` | Tool input parameters (shown to user) |
+| `nonce` | `string` | JIT nonce for replay prevention — client must echo this back |
+
+#### `done` — Agent turn complete
+
+```json
+{
+  "type": "done",
+  "full_response": "The pods are crash-looping because..."
+}
+```
+
+#### `error` — Error message
+
+```json
+{
+  "type": "error",
+  "message": "Rate limited. Max 10 messages per minute."
+}
+```
+
+#### `cleared` — Conversation history cleared
+
+```json
+{
+  "type": "cleared"
+}
+```
+
+---
+
+## Monitor Protocol (`/ws/monitor`)
+
+### Client-to-Server Messages
 
 #### `subscribe_monitor` — Subscribe to cluster monitoring
 
@@ -115,7 +268,7 @@ Sent as the first message after connecting to `/ws/monitor`. Configures the moni
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `type` | `"subscribe_monitor"` | yes | |
-| `trustLevel` | `integer` | no | Autonomous action trust level (0–3). Clamped to server-configured max. Default: `1` |
+| `trustLevel` | `integer` | no | Autonomous action trust level (0-4). Clamped to server-configured max. Default: `1` |
 | `autoFixCategories` | `string[]` | no | Categories the agent may auto-fix without prompting |
 
 #### `trigger_scan` — Trigger an immediate cluster scan
@@ -126,7 +279,7 @@ Sent as the first message after connecting to `/ws/monitor`. Configures the moni
 }
 ```
 
-Triggers an immediate cluster scan. Results are pushed as `finding` and `monitor_status` events.
+Triggers an immediate cluster scan. If a scan is already in progress, returns an error. Results are pushed as `finding` and `monitor_status` events.
 
 #### `action_response` — Respond to an autonomous action proposal
 
@@ -160,105 +313,7 @@ Triggers an immediate cluster scan. Results are pushed as `finding` and `monitor
 | `page` | `integer` | no | Page number (default: `1`) |
 | `filters` | `object` | no | Optional filters (`status`, `category`, `since`, `search`) |
 
----
-
-## Server-to-Client Events
-
-Events streamed from the agent to the UI over WebSocket.
-
-### `text_delta` — Streaming text chunk
-
-```json
-{
-  "type": "text_delta",
-  "text": "The pods are crash-looping because"
-}
-```
-
-### `thinking_delta` — Streaming thinking/reasoning chunk
-
-```json
-{
-  "type": "thinking_delta",
-  "thinking": "Let me check the pod logs first..."
-}
-```
-
-### `tool_use` — Tool execution started
-
-```json
-{
-  "type": "tool_use",
-  "tool": "get_pod_logs"
-}
-```
-
-### `component` — Structured UI component from tool result
-
-```json
-{
-  "type": "component",
-  "tool": "list_pods",
-  "spec": {
-    "kind": "data_table",
-    "title": "Pods in production",
-    "columns": [
-      {"id": "name", "header": "Name"},
-      {"id": "status", "header": "Status"}
-    ],
-    "rows": [
-      {"name": "api-server-abc", "status": "Running"}
-    ]
-  }
-}
-```
-
-See [Component Specs](#component-specs) for all `spec.kind` values.
-
-### `confirm_request` — Request user confirmation for a dangerous action
-
-```json
-{
-  "type": "confirm_request",
-  "tool": "delete_resource",
-  "input": {"kind": "Pod", "name": "my-pod", "namespace": "default"},
-  "nonce": "abc123..."
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `tool` | `string` | Tool name requiring confirmation |
-| `input` | `object` | Tool input parameters (shown to user) |
-| `nonce` | `string` | JIT nonce for replay prevention |
-
-### `done` — Agent turn complete
-
-```json
-{
-  "type": "done",
-  "full_response": "The pods are crash-looping because..."
-}
-```
-
-### `error` — Error message
-
-```json
-{
-  "type": "error",
-  "message": "Rate limited. Max 10 messages per minute."
-}
-```
-
-### `cleared` — Conversation history cleared
-
-```json
-{
-  "type": "cleared"
-}
-```
-
-### `/ws/monitor` Server-to-Client Events
+### Server-to-Client Events
 
 #### `finding` — Cluster issue detected
 
@@ -311,18 +366,6 @@ See [Component Specs](#component-specs) for all `spec.kind` values.
 - `verificationEvidence`: `string`
 - `verificationTimestamp`: `number`
 
-#### `monitor_status` — Scan cycle status update
-
-```json
-{
-  "type": "monitor_status",
-  "scanning": false,
-  "lastScan": 1711540800,
-  "findingsCount": 3,
-  "predictionsCount": 1
-}
-```
-
 #### `investigation_report` — Proactive root-cause analysis for critical findings
 
 ```json
@@ -371,6 +414,18 @@ Sent after each scan cycle. Contains the IDs of all currently active findings. T
 | `activeIds` | `string[]` | IDs of all findings that are still active |
 | `timestamp` | `number` | Unix timestamp of the snapshot |
 
+#### `monitor_status` — Scan cycle status update
+
+```json
+{
+  "type": "monitor_status",
+  "activeWatches": ["crashloop", "pending", "workloads", "nodes", "cert_expiry", "alerts", "oom", "image_pull", "operators", "daemonsets", "hpa"],
+  "lastScan": 1711540800,
+  "findingsCount": 3,
+  "nextScan": 1711540860
+}
+```
+
 #### `fix_history` — Response to `get_fix_history`
 
 ```json
@@ -382,6 +437,31 @@ Sent after each scan cycle. Contains the IDs of all currently active findings. T
   "pageSize": 20
 }
 ```
+
+#### `error` — Rate limit or other errors
+
+```json
+{
+  "type": "error",
+  "message": "Rate limited. Max 10 messages per minute."
+}
+```
+
+---
+
+## Agent Protocol (`/ws/agent`)
+
+The `/ws/agent` endpoint uses the same client-to-server and server-to-client message types as the chat protocol (`/ws/sre`, `/ws/security`). The difference is that each incoming `message` is classified by an intent classifier (`orchestrator.py`) and automatically routed to the appropriate agent (SRE or Security) with the correct system prompt and tool set.
+
+### Client-to-Server Messages
+
+- `message`: `{type, content, context?, fleet?}` — same as chat protocol
+- `confirm_response`: `{type, approved, nonce}` — same as chat protocol
+- `clear`: `{type}` — clears conversation history
+
+### Server-to-Client Events
+
+- `text_delta`, `thinking_delta`, `tool_use`, `component`, `confirm_request` (with nonce), `done`, `error`, `cleared` — same as chat protocol
 
 ---
 
@@ -418,6 +498,7 @@ Structured UI components returned by agent tools via the `component` event. The 
 | Max message size | 1 MB | Agent |
 | Rate limit | 10 messages/minute per connection | Agent |
 | Confirmation timeout | 120 seconds | Agent |
+| Pending confirmation TTL | 5 minutes | Agent |
 | Context field validation | `^[a-zA-Z0-9\-._/: ]{0,253}$` | Agent |
 | Reconnect attempts | 5 max, exponential backoff + jitter | UI |
 
@@ -431,17 +512,18 @@ The UI sends a `GET /version` request before connecting. If the agent's `protoco
 
 | Version | Changes | UI Version | Agent Version |
 |---------|---------|------------|---------------|
-| `2` | `/ws/monitor` endpoint for autonomous cluster scanning, `trigger_scan` / `subscribe_monitor` / `action_response` / `get_fix_history` client messages, `finding` / `prediction` / `action_report` / `monitor_status` server events, fix history REST endpoints, predictions REST endpoint | v5.12.0+ | v1.4.0+ |
+| `2` | `/ws/monitor` for autonomous scanning, `/ws/agent` for auto-routing orchestration, `subscribe_monitor` / `trigger_scan` / `action_response` / `get_fix_history` client messages, `finding` / `prediction` / `action_report` / `investigation_report` / `verification_report` / `findings_snapshot` / `monitor_status` server events, fix history / predictions / memory / context REST endpoints, monitor pause/resume, nonce-based confirmation replay prevention | v5.12.0+ | v1.4.0+ |
 | `1` | Initial protocol: text/thinking streaming, tool use, components, confirmations | v5.0.0+ | v1.0.0+ |
 
 ### Release Compatibility Matrix
 
 | UI Version | Agent Version | Protocol | Status |
 |------------|--------------|----------|--------|
-| v5.12.0 | v1.4.0 | 2 | Current |
+| v5.13.0 | v1.5.0 | 2 | Current |
+| v5.12.0 | v1.4.0 | 2 | Compatible |
 | v5.11.0 | v1.3.0 | 1 | Compatible |
 | v5.10.0 | v1.3.0 | 1 | Compatible |
 | v5.8.0 | v1.2.0 | 1 | Compatible |
-| v5.0.0–v5.7.0 | v1.0.0–v1.1.0 | 1 | Compatible |
+| v5.0.0-v5.7.0 | v1.0.0-v1.1.0 | 1 | Compatible |
 
 > Both repos should tag releases together when protocol changes occur. Minor UI/Agent releases within the same protocol version are always compatible.

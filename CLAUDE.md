@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.5.0, Protocol v2, 109 tools, 11 scanners, 320 tests.
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.5.0, Protocol v2, 109 tools, 11 scanners, 320 tests. Auto-routing orchestrator classifies queries and routes to SRE or Security agent.
 
 **IMPORTANT:** Always run `python3 -m pytest tests/ -v` before committing. CI runs on every push — check with `gh run list --limit 1`.
 
@@ -47,14 +47,21 @@ helm template test chart/ --set vertexAI.projectId=x --set vertexAI.region=y  # 
 - `/ws/sre` — SRE agent chat
 - `/ws/security` — Security scanner chat
 - `/ws/monitor` — Autonomous cluster monitoring (push-based findings, predictions, actions)
+- `/ws/agent` — Auto-routing orchestrated agent (classifies intent per message, routes to SRE or Security)
 - Auth: `PULSE_AGENT_WS_TOKEN` via query param, constant-time comparison
 
 ### Monitor System (`monitor.py`)
 - `MonitorSession` — periodic cluster scanning (default 60s interval)
-- 6 scanners: crashlooping pods, pending pods, failed deployments, node pressure, expiring certs, firing alerts
+- 11 scanners: crashlooping pods, pending pods, failed deployments, node pressure, expiring certs, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation
 - Auto-fix at trust level 3+: deletes crashlooping pods, restarts failed deployments
 - `findings_snapshot` event for stale finding cleanup
 - Fix history persisted to the database (`PULSE_AGENT_DATABASE_URL`)
+- `_sanitize_for_prompt()` on all cluster data in investigation prompts with `--- BEGIN/END CLUSTER DATA ---` delimiters
+
+### Orchestrator (`orchestrator.py`)
+- `classify_intent()` — keyword-based SRE/Security/Both classification
+- `build_orchestrated_config()` — returns system_prompt, tool_defs, tool_map, write_tools for the classified mode
+- Used by `/ws/agent` endpoint for auto-routing
 
 ### Tools
 - `k8s_tools.py` — 35 K8s tools (`@beta_tool` decorated). Write tools in `WRITE_TOOLS` set require confirmation.
@@ -64,6 +71,8 @@ helm template test chart/ --set vertexAI.projectId=x --set vertexAI.region=y  # 
 - `predict_tools.py` — 3 predictive analytics tools
 - `timeline_tools.py` — 1 incident correlation tool
 - `git_tools.py` — 1 Git PR proposal tool
+- `handoff_tools.py` — 2 agent-to-agent handoff tools (`request_security_scan`, `request_sre_investigation`)
+- `tool_registry.py` — central registry; all tool modules call `register_tool()` at import time
 
 ### Tool Pattern
 ```python
@@ -80,6 +89,11 @@ def tool_name(param: str, namespace: str = "") -> str:
 ```
 
 Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, wrap K8s calls in `safe()`, write tools must be in `WRITE_TOOLS` set, never return secret values.
+
+### Configuration (`config.py`)
+- `PulseAgentSettings(BaseSettings)` — Pydantic v2 Settings with `PULSE_AGENT_` env prefix
+- `.env` file support, type validation at startup
+- All config accessed via settings instance, not raw `os.environ`
 
 ### Harness (`harness.py`)
 - Dynamic tool selection: 8 categories, loads 15-25 of 109 tools per query
@@ -100,12 +114,14 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `chart/templates/deployment.yaml` — validates credentials at install time via `_helpers.tpl`
 
 ### Key Files
-- `config.py` — startup validation (API key, model, timeouts)
+- `config.py` — Pydantic v2 Settings (`PulseAgentSettings` with `PULSE_AGENT_` prefix)
 - `errors.py` — `ToolError` classification (7 categories + suggestions)
 - `error_tracker.py` — thread-safe ring buffer for error aggregation
 - `runbooks.py` — 10 built-in SRE runbooks injected into system prompt
-- `memory/` — optional self-improving agent (SQLite, pattern detection, learned runbooks)
+- `memory/` — self-improving agent (PostgreSQL or SQLite, pattern detection, learned runbooks)
 - `k8s_client.py` — lazy-initialized K8s client with `safe()` wrapper
+- `context_bus.py` — shared context bus for cross-agent communication
+- `orchestrator.py` — intent classification + agent routing for `/ws/agent`
 
 ### Claude Code Agents (`.claude/agents/`)
 8 specialized agents with hooks in `.claude/settings.json`:
@@ -128,7 +144,10 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 | `PULSE_AGENT_WS_TOKEN` | WebSocket auth token | auto-generated |
 | `PULSE_AGENT_SCAN_INTERVAL` | Monitor scan interval (seconds) | `60` |
 | `PULSE_AGENT_HARNESS` | Enable harness optimizations | `1` |
-| `PULSE_AGENT_MEMORY` | Enable self-improving memory | disabled |
+| `PULSE_AGENT_MEMORY` | Enable self-improving memory | `1` (enabled) |
+| `PULSE_AGENT_DATABASE_URL` | Database URL (PostgreSQL or SQLite) | `sqlite:///tmp/pulse_agent/pulse.db` |
+| `PULSE_AGENT_AUTOFIX_ENABLED` | Enable monitor auto-fix | `true` |
+| `PULSE_AGENT_MAX_TRUST_LEVEL` | Server-side max trust level (0-4) | `3` |
 | `PULSE_AGENT_CB_THRESHOLD` | Circuit breaker failure threshold | `3` |
 | `PULSE_AGENT_CB_TIMEOUT` | Circuit breaker recovery (seconds) | `60` |
 
