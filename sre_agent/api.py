@@ -108,6 +108,16 @@ async def lifespan(app: FastAPI):
         logger.info("Connected to cluster")
     except Exception:
         logger.warning("Cannot connect to cluster — tools may fail")
+    # Initialize memory system if enabled
+    if os.environ.get("PULSE_AGENT_MEMORY", "1") == "1":
+        try:
+            from .memory import MemoryManager, set_manager
+
+            manager = MemoryManager()
+            set_manager(manager)
+            logger.info("Memory system initialized")
+        except Exception as e:
+            logger.warning("Memory system init failed: %s", e)
     yield
 
 
@@ -273,12 +283,26 @@ async def _run_agent_ws(
         finally:
             _pending_confirms.pop(ws_id, None)
 
+    # Augment system prompt with memory context
+    effective_system = system_prompt
+    if os.environ.get("PULSE_AGENT_MEMORY", "1") == "1":
+        try:
+            from .memory import get_manager
+
+            manager = get_manager()
+            if manager:
+                last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+                if isinstance(last_user, str) and last_user:
+                    effective_system = manager.augment_prompt(system_prompt, last_user)
+        except Exception as e:
+            logger.debug("Memory retrieval failed: %s", e)
+
     # Run the blocking agent in a thread
     full_response = await asyncio.to_thread(
         run_agent_streaming,
         client=client,
         messages=messages,
-        system_prompt=system_prompt,
+        system_prompt=effective_system,
         tool_defs=tool_defs,
         tool_map=tool_map,
         write_tools=write_tools,
@@ -288,6 +312,27 @@ async def _run_agent_ws(
         on_confirm=on_confirm,
         on_component=on_component,
     )
+
+    # Evaluate the interaction for memory scoring
+    if os.environ.get("PULSE_AGENT_MEMORY", "1") == "1":
+        try:
+            from .memory import get_manager
+
+            manager = get_manager()
+            if manager and hasattr(manager, "finish_turn"):
+                user_msgs = [m for m in messages if m["role"] == "user"]
+                if user_msgs:
+                    query = (
+                        user_msgs[-1]["content"]
+                        if isinstance(user_msgs[-1]["content"], str)
+                        else str(user_msgs[-1]["content"])
+                    )
+                    manager.start_turn()
+                    for t in session_tools:
+                        manager.record_tool_call(t, {})
+                    manager.finish_turn(query, full_response)
+        except Exception:
+            pass
 
     # Auto-store resolved interactive sessions in memory
     if full_response and len(full_response) > 100 and os.environ.get("PULSE_AGENT_MEMORY") == "1":

@@ -18,7 +18,7 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/tools` | token | All tools grouped by mode (sre, security) with `requires_confirmation` flags |
 | `GET` | `/fix-history` | token | Paginated fix history with filters (`status`, `category`, `since`, `search`) |
 | `GET` | `/fix-history/{id}` | token | Single action detail with before/after state |
-| `POST` | `/fix-history/{id}/rollback` | token | Attempt rollback (returns error — rollback not currently supported) |
+| `POST` | `/fix-history/{id}/rollback` | token | Rollback a completed action (supported for `restart_deployment`; returns error for unsupported action types) |
 | `GET` | `/eval/status` | token | Cached quality gate snapshot (release, safety, integration, outcomes) |
 | `GET` | `/predictions` | token | Returns empty — predictions are WebSocket-only (`/ws/monitor`) |
 | `GET` | `/memory/export` | token | Export learned runbooks and patterns as JSON |

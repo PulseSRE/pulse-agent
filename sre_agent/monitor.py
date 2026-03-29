@@ -134,11 +134,31 @@ def _ensure_tables() -> None:
     _tables_ensured = True
 
 
-def save_action(action: dict, category: str = "", resources: list[dict] | None = None) -> None:
+def save_action(
+    action: dict, category: str = "", resources: list[dict] | None = None, finding: dict | None = None
+) -> None:
     """Persist an action report to the database."""
     try:
         _ensure_tables()
         db = get_database()
+
+        # Determine rollback availability from finding metadata
+        rollback_available = 0
+        rollback_action_json = ""
+        rollback_meta = (finding or {}).get("_rollback_meta")
+        if rollback_meta and action.get("status") == "completed" and action.get("tool") == "restart_deployment":
+            rollback_available = 1
+            rollback_action_json = json.dumps(
+                {
+                    "tool": "rollback_deployment",
+                    "input": {
+                        "name": rollback_meta["name"],
+                        "namespace": rollback_meta["namespace"],
+                        "revision": rollback_meta["revision"],
+                    },
+                }
+            )
+
         db.execute(
             """INSERT OR REPLACE INTO actions
                (id, finding_id, timestamp, category, tool, input, status,
@@ -159,8 +179,8 @@ def save_action(action: dict, category: str = "", resources: list[dict] | None =
                 action.get("error"),
                 action.get("reasoning", ""),
                 action.get("durationMs", 0),
-                0,  # rollback not available — delete_pod/restart_deployment are irreversible
-                "",
+                rollback_available,
+                rollback_action_json,
                 json.dumps(resources or []),
                 action.get("verificationStatus"),
                 action.get("verificationEvidence"),
@@ -301,14 +321,47 @@ def save_investigation(report: dict, finding: dict) -> None:
 
 
 def execute_rollback(action_id: str) -> dict:
-    """Rollback is not supported — auto-fix actions (delete_pod, restart_deployment) are irreversible."""
+    """Rollback a completed action if rollback data is available."""
     detail = get_action_detail(action_id)
     if not detail:
         return {"error": "Action not found"}
-    return {
-        "error": "Rollback not available. Auto-fix actions (pod deletion, rolling restart) "
-        "cannot be reversed — the controller recreates pods automatically.",
-    }
+    if detail["status"] != "completed":
+        return {"error": f"Cannot rollback action with status '{detail['status']}'"}
+
+    rollback_data = detail.get("rollbackAction")
+    if not rollback_data:
+        return {
+            "error": "Rollback not available. This action type (e.g. pod deletion) "
+            "cannot be reversed — the controller recreates pods automatically.",
+        }
+
+    tool = rollback_data.get("tool")
+    if tool == "rollback_deployment":
+        inp = rollback_data.get("input", {})
+        try:
+            apps = get_apps_client()
+            name = inp["name"]
+            ns = inp["namespace"]
+            # Clear the restartedAt annotation to undo the rolling restart
+            body = {
+                "spec": {
+                    "template": {
+                        "metadata": {
+                            "annotations": {"kubectl.kubernetes.io/restartedAt": ""},
+                        }
+                    }
+                }
+            }
+            apps.patch_namespaced_deployment(name, ns, body=body)
+            # Update status in database
+            db = get_database()
+            db.execute("UPDATE actions SET status = 'rolled_back' WHERE id = ?", (action_id,))
+            db.commit()
+            return {"status": "rolled_back", "actionId": action_id}
+        except Exception as e:
+            return {"error": f"Rollback failed: {e}"}
+
+    return {"error": f"Rollback not supported for tool '{tool}'"}
 
 
 def update_action_verification(action_id: str, status: str, evidence: str) -> None:
@@ -852,13 +905,20 @@ def _fix_workloads(finding: dict) -> tuple[str, str, str]:
     dep = apps.read_namespaced_deployment(r["name"], r["namespace"])
     desired = dep.spec.replicas or 0
     available = dep.status.available_replicas or 0
-    before = f"Deployment {r['name']} in {r['namespace']}: {available}/{desired} available"
+    revision = (dep.metadata.annotations or {}).get("deployment.kubernetes.io/revision", "")
+    before = f"Deployment {r['name']} in {r['namespace']}: revision={revision}, available={available}/{desired}"
     # Trigger rolling restart
     from datetime import datetime as _dt
 
     now = _dt.now(UTC).isoformat()
     body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}}
     apps.patch_namespaced_deployment(r["name"], r["namespace"], body=body)
+    # Stash rollback metadata on the finding so save_action can persist it
+    finding["_rollback_meta"] = {
+        "name": r["name"],
+        "namespace": r["namespace"],
+        "revision": revision,
+    }
     return ("restart_deployment", before, f"Deployment {r['name']} rolling restart triggered")
 
 
@@ -1403,6 +1463,7 @@ class MonitorSession:
                 action_report,
                 category=category,
                 resources=resources,
+                finding=finding,
             )
 
     async def run_investigations(self, findings: list[dict]) -> None:
