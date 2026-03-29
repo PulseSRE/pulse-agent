@@ -468,16 +468,47 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                         logger.warning("Confirm response nonce mismatch — possible replay (session=%s)", session_id)
                         future.set_result(False)
                     else:
-                        future.set_result(data.get("approved", False))
-                        logger.info(
-                            "Confirmation received: approved=%s nonce=%s", data.get("approved"), received_nonce[:8]
-                        )
+                        approved = data.get("approved", False)
+                        future.set_result(approved)
+                        logger.info("Confirmation received: approved=%s nonce=%s", approved, received_nonce[:8])
+                        # Record confirmation as implicit feedback for memory learning
+                        try:
+                            from .memory import get_manager
+
+                            manager = get_manager()
+                            if manager and approved:
+                                manager.update_last_outcome(True)
+                        except Exception:
+                            pass
                     _pending_nonces.pop(session_id, None)
                     continue
 
                 if msg_type == "clear":
                     messages.clear()
                     await websocket.send_json({"type": "cleared"})
+                    continue
+
+                if msg_type == "feedback":
+                    resolved = data.get("resolved", False)
+                    try:
+                        from .memory import get_manager
+
+                        manager = get_manager()
+                        if manager:
+                            result = manager.update_last_outcome(resolved)
+                            await websocket.send_json(
+                                {
+                                    "type": "feedback_ack",
+                                    "resolved": resolved,
+                                    "score": result.get("score", 0) if result else 0,
+                                    "runbookExtracted": bool(result and result.get("runbook_id")),
+                                }
+                            )
+                        else:
+                            await websocket.send_json({"type": "feedback_ack", "resolved": resolved, "score": 0})
+                    except Exception as e:
+                        logger.debug("Feedback recording failed: %s", e)
+                        await websocket.send_json({"type": "feedback_ack", "resolved": resolved, "score": 0})
                     continue
 
                 # Queue other messages for the main loop
@@ -680,16 +711,47 @@ async def websocket_auto_agent(websocket: WebSocket):
                         logger.warning("Confirm response nonce mismatch — possible replay (session=%s)", session_id)
                         future.set_result(False)
                     else:
-                        future.set_result(data.get("approved", False))
-                        logger.info(
-                            "Confirmation received: approved=%s nonce=%s", data.get("approved"), received_nonce[:8]
-                        )
+                        approved = data.get("approved", False)
+                        future.set_result(approved)
+                        logger.info("Confirmation received: approved=%s nonce=%s", approved, received_nonce[:8])
+                        # Record confirmation as implicit feedback for memory learning
+                        try:
+                            from .memory import get_manager
+
+                            manager = get_manager()
+                            if manager and approved:
+                                manager.update_last_outcome(True)
+                        except Exception:
+                            pass
                     _pending_nonces.pop(session_id, None)
                     continue
 
                 if msg_type == "clear":
                     messages.clear()
                     await websocket.send_json({"type": "cleared"})
+                    continue
+
+                if msg_type == "feedback":
+                    resolved = data.get("resolved", False)
+                    try:
+                        from .memory import get_manager
+
+                        manager = get_manager()
+                        if manager:
+                            result = manager.update_last_outcome(resolved)
+                            await websocket.send_json(
+                                {
+                                    "type": "feedback_ack",
+                                    "resolved": resolved,
+                                    "score": result.get("score", 0) if result else 0,
+                                    "runbookExtracted": bool(result and result.get("runbook_id")),
+                                }
+                            )
+                        else:
+                            await websocket.send_json({"type": "feedback_ack", "resolved": resolved, "score": 0})
+                    except Exception as e:
+                        logger.debug("Feedback recording failed: %s", e)
+                        await websocket.send_json({"type": "feedback_ack", "resolved": resolved, "score": 0})
                     continue
 
                 # Queue other messages for the main loop
