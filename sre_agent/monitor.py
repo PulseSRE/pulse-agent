@@ -1222,6 +1222,17 @@ def _run_security_followup_sync(finding: dict) -> dict:
         cluster_ctx,
     )
 
+    # Memory: inject past security findings into prompt
+    if os.environ.get("PULSE_AGENT_MEMORY", "1") == "1":
+        try:
+            from .memory import get_manager
+
+            manager = get_manager()
+            if manager:
+                effective_system = manager.augment_prompt(effective_system, prompt)
+        except Exception:
+            pass
+
     response = run_agent_streaming(
         client=client,
         messages=[{"role": "user", "content": prompt}],
