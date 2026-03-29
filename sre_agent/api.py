@@ -624,16 +624,33 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                         "full_response": full_response,
                     }
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception("Agent error")
                 if messages:
                     messages.pop()
+                # Build a descriptive error message
+                err_type = type(exc).__name__
+                err_msg = str(exc)[:200]
+                if "DefaultCredentialsError" in err_type or "credentials" in err_msg.lower():
+                    detail = (
+                        "AI backend credentials not configured. Check ANTHROPIC_API_KEY or Vertex AI service account."
+                    )
+                    suggestions = [
+                        "Verify the GCP service account key is mounted",
+                        "Or set ANTHROPIC_API_KEY as an alternative",
+                    ]
+                elif "rate" in err_msg.lower() or "429" in err_msg:
+                    detail = "AI API rate limit reached. Please wait a moment and try again."
+                    suggestions = ["Wait 30 seconds before retrying"]
+                else:
+                    detail = f"Agent error: {err_type} — {err_msg}" if err_msg else f"Agent error: {err_type}"
+                    suggestions = ["Try again", "Check agent logs for details"]
                 await websocket.send_json(
                     {
                         "type": "error",
-                        "message": "Agent encountered an error. Please try again.",
+                        "message": detail,
                         "category": "server",
-                        "suggestions": [],
+                        "suggestions": suggestions,
                         "operation": "",
                     }
                 )
@@ -879,16 +896,33 @@ async def websocket_auto_agent(websocket: WebSocket):
                         "full_response": full_response,
                     }
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception("Agent error")
                 if messages:
                     messages.pop()
+                # Build a descriptive error message
+                err_type = type(exc).__name__
+                err_msg = str(exc)[:200]
+                if "DefaultCredentialsError" in err_type or "credentials" in err_msg.lower():
+                    detail = (
+                        "AI backend credentials not configured. Check ANTHROPIC_API_KEY or Vertex AI service account."
+                    )
+                    suggestions = [
+                        "Verify the GCP service account key is mounted",
+                        "Or set ANTHROPIC_API_KEY as an alternative",
+                    ]
+                elif "rate" in err_msg.lower() or "429" in err_msg:
+                    detail = "AI API rate limit reached. Please wait a moment and try again."
+                    suggestions = ["Wait 30 seconds before retrying"]
+                else:
+                    detail = f"Agent error: {err_type} — {err_msg}" if err_msg else f"Agent error: {err_type}"
+                    suggestions = ["Try again", "Check agent logs for details"]
                 await websocket.send_json(
                     {
                         "type": "error",
-                        "message": "Agent encountered an error. Please try again.",
+                        "message": detail,
                         "category": "server",
-                        "suggestions": [],
+                        "suggestions": suggestions,
                         "operation": "",
                     }
                 )
