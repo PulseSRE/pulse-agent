@@ -868,15 +868,15 @@ async def websocket_monitor(websocket: WebSocket):
     Client sends: subscribe_monitor, action_response, get_fix_history
     """
     # Token authentication
-    import hmac as _hmac
+    import hmac
 
     expected_token = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
     if not expected_token:
         await websocket.close(code=4001, reason="Server not configured. PULSE_AGENT_WS_TOKEN is required.")
         return
     client_token = websocket.query_params.get("token", "")
-    if not _hmac.compare_digest(client_token, expected_token):
-        await websocket.close(code=4001, reason="Unauthorized.")
+    if not hmac.compare_digest(client_token, expected_token):
+        await websocket.close(code=4001, reason="Unauthorized. Invalid or missing token.")
         return
 
     await websocket.accept()
@@ -983,7 +983,7 @@ async def websocket_monitor(websocket: WebSocket):
 
 def _verify_rest_token(authorization: str | None = Header(None), token: str | None = Query(None)):
     """Verify token for REST endpoints — accepts Bearer header or query param."""
-    import hmac as _hmac
+    import hmac
 
     expected = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
     if not expected:
@@ -993,7 +993,7 @@ def _verify_rest_token(authorization: str | None = Header(None), token: str | No
         client_token = authorization[7:]
     elif token:
         client_token = token
-    if not client_token or not _hmac.compare_digest(client_token, expected):
+    if not client_token or not hmac.compare_digest(client_token, expected):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

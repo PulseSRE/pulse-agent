@@ -1,6 +1,7 @@
 {{- if and (eq .Values.database.type "postgresql") .Values.database.postgresql.enabled }}
 {{- $fullName := include "sre-agent.fullname" . }}
 {{- $pgSecretName := .Values.database.postgresql.auth.existingSecret | default (printf "%s-pg-auth" $fullName) }}
+{{- $pgStorage := .Values.database.postgresql.storage | default "5Gi" }}
 ---
 # Auto-generated PostgreSQL password (kept across upgrades)
 {{- if not .Values.database.postgresql.auth.existingSecret }}
@@ -103,7 +104,7 @@ spec:
       {{- end }}
       resources:
         requests:
-          storage: {{ .Values.database.postgresql.storage }}
+          storage: {{ $pgStorage }}
 ---
 # ClusterIP Service for agent connectivity
 apiVersion: v1

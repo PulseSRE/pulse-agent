@@ -86,6 +86,7 @@ database:
         memory: 512Mi
     storage: 5Gi
     storageClass: ""
+    # auth section must be present for template to reference .Values.database.postgresql.auth.*
     auth:
       database: pulse_agent
       username: pulse

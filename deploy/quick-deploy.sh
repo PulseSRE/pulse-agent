@@ -85,6 +85,22 @@ echo "==> Restarting deployment..."
 oc rollout restart "deployment/$DEPLOY" -n "$NS"
 oc rollout status "deployment/$DEPLOY" -n "$NS" --timeout=60s
 
+# === WS Token Sync for UI compatibility ===
+echo "==> Syncing WS auth token for UI..."
+SECRET_NAME=$(oc get deployment "$DEPLOY" -n "$NS" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="PULSE_AGENT_WS_TOKEN")].valueFrom.secretKeyRef.name}' 2>/dev/null || echo "${DEPLOY}-ws-token")
+
+if oc get secret "$SECRET_NAME" -n "$NS" &>/dev/null; then
+    TOKEN=$(oc get secret "$SECRET_NAME" -n "$NS" -o jsonpath='{.data.token}' | base64 -d 2>/dev/null || echo "")
+    if [[ -n "$TOKEN" ]]; then
+        echo "    Token secret: $SECRET_NAME"
+        echo "    Token (first 12 chars): ${TOKEN:0:12}..."
+        oc set env deployment/"$DEPLOY" PULSE_AGENT_WS_TOKEN="$TOKEN" -n "$NS" --overwrite
+        echo "    ✓ WS token synced to deployment"
+    fi
+else
+    echo "    ⚠️ WS token secret not found"
+fi
+
 echo "==> Verifying health..."
 for i in 1 2 3; do
     sleep 5

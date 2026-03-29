@@ -1,4 +1,4 @@
-.PHONY: lint format type-check test verify helm-lint release
+.PHONY: lint format type-check test verify helm-lint release sync-token
 
 lint:
 	ruff check sre_agent/ tests/
@@ -18,6 +18,34 @@ verify: lint type-check test
 helm-lint:
 	helm lint chart/
 	helm template test chart/ --set vertexAI.projectId=test --set vertexAI.region=us-central1
+
+sync-token:
+	@echo "Syncing WS auth token..."
+	@# Use oc if available (OpenShift), otherwise kubectl
+	@CMD=$$(command -v oc 2>/dev/null || command -v kubectl 2>/dev/null || echo ""); \
+	if [ -z "$$CMD" ]; then \
+		echo "  ❌ Neither oc nor kubectl found. Please install one."; \
+		exit 1; \
+	fi; \
+	NS=$$(oc project -q 2>/dev/null || echo "openshiftpulse"); \
+	echo "  Using $$CMD, namespace: $$NS"; \
+	DEPLOY_NAME=$$($$CMD get deployment -n "$$NS" -l app.kubernetes.io/name=openshift-sre-agent -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "pulse-agent-openshift-sre-agent"); \
+	SECRET_NAME=$$($$CMD get deployment "$$DEPLOY_NAME" -n "$$NS" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="PULSE_AGENT_WS_TOKEN")].valueFrom.secretKeyRef.name}' 2>/dev/null || echo "$$DEPLOY_NAME-ws-token"); \
+	if $$CMD get secret "$$SECRET_NAME" -n "$$NS" &>/dev/null 2>&1; then \
+		TOKEN=$$($$CMD get secret "$$SECRET_NAME" -n "$$NS" -o jsonpath='{.data.token}' 2>/dev/null | base64 -d 2>/dev/null || echo ""); \
+		if [ -n "$$TOKEN" ]; then \
+			echo "  Token secret: $$SECRET_NAME"; \
+			echo "  Token (first 12 chars): $${TOKEN:0:12}..."; \
+			$$CMD set env deployment/"$$DEPLOY_NAME" PULSE_AGENT_WS_TOKEN="$$TOKEN" -n "$$NS" --overwrite; \
+			echo "  ✓ Token synced to deployment"; \
+			echo "  Run: oc get secret $$SECRET_NAME -n $$NS -o jsonpath='{.data.token}' | base64 -d"; \
+		else \
+			echo "  ⚠️ Could not decode token from secret"; \
+		fi; \
+	else \
+		echo "  ⚠️ Secret $$SECRET_NAME not found in namespace $$NS"; \
+		echo "  Try: helm upgrade ... to recreate the secret"; \
+	fi
 
 release:
 	@test -n "$(VERSION)" || (echo "Usage: make release VERSION=x.y.z" && exit 1)

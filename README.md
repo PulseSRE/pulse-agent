@@ -458,6 +458,8 @@ helm install pulse-agent ./chart \
 
 The chart **requires** either `vertexAI.projectId` or `anthropicApiKey.existingSecret` — `helm install` will fail with a clear error if neither is set.
 
+**Note on PostgreSQL:** The chart now deploys a PostgreSQL StatefulSet by default for production use (persistent fix history, memory, etc.). Set `database.postgresql.enabled=false` if you prefer SQLite-only.
+
 Enable write operations, security scanning, and memory:
 ```bash
 helm upgrade pulse-agent ./chart \

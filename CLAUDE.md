@@ -38,7 +38,7 @@ python -m sre_agent.main security     # Security scanner
 pulse-agent-api                       # FastAPI on port 8080
 
 # Tests
-python3 -m pytest tests/ -v           # all tests (~200 tests, fully mocked)
+python3 -m pytest tests/ -v           # all tests (~393 tests)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
 make verify                                    # lint + type-check + test
 
@@ -47,8 +47,8 @@ make release VERSION=1.6.0            # bump version everywhere, commit, tag
 # then: git push && git push --tags   # triggers build-push.yml
 
 # Deploy (OpenShift)
-./deploy/quick-deploy.sh openshiftpulse        # fast Podman build + push
-make helm-lint                                 # validate chart locally
+./deploy/quick-deploy.sh openshiftpulse        # fast Podman build + push to internal registry
+make helm-lint                                 # validate chart locally (tests PostgreSQL StatefulSet)
 ```
 
 ## Architecture
