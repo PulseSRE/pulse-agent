@@ -14,10 +14,9 @@ def detect_patterns(store: IncidentStore) -> list[dict]:
 
     Returns list of newly detected patterns.
     """
-    incidents = store.conn.execute(
+    incidents = store.db.fetchall(
         "SELECT * FROM incidents ORDER BY timestamp DESC LIMIT 200"
-    ).fetchall()
-    incidents = [dict(r) for r in incidents]
+    )
 
     if len(incidents) < 3:
         return []
@@ -39,10 +38,10 @@ def detect_patterns(store: IncidentStore) -> list[dict]:
                 if kw1 in inc["query_keywords"] and kw2 in inc["query_keywords"]
             ]
             if len(matching) >= 3:
-                existing = store.conn.execute(
+                existing = store.db.fetchall(
                     "SELECT id FROM patterns WHERE keywords LIKE ? AND keywords LIKE ?",
                     (f"%{kw1}%", f"%{kw2}%")
-                ).fetchall()
+                )
                 if not existing:
                     pid = store.record_pattern(
                         pattern_type="recurring",
@@ -74,10 +73,10 @@ def detect_patterns(store: IncidentStore) -> list[dict]:
         if len(same_time) >= 2:
             seen_time_patterns.add(key)
             ids = [inc["id"]] + [i["id"] for i in same_time]
-            existing = store.conn.execute(
+            existing = store.db.fetchall(
                 "SELECT id FROM patterns WHERE pattern_type = 'time_based' AND keywords LIKE ?",
                 (f"%{inc['error_type'].lower()}%",)
-            ).fetchall()
+            )
             if not existing:
                 pid = store.record_pattern(
                     pattern_type="time_based",
@@ -120,10 +119,10 @@ def detect_patterns(store: IncidentStore) -> list[dict]:
     for (cat_a, cat_b), count in correlation_counts.most_common(5):
         if count >= 3:
             ids = sorted(set(correlation_ids[(cat_a, cat_b)]))[:20]
-            existing = store.conn.execute(
+            existing = store.db.fetchall(
                 "SELECT id FROM patterns WHERE pattern_type = 'correlation' AND keywords LIKE ? AND keywords LIKE ?",
                 (f"%{cat_a.lower()}%", f"%{cat_b.lower()}%")
-            ).fetchall()
+            )
             if not existing:
                 pid = store.record_pattern(
                     pattern_type="correlation",

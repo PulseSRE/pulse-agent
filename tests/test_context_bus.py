@@ -5,7 +5,21 @@ import time
 
 import pytest
 
+from sre_agent.db import Database, set_database, reset_database
 from sre_agent.context_bus import ContextBus, ContextEntry, get_context_bus
+import sre_agent.context_bus as _cb
+
+
+@pytest.fixture(autouse=True)
+def _use_temp_db(tmp_path):
+    """Use a temp database for each test."""
+    db_path = str(tmp_path / "test_context.db")
+    db = Database(f"sqlite:///{db_path}")
+    set_database(db)
+    _cb._tables_ensured = False
+    yield
+    reset_database()
+    _cb._tables_ensured = False
 
 
 class TestContextBusPublishAndRetrieve:

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import statistics
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from ..db import Database
 
 
 DEFAULT_FIX_DB_PATH = os.environ.get(
@@ -115,17 +116,14 @@ def load_outcome_policy(policy_path: str = DEFAULT_POLICY_PATH) -> OutcomeRegres
     )
 
 
-def _open_db(db_path: str) -> sqlite3.Connection:
-    if db_path != ":memory:":
-        Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+def _open_db(db_path: str) -> Database:
+    url = f"sqlite:///{db_path}" if not db_path.startswith(("sqlite:", "postgres")) else db_path
+    return Database(url)
 
 
-def _load_actions(conn: sqlite3.Connection, since_ms: int, until_ms: int) -> list[dict[str, Any]]:
+def _load_actions(db: Database, since_ms: int, until_ms: int) -> list[dict[str, Any]]:
     try:
-        rows = conn.execute(
+        rows = db.fetchall(
             """
             SELECT timestamp, status, duration_ms, input
             FROM actions
@@ -133,8 +131,8 @@ def _load_actions(conn: sqlite3.Connection, since_ms: int, until_ms: int) -> lis
             ORDER BY timestamp ASC
             """,
             (since_ms, until_ms),
-        ).fetchall()
-    except sqlite3.OperationalError:
+        )
+    except Exception:
         return []
     actions: list[dict[str, Any]] = []
     for row in rows:
@@ -236,12 +234,12 @@ def analyze_windows(
     baseline_start = current_start - baseline_days * day_ms
     baseline_end = current_start
 
-    conn = _open_db(db_path)
+    db = _open_db(db_path)
     try:
-        current_actions = _load_actions(conn, current_start, now)
-        baseline_actions = _load_actions(conn, baseline_start, baseline_end)
+        current_actions = _load_actions(db, current_start, now)
+        baseline_actions = _load_actions(db, baseline_start, baseline_end)
     finally:
-        conn.close()
+        db.close()
 
     current = compute_metrics(current_actions)
     baseline = compute_metrics(baseline_actions)

@@ -67,10 +67,51 @@ CREATE TABLE IF NOT EXISTS actions (
     id TEXT PRIMARY KEY,
     finding_id TEXT,
     timestamp BIGINT,
-    action_type TEXT NOT NULL,
+    category TEXT,
+    tool TEXT,
+    input TEXT,
     status TEXT DEFAULT 'pending',
-    description TEXT DEFAULT '',
-    result TEXT DEFAULT ''
+    before_state TEXT,
+    after_state TEXT,
+    error TEXT,
+    reasoning TEXT,
+    duration_ms INTEGER,
+    rollback_available INTEGER DEFAULT 0,
+    rollback_action TEXT,
+    resources TEXT,
+    verification_status TEXT,
+    verification_evidence TEXT,
+    verification_timestamp INTEGER
+);
+"""
+
+INVESTIGATIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS investigations (
+    id TEXT PRIMARY KEY,
+    finding_id TEXT,
+    timestamp INTEGER,
+    category TEXT,
+    severity TEXT,
+    status TEXT,
+    summary TEXT,
+    suspected_cause TEXT,
+    recommended_fix TEXT,
+    confidence REAL,
+    error TEXT,
+    resources TEXT
+);
+"""
+
+CONTEXT_ENTRIES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS context_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    category TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    details TEXT NOT NULL,
+    timestamp BIGINT NOT NULL,
+    namespace TEXT DEFAULT '',
+    resources TEXT DEFAULT '[]'
 );
 """
 
@@ -93,7 +134,13 @@ CREATE INDEX IF NOT EXISTS idx_incidents_error_type ON incidents(error_type);
 CREATE INDEX IF NOT EXISTS idx_runbooks_keywords ON runbooks(trigger_keywords);
 CREATE INDEX IF NOT EXISTS idx_patterns_keywords ON patterns(keywords);
 CREATE INDEX IF NOT EXISTS idx_actions_status ON actions(status);
+CREATE INDEX IF NOT EXISTS idx_actions_ts ON actions(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_actions_category ON actions(category);
 CREATE INDEX IF NOT EXISTS idx_findings_cluster ON findings(cluster);
+CREATE INDEX IF NOT EXISTS idx_investigations_ts ON investigations(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_investigations_finding ON investigations(finding_id);
+CREATE INDEX IF NOT EXISTS idx_context_entries_ts ON context_entries(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_context_entries_ns ON context_entries(namespace);
 """
 
 ALL_SCHEMAS = (
@@ -102,6 +149,8 @@ ALL_SCHEMAS = (
     + PATTERNS_SCHEMA
     + METRICS_SCHEMA
     + ACTIONS_SCHEMA
+    + INVESTIGATIONS_SCHEMA
+    + CONTEXT_ENTRIES_SCHEMA
     + FINDINGS_SCHEMA
     + INDEX_SCHEMA
 )

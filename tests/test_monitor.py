@@ -2,10 +2,10 @@
 
 import asyncio
 import json
-import sqlite3
 from unittest.mock import patch, MagicMock
 import pytest
 
+from sre_agent.db import Database, set_database, reset_database
 from sre_agent.monitor import (
     _make_finding,
     _make_prediction,
@@ -13,7 +13,6 @@ from sre_agent.monitor import (
     save_action,
     get_fix_history,
     get_action_detail,
-    _FIX_SCHEMA,
     SEVERITY_CRITICAL,
     SEVERITY_WARNING,
     SEVERITY_INFO,
@@ -27,13 +26,18 @@ from sre_agent.monitor import (
 @pytest.fixture(autouse=True)
 def _use_temp_db(monkeypatch, tmp_path):
     """Use a temp database for each test."""
-    db_path = str(tmp_path / "test_fix_history.db")
-    monkeypatch.setattr("sre_agent.monitor._FIX_DB_PATH", db_path)
-    # Reset the cached connection so each test gets a fresh DB
     import sre_agent.monitor as _mon
-    _mon._fix_db_conn = None
+    import sre_agent.context_bus as _cb
+    db_path = str(tmp_path / "test_fix_history.db")
+    db = Database(f"sqlite:///{db_path}")
+    set_database(db)
+    # Reset table-creation flags so each test creates tables fresh
+    _mon._tables_ensured = False
+    _cb._tables_ensured = False
     yield
-    _mon._fix_db_conn = None
+    reset_database()
+    _mon._tables_ensured = False
+    _cb._tables_ensured = False
 
 
 class TestMakeHelpers:
@@ -205,13 +209,13 @@ class TestFixHistory:
             "confidence": 0.9,
         }
         save_investigation(report, finding)
-        conn = sqlite3.connect(str(tmp_path / "test_fix_history.db"))
-        row = conn.execute("SELECT finding_id, status, summary FROM investigations WHERE id = ?", ("i-test-1",)).fetchone()
-        conn.close()
+        from sre_agent.db import get_database
+        db = get_database()
+        row = db.fetchone("SELECT finding_id, status, summary FROM investigations WHERE id = ?", ("i-test-1",))
         assert row is not None
-        assert row[0] == finding["id"]
-        assert row[1] == "completed"
-        assert row[2] == "Root cause identified"
+        assert row["finding_id"] == finding["id"]
+        assert row["status"] == "completed"
+        assert row["summary"] == "Root cause identified"
 
 
 class TestMonitorSessionApprovals:

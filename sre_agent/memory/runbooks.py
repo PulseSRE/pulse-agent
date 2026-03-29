@@ -13,14 +13,14 @@ def extract_runbook(store: IncidentStore, incident_id: int,
 
     Returns runbook ID or None if not suitable.
     """
-    rows = store.conn.execute(
+    rows = store.db.fetchall(
         "SELECT * FROM incidents WHERE id = ? AND outcome = 'resolved'",
         (incident_id,)
-    ).fetchall()
+    )
     if not rows:
         return None
 
-    incident = dict(rows[0])
+    incident = rows[0]
     tool_sequence = json.loads(incident["tool_sequence"])
 
     if len(tool_sequence) < 2:
@@ -58,7 +58,7 @@ def extract_runbook(store: IncidentStore, incident_id: int,
 def is_duplicate_runbook(store: IncidentStore, tool_sequence: list[dict]) -> bool:
     """Check if a runbook with the same tool name sequence exists."""
     tool_names = tuple(t["name"] for t in tool_sequence)
-    existing = store.conn.execute("SELECT tool_sequence FROM runbooks").fetchall()
+    existing = store.db.fetchall("SELECT tool_sequence FROM runbooks")
     for row in existing:
         existing_names = tuple(t["name"] for t in json.loads(row["tool_sequence"]))
         if existing_names == tool_names:

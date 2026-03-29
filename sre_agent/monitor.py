@@ -19,6 +19,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from .db import get_database
+from . import db_schema
 from .k8s_client import get_core_client, get_apps_client, get_custom_client, get_autoscaling_client, safe
 from .errors import ToolError
 
@@ -109,93 +111,35 @@ def _make_action_report(
     }
 
 
-# ── Fix History (SQLite) ──────────────────────────────────────────────────
+# ── Fix History (Database abstraction) ────────────────────────────────────
 
-import sqlite3
-
-_FIX_DB_PATH = os.environ.get("PULSE_AGENT_FIX_DB",
-    os.environ.get("PULSE_AGENT_MEMORY_PATH", "/tmp/pulse_agent/memory.db").replace("memory.db", "fix_history.db"))
-
-_FIX_SCHEMA = """
-CREATE TABLE IF NOT EXISTS actions (
-    id TEXT PRIMARY KEY,
-    finding_id TEXT,
-    timestamp INTEGER,
-    category TEXT,
-    tool TEXT,
-    input TEXT,
-    status TEXT,
-    before_state TEXT,
-    after_state TEXT,
-    error TEXT,
-    reasoning TEXT,
-    duration_ms INTEGER,
-    rollback_available INTEGER DEFAULT 0,
-    rollback_action TEXT,
-    resources TEXT,
-    verification_status TEXT,
-    verification_evidence TEXT,
-    verification_timestamp INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_actions_ts ON actions(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_actions_status ON actions(status);
-CREATE INDEX IF NOT EXISTS idx_actions_category ON actions(category);
-CREATE TABLE IF NOT EXISTS investigations (
-    id TEXT PRIMARY KEY,
-    finding_id TEXT,
-    timestamp INTEGER,
-    category TEXT,
-    severity TEXT,
-    status TEXT,
-    summary TEXT,
-    suspected_cause TEXT,
-    recommended_fix TEXT,
-    confidence REAL,
-    error TEXT,
-    resources TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_investigations_ts ON investigations(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_investigations_finding ON investigations(finding_id);
-"""
+_tables_ensured = False
 
 
-_fix_db_conn: sqlite3.Connection | None = None
-_fix_db_lock = threading.Lock()
-
-
-def _get_fix_db() -> sqlite3.Connection:
-    global _fix_db_conn
-    with _fix_db_lock:
-        if _fix_db_conn is not None:
-            try:
-                _fix_db_conn.execute("SELECT 1")
-                return _fix_db_conn
-            except sqlite3.Error:
-                _fix_db_conn = None
-
-        os.makedirs(os.path.dirname(_FIX_DB_PATH), exist_ok=True)
-        conn = sqlite3.connect(_FIX_DB_PATH, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.executescript(_FIX_SCHEMA)
-        for stmt in (
-            "ALTER TABLE actions ADD COLUMN verification_status TEXT",
-            "ALTER TABLE actions ADD COLUMN verification_evidence TEXT",
-            "ALTER TABLE actions ADD COLUMN verification_timestamp INTEGER",
-        ):
-            try:
-                conn.execute(stmt)
-            except sqlite3.OperationalError:
-                pass
-        _fix_db_conn = conn
-        return conn
+def _ensure_tables() -> None:
+    """Create actions and investigations tables if they don't exist."""
+    global _tables_ensured
+    if _tables_ensured:
+        return
+    db = get_database()
+    db.executescript(db_schema.ACTIONS_SCHEMA)
+    db.executescript(db_schema.INVESTIGATIONS_SCHEMA)
+    db.executescript(
+        "CREATE INDEX IF NOT EXISTS idx_actions_ts ON actions(timestamp DESC);\n"
+        "CREATE INDEX IF NOT EXISTS idx_actions_status ON actions(status);\n"
+        "CREATE INDEX IF NOT EXISTS idx_actions_category ON actions(category);\n"
+        "CREATE INDEX IF NOT EXISTS idx_investigations_ts ON investigations(timestamp DESC);\n"
+        "CREATE INDEX IF NOT EXISTS idx_investigations_finding ON investigations(finding_id);\n"
+    )
+    _tables_ensured = True
 
 
 def save_action(action: dict, category: str = "", resources: list[dict] | None = None) -> None:
-    """Persist an action report to SQLite."""
+    """Persist an action report to the database."""
     try:
-        conn = _get_fix_db()
-        conn.execute(
+        _ensure_tables()
+        db = get_database()
+        db.execute(
             """INSERT OR REPLACE INTO actions
                (id, finding_id, timestamp, category, tool, input, status,
                 before_state, after_state, error, reasoning, duration_ms,
@@ -223,17 +167,18 @@ def save_action(action: dict, category: str = "", resources: list[dict] | None =
                 action.get("verificationTimestamp"),
             ),
         )
-        conn.commit()
+        db.commit()
     except Exception as e:
         logger.error("Failed to save action: %s", e)
 
 
 def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = None) -> dict:
-    """Retrieve paginated fix history from SQLite."""
+    """Retrieve paginated fix history from the database."""
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
     try:
-        conn = _get_fix_db()
+        _ensure_tables()
+        db = get_database()
         where_parts = []
         params: list[Any] = []
 
@@ -253,12 +198,13 @@ def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = N
 
         where = "WHERE " + " AND ".join(where_parts) if where_parts else ""
 
-        total = conn.execute(f"SELECT COUNT(*) FROM actions {where}", params).fetchone()[0]
+        count_row = db.fetchone(f"SELECT COUNT(*) as cnt FROM actions {where}", tuple(params))
+        total = count_row["cnt"] if count_row else 0
         offset = (page - 1) * page_size
-        rows = conn.execute(
+        rows = db.fetchall(
             f"SELECT * FROM actions {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-            params + [page_size, offset],
-        ).fetchall()
+            tuple(params + [page_size, offset]),
+        )
 
         actions = []
         for r in rows:
@@ -292,8 +238,9 @@ def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = N
 def get_action_detail(action_id: str) -> dict | None:
     """Get a single action by ID."""
     try:
-        conn = _get_fix_db()
-        row = conn.execute("SELECT * FROM actions WHERE id = ?", (action_id,)).fetchone()
+        _ensure_tables()
+        db = get_database()
+        row = db.fetchone("SELECT * FROM actions WHERE id = ?", (action_id,))
         if not row:
             return None
         return {
@@ -324,8 +271,9 @@ def get_action_detail(action_id: str) -> dict | None:
 def save_investigation(report: dict, finding: dict) -> None:
     """Persist a proactive investigation report."""
     try:
-        conn = _get_fix_db()
-        conn.execute(
+        _ensure_tables()
+        db = get_database()
+        db.execute(
             """INSERT OR REPLACE INTO investigations
                (id, finding_id, timestamp, category, severity, status, summary,
                 suspected_cause, recommended_fix, confidence, error, resources)
@@ -345,7 +293,7 @@ def save_investigation(report: dict, finding: dict) -> None:
                 json.dumps(finding.get("resources", [])),
             ),
         )
-        conn.commit()
+        db.commit()
     except Exception as e:
         logger.error("Failed to save investigation: %s", e)
 
@@ -364,14 +312,15 @@ def execute_rollback(action_id: str) -> dict:
 def update_action_verification(action_id: str, status: str, evidence: str) -> None:
     """Persist verification result for an action."""
     try:
-        conn = _get_fix_db()
-        conn.execute(
+        _ensure_tables()
+        db = get_database()
+        db.execute(
             """UPDATE actions
                SET verification_status = ?, verification_evidence = ?, verification_timestamp = ?
                WHERE id = ?""",
             (status, evidence, _ts(), action_id),
         )
-        conn.commit()
+        db.commit()
     except Exception as e:
         logger.error("Failed to update action verification: %s", e)
 
