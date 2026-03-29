@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.5.0, Protocol v2, 109 tools, 11 scanners, 320 tests. Auto-routing orchestrator classifies queries and routes to SRE or Security agent.
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.5.3, Protocol v2, 109 tools, 11 scanners, 320 tests. Auto-routing orchestrator classifies queries and routes to SRE or Security agent.
 
 **IMPORTANT:** Always run `python3 -m pytest tests/ -v` before committing. CI runs on every push — check with `gh run list --limit 1`.
 
