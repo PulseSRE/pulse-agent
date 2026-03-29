@@ -14,8 +14,8 @@ from ..db import Database
 
 
 DEFAULT_FIX_DB_PATH = os.environ.get(
-    "PULSE_AGENT_FIX_DB",
-    os.environ.get("PULSE_AGENT_MEMORY_PATH", "/tmp/pulse_agent/memory.db").replace("memory.db", "fix_history.db"),
+    "PULSE_AGENT_DATABASE_URL",
+    "sqlite:///tmp/pulse_agent/pulse.db",
 )
 DEFAULT_POLICY_PATH = str(Path(__file__).resolve().parent / "policies" / "outcome_regression_policy.yaml")
 

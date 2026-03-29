@@ -114,7 +114,7 @@ spec:
             {{- end }}
             {{- if and .Values.memory.enabled .Values.memory.persistence.enabled }}
             - name: memory-data
-              mountPath: {{ regexReplaceAll "/[^/]+$" .Values.memory.dbPath "" | default "/tmp/pulse_agent" }}
+              mountPath: /tmp/pulse_agent
             {{- end }}
       volumes:
         - name: tmp

@@ -46,9 +46,9 @@ def validate_config() -> None:
     memory_enabled = os.getenv("PULSE_AGENT_MEMORY", "1").lower()
     if memory_enabled not in ("0", "1", "true", "false", "yes", "no", ""):
         errors.append(f"PULSE_AGENT_MEMORY '{memory_enabled}' is not a valid boolean (use 1/0/true/false)")
-    memory_path = os.getenv("PULSE_AGENT_MEMORY_PATH", "/tmp/pulse_agent/memory.db")
-    if memory_enabled in ("1", "true", "yes") and not memory_path:
-        errors.append("PULSE_AGENT_MEMORY_PATH must be set when memory is enabled")
+    db_url = os.getenv("PULSE_AGENT_DATABASE_URL", "sqlite:///tmp/pulse_agent/pulse.db")
+    if memory_enabled in ("1", "true", "yes") and not db_url:
+        errors.append("PULSE_AGENT_DATABASE_URL must be set when memory is enabled")
 
     if errors:
         for e in errors:

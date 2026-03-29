@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Pulse Agent API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Pulse Agent API", version="1.5.0", lifespan=lifespan)
 
 
 PROTOCOL_VERSION = "2"

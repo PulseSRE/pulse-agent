@@ -37,7 +37,7 @@ incidents to improve future diagnostics. Components:
 
 ### Configuration
 - [ ] Memory system respects `memory.enabled` Helm value
-- [ ] DB path is configurable via `memory.dbPath`
+- [ ] DB URL is configurable via `PULSE_AGENT_DATABASE_URL`
 - [ ] Persistence works with PVC when `memory.persistence.enabled=true`
 - [ ] Graceful degradation when DB is unavailable
 

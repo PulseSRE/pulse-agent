@@ -54,7 +54,7 @@ helm template test chart/ --set vertexAI.projectId=x --set vertexAI.region=y  # 
 - 6 scanners: crashlooping pods, pending pods, failed deployments, node pressure, expiring certs, firing alerts
 - Auto-fix at trust level 3+: deletes crashlooping pods, restarts failed deployments
 - `findings_snapshot` event for stale finding cleanup
-- Fix history persisted to SQLite (`~/.pulse_agent/fix_history.db`)
+- Fix history persisted to the database (`PULSE_AGENT_DATABASE_URL`)
 
 ### Tools
 - `k8s_tools.py` — 35 K8s tools (`@beta_tool` decorated). Write tools in `WRITE_TOOLS` set require confirmation.

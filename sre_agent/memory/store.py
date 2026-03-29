@@ -38,7 +38,7 @@ def db_safe(default=None):
         return wrapper
     return decorator
 
-DEFAULT_DB_PATH = os.path.expanduser("~/.pulse_agent/memory.db")
+DEFAULT_DB_PATH = os.environ.get("PULSE_AGENT_DATABASE_URL", "sqlite:///tmp/pulse_agent/pulse.db")
 
 _STORE_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_incidents_keywords ON incidents(query_keywords);
@@ -82,8 +82,9 @@ class IncidentStore:
         if db is not None:
             self.db = db
         else:
-            self.db_path = db_path or os.environ.get("PULSE_AGENT_MEMORY_PATH", DEFAULT_DB_PATH)
-            url = f"sqlite:///{self.db_path}" if not self.db_path.startswith("sqlite:") else self.db_path
+            url = db_path or DEFAULT_DB_PATH
+            if not url.startswith(("sqlite:", "postgres")):
+                url = f"sqlite:///{url}"
             self.db = Database(url)
         self.db.executescript(SCHEMA)
 

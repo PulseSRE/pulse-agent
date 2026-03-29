@@ -52,7 +52,7 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Confirmation Gate** — Write operations still require the programmatic confirmation round-trip at all trust levels; auto-fix pre-approves on behalf of the user
 
 ### Self-Improving Agent
-- **Incident Memory** — Stores every interaction with query, tool sequence, resolution, and outcome in SQLite
+- **Incident Memory** — Stores every interaction with query, tool sequence, resolution, and outcome in the database
 - **Learned Runbooks** — When you confirm a resolution, the tool sequence is automatically extracted as a reusable runbook
 - **Pattern Detection** — Identifies recurring issues and time-based patterns across incident history
 - **Self-Evaluation** — Scores each interaction on resolution (40%), efficiency (30%), safety (20%), and speed (10%)
@@ -100,7 +100,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 | `PULSE_AGENT_MODEL` | Claude model to use | `claude-opus-4-6` |
 | `PULSE_AGENT_MAX_TOKENS` | Max output tokens per response | `16000` |
 | `PULSE_AGENT_MEMORY` | Enable self-improving memory (`1`/`true`) | disabled |
-| `PULSE_AGENT_MEMORY_PATH` | SQLite database path | `~/.pulse_agent/memory.db` |
+| `PULSE_AGENT_DATABASE_URL` | Database connection URL (PostgreSQL or SQLite) | `sqlite:///tmp/pulse_agent/pulse.db` |
 | `PULSE_AGENT_TRUSTED_REGISTRIES` | Comma-separated trusted image registry prefixes | Red Hat, Quay, OpenShift |
 | `PULSE_AGENT_HARNESS` | Enable Claude harness optimizations | `1` (enabled) |
 | `PULSE_AGENT_WS_TOKEN` | WebSocket authentication token (required for API mode) | |
