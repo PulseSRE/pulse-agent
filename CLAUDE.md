@@ -110,8 +110,9 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 ### Helm Chart (`chart/`)
 - `values.yaml` — requires `vertexAI.projectId` or `anthropicApiKey.existingSecret`
 - WS token auto-generated as K8s Secret (`helm.sh/resource-policy: keep`)
-- Rolling update: `maxSurge: 0, maxUnavailable: 1` (stays within CPU quota)
+- Recreate strategy (avoids 2x resource usage during rollouts on quota-constrained namespaces)
 - `chart/templates/deployment.yaml` — validates credentials at install time via `_helpers.tpl`
+- `chart/templates/postgresql.yaml` — PostgreSQL deployment (RHEL 9, runAsNonRoot, NetworkPolicy)
 
 ### Key Files
 - `config.py` — Pydantic v2 Settings (`PulseAgentSettings` with `PULSE_AGENT_` prefix)
@@ -145,7 +146,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 | `PULSE_AGENT_SCAN_INTERVAL` | Monitor scan interval (seconds) | `60` |
 | `PULSE_AGENT_HARNESS` | Enable harness optimizations | `1` |
 | `PULSE_AGENT_MEMORY` | Enable self-improving memory | `1` (enabled) |
-| `PULSE_AGENT_DATABASE_URL` | Database URL (PostgreSQL or SQLite) | `sqlite:///tmp/pulse_agent/pulse.db` |
+| `PULSE_AGENT_DATABASE_URL` | Database URL (PostgreSQL or SQLite) | `sqlite:////tmp/pulse_agent/pulse.db` |
 | `PULSE_AGENT_AUTOFIX_ENABLED` | Enable monitor auto-fix | `true` |
 | `PULSE_AGENT_MAX_TRUST_LEVEL` | Server-side max trust level (0-4) | `3` |
 | `PULSE_AGENT_CB_THRESHOLD` | Circuit breaker failure threshold | `3` |

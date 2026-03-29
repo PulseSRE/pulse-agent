@@ -27,6 +27,9 @@ pulse-agent-eval-weekly-digest = "sre_agent.evals.weekly_digest_cli:main"
 [tool.setuptools.packages.find]
 include = ["sre_agent*"]
 
+[tool.setuptools.package-data]
+"sre_agent.evals.scenarios_data" = ["*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

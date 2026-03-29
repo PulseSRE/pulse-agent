@@ -113,7 +113,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 | `PULSE_AGENT_MODEL` | Claude model to use | `claude-opus-4-6` |
 | `PULSE_AGENT_MAX_TOKENS` | Max output tokens per response | `16000` |
 | `PULSE_AGENT_MEMORY` | Enable self-improving memory (`1`/`true`) | `1` (enabled) |
-| `PULSE_AGENT_DATABASE_URL` | Database connection URL (PostgreSQL or SQLite) | `sqlite:///tmp/pulse_agent/pulse.db` |
+| `PULSE_AGENT_DATABASE_URL` | Database connection URL (PostgreSQL or SQLite) | `sqlite:////tmp/pulse_agent/pulse.db` |
 | `PULSE_AGENT_AUTOFIX_ENABLED` | Enable/disable monitor auto-fix | `true` |
 | `PULSE_AGENT_MAX_TRUST_LEVEL` | Server-side max trust level cap (0-4) | `3` |
 | `PULSE_AGENT_SCAN_INTERVAL` | Monitor scan interval (seconds) | `60` |
@@ -285,7 +285,7 @@ PULSE_AGENT_MEMORY=1 python -m sre_agent.main
 
 ### How It Works
 
-1. **Before each turn** — retrieves similar past incidents, matching runbooks, and patterns from SQLite. Injects into the system prompt (capped at 1500 chars to prevent context bloat).
+1. **Before each turn** — retrieves similar past incidents, matching runbooks, and patterns from the database. Injects into the system prompt (capped at 1500 chars to prevent context bloat).
 2. **During the turn** — agent can explicitly query its memory via 3 tools.
 3. **After each turn** — evaluates the interaction and stores it with a score.
 4. **On user feedback** — type `feedback` then `y` to confirm resolution. The tool sequence is extracted as a reusable runbook.
@@ -465,9 +465,9 @@ kubectl create secret generic pulse-ws-token --from-literal=token=your-secret
 helm install pulse-agent ./chart --set wsAuth.existingSecret=pulse-ws-token
 ```
 
-### Rolling Updates
+### Deployment Strategy
 
-The chart uses `maxSurge: 0, maxUnavailable: 1` to stay within tight namespace CPU quotas during rolling updates. One old pod is terminated before a new one starts.
+The chart uses the `Recreate` strategy to avoid doubling resource usage during rollouts, which is critical on quota-constrained namespaces. All old pods are terminated before new ones start.
 
 ### GCP Authentication
 
@@ -493,12 +493,14 @@ sre_agent/
 ├── security_tools.py    # 9 security scanning tools (@beta_tool)
 ├── handoff_tools.py     # 2 agent-to-agent handoff tools (request_security_scan, request_sre_investigation)
 ├── harness.py           # Claude harness: tool selection, prompt caching, cluster context
-├── context_bus.py       # Shared context bus for cross-agent communication
+├── db.py                # Database abstraction (PostgreSQL + SQLite)
+├── db_schema.py         # Shared schema definitions
+├── context_bus.py       # Shared context bus for cross-agent communication (database-backed)
 ├── units.py             # Kubernetes resource unit parsing (CPU, memory)
 ├── runbooks.py          # Built-in SRE runbooks and alert triage context
 └── memory/              # Self-improving agent layer
     ├── __init__.py      # MemoryManager orchestrator
-    ├── store.py         # SQLite persistence (incidents, runbooks, patterns, metrics)
+    ├── store.py         # Database persistence (incidents, runbooks, patterns, metrics)
     ├── evaluation.py    # Self-evaluation scoring rubric
     ├── retrieval.py     # Context assembly for prompt augmentation
     ├── runbooks.py      # Runbook extraction from resolved incidents
@@ -514,6 +516,7 @@ chart/                   # Helm chart
     ├── serviceaccount.yaml
     ├── clusterrole.yaml         # Least-privilege RBAC (no wildcards)
     ├── clusterrolebinding.yaml
+    ├── postgresql.yaml          # PostgreSQL deployment (RHEL 9, hardened)
     ├── ws-token-secret.yaml     # Auto-generated WS auth token
     └── networkpolicy.yaml       # Ingress on 8080, egress DNS + HTTPS
 
@@ -533,6 +536,38 @@ chart/                   # Helm chart
     ├── post-edit.sh             # PostToolUse: routes edits to auditor agents
     └── stop-checks.sh           # Stop: suggests tests for changed files
 ```
+
+## CI/CD
+
+### GitHub Actions
+
+| Workflow | Trigger | What it does |
+|----------|---------|-------------|
+| `build-push.yml` | `v*` tag push, manual dispatch | Builds `Dockerfile.full`, pushes to `quay.io/amobrem/pulse-agent` with tag + `latest` |
+| `evals.yml` | PR, push to main, daily 6am UTC, manual | Lint, format check, unit tests, docs consistency, release eval gate, replay evals, safety/integration suites, outcome regression, weekly digest |
+
+### Image Registry
+
+Images are hosted on **Quay.io** at `quay.io/amobrem/pulse-agent`.
+
+**To release a new version:**
+```bash
+git tag v1.6.0
+git push origin v1.6.0
+# GitHub Actions builds and pushes automatically
+```
+
+**Manual build:**
+```bash
+docker build -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.6.0 .
+docker push quay.io/amobrem/pulse-agent:v1.6.0
+```
+
+**Required GitHub Secrets:**
+| Secret | Description |
+|--------|-------------|
+| `QUAY_USERNAME` | Quay.io robot account (e.g., `amobrem+cibot`) |
+| `QUAY_PASSWORD` | Quay.io robot account token |
 
 ## Testing
 

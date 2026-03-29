@@ -186,7 +186,7 @@ def get_database() -> Database:
     with _db_lock:
         if _db is not None and _db.health_check():
             return _db
-        url = os.environ.get("PULSE_AGENT_DATABASE_URL", "sqlite:///tmp/pulse_agent/pulse.db")
+        url = os.environ.get("PULSE_AGENT_DATABASE_URL", "sqlite:////tmp/pulse_agent/pulse.db")
         _db = Database(url)
         return _db
 
