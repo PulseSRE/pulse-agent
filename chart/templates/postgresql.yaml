@@ -15,7 +15,13 @@ metadata:
     "helm.sh/resource-policy": keep
 type: Opaque
 data:
-  {{ .Values.database.postgresql.auth.secretKey }}: {{ randAlphaNum 32 | b64enc | quote }}
+  {{- $existingPg := (lookup "v1" "Secret" .Release.Namespace $pgSecretName) }}
+  {{- $pgKey := .Values.database.postgresql.auth.secretKey }}
+  {{- if and $existingPg (index $existingPg.data $pgKey) }}
+  {{ $pgKey }}: {{ index $existingPg.data $pgKey }}
+  {{- else }}
+  {{ $pgKey }}: {{ randAlphaNum 32 | b64enc | quote }}
+  {{- end }}
 {{- end }}
 ---
 # Headless Service for StatefulSet stable DNS (postgresql-0.postgresql-headless)
