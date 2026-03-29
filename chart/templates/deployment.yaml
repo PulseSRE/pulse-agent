@@ -81,13 +81,21 @@ spec:
                   name: {{ .Values.anthropicApiKey.existingSecret }}
                   key: {{ .Values.anthropicApiKey.existingSecretKey }}
             {{- end }}
+            {{- if eq .Values.database.type "postgresql" }}
+            - name: PULSE_AGENT_DATABASE_URL
+              value: "postgresql://{{ .Values.database.postgresql.auth.username }}:$(PGPASSWORD)@{{ include "sre-agent.fullname" . }}-postgresql:5432/{{ .Values.database.postgresql.auth.database }}"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.postgresql.auth.existingSecret | default (printf "%s-pg-auth" (include "sre-agent.fullname" .)) }}
+                  key: {{ .Values.database.postgresql.auth.secretKey }}
+            {{- else }}
+            - name: PULSE_AGENT_DATABASE_URL
+              value: "sqlite:///tmp/pulse_agent/pulse.db"
+            {{- end }}
             {{- if .Values.memory.enabled }}
             - name: PULSE_AGENT_MEMORY
               value: "1"
-            - name: PULSE_AGENT_MEMORY_PATH
-              value: {{ .Values.memory.dbPath | quote }}
-            - name: PULSE_AGENT_FIX_DB
-              value: {{ .Values.memory.dbPath | replace "memory.db" "fix_history.db" | quote }}
             {{- end }}
             - name: PULSE_AGENT_WS_TOKEN
               valueFrom:

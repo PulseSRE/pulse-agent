@@ -1,0 +1,135 @@
+{{- if and (eq .Values.database.type "postgresql") .Values.database.postgresql.enabled }}
+{{- $fullName := include "sre-agent.fullname" . }}
+{{- $pgSecretName := .Values.database.postgresql.auth.existingSecret | default (printf "%s-pg-auth" $fullName) }}
+---
+# Auto-generated PostgreSQL password (kept across upgrades)
+{{- if not .Values.database.postgresql.auth.existingSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $pgSecretName }}
+  labels:
+    {{- include "sre-agent.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/resource-policy": keep
+type: Opaque
+data:
+  {{ .Values.database.postgresql.auth.secretKey }}: {{ randAlphaNum 32 | b64enc | quote }}
+{{- end }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fullName }}-pg-data
+  labels:
+    {{- include "sre-agent.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if .Values.database.postgresql.storageClass }}
+  storageClassName: {{ .Values.database.postgresql.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.database.postgresql.storage }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullName }}-postgresql
+  labels:
+    {{- include "sre-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: {{ $fullName }}-postgresql
+  template:
+    metadata:
+      labels:
+        app: {{ $fullName }}-postgresql
+        {{- include "sre-agent.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: postgresql
+        image: {{ .Values.database.postgresql.image }}
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5432
+          protocol: TCP
+        env:
+        - name: POSTGRESQL_USER
+          value: {{ .Values.database.postgresql.auth.username | quote }}
+        - name: POSTGRESQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $pgSecretName }}
+              key: {{ .Values.database.postgresql.auth.secretKey }}
+        - name: POSTGRESQL_DATABASE
+          value: {{ .Values.database.postgresql.auth.database | quote }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: pg-data
+          mountPath: /var/lib/pgsql/data
+        resources:
+          {{- toYaml .Values.database.postgresql.resources | nindent 10 }}
+        livenessProbe:
+          exec:
+            command: ["pg_isready", "-U", {{ .Values.database.postgresql.auth.username | quote }}]
+          initialDelaySeconds: 15
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", {{ .Values.database.postgresql.auth.username | quote }}]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: pg-data
+        persistentVolumeClaim:
+          claimName: {{ $fullName }}-pg-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullName }}-postgresql
+  labels:
+    {{- include "sre-agent.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: {{ $fullName }}-postgresql
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+---
+# NetworkPolicy: only agent pods can connect to PostgreSQL
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullName }}-pg-access
+  labels:
+    {{- include "sre-agent.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ $fullName }}-postgresql
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          {{- include "sre-agent.selectorLabels" . | nindent 10 }}
+    ports:
+    - port: 5432
+      protocol: TCP
+{{- end }}
