@@ -20,6 +20,16 @@ NS="${1:-openshiftpulse}"
 DEPLOY="pulse-agent-openshift-sre-agent"
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Clean up old build pods to free quota
+oc delete pod -n "$NS" -l openshift.io/build.name --field-selector=status.phase!=Running 2>/dev/null || true
+
+# Auto-detect Dockerfile: use Dockerfile.full if deps image doesn't exist
+DOCKERFILE="Dockerfile"
+if ! oc get istag pulse-agent-deps:latest -n "$NS" &>/dev/null; then
+    echo "==> No deps image found, using full build..."
+    DOCKERFILE="Dockerfile.full"
+fi
+
 # Run tests before building (fail early)
 if [[ "$SKIP_TESTS" == "false" ]]; then
     echo "==> Running tests..."
@@ -36,7 +46,7 @@ if command -v podman &>/dev/null && podman info &>/dev/null && [[ -n "$REGISTRY"
 
     echo "==> Building locally with Podman (cached layers)..."
     cd "$SCRIPT_DIR"
-    podman build --platform linux/amd64 -t "$IMAGE" -f Dockerfile.full . 2>&1 | tail -5
+    podman build --platform linux/amd64 -t "$IMAGE" -f "$DOCKERFILE" . 2>&1 | tail -5
 
     echo "==> Logging into registry..."
     SA_TOKEN=$(oc create token builder -n "$NS" 2>/dev/null || oc whoami -t)

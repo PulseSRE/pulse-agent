@@ -8,10 +8,7 @@ metadata:
 spec:
   replicas: {{ .Values.replicaCount }}
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 0
-      maxUnavailable: 1
+    type: Recreate
   selector:
     matchLabels:
       {{- include "sre-agent.selectorLabels" . | nindent 6 }}
