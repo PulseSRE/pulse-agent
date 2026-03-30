@@ -1,7 +1,7 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.8.0"><img src="https://img.shields.io/badge/release-v1.8.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.9.0"><img src="https://img.shields.io/badge/release-v1.9.0-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-109-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-11-10b981?style=for-the-badge" alt="Scanners">
   <img src="https://img.shields.io/badge/tests-397-10b981?style=for-the-badge" alt="Tests">
@@ -47,6 +47,7 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Reasoning Chains** — Investigation reports include `evidence` (facts that support the diagnosis) and `alternativesConsidered` (hypotheses ruled out)
 - **Simulation Preview** — `POST /simulate` endpoint predicts impact, risk level, and estimated duration for any action before execution
 - **Noise Learning** — Tracks transient findings that self-resolve; assigns `noiseScore` to suppress flaky alerts
+- **Audit Scanners** — 5 audit scanners: config change correlation (ConfigMap update → pod crash), RBAC change detection (new cluster-admin bindings), deployment rollout monitoring, high-frequency warning events, and auth anomalies (kubeadmin, login failures, SA tokens, OAuth clients)
 - **Finding Lifecycle** — Stale finding cleanup after each scan cycle, severity escalation on repeat occurrences
 
 ### Orchestrator
@@ -364,7 +365,7 @@ pulse-agent-api  # Starts on port 8080
 | `GET /eval/status` | Cached eval quality gate snapshot |
 | `WS /ws/sre?token=...` | SRE agent WebSocket |
 | `WS /ws/security?token=...` | Security scanner WebSocket |
-| `WS /ws/monitor?token=...` | Autonomous monitor (11 scanners, auto-fix) |
+| `WS /ws/monitor?token=...` | Autonomous monitor (16 scanners, auto-fix) |
 | `WS /ws/agent?token=...` | Auto-routing orchestrated agent |
 
 ### WebSocket Protocol
@@ -398,6 +399,7 @@ Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_val
 
 | Pulse Agent | OpenShift Pulse UI | Protocol |
 |------------|-------------------|----------|
+| v1.9.0 | v5.14.0+ | 2 |
 | v1.8.0 | v5.14.0+ | 2 |
 | v1.7.1 | v5.14.0+ | 2 |
 | v1.7.0 | v5.14.0+ | 2 |
@@ -577,8 +579,8 @@ git push && git push --tags   # GitHub Actions builds and pushes automatically
 
 **Manual build:**
 ```bash
-docker build -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.8.0 .
-docker push quay.io/amobrem/pulse-agent:v1.8.0
+docker build -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.9.0 .
+docker push quay.io/amobrem/pulse-agent:v1.9.0
 ```
 
 **Required GitHub Secrets:**
@@ -594,7 +596,7 @@ pip install -e '.[test]'
 python -m pytest tests/ -v
 ```
 
-397 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, and the memory system. All tests run without a cluster or API key (fully mocked).
+450 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ## Evaluation Framework
 
@@ -648,7 +650,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>109 tools</strong> &bull; <strong>11 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>397 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>109 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>450 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">
