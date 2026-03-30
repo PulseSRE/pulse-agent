@@ -11,7 +11,7 @@ import os
 from datetime import UTC, datetime, timedelta
 
 from .errors import ToolError
-from .k8s_client import get_apps_client, get_core_client, get_rbac_client, safe
+from .k8s_client import get_apps_client, get_core_client, get_custom_client, get_rbac_client, safe
 from .monitor import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING, _make_finding, _skip_namespace
 
 logger = logging.getLogger("pulse_agent")
@@ -114,8 +114,6 @@ def scan_rbac_changes() -> list[dict]:
 
         for crb in crbs.items:
             if crb.metadata.creation_timestamp and crb.metadata.creation_timestamp < cutoff:
-                continue
-            if _skip_namespace(crb.metadata.name):
                 continue
 
             role_name = crb.role_ref.name if crb.role_ref else ""
@@ -313,8 +311,6 @@ def scan_auth_events() -> list[dict]:
 
         # 1. Check for kubeadmin user (should be removed post-install)
         try:
-            from .k8s_client import get_custom_client
-
             custom = get_custom_client()
             users = safe(lambda: custom.list_cluster_custom_object("user.openshift.io", "v1", "users"))
             if not isinstance(users, ToolError):

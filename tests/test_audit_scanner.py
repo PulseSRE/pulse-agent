@@ -224,7 +224,7 @@ class TestScanAuthEvents:
 
         with (
             patch("sre_agent.audit_scanner.get_core_client") as core,
-            patch("sre_agent.k8s_client.get_custom_client") as custom,
+            patch("sre_agent.audit_scanner.get_custom_client") as custom,
         ):
             custom.return_value.list_cluster_custom_object.return_value = {
                 "items": [{"metadata": {"name": "kubeadmin"}}]
@@ -242,7 +242,7 @@ class TestScanAuthEvents:
 
         with (
             patch("sre_agent.audit_scanner.get_core_client") as core,
-            patch("sre_agent.k8s_client.get_custom_client") as custom,
+            patch("sre_agent.audit_scanner.get_custom_client") as custom,
         ):
             custom.return_value.list_cluster_custom_object.return_value = {
                 "items": [{"metadata": {"name": "admin-user"}}]
@@ -263,7 +263,7 @@ class TestScanAuthEvents:
         ]
         with (
             patch("sre_agent.audit_scanner.get_core_client") as core,
-            patch("sre_agent.k8s_client.get_custom_client") as custom,
+            patch("sre_agent.audit_scanner.get_custom_client") as custom,
         ):
             custom.return_value.list_cluster_custom_object.return_value = {"items": []}
             core.return_value.list_namespaced_event.return_value = SimpleNamespace(items=events)
@@ -272,3 +272,24 @@ class TestScanAuthEvents:
 
         auth_findings = [f for f in findings if "Authentication failures" in f.get("title", "")]
         assert len(auth_findings) == 1
+
+    def test_detects_namespace_role_binding(self):
+        from sre_agent.audit_scanner import scan_rbac_changes
+
+        rb = SimpleNamespace(
+            metadata=SimpleNamespace(
+                name="dev-admin-binding",
+                namespace="staging",
+                creation_timestamp=_ts(2),
+            ),
+            role_ref=SimpleNamespace(name="admin", kind="ClusterRole"),
+            subjects=[SimpleNamespace(kind="User", name="dev-user")],
+        )
+        with patch("sre_agent.audit_scanner.get_rbac_client") as rbac:
+            rbac.return_value.list_cluster_role_binding.return_value = SimpleNamespace(items=[])
+            rbac.return_value.list_role_binding_for_all_namespaces.return_value = SimpleNamespace(items=[rb])
+            findings = scan_rbac_changes()
+        assert len(findings) == 1
+        assert findings[0]["severity"] == "warning"
+        assert "admin" in findings[0]["title"]
+        assert "staging" in findings[0]["title"]
