@@ -653,12 +653,15 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                         )
                     )
 
-                await websocket.send_json(
-                    {
-                        "type": "done",
-                        "full_response": full_response,
-                    }
-                )
+                try:
+                    await websocket.send_json(
+                        {
+                            "type": "done",
+                            "full_response": full_response,
+                        }
+                    )
+                except Exception:
+                    pass  # Client disconnected — expected during long queries
             except Exception as exc:
                 logger.exception("Agent error")
                 if messages:
@@ -680,15 +683,18 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                 else:
                     detail = f"Agent error: {err_type} — {err_msg}" if err_msg else f"Agent error: {err_type}"
                     suggestions = ["Try again", "Check agent logs for details"]
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "message": detail,
-                        "category": "server",
-                        "suggestions": suggestions,
-                        "operation": "",
-                    }
-                )
+                try:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "message": detail,
+                            "category": "server",
+                            "suggestions": suggestions,
+                            "operation": "",
+                        }
+                    )
+                except Exception:
+                    pass  # Client already disconnected
 
     except Exception:
         logger.exception("WebSocket error")
@@ -846,12 +852,15 @@ async def websocket_auto_agent(websocket: WebSocket):
                         )
                     )
 
-                await websocket.send_json(
-                    {
-                        "type": "done",
-                        "full_response": full_response,
-                    }
-                )
+                try:
+                    await websocket.send_json(
+                        {
+                            "type": "done",
+                            "full_response": full_response,
+                        }
+                    )
+                except Exception:
+                    pass  # Client disconnected — expected during long queries
             except Exception as exc:
                 logger.exception("Agent error")
                 if messages:
@@ -873,15 +882,18 @@ async def websocket_auto_agent(websocket: WebSocket):
                 else:
                     detail = f"Agent error: {err_type} — {err_msg}" if err_msg else f"Agent error: {err_type}"
                     suggestions = ["Try again", "Check agent logs for details"]
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "message": detail,
-                        "category": "server",
-                        "suggestions": suggestions,
-                        "operation": "",
-                    }
-                )
+                try:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "message": detail,
+                            "category": "server",
+                            "suggestions": suggestions,
+                            "operation": "",
+                        }
+                    )
+                except Exception:
+                    pass  # Client already disconnected
 
     except Exception:
         logger.exception("WebSocket error")
@@ -1293,7 +1305,12 @@ async def memory_incidents(
     manager = get_manager()
     if not manager:
         return {"incidents": []}
-    incidents = manager.store.search_incidents(search, limit=limit)
+    if search:
+        incidents = manager.store.search_incidents(search, limit=limit)
+    else:
+        # No search query — return most recent incidents
+        rows = manager.store.db.fetchall("SELECT * FROM incidents ORDER BY timestamp DESC LIMIT ?", (limit,))
+        incidents = [dict(r) for r in rows] if rows else []
     return {"incidents": incidents}
 
 
