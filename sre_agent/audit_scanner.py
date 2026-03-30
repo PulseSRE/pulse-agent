@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 
 from .errors import ToolError
 from .k8s_client import get_apps_client, get_core_client, get_rbac_client, safe
-from .monitor import SEVERITY_CRITICAL, SEVERITY_WARNING, _make_finding, _skip_namespace
+from .monitor import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING, _make_finding, _skip_namespace
 
 logger = logging.getLogger("pulse_agent")
 
@@ -301,4 +301,143 @@ def scan_warning_events() -> list[dict]:
 
     except Exception as e:
         logger.error("Warning events scan failed: %s", e)
+    return findings
+
+
+def scan_auth_events() -> list[dict]:
+    """Detect authentication anomalies — failed logins, kubeadmin usage, SA token creation."""
+    findings: list[dict] = []
+
+    try:
+        core = get_core_client()
+
+        # 1. Check for kubeadmin user (should be removed post-install)
+        try:
+            from .k8s_client import get_custom_client
+
+            custom = get_custom_client()
+            users = safe(lambda: custom.list_cluster_custom_object("user.openshift.io", "v1", "users"))
+            if not isinstance(users, ToolError):
+                for user in users.get("items", []):
+                    if user.get("metadata", {}).get("name") == "kubeadmin":
+                        findings.append(
+                            _make_finding(
+                                severity=SEVERITY_WARNING,
+                                category="audit_auth",
+                                title="kubeadmin account still exists",
+                                summary=(
+                                    "The emergency kubeadmin account has not been removed. "
+                                    "This is a security risk — anyone with the kubeadmin password "
+                                    "has full cluster access. Remove with: oc delete secret kubeadmin -n kube-system"
+                                ),
+                                resources=[{"kind": "User", "name": "kubeadmin", "namespace": ""}],
+                                confidence=0.98,
+                            )
+                        )
+                        break
+        except Exception:
+            pass  # user.openshift.io may not exist on non-OCP clusters
+
+        # 2. Check for failed auth events in openshift-authentication namespace
+        try:
+            events = safe(
+                lambda: core.list_namespaced_event(
+                    "openshift-authentication",
+                    field_selector="type=Warning",
+                )
+            )
+            if not isinstance(events, ToolError):
+                auth_failures = [
+                    e
+                    for e in events.items
+                    if "fail" in (e.reason or "").lower() or "denied" in (e.message or "").lower()
+                ]
+                if len(auth_failures) >= 5:
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_WARNING,
+                            category="audit_auth",
+                            title=f"Authentication failures detected ({len(auth_failures)} events)",
+                            summary=(
+                                f"{len(auth_failures)} authentication failure events in openshift-authentication. "
+                                f"Recent: {auth_failures[0].message[:100] if auth_failures[0].message else 'unknown'}"
+                            ),
+                            resources=[{"kind": "Namespace", "name": "openshift-authentication", "namespace": ""}],
+                            confidence=0.82,
+                        )
+                    )
+        except Exception:
+            pass  # Namespace may not exist on non-OCP clusters
+
+        # 3. Check for recently created ServiceAccount tokens (potential token theft vector)
+        secrets = safe(
+            lambda: core.list_secret_for_all_namespaces(
+                field_selector="type=kubernetes.io/service-account-token",
+            )
+        )
+        if not isinstance(secrets, ToolError):
+            cutoff = datetime.now(UTC) - timedelta(hours=24)
+            recent_tokens = []
+            for secret in secrets.items:
+                ns = secret.metadata.namespace
+                if _skip_namespace(ns):
+                    continue
+                if secret.metadata.creation_timestamp and secret.metadata.creation_timestamp > cutoff:
+                    recent_tokens.append({"name": secret.metadata.name, "namespace": ns})
+
+            if len(recent_tokens) > 5:
+                findings.append(
+                    _make_finding(
+                        severity=SEVERITY_INFO,
+                        category="audit_auth",
+                        title=f"{len(recent_tokens)} new service account tokens in 24h",
+                        summary=(
+                            f"{len(recent_tokens)} new ServiceAccount token secrets created in the last 24 hours. "
+                            f"Review for unexpected token creation. "
+                            f"Namespaces: {', '.join(list({t['namespace'] for t in recent_tokens[:5]}))}."
+                        ),
+                        resources=[
+                            {
+                                "kind": "Secret",
+                                "name": recent_tokens[0]["name"],
+                                "namespace": recent_tokens[0]["namespace"],
+                            }
+                        ],
+                        confidence=0.65,
+                    )
+                )
+
+        # 4. Check for new OAuthClient registrations (OpenShift)
+        try:
+            custom = get_custom_client()
+            oauth_clients = safe(lambda: custom.list_cluster_custom_object("oauth.openshift.io", "v1", "oauthclients"))
+            if not isinstance(oauth_clients, ToolError):
+                cutoff = datetime.now(UTC) - timedelta(hours=24)
+                for oc in oauth_clients.get("items", []):
+                    created = oc.get("metadata", {}).get("creationTimestamp", "")
+                    if created:
+                        try:
+                            created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                            if created_dt > cutoff:
+                                name = oc.get("metadata", {}).get("name", "unknown")
+                                findings.append(
+                                    _make_finding(
+                                        severity=SEVERITY_WARNING,
+                                        category="audit_auth",
+                                        title=f"New OAuth client registered: {name}",
+                                        summary=(
+                                            f"OAuthClient '{name}' was created in the last 24 hours. "
+                                            f"Verify this is an authorized application registration."
+                                        ),
+                                        resources=[{"kind": "OAuthClient", "name": name, "namespace": ""}],
+                                        confidence=0.88,
+                                    )
+                                )
+                        except (ValueError, TypeError):
+                            pass
+        except Exception:
+            pass  # oauth.openshift.io may not exist
+
+    except Exception as e:
+        logger.error("Auth events scan failed: %s", e)
     return findings

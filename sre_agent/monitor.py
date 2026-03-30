@@ -907,13 +907,20 @@ ALL_SCANNERS = [
 
 def _get_all_scanners() -> list[tuple[str, Callable]]:
     """Return all scanners including audit scanners (lazy import to avoid circular dependency)."""
-    from .audit_scanner import scan_config_changes, scan_rbac_changes, scan_recent_deployments, scan_warning_events
+    from .audit_scanner import (
+        scan_auth_events,
+        scan_config_changes,
+        scan_rbac_changes,
+        scan_recent_deployments,
+        scan_warning_events,
+    )
 
     return ALL_SCANNERS + [
         ("audit_config", scan_config_changes),
         ("audit_rbac", scan_rbac_changes),
         ("audit_deployment", scan_recent_deployments),
         ("audit_events", scan_warning_events),
+        ("audit_auth", scan_auth_events),
     ]
 
 

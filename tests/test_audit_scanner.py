@@ -216,3 +216,59 @@ class TestScanWarningEvents:
             core.return_value.list_event_for_all_namespaces.return_value = SimpleNamespace(items=events)
             findings = scan_warning_events()
         assert len(findings) == 0
+
+
+class TestScanAuthEvents:
+    def test_detects_kubeadmin(self):
+        from sre_agent.audit_scanner import scan_auth_events
+
+        with (
+            patch("sre_agent.audit_scanner.get_core_client") as core,
+            patch("sre_agent.k8s_client.get_custom_client") as custom,
+        ):
+            custom.return_value.list_cluster_custom_object.return_value = {
+                "items": [{"metadata": {"name": "kubeadmin"}}]
+            }
+            core.return_value.list_namespaced_event.return_value = SimpleNamespace(items=[])
+            core.return_value.list_secret_for_all_namespaces.return_value = SimpleNamespace(items=[])
+            findings = scan_auth_events()
+
+        kubeadmin_findings = [f for f in findings if "kubeadmin" in f["title"]]
+        assert len(kubeadmin_findings) == 1
+        assert kubeadmin_findings[0]["severity"] == "warning"
+
+    def test_no_kubeadmin_no_finding(self):
+        from sre_agent.audit_scanner import scan_auth_events
+
+        with (
+            patch("sre_agent.audit_scanner.get_core_client") as core,
+            patch("sre_agent.k8s_client.get_custom_client") as custom,
+        ):
+            custom.return_value.list_cluster_custom_object.return_value = {
+                "items": [{"metadata": {"name": "admin-user"}}]
+            }
+            core.return_value.list_namespaced_event.return_value = SimpleNamespace(items=[])
+            core.return_value.list_secret_for_all_namespaces.return_value = SimpleNamespace(items=[])
+            findings = scan_auth_events()
+
+        kubeadmin_findings = [f for f in findings if "kubeadmin" in f.get("title", "")]
+        assert len(kubeadmin_findings) == 0
+
+    def test_detects_auth_failures(self):
+        from sre_agent.audit_scanner import scan_auth_events
+
+        events = [
+            SimpleNamespace(reason="AuthFailed", message="login denied for user X", metadata=SimpleNamespace())
+            for _ in range(6)
+        ]
+        with (
+            patch("sre_agent.audit_scanner.get_core_client") as core,
+            patch("sre_agent.k8s_client.get_custom_client") as custom,
+        ):
+            custom.return_value.list_cluster_custom_object.return_value = {"items": []}
+            core.return_value.list_namespaced_event.return_value = SimpleNamespace(items=events)
+            core.return_value.list_secret_for_all_namespaces.return_value = SimpleNamespace(items=[])
+            findings = scan_auth_events()
+
+        auth_findings = [f for f in findings if "Authentication failures" in f.get("title", "")]
+        assert len(auth_findings) == 1
