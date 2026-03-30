@@ -227,7 +227,7 @@ async def _run_agent_ws(
         try:
             await websocket.send_json(data)
         except Exception:
-            pass  # Client gone — nothing to do
+            pass  # Client disconnected — expected during shutdown
 
     def _schedule_send(data: dict):
         """Thread-safe: schedule a WebSocket send on the event loop."""
@@ -1209,18 +1209,9 @@ async def rest_predictions(
     authorization: str | None = Header(None),
     token: str | None = Query(None),
 ):
-    """Active predictions from the most recent scan (Protocol v2). Requires token auth.
-
-    TODO: Implement by reading recent predictions from monitorStore once
-    the monitor session persists predictions to the fix-history database.
-    Currently predictions are only pushed over the WebSocket stream.
-    """
+    """Active predictions — currently only available via /ws/monitor WebSocket stream."""
     _verify_rest_token(authorization, token)
-    return {
-        "predictions": [],
-        "total": 0,
-        "note": "Predictions are currently only available via the /ws/monitor WebSocket stream.",
-    }
+    raise HTTPException(status_code=501, detail="Predictions are only available via the /ws/monitor WebSocket stream.")
 
 
 @app.post("/simulate")
