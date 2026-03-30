@@ -120,8 +120,17 @@ def scan_rbac_changes() -> list[dict]:
             if role_name != "cluster-admin":
                 continue
 
-            # Skip system-managed bindings
-            if crb.metadata.name.startswith("system:") or crb.metadata.name.startswith("cluster-"):
+            # Skip system-managed and ROSA/managed cluster bindings
+            name = crb.metadata.name
+            if (
+                name.startswith("system:")
+                or name.startswith("cluster-")
+                or name.startswith("dedicated-admin")
+                or name.startswith("openshift-")
+                or name.startswith("open-cluster-management")
+                or ":infrastructure:" in name
+                or ":masters" in name
+            ):
                 continue
 
             subjects = crb.subjects or []
@@ -151,6 +160,14 @@ def scan_rbac_changes() -> list[dict]:
                 continue
             ns = rb.metadata.namespace
             if _skip_namespace(ns):
+                continue
+            # Skip managed cluster system bindings
+            rb_name = rb.metadata.name
+            if (
+                rb_name.startswith("dedicated-admin")
+                or rb_name.startswith("system:")
+                or rb_name.startswith("openshift-")
+            ):
                 continue
 
             role_name = rb.role_ref.name if rb.role_ref else ""
