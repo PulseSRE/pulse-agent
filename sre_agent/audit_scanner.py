@@ -270,9 +270,11 @@ def scan_warning_events() -> list[dict]:
 
         # Group events by reason + namespace
         event_groups: dict[str, list] = {}
+        # Get the agent's own namespace to exclude self-generated noise
+        agent_ns = os.environ.get("POD_NAMESPACE", "openshiftpulse")
         for event in events.items:
             ns = event.metadata.namespace
-            if _skip_namespace(ns):
+            if _skip_namespace(ns) or ns == agent_ns:
                 continue
             key = f"{ns}:{event.reason}"
             if key not in event_groups:
