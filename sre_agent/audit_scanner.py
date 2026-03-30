@@ -256,7 +256,7 @@ def scan_recent_deployments() -> list[dict]:
 def scan_warning_events() -> list[dict]:
     """Surface high-frequency warning events that may indicate systemic issues."""
     findings: list[dict] = []
-    threshold = int(os.environ.get("PULSE_AGENT_AUDIT_EVENT_THRESHOLD", "10"))
+    threshold = int(os.environ.get("PULSE_AGENT_AUDIT_EVENT_THRESHOLD", "50"))
 
     try:
         core = get_core_client()

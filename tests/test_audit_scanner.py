@@ -178,7 +178,7 @@ class TestScanWarningEvents:
             SimpleNamespace(
                 metadata=SimpleNamespace(namespace="prod"),
                 reason="BackOff",
-                count=15,
+                count=20,
                 involved_object=SimpleNamespace(kind="Pod", name=f"web-{i}"),
             )
             for i in range(3)
@@ -188,7 +188,7 @@ class TestScanWarningEvents:
             findings = scan_warning_events()
         assert len(findings) == 1
         assert "BackOff" in findings[0]["title"]
-        assert "45x" in findings[0]["title"]
+        assert "60x" in findings[0]["title"]
 
     def test_no_findings_below_threshold(self):
         events = [
