@@ -1479,24 +1479,66 @@ def get_prometheus_query(query: str, time_range: str = "") -> str:
     if not results:
         return f"Query returned no results for: {query}"
 
-    lines = []
-    for r in results[:50]:
-        metric = r.get("metric", {})
-        label_str = ", ".join(f"{k}={v}" for k, v in metric.items() if k != "__name__")
-        name = metric.get("__name__", query)
+    # Default color palette for chart series
+    _CHART_COLORS = ["#60a5fa", "#34d399", "#fbbf24", "#f87171", "#a78bfa", "#38bdf8", "#fb923c", "#e879f9"]
 
-        if result_type == "vector":
+    lines = []
+    if result_type == "matrix":
+        # Range query → build a ChartSpec
+        series = []
+        for i, r in enumerate(results[:15]):
+            metric = r.get("metric", {})
+            label_parts = [f"{v}" for k, v in metric.items() if k != "__name__"]
+            label = ", ".join(label_parts) or metric.get("__name__", f"series-{i}")
+            values = r.get("values", [])
+            data = [[int(float(ts) * 1000), float(val)] for ts, val in values]
+            latest = values[-1][1] if values else "?"
+            lines.append(f"{label} = {latest} (latest of {len(values)} samples)")
+            series.append({"label": label[:60], "data": data, "color": _CHART_COLORS[i % len(_CHART_COLORS)]})
+
+        if len(results) > 15:
+            lines.append(f"... and {len(results) - 15} more series (truncated to 15 for chart)")
+
+        text = "\n".join(lines)
+        component = {
+            "kind": "chart",
+            "chartType": "line",
+            "title": query[:80],
+            "series": series,
+            "yAxisLabel": "",
+            "height": 300,
+            "query": query,
+            "timeRange": time_range,
+        }
+        return (text, component)
+
+    else:
+        # Instant query (vector) → build a DataTableSpec
+        rows = []
+        for r in results[:50]:
+            metric = r.get("metric", {})
+            label_str = ", ".join(f"{k}={v}" for k, v in metric.items() if k != "__name__")
+            name = metric.get("__name__", query)
             _ts, val = r.get("value", [0, "?"])
             lines.append(f"{name}{{{label_str}}} = {val}")
-        elif result_type == "matrix":
-            values = r.get("values", [])
-            latest = values[-1] if values else [0, "?"]
-            lines.append(f"{name}{{{label_str}}} = {latest[1]} (latest of {len(values)} samples)")
+            rows.append({"metric": f"{name}{{{label_str}}}" if label_str else name, "value": str(val)})
 
-    if len(results) > 50:
-        lines.append(f"... and {len(results) - 50} more results (truncated)")
+        if len(results) > 50:
+            lines.append(f"... and {len(results) - 50} more results (truncated)")
 
-    return "\n".join(lines)
+        text = "\n".join(lines)
+        component = (
+            {
+                "kind": "data_table",
+                "title": f"Query: {query[:60]}",
+                "columns": [{"id": "metric", "header": "Metric"}, {"id": "value", "header": "Value"}],
+                "rows": rows,
+                "query": query,
+            }
+            if rows
+            else None
+        )
+        return (text, component)
 
 
 # ---------------------------------------------------------------------------
