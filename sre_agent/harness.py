@@ -222,6 +222,7 @@ ALWAYS_INCLUDE = {
     "record_audit_entry",
     "suggest_remediation",
     "create_dashboard",
+    "list_saved_views",
 }
 
 

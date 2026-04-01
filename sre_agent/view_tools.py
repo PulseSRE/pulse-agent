@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
+import threading
 import uuid
 
 from anthropic import beta_tool
 
 from .tool_registry import register_tool
+
+# Thread-local storage for the current user identity (set by API layer)
+_current_user = threading.local()
+
+
+def set_current_user(owner: str) -> None:
+    """Set the current user for view tools (called by API layer per-request)."""
+    _current_user.owner = owner
+
+
+def get_current_user() -> str:
+    """Get the current user identity."""
+    return getattr(_current_user, "owner", "anonymous")
 
 
 @beta_tool
@@ -97,5 +111,47 @@ def namespace_summary(namespace: str) -> str:
     return (text, component)
 
 
+@beta_tool
+def list_saved_views() -> str:
+    """List all custom dashboard views saved by the current user. Returns view titles, descriptions, widget counts, and direct links. Use this when the user asks to see their dashboards, saved views, or custom views."""
+    from . import db
+
+    owner = get_current_user()
+    views = db.list_views(owner)
+    if not views:
+        return "No saved views found. You can create one by asking me to build a dashboard."
+
+    lines = []
+    rows = []
+    for v in views:
+        widget_count = len(v.get("layout", []))
+        lines.append(f"  {v['title']} — {widget_count} widgets — /custom/{v['id']}")
+        rows.append(
+            {
+                "title": v["title"],
+                "description": v.get("description", ""),
+                "widgets": widget_count,
+                "link": f"/custom/{v['id']}",
+                "updated": v.get("updated_at", ""),
+            }
+        )
+
+    text = f"Your saved dashboards ({len(views)}):\n" + "\n".join(lines)
+    component = {
+        "kind": "data_table",
+        "title": f"Your Dashboards ({len(rows)})",
+        "columns": [
+            {"id": "title", "header": "Title"},
+            {"id": "description", "header": "Description"},
+            {"id": "widgets", "header": "Widgets"},
+            {"id": "link", "header": "Link"},
+            {"id": "updated", "header": "Updated"},
+        ],
+        "rows": rows,
+    }
+    return (text, component)
+
+
 register_tool(create_dashboard)
 register_tool(namespace_summary)
+register_tool(list_saved_views)

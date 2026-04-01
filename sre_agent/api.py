@@ -214,8 +214,12 @@ async def _run_agent_ws(
     tool_map: dict,
     write_tools: set[str],
     session_id: str,
+    current_user: str = "anonymous",
 ):
     """Run an agent turn and stream results over WebSocket."""
+    from .view_tools import set_current_user
+
+    set_current_user(current_user)
     client = create_client()
     ws_id = session_id
 
@@ -564,6 +568,17 @@ async def websocket_agent(websocket: WebSocket, mode: str):
     # Rate limiting state
     message_timestamps: list[float] = []
 
+    # Extract user identity for view tools (best-effort, fall back to token hash)
+    try:
+        ws_user = _get_current_user(
+            authorization=websocket.headers.get("authorization"),
+            x_forwarded_access_token=websocket.headers.get("x-forwarded-access-token"),
+        )
+    except HTTPException:
+        import hashlib
+
+        ws_user = f"user-{hashlib.sha256(client_token.encode()).hexdigest()[:16]}"
+
     if mode == "sre":
         system_prompt = SRE_SYSTEM_PROMPT
         tool_defs = SRE_TOOL_DEFS
@@ -662,6 +677,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                     tool_map,
                     write_tools,
                     session_id,
+                    current_user=ws_user,
                 )
                 messages.append({"role": "assistant", "content": full_response})
 
@@ -762,6 +778,17 @@ async def websocket_auto_agent(websocket: WebSocket):
     message_timestamps: list[float] = []
     last_mode: str = "sre"
 
+    # Extract user identity for view tools
+    try:
+        ws_user = _get_current_user(
+            authorization=websocket.headers.get("authorization"),
+            x_forwarded_access_token=websocket.headers.get("x-forwarded-access-token"),
+        )
+    except HTTPException:
+        import hashlib
+
+        ws_user = f"user-{hashlib.sha256(client_token.encode()).hexdigest()[:16]}"
+
     # Message queue for incoming messages while agent is running
     incoming: asyncio.Queue = asyncio.Queue()
     _receive_loop = _make_receive_loop(websocket, session_id, messages, incoming)
@@ -860,6 +887,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                     tool_map,
                     write_tools,
                     session_id,
+                    current_user=ws_user,
                 )
                 messages.append({"role": "assistant", "content": full_response})
 
