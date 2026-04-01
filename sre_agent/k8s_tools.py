@@ -1512,6 +1512,31 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
     # Default color palette for chart series
     _CHART_COLORS = ["#60a5fa", "#34d399", "#fbbf24", "#f87171", "#a78bfa", "#38bdf8", "#fb923c", "#e879f9"]
 
+    # Generate a human-readable title from PromQL
+    def _title_from_query(q: str) -> str:
+        q = q.strip()
+        # Extract the metric name and grouping
+        import re as _re
+
+        # Common patterns → friendly names
+        if "cpu_usage_seconds_total" in q:
+            group = _re.search(r"by\s*\(([^)]+)\)", q)
+            by = group.group(1) if group else ""
+            ns = _re.search(r'namespace="([^"]+)"', q)
+            prefix = f"{ns.group(1)} — " if ns else ""
+            return f"{prefix}CPU Usage" + (f" by {by}" if by else "")
+        if "memory" in q.lower():
+            group = _re.search(r"by\s*\(([^)]+)\)", q)
+            by = group.group(1) if group else ""
+            return "Memory Usage" + (f" by {by}" if by else "")
+        if "node_cpu_seconds_total" in q:
+            return "Node CPU Utilization"
+        if "node_memory" in q:
+            return "Node Memory Pressure"
+        # Fallback: use the metric name
+        metric = _re.search(r"([a-z_]+)\{", q) or _re.search(r"([a-z_]+)\(", q) or _re.search(r"^([a-z_]+)", q)
+        return metric.group(1).replace("_", " ").title() if metric else q[:60]
+
     lines = []
     if result_type == "matrix":
         # Range query → build a ChartSpec
@@ -1533,7 +1558,7 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
         component = {
             "kind": "chart",
             "chartType": "line",
-            "title": query[:80],
+            "title": _title_from_query(query),
             "series": series,
             "yAxisLabel": "",
             "height": 300,
@@ -1560,7 +1585,7 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
         component = (
             {
                 "kind": "data_table",
-                "title": f"Query: {query[:60]}",
+                "title": _title_from_query(query),
                 "columns": [{"id": "metric", "header": "Metric"}, {"id": "value", "header": "Value"}],
                 "rows": rows,
                 "query": query,
