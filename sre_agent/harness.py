@@ -451,6 +451,11 @@ by calling multiple tools. The UI renders each tool's component inline.
 1. get_pod_metrics(namespace, sort_by="cpu") — sorted by the requested metric
 2. Add more tools as context requires (HPAs, node metrics, etc.)
 
+**Clickable resource names**: Include a `_gvr` field (hidden, not a column) in each row
+to enable clickable names. Format: `group~version~resource` (e.g. `v1~pods`,
+`apps~v1~deployments`, `operators.coreos.com~v1alpha1~subscriptions`). The UI uses
+this to build detail page links. Works for any resource type including CRDs.
+
 **Dynamic table schemas**: Table columns are fully dynamic — you decide what columns
 to include based on the user's request. Add, remove, or reorder columns as needed.
 The frontend renders whatever columns you provide. For example, if the user asks

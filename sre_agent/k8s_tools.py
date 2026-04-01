@@ -130,6 +130,7 @@ def list_pods(namespace: str = "default", label_selector: str = "", field_select
         )
         rows.append(
             {
+                "_gvr": "v1~pods",
                 "namespace": ns,
                 "name": pod.metadata.name,
                 "status": pod.status.phase or "Unknown",
@@ -300,6 +301,7 @@ def list_nodes() -> str:
         )
         rows.append(
             {
+                "_gvr": "v1~nodes",
                 "name": node.metadata.name,
                 "roles": ",".join(roles),
                 "status": "Ready" if ready == "True" else "NotReady",
@@ -475,6 +477,7 @@ def list_deployments(namespace: str = "default") -> str:
         )
         rows.append(
             {
+                "_gvr": "apps~v1~deployments",
                 "namespace": dep.metadata.namespace,
                 "name": dep.metadata.name,
                 "ready": f"{ready}/{desired}",
@@ -992,6 +995,7 @@ def list_statefulsets(namespace: str = "default") -> str:
         )
         rows.append(
             {
+                "_gvr": "apps~v1~statefulsets",
                 "namespace": sts.metadata.namespace,
                 "name": sts.metadata.name,
                 "ready": f"{ready}/{desired}",
@@ -1054,6 +1058,7 @@ def list_daemonsets(namespace: str = "default") -> str:
         )
         rows.append(
             {
+                "_gvr": "apps~v1~daemonsets",
                 "namespace": ds.metadata.namespace,
                 "name": ds.metadata.name,
                 "desired": desired,
@@ -1280,6 +1285,7 @@ def list_hpas(namespace: str = "default") -> str:
         )
         rows.append(
             {
+                "_gvr": "autoscaling~v2~horizontalpodautoscalers",
                 "namespace": hpa.metadata.namespace,
                 "name": hpa.metadata.name,
                 "target": target,
