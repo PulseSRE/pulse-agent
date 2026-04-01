@@ -1,7 +1,6 @@
-"""Table schemas that work for both SQLite and PostgreSQL.
+"""PostgreSQL table schemas for Pulse Agent.
 
-Import this module and pass the schema strings to ``Database.executescript()``
-which handles DDL translation automatically.
+Import this module and pass the schema strings to ``Database.executescript()``.
 """
 
 INCIDENTS_SCHEMA = """

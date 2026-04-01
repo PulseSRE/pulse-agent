@@ -222,16 +222,29 @@ def reset_database() -> None:
 
 
 def _db_safe(fn):
-    """Decorator that catches database errors and returns None/empty."""
+    """Decorator that catches database errors and returns None.
+
+    Only catches database and serialization errors. Programming bugs
+    (TypeError, KeyError, etc.) are re-raised to avoid silent failures.
+    """
     import functools
+    import json
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except Exception:
+        except (json.JSONDecodeError, OSError):
             logger.exception("View database operation failed: %s", fn.__name__)
             return None
+        except Exception:
+            # Catch psycopg2 database errors
+            exc = __import__("sys").exc_info()[1]
+            mod = type(exc).__module__ or ""
+            if mod.startswith("psycopg2"):
+                logger.exception("View database operation failed: %s", fn.__name__)
+                return None
+            raise
 
     return wrapper
 
@@ -259,7 +272,10 @@ def save_view(
     now = datetime.now(UTC).isoformat()
     db.execute(
         "INSERT INTO views (id, owner, title, description, icon, layout, positions, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (id) DO UPDATE SET "
+        "title = EXCLUDED.title, description = EXCLUDED.description, icon = EXCLUDED.icon, "
+        "layout = EXCLUDED.layout, positions = EXCLUDED.positions, updated_at = EXCLUDED.updated_at",
         (view_id, owner, title, description, icon, json.dumps(layout), json.dumps(positions or {}), now, now),
     )
     db.commit()
@@ -267,13 +283,13 @@ def save_view(
 
 
 @_db_safe
-def list_views(owner: str) -> list[dict]:
-    """List all views owned by a user."""
+def list_views(owner: str, limit: int = 50) -> list[dict]:
+    """List all views owned by a user (max 50)."""
     db = get_database()
     rows = db.fetchall(
         "SELECT id, owner, title, description, icon, layout, positions, created_at, updated_at "
-        "FROM views WHERE owner = ? ORDER BY updated_at DESC",
-        (owner,),
+        "FROM views WHERE owner = ? ORDER BY updated_at DESC LIMIT ?",
+        (owner, min(limit, 50)),
     )
     return [_deserialize_view_row(row) for row in rows]
 
@@ -316,21 +332,21 @@ def update_view(view_id: str, owner: str, **updates) -> bool:
     values.extend([view_id, owner])
 
     db = get_database()
-    db.execute(
+    cursor = db.execute(
         f"UPDATE views SET {', '.join(fields)} WHERE id = ? AND owner = ?",
         tuple(values),
     )
     db.commit()
-    return True
+    return getattr(cursor, "rowcount", 1) > 0
 
 
 @_db_safe
 def delete_view(view_id: str, owner: str) -> bool:
-    """Delete a view. Only the owner can delete."""
+    """Delete a view. Only the owner can delete. Returns False if not found."""
     db = get_database()
-    db.execute("DELETE FROM views WHERE id = ? AND owner = ?", (view_id, owner))
+    cursor = db.execute("DELETE FROM views WHERE id = ? AND owner = ?", (view_id, owner))
     db.commit()
-    return True
+    return getattr(cursor, "rowcount", 1) > 0
 
 
 @_db_safe

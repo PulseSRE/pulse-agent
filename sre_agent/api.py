@@ -1428,6 +1428,7 @@ async def eval_status(
 
 _user_cache: dict[str, tuple[str, float]] = {}
 _USER_CACHE_TTL = 60  # seconds
+_USER_CACHE_MAX = 500  # evict oldest entries beyond this
 
 
 def _get_current_user(
@@ -1440,6 +1441,9 @@ def _get_current_user(
     Kubernetes TokenReview API to resolve it to a username. Results are cached
     for 60 seconds to avoid per-request K8s API calls. In local dev,
     PULSE_AGENT_DEV_USER overrides this.
+
+    Raises HTTPException(401) if no token is provided — anonymous access is
+    not allowed for view operations.
     """
     import hashlib
 
@@ -1452,10 +1456,10 @@ def _get_current_user(
         token = authorization[7:]
 
     if not token:
-        return "anonymous"
+        raise HTTPException(status_code=401, detail="User identity required for view operations")
 
     # Check cache
-    token_hash = hashlib.sha256(token.encode()).hexdigest()[:12]
+    token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
     cached = _user_cache.get(token_hash)
     if cached and (time.time() - cached[1]) < _USER_CACHE_TTL:
         return cached[0]
@@ -1472,15 +1476,23 @@ def _get_current_user(
         result = auth_api.create_token_review(review)
         if result.status.authenticated:
             username = result.status.user.username
-            _user_cache[token_hash] = (username, time.time())
+            _cache_user(token_hash, username)
             return username
     except Exception:
         logger.debug("TokenReview failed, using token hash as user identity")
 
     # Fallback: use a hash of the token as a stable user identifier
     fallback = f"user-{token_hash}"
-    _user_cache[token_hash] = (fallback, time.time())
+    _cache_user(token_hash, fallback)
     return fallback
+
+
+def _cache_user(token_hash: str, username: str) -> None:
+    """Cache a user identity with bounded eviction."""
+    _user_cache[token_hash] = (username, time.time())
+    if len(_user_cache) > _USER_CACHE_MAX:
+        oldest = min(_user_cache, key=lambda k: _user_cache[k][1])
+        _user_cache.pop(oldest, None)
 
 
 @app.get("/views")
@@ -1535,14 +1547,21 @@ async def rest_create_view(
     body = await request.json()
 
     view_id = body.get("id", f"cv-{uuid.uuid4().hex[:12]}")
-    title = body.get("title", "Untitled View")
-    description = body.get("description", "")
+    title = str(body.get("title", "Untitled View"))[:200]
+    description = str(body.get("description", ""))[:1000]
     layout = body.get("layout", [])
     positions = body.get("positions", {})
-    icon = body.get("icon", "")
+    icon = str(body.get("icon", ""))[:50]
 
     if not layout:
         return JSONResponse(status_code=400, content={"error": "layout is required"})
+    if not isinstance(layout, list) or len(layout) > 50:
+        return JSONResponse(status_code=400, content={"error": "layout must be a list with at most 50 widgets"})
+    # Reject payloads over 1MB
+    import json as _json
+
+    if len(_json.dumps(layout)) > 1_000_000:
+        return JSONResponse(status_code=400, content={"error": "layout payload too large (max 1MB)"})
 
     result = db.save_view(owner, view_id, title, description, layout, positions, icon)
     if result is None:
@@ -1582,10 +1601,14 @@ async def rest_delete_view(
 ):
     """Delete a view. Owner only."""
     _verify_rest_token(authorization, token)
+    from fastapi.responses import JSONResponse
+
     from . import db
 
     owner = _get_current_user(authorization, x_forwarded_access_token)
-    db.delete_view(view_id, owner)
+    deleted = db.delete_view(view_id, owner)
+    if not deleted:
+        return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
     return {"deleted": True}
 
 
@@ -1597,16 +1620,20 @@ async def rest_clone_view(
     token: str | None = Query(None),
     x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
 ):
-    """Clone a view to the current user's account (for share links)."""
+    """Clone a view to the current user's account. Only the owner can clone their own views."""
     _verify_rest_token(authorization, token)
     from fastapi.responses import JSONResponse
 
     from . import db
 
     owner = _get_current_user(authorization, x_forwarded_access_token)
+    # Verify the caller owns the source view
+    source = db.get_view(view_id, owner)
+    if source is None:
+        return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
     new_id = db.clone_view(view_id, owner)
     if new_id is None:
-        return JSONResponse(status_code=404, content={"error": "Source view not found"})
+        return JSONResponse(status_code=500, content={"error": "Clone failed"})
     return {"id": new_id, "owner": owner}
 
 
@@ -1631,10 +1658,12 @@ async def rest_share_view(
     if view is None:
         return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
 
-    secret = os.environ.get("PULSE_AGENT_WS_TOKEN", "pulse")
+    secret = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
+    if not secret:
+        return JSONResponse(status_code=503, detail="Server not configured for sharing")
     expires = int(time.time()) + 86400  # 24 hours
     payload = f"{view_id}:{expires}"
-    signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+    signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
     share_token = f"{payload}:{signature}"
 
     return {"share_token": share_token, "view_id": view_id, "expires_in": 86400}
@@ -1656,7 +1685,8 @@ async def rest_claim_shared_view(
 
     from . import db
 
-    # Verify share token
+    # Verify share token — format is view_id:expires:full_hmac_sha256
+    # The signature covers view_id:expires using the server's WS token as secret
     parts = share_token.split(":")
     if len(parts) != 3:
         return JSONResponse(status_code=400, content={"error": "Invalid share token"})
@@ -1670,8 +1700,10 @@ async def rest_claim_shared_view(
     if int(time.time()) > expires:
         return JSONResponse(status_code=410, content={"error": "Share link has expired"})
 
-    secret = os.environ.get("PULSE_AGENT_WS_TOKEN", "pulse")
-    expected_sig = hmac.new(secret.encode(), f"{view_id}:{expires_str}".encode(), hashlib.sha256).hexdigest()[:16]
+    secret = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
+    if not secret:
+        return JSONResponse(status_code=503, content={"error": "Server not configured"})
+    expected_sig = hmac.new(secret.encode(), f"{view_id}:{expires_str}".encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(signature, expected_sig):
         return JSONResponse(status_code=400, content={"error": "Invalid share token"})
 
