@@ -1456,19 +1456,37 @@ def get_prometheus_query(query: str, time_range: str = "") -> str:
         # Instant query
         params = urllib.parse.urlencode({"query": query})
 
-    # Try service proxy first (in-cluster)
-    core = get_core_client()
+    # Connect to Thanos/Prometheus using direct HTTPS with SA bearer token
+    import ssl
+
+    endpoint = f"api/v1/query?{params}" if not time_range else f"api/v1/query_range?{params}"
+    thanos_url = f"{base_url}/{endpoint}"
+
     try:
-        path = f"api/v1/query?{params}" if not time_range else f"api/v1/query_range?{params}"
-        result = core.connect_get_namespaced_service_proxy_with_path(
-            "thanos-querier:web",
-            "openshift-monitoring",
-            path=path,
-            _preload_content=False,
-        )
-        data = json.loads(result.data)
-    except Exception:
-        return "Cannot reach Prometheus/Thanos. Set THANOS_URL environment variable."
+        # Read service account token for in-cluster auth
+        token = ""
+        try:
+            with open("/var/run/secrets/kubernetes.io/serviceaccount/token") as f:
+                token = f.read().strip()
+        except FileNotFoundError:
+            pass
+
+        ctx = ssl.create_default_context()
+        try:
+            ctx.load_verify_locations("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+        except Exception:
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        req = urllib.request.Request(thanos_url, headers=headers)
+        resp = urllib.request.urlopen(req, context=ctx, timeout=30)
+        data = json.loads(resp.read())
+    except Exception as e:
+        return f"Cannot reach Prometheus/Thanos at {base_url}: {e}"
 
     if data.get("status") != "success":
         return f"Query error: {data.get('error', 'unknown')}"
