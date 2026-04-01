@@ -1516,7 +1516,7 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
     if result_type == "matrix":
         # Range query → build a ChartSpec
         series = []
-        for i, r in enumerate(results[:15]):
+        for i, r in enumerate(results[:10]):
             metric = r.get("metric", {})
             label_parts = [f"{v}" for k, v in metric.items() if k != "__name__"]
             label = ", ".join(label_parts) or metric.get("__name__", f"series-{i}")
@@ -1526,8 +1526,8 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
             lines.append(f"{label} = {latest} (latest of {len(values)} samples)")
             series.append({"label": label[:60], "data": data, "color": _CHART_COLORS[i % len(_CHART_COLORS)]})
 
-        if len(results) > 15:
-            lines.append(f"... and {len(results) - 15} more series (truncated to 15 for chart)")
+        if len(results) > 10:
+            lines.append(f"... and {len(results) - 10} more series (truncated to top 10 for chart)")
 
         text = "\n".join(lines)
         component = {
