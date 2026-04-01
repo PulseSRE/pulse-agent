@@ -13,4 +13,20 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "sre-agent.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+---
+# Grant access to Prometheus/Thanos metrics for chart generation
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "sre-agent.fullname" . }}-monitoring
+  labels:
+    {{- include "sre-agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-monitoring-view
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "sre-agent.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
 {{- end }}
