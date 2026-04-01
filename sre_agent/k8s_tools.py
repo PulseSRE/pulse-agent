@@ -1421,12 +1421,12 @@ def get_firing_alerts() -> str:
 
 
 @beta_tool
-def get_prometheus_query(query: str, time_range: str = "") -> str:
-    """Execute a PromQL query against Prometheus/Thanos and return the results.
+def get_prometheus_query(query: str, time_range: str = "1h") -> str:
+    """Execute a PromQL query against Prometheus/Thanos and return the results as an interactive chart.
 
     Args:
         query: PromQL query string, e.g. 'up', 'node_memory_MemAvailable_bytes', 'rate(container_cpu_usage_seconds_total[5m])'.
-        time_range: Optional time range for range queries (e.g. '5m', '1h', '24h'). If empty, does an instant query.
+        time_range: Time range for the query (e.g. '5m', '1h', '24h'). Defaults to '1h'. Use '' for instant queries (returns a table instead of chart).
     """
     import os
     import urllib.error
