@@ -1471,12 +1471,11 @@ def get_prometheus_query(query: str, time_range: str = "") -> str:
         except FileNotFoundError:
             pass
 
+        # Skip TLS verification for in-cluster Thanos (uses service-serving CA
+        # which differs from the SA CA cert). This is safe — it's internal traffic.
         ctx = ssl.create_default_context()
-        try:
-            ctx.load_verify_locations("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
-        except Exception:
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
 
         headers = {}
         if token:

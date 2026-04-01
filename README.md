@@ -1,7 +1,7 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.10.0"><img src="https://img.shields.io/badge/release-v1.10.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.11.0"><img src="https://img.shields.io/badge/release-v1.11.0-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-113-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-11-10b981?style=for-the-badge" alt="Scanners">
   <img src="https://img.shields.io/badge/tests-627-10b981?style=for-the-badge" alt="Tests">
@@ -407,7 +407,7 @@ Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_val
 
 | Pulse Agent | OpenShift Pulse UI | Protocol |
 |------------|-------------------|----------|
-| v1.10.0 | v5.16.2+ | 2 |
+| v1.11.0 | v5.16.2+ | 2 |
 | v1.9.0 | v5.14.0+ | 2 |
 | v1.8.0 | v5.14.0+ | 2 |
 | v1.7.1 | v5.14.0+ | 2 |
@@ -445,8 +445,8 @@ Builds both images locally with Podman, pushes to Quay.io, deploys via Helm. Age
 ### Build Image
 
 ```bash
-podman build --platform linux/amd64 -t quay.io/amobrem/pulse-agent:v1.10.0 -f Dockerfile.full .
-podman push quay.io/amobrem/pulse-agent:v1.10.0
+podman build --platform linux/amd64 -t quay.io/amobrem/pulse-agent:v1.11.0 -f Dockerfile.full .
+podman push quay.io/amobrem/pulse-agent:v1.11.0
 ```
 
 ### Helm Install
@@ -590,8 +590,8 @@ git push && git push --tags   # GitHub Actions builds and pushes automatically
 
 **Manual build:**
 ```bash
-podman build --platform linux/amd64 -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.10.0 .
-podman push quay.io/amobrem/pulse-agent:v1.10.0
+podman build --platform linux/amd64 -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.11.0 .
+podman push quay.io/amobrem/pulse-agent:v1.11.0
 ```
 
 **Required GitHub Secrets:**
