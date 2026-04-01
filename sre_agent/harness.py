@@ -215,7 +215,9 @@ TOOL_CATEGORIES = {
     },
 }
 
-# Tools always included regardless of category
+# Tools always included regardless of category — these are lightweight and
+# broadly useful. Better to include a few extra tools than to miss one the
+# user needs.
 ALWAYS_INCLUDE = {
     "list_namespaces",
     "get_cluster_version",
@@ -223,6 +225,12 @@ ALWAYS_INCLUDE = {
     "suggest_remediation",
     "create_dashboard",
     "list_saved_views",
+    "namespace_summary",
+    "list_pods",
+    "list_nodes",
+    "get_events",
+    "list_deployments",
+    "get_firing_alerts",
 }
 
 
@@ -231,6 +239,9 @@ def select_tools(query: str, all_tools: list, all_tool_map: dict) -> tuple[list,
 
     Returns (filtered_tool_defs, filtered_tool_map).
     Falls back to all tools if no category matches.
+
+    Strategy: be permissive. Include top 3 categories (not 2), always include
+    core diagnostic tools, and cross-pollinate related categories.
     """
     query_lower = query.lower()
 
@@ -245,15 +256,18 @@ def select_tools(query: str, all_tools: list, all_tool_map: dict) -> tuple[list,
         # No match — return all tools (generic query)
         return [t.to_dict() for t in all_tools], {t.name: t for t in all_tools}
 
-    # Take top 2 categories + always-include
-    top_categories = sorted(scores.keys(), key=lambda c: scores[c], reverse=True)[:2]
+    # Take top 3 categories (was 2 — too restrictive)
+    top_categories = sorted(scores.keys(), key=lambda c: scores[c], reverse=True)[:3]
     selected_names = set(ALWAYS_INCLUDE)
     for cat in top_categories:
         selected_names.update(TOOL_CATEGORIES[cat]["tools"])
 
-    # Always include write tools from diagnostics (scale, restart) if workloads matched
-    if "diagnostics" in top_categories:
+    # Cross-pollinate related categories
+    if "diagnostics" in top_categories or "workloads" in top_categories:
         selected_names.update(TOOL_CATEGORIES["workloads"]["tools"])
+        selected_names.update(TOOL_CATEGORIES["diagnostics"]["tools"])
+    if "monitoring" in top_categories:
+        selected_names.update(TOOL_CATEGORIES["diagnostics"]["tools"])
 
     # Filter to only tools that exist in the actual tool list
     available_names = {t.name for t in all_tools}
