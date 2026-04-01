@@ -1772,3 +1772,33 @@ async def rest_claim_shared_view(
     if new_id is None:
         return JSONResponse(status_code=404, content={"error": "Source view not found"})
     return {"id": new_id, "owner": owner}
+
+
+# ---------------------------------------------------------------------------
+# Live Query Refresh — lightweight Prometheus proxy for view widgets
+# ---------------------------------------------------------------------------
+
+
+@app.get("/query")
+async def rest_query(
+    q: str = Query(..., description="PromQL query string"),
+    range: str = Query("", alias="range", description="Time range, e.g. '1h', '24h'"),
+    authorization: str | None = Header(None),
+    _token: str | None = Query(None, alias="token"),
+):
+    """Execute a PromQL query and return a ComponentSpec for live widget refresh.
+
+    No Claude/LLM involved — direct Prometheus proxy.
+    """
+    _verify_rest_token(authorization, _token)
+
+    from .k8s_tools import get_prometheus_query
+
+    result = get_prometheus_query.call({"query": q, "time_range": range})
+
+    if isinstance(result, tuple) and len(result) == 2:
+        _text_result, component = result
+        if component:
+            return {"component": component}
+        return {"component": None, "text": _text_result}
+    return {"component": None, "text": str(result)}

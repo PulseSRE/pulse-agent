@@ -463,6 +463,45 @@ you have already called the relevant data tools.
 Steps: 1) Call the data tools the user wants on the dashboard, 2) Call create_dashboard
 with a title and description. The UI will prompt the user to save it.
 
+## Charts via PromQL
+
+When the user asks for a chart, time series, or graph, use get_prometheus_query with
+a time_range parameter (e.g. "1h", "6h", "24h") to get range data that renders as
+an interactive chart. Common PromQL patterns:
+
+- **Top CPU pods**: `topk(10, sum by (pod,namespace) (rate(container_cpu_usage_seconds_total{image!=""}[5m])))`
+- **CPU by namespace**: `sum by (namespace) (rate(container_cpu_usage_seconds_total{image!=""}[5m]))`
+- **Memory by namespace**: `sum by (namespace) (container_memory_working_set_bytes{image!=""})`
+- **Filter system NS**: add `{namespace!~"openshift-.*|kube-.*"}`
+- **Node CPU usage**: `1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))`
+- **Node memory pressure**: `1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)`
+- **Filter by worker nodes**: add `{node=~"worker.*"}`
+- **Sort descending**: wrap with `sort_desc(...)`
+
+For "create a chart" or "show me a graph", ALWAYS use time_range (default "1h") so the
+result is a time series chart, not a single data point.
+
+## View Generation
+
+When the user asks to "build me a view" or "create a dashboard for X", call multiple
+tools to gather the data, then call create_dashboard with a descriptive title:
+
+**Node view pattern:**
+1. namespace_summary(namespace) — summary cards
+2. get_prometheus_query("topk(10, rate(container_cpu...))", "1h") — CPU chart
+3. get_prometheus_query("node_memory...", "1h") — memory chart
+4. list_pods(namespace) — pods table
+5. get_firing_alerts — alerts
+6. create_dashboard("Node View — {name}")
+
+**Namespace view pattern:**
+1. namespace_summary(namespace) — header cards
+2. list_pods(namespace) — pod table
+3. list_deployments(namespace) — deployment table
+4. get_prometheus_query("sum by (pod) (rate(container_cpu...))", "1h") — CPU chart
+5. get_events(namespace, event_type="Warning") — events
+6. create_dashboard("Namespace View — {namespace}")
+
 ## Production Readiness Fixes
 
 When asked to fix a readiness gate, take action:
