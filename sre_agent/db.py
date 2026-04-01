@@ -214,3 +214,157 @@ def reset_database() -> None:
     if _db:
         _db.close()
     _db = None
+
+
+# ---------------------------------------------------------------------------
+# View persistence (user-scoped custom dashboards)
+# ---------------------------------------------------------------------------
+
+
+def _db_safe(fn):
+    """Decorator that catches database errors and returns None/empty."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            logger.exception("View database operation failed: %s", fn.__name__)
+            return None
+
+    return wrapper
+
+
+def _deserialize_view_row(row: dict) -> dict:
+    """Parse JSON fields in a view row from the database."""
+    import json
+
+    for field in ("layout", "positions"):
+        val = row.get(field)
+        if isinstance(val, str):
+            row[field] = json.loads(val)
+    return row
+
+
+@_db_safe
+def save_view(
+    owner: str, view_id: str, title: str, description: str, layout: list, positions: dict | None = None, icon: str = ""
+) -> str | None:
+    """Save a new view for a user. Returns the view ID."""
+    import json
+    from datetime import UTC, datetime
+
+    db = get_database()
+    now = datetime.now(UTC).isoformat()
+    db.execute(
+        "INSERT INTO views (id, owner, title, description, icon, layout, positions, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (view_id, owner, title, description, icon, json.dumps(layout), json.dumps(positions or {}), now, now),
+    )
+    db.commit()
+    return view_id
+
+
+@_db_safe
+def list_views(owner: str) -> list[dict]:
+    """List all views owned by a user."""
+    db = get_database()
+    rows = db.fetchall(
+        "SELECT id, owner, title, description, icon, layout, positions, created_at, updated_at "
+        "FROM views WHERE owner = ? ORDER BY updated_at DESC",
+        (owner,),
+    )
+    return [_deserialize_view_row(row) for row in rows]
+
+
+@_db_safe
+def get_view(view_id: str, owner: str | None = None) -> dict | None:
+    """Get a single view by ID. If owner is provided, checks ownership."""
+    db = get_database()
+    if owner:
+        row = db.fetchone("SELECT * FROM views WHERE id = ? AND owner = ?", (view_id, owner))
+    else:
+        row = db.fetchone("SELECT * FROM views WHERE id = ?", (view_id,))
+    if row is None:
+        return None
+    return _deserialize_view_row(row)
+
+
+@_db_safe
+def update_view(view_id: str, owner: str, **updates) -> bool:
+    """Update a view's fields. Only the owner can update."""
+    import json
+    from datetime import UTC, datetime
+
+    allowed = {"title", "description", "icon", "layout", "positions"}
+    fields = []
+    values = []
+    for key, value in updates.items():
+        if key not in allowed:
+            continue
+        if key in ("layout", "positions"):
+            value = json.dumps(value)
+        fields.append(f"{key} = ?")
+        values.append(value)
+
+    if not fields:
+        return False
+
+    fields.append("updated_at = ?")
+    values.append(datetime.now(UTC).isoformat())
+    values.extend([view_id, owner])
+
+    db = get_database()
+    db.execute(
+        f"UPDATE views SET {', '.join(fields)} WHERE id = ? AND owner = ?",
+        tuple(values),
+    )
+    db.commit()
+    return True
+
+
+@_db_safe
+def delete_view(view_id: str, owner: str) -> bool:
+    """Delete a view. Only the owner can delete."""
+    db = get_database()
+    db.execute("DELETE FROM views WHERE id = ? AND owner = ?", (view_id, owner))
+    db.commit()
+    return True
+
+
+@_db_safe
+def clone_view(view_id: str, new_owner: str) -> str | None:
+    """Clone a view to another user's account. Returns the new view ID."""
+    import json
+    import uuid
+    from datetime import UTC, datetime
+
+    db = get_database()
+    source = db.fetchone("SELECT * FROM views WHERE id = ?", (view_id,))
+    if source is None:
+        return None
+    _deserialize_view_row(source)
+
+    new_id = f"cv-{uuid.uuid4().hex[:12]}"
+    now = datetime.now(UTC).isoformat()
+    layout = source["layout"]
+    positions = source["positions"]
+
+    db.execute(
+        "INSERT INTO views (id, owner, title, description, icon, layout, positions, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            new_id,
+            new_owner,
+            source["title"],
+            source["description"],
+            source.get("icon", ""),
+            json.dumps(layout),
+            json.dumps(positions),
+            now,
+            now,
+        ),
+    )
+    db.commit()
+    return new_id

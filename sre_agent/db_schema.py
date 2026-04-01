@@ -130,6 +130,20 @@ CREATE TABLE IF NOT EXISTS findings (
 );
 """
 
+VIEWS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS views (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    icon TEXT DEFAULT '',
+    layout TEXT NOT NULL,
+    positions TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
 INDEX_SCHEMA = """
 CREATE INDEX IF NOT EXISTS idx_incidents_keywords ON incidents(query_keywords);
 CREATE INDEX IF NOT EXISTS idx_incidents_error_type ON incidents(error_type);
@@ -143,6 +157,7 @@ CREATE INDEX IF NOT EXISTS idx_investigations_ts ON investigations(timestamp DES
 CREATE INDEX IF NOT EXISTS idx_investigations_finding ON investigations(finding_id);
 CREATE INDEX IF NOT EXISTS idx_context_entries_ts ON context_entries(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_context_entries_ns ON context_entries(namespace);
+CREATE INDEX IF NOT EXISTS idx_views_owner ON views(owner);
 """
 
 ALL_SCHEMAS = (
@@ -154,5 +169,6 @@ ALL_SCHEMAS = (
     + INVESTIGATIONS_SCHEMA
     + CONTEXT_ENTRIES_SCHEMA
     + FINDINGS_SCHEMA
+    + VIEWS_SCHEMA
     + INDEX_SCHEMA
 )

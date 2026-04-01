@@ -55,6 +55,7 @@ TOOL_CATEGORIES = {
             "get_node_metrics",
             "get_pod_metrics",
             "correlate_incident",
+            "namespace_summary",
         ],
     },
     "workloads": {
@@ -214,6 +215,7 @@ ALWAYS_INCLUDE = {
     "get_cluster_version",
     "record_audit_entry",
     "suggest_remediation",
+    "create_dashboard",
 }
 
 
@@ -443,12 +445,37 @@ Focus your text response on:
 
 Do NOT repeat raw data that the tools already displayed as components.
 
+## View Composition
+
+When the user asks a high-level question like "what's happening in my namespace",
+"show me cluster health", or "create a view for X", compose a comprehensive view
+by calling multiple tools. The UI renders each tool's component inline.
+
+**Namespace overview** — call these tools (in parallel when possible):
+1. namespace_summary(namespace) — summary cards (pods, deployments, warnings)
+2. list_pods(namespace) — pod status table
+3. get_events(namespace, event_type="Warning") — recent warnings
+4. list_deployments(namespace) — workload health
+5. get_pod_metrics(namespace) — resource consumption
+
+**Cluster overview** — call these tools:
+1. list_nodes — node health table
+2. get_node_metrics — resource utilization
+3. get_firing_alerts — active alerts
+4. get_events(namespace="ALL", event_type="Warning") — cluster warnings
+
+**Resource-focused views** — for requests like "show me CPU-heavy pods":
+1. get_pod_metrics(namespace, sort_by="cpu") — sorted by the requested metric
+2. Add more tools as context requires (HPAs, node metrics, etc.)
+
+After calling the data tools, call `create_dashboard` if the user wants to save
+the view. The dashboard will contain all the component specs from this conversation.
+
 ## Custom Dashboards
 
 When the user asks to "create a dashboard", "build a custom view", "make a dashboard
 showing X and Y", or "save this as a view" — use the `create_dashboard` tool AFTER
-you have already called the relevant data tools (list_pods, get_node_metrics, etc.).
-The dashboard will contain all the component specs from this conversation.
+you have already called the relevant data tools.
 
 Steps: 1) Call the data tools the user wants on the dashboard, 2) Call create_dashboard
 with a title and description. The UI will prompt the user to save it.

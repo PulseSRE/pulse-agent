@@ -276,6 +276,7 @@ def list_nodes() -> str:
         return str(result)
 
     lines = []
+    rows = []
     for node in result.items:
         roles = [
             label.split("/")[-1]
@@ -295,7 +296,37 @@ def list_nodes() -> str:
             f"Version={node.status.node_info.kubelet_version}  "
             f"Age={age(node.metadata.creation_timestamp)}"
         )
-    return "\n".join(lines) or "No nodes found."
+        rows.append(
+            {
+                "name": node.metadata.name,
+                "roles": ",".join(roles),
+                "status": "Ready" if ready == "True" else "NotReady",
+                "cpu": f"{cap.get('cpu', '?')}/{alloc.get('cpu', '?')}",
+                "memory": f"{cap.get('memory', '?')}/{alloc.get('memory', '?')}",
+                "version": node.status.node_info.kubelet_version,
+                "age": age(node.metadata.creation_timestamp),
+            }
+        )
+    text = "\n".join(lines) or "No nodes found."
+    component = (
+        {
+            "kind": "data_table",
+            "title": f"Nodes ({len(rows)})",
+            "columns": [
+                {"id": "name", "header": "Name"},
+                {"id": "roles", "header": "Roles"},
+                {"id": "status", "header": "Status"},
+                {"id": "cpu", "header": "CPU (cap/alloc)"},
+                {"id": "memory", "header": "Memory (cap/alloc)"},
+                {"id": "version", "header": "Version"},
+                {"id": "age", "header": "Age"},
+            ],
+            "rows": rows,
+        }
+        if rows
+        else None
+    )
+    return (text, component)
 
 
 @beta_tool
@@ -788,22 +819,51 @@ def get_node_metrics() -> str:
             }
 
     lines = []
+    rows = []
     for item in result.get("items", []):
         name = item["metadata"]["name"]
         usage = item.get("usage", {})
         cpu_m = parse_cpu_millicores(usage.get("cpu", "0"))
         mem_bytes = parse_memory_bytes(usage.get("memory", "0"))
 
+        cpu_pct_val = 0
+        mem_pct_val = 0
         pct = ""
         if name in capacity_map:
             cap = capacity_map[name]
-            cpu_pct = (cpu_m / cap["cpu_m"] * 100) if cap["cpu_m"] > 0 else 0
-            mem_pct = (mem_bytes / cap["mem_bytes"] * 100) if cap["mem_bytes"] > 0 else 0
-            pct = f"  CPU%={cpu_pct:.0f}%  Mem%={mem_pct:.0f}%"
+            cpu_pct_val = (cpu_m / cap["cpu_m"] * 100) if cap["cpu_m"] > 0 else 0
+            mem_pct_val = (mem_bytes / cap["mem_bytes"] * 100) if cap["mem_bytes"] > 0 else 0
+            pct = f"  CPU%={cpu_pct_val:.0f}%  Mem%={mem_pct_val:.0f}%"
 
         lines.append(f"{name}  CPU={format_cpu(cpu_m)}  Memory={format_memory(mem_bytes)}{pct}")
+        rows.append(
+            {
+                "name": name,
+                "cpu": format_cpu(cpu_m),
+                "memory": format_memory(mem_bytes),
+                "cpu_pct": f"{cpu_pct_val:.0f}%",
+                "mem_pct": f"{mem_pct_val:.0f}%",
+            }
+        )
 
-    return "\n".join(lines) or "No node metrics found."
+    text = "\n".join(lines) or "No node metrics found."
+    component = (
+        {
+            "kind": "data_table",
+            "title": f"Node Metrics ({len(rows)})",
+            "columns": [
+                {"id": "name", "header": "Node"},
+                {"id": "cpu", "header": "CPU Usage"},
+                {"id": "cpu_pct", "header": "CPU %"},
+                {"id": "memory", "header": "Memory Usage"},
+                {"id": "mem_pct", "header": "Memory %"},
+            ],
+            "rows": rows,
+        }
+        if rows
+        else None
+    )
+    return (text, component)
 
 
 @beta_tool
@@ -856,13 +916,39 @@ def get_pod_metrics(namespace: str = "default", sort_by: str = "cpu") -> str:
         pods.sort(key=lambda p: p["cpu_m"], reverse=True)
 
     lines = []
+    rows = []
     for p in pods[:MAX_RESULTS]:
         lines.append(f"{p['ns']}/{p['name']}  CPU={p['cpu_str']}  Memory={p['mem_str']}")
+        rows.append(
+            {
+                "namespace": p["ns"],
+                "name": p["name"],
+                "cpu": p["cpu_str"],
+                "memory": p["mem_str"],
+            }
+        )
     total = len(pods)
     if total > MAX_RESULTS:
         lines.append(f"... and {total - MAX_RESULTS} more pods (truncated)")
 
-    return "\n".join(lines) or "No pod metrics found."
+    text = "\n".join(lines) or "No pod metrics found."
+    sort_label = "CPU" if sort_by != "memory" else "Memory"
+    component = (
+        {
+            "kind": "data_table",
+            "title": f"Pod Metrics — Top by {sort_label} ({len(rows)})",
+            "columns": [
+                {"id": "namespace", "header": "Namespace"},
+                {"id": "name", "header": "Pod"},
+                {"id": "cpu", "header": "CPU"},
+                {"id": "memory", "header": "Memory"},
+            ],
+            "rows": rows,
+        }
+        if rows
+        else None
+    )
+    return (text, component)
 
 
 # ---------------------------------------------------------------------------
@@ -886,15 +972,48 @@ def list_statefulsets(namespace: str = "default") -> str:
         return str(result)
 
     lines = []
+    rows = []
     for sts in result.items[:MAX_RESULTS]:
         s = sts.status
+        ready = s.ready_replicas or 0
+        desired = s.replicas or 0
         lines.append(
             f"{sts.metadata.namespace}/{sts.metadata.name}  "
-            f"Ready={s.ready_replicas or 0}/{s.replicas or 0}  "
+            f"Ready={ready}/{desired}  "
             f"Updated={s.updated_replicas or 0}  "
             f"Age={age(sts.metadata.creation_timestamp)}"
         )
-    return "\n".join(lines) or "No StatefulSets found."
+        rows.append(
+            {
+                "namespace": sts.metadata.namespace,
+                "name": sts.metadata.name,
+                "ready": f"{ready}/{desired}",
+                "status": "Healthy"
+                if ready == desired and desired > 0
+                else ("Degraded" if ready > 0 else "Unavailable"),
+                "updated": s.updated_replicas or 0,
+                "age": age(sts.metadata.creation_timestamp),
+            }
+        )
+    text = "\n".join(lines) or "No StatefulSets found."
+    component = (
+        {
+            "kind": "data_table",
+            "title": f"StatefulSets ({len(rows)})",
+            "columns": [
+                {"id": "namespace", "header": "Namespace"},
+                {"id": "name", "header": "Name"},
+                {"id": "ready", "header": "Ready"},
+                {"id": "status", "header": "Status"},
+                {"id": "updated", "header": "Updated"},
+                {"id": "age", "header": "Age"},
+            ],
+            "rows": rows,
+        }
+        if rows
+        else None
+    )
+    return (text, component)
 
 
 @beta_tool
@@ -913,17 +1032,50 @@ def list_daemonsets(namespace: str = "default") -> str:
         return str(result)
 
     lines = []
+    rows = []
     for ds in result.items[:MAX_RESULTS]:
         s = ds.status
+        desired = s.desired_number_scheduled
+        ready = s.number_ready or 0
         lines.append(
             f"{ds.metadata.namespace}/{ds.metadata.name}  "
-            f"Desired={s.desired_number_scheduled}  "
-            f"Ready={s.number_ready or 0}  "
+            f"Desired={desired}  "
+            f"Ready={ready}  "
             f"Available={s.number_available or 0}  "
             f"Misscheduled={s.number_misscheduled or 0}  "
             f"Age={age(ds.metadata.creation_timestamp)}"
         )
-    return "\n".join(lines) or "No DaemonSets found."
+        rows.append(
+            {
+                "namespace": ds.metadata.namespace,
+                "name": ds.metadata.name,
+                "desired": desired,
+                "ready": ready,
+                "available": s.number_available or 0,
+                "status": "Healthy" if ready == desired else "Degraded",
+                "age": age(ds.metadata.creation_timestamp),
+            }
+        )
+    text = "\n".join(lines) or "No DaemonSets found."
+    component = (
+        {
+            "kind": "data_table",
+            "title": f"DaemonSets ({len(rows)})",
+            "columns": [
+                {"id": "namespace", "header": "Namespace"},
+                {"id": "name", "header": "Name"},
+                {"id": "desired", "header": "Desired"},
+                {"id": "ready", "header": "Ready"},
+                {"id": "available", "header": "Available"},
+                {"id": "status", "header": "Status"},
+                {"id": "age", "header": "Age"},
+            ],
+            "rows": rows,
+        }
+        if rows
+        else None
+    )
+    return (text, component)
 
 
 @beta_tool
@@ -1098,6 +1250,7 @@ def list_hpas(namespace: str = "default") -> str:
         return str(result)
 
     lines = []
+    rows = []
     for hpa in result.items[:MAX_RESULTS]:
         s = hpa.status
         ref = hpa.spec.scale_target_ref
@@ -1109,14 +1262,44 @@ def list_hpas(namespace: str = "default") -> str:
                 current = mc.resource.current.average_utilization
                 metrics_str.append(f"{mc.resource.name}={current}%")
 
+        replicas_str = f"{s.current_replicas or 0}/{hpa.spec.min_replicas or 1}-{hpa.spec.max_replicas}"
+        metrics_display = ", ".join(metrics_str) or "none"
         lines.append(
             f"{hpa.metadata.namespace}/{hpa.metadata.name}  "
             f"Target={target}  "
-            f"Replicas={s.current_replicas or 0}/{hpa.spec.min_replicas or 1}-{hpa.spec.max_replicas}  "
-            f"Metrics=[{', '.join(metrics_str) or 'none'}]  "
+            f"Replicas={replicas_str}  "
+            f"Metrics=[{metrics_display}]  "
             f"Age={age(hpa.metadata.creation_timestamp)}"
         )
-    return "\n".join(lines) or "No HPAs found."
+        rows.append(
+            {
+                "namespace": hpa.metadata.namespace,
+                "name": hpa.metadata.name,
+                "target": target,
+                "replicas": replicas_str,
+                "metrics": metrics_display,
+                "age": age(hpa.metadata.creation_timestamp),
+            }
+        )
+    text = "\n".join(lines) or "No HPAs found."
+    component = (
+        {
+            "kind": "data_table",
+            "title": f"HPAs ({len(rows)})",
+            "columns": [
+                {"id": "namespace", "header": "Namespace"},
+                {"id": "name", "header": "Name"},
+                {"id": "target", "header": "Target"},
+                {"id": "replicas", "header": "Replicas (cur/min-max)"},
+                {"id": "metrics", "header": "Metrics"},
+                {"id": "age", "header": "Age"},
+            ],
+            "rows": rows,
+        }
+        if rows
+        else None
+    )
+    return (text, component)
 
 
 @beta_tool
@@ -1199,6 +1382,8 @@ def get_firing_alerts() -> str:
         return "No alerts currently firing."
 
     lines = []
+    items = []
+    _severity_to_status = {"critical": "error", "warning": "warning", "info": "info"}
     for alert in sorted(firing, key=lambda a: a.get("labels", {}).get("severity", ""), reverse=True):
         labels = alert.get("labels", {})
         annotations = alert.get("annotations", {})
@@ -1209,8 +1394,25 @@ def get_firing_alerts() -> str:
         starts = alert.get("startsAt", "?")[:19]
 
         lines.append(f"[{severity.upper()}] {name}  namespace={ns}  since={starts}\n  {summary}")
+        items.append(
+            {
+                "name": f"[{severity.upper()}] {name}",
+                "status": _severity_to_status.get(severity.lower(), "warning"),
+                "detail": f"{ns} — {summary[:100]}" if summary else ns,
+            }
+        )
 
-    return f"Firing alerts ({len(firing)}):\n\n" + "\n\n".join(lines)
+    text = f"Firing alerts ({len(firing)}):\n\n" + "\n\n".join(lines)
+    component = (
+        {
+            "kind": "status_list",
+            "title": f"Firing Alerts ({len(items)})",
+            "items": items,
+        }
+        if items
+        else None
+    )
+    return (text, component)
 
 
 @beta_tool

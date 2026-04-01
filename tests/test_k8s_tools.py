@@ -161,7 +161,7 @@ class TestListNodes:
                 _make_node("node-2", roles=["worker"]),
             ]
         )
-        result = list_nodes.call({})
+        result = _text(list_nodes.call({}))
         assert "node-1" in result
         assert "master" in result
         assert "node-2" in result
@@ -400,7 +400,7 @@ class TestMetricsTools:
             ]
         }
         mock_k8s["core"].list_node.return_value = _list_result([_make_node("node-1", cpu="4", memory="16Gi")])
-        result = get_node_metrics.call({})
+        result = _text(get_node_metrics.call({}))
         assert "node-1" in result
         assert "CPU=500m" in result
         assert "Memory=4096Mi" in result
@@ -408,7 +408,8 @@ class TestMetricsTools:
     def test_node_metrics_not_available(self, mock_k8s):
         mock_k8s["custom"].list_cluster_custom_object.side_effect = ApiException(status=404, reason="Not Found")
         result = get_node_metrics.call({})
-        assert "metrics-server" in result.lower() or "not available" in result.lower()
+        text = _text(result) if isinstance(result, tuple) else result
+        assert "metrics-server" in text.lower() or "not available" in text.lower()
 
     def test_pod_metrics(self, mock_k8s):
         mock_k8s["custom"].list_namespaced_custom_object.return_value = {
@@ -419,7 +420,7 @@ class TestMetricsTools:
                 },
             ]
         }
-        result = get_pod_metrics.call({"namespace": "default"})
+        result = _text(get_pod_metrics.call({"namespace": "default"}))
         assert "web-1" in result
         assert "CPU=100m" in result
 
@@ -436,7 +437,7 @@ class TestMetricsTools:
                 },
             ]
         }
-        result = get_pod_metrics.call({"namespace": "default", "sort_by": "memory"})
+        result = _text(get_pod_metrics.call({"namespace": "default", "sort_by": "memory"}))
         lines = result.strip().split("\n")
         assert "high-mem" in lines[0]
 
@@ -449,5 +450,5 @@ class TestMetricsTools:
                 },
             ]
         }
-        result = get_pod_metrics.call({"namespace": "ALL"})
+        result = _text(get_pod_metrics.call({"namespace": "ALL"}))
         assert "ns1/p1" in result

@@ -1419,3 +1419,264 @@ async def eval_status(
         _EVAL_STATUS_CACHE = payload
         _EVAL_STATUS_CACHE_TS_MS = now_ms
         return payload
+
+
+# ---------------------------------------------------------------------------
+# View Management (user-scoped custom dashboards)
+# ---------------------------------------------------------------------------
+
+
+_user_cache: dict[str, tuple[str, float]] = {}
+_USER_CACHE_TTL = 60  # seconds
+
+
+def _get_current_user(
+    authorization: str | None = None,
+    x_forwarded_access_token: str | None = None,
+) -> str:
+    """Extract username from OpenShift OAuth token or fall back to dev user.
+
+    In production, the OAuth proxy sets X-Forwarded-Access-Token. We use the
+    Kubernetes TokenReview API to resolve it to a username. Results are cached
+    for 60 seconds to avoid per-request K8s API calls. In local dev,
+    PULSE_AGENT_DEV_USER overrides this.
+    """
+    import hashlib
+
+    dev_user = os.environ.get("PULSE_AGENT_DEV_USER", "")
+    if dev_user:
+        return dev_user
+
+    token = x_forwarded_access_token or ""
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+
+    if not token:
+        return "anonymous"
+
+    # Check cache
+    token_hash = hashlib.sha256(token.encode()).hexdigest()[:12]
+    cached = _user_cache.get(token_hash)
+    if cached and (time.time() - cached[1]) < _USER_CACHE_TTL:
+        return cached[0]
+
+    # Try to resolve via Kubernetes TokenReview
+    try:
+        from kubernetes import client as k8s_client
+
+        from .k8s_client import _load_k8s
+
+        _load_k8s()
+        auth_api = k8s_client.AuthenticationV1Api()
+        review = k8s_client.TokenReview(spec=k8s_client.TokenReviewSpec(token=token))
+        result = auth_api.create_token_review(review)
+        if result.status.authenticated:
+            username = result.status.user.username
+            _user_cache[token_hash] = (username, time.time())
+            return username
+    except Exception:
+        logger.debug("TokenReview failed, using token hash as user identity")
+
+    # Fallback: use a hash of the token as a stable user identifier
+    fallback = f"user-{token_hash}"
+    _user_cache[token_hash] = (fallback, time.time())
+    return fallback
+
+
+@app.get("/views")
+async def rest_list_views(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+):
+    """List all views for the current user."""
+    _verify_rest_token(authorization, token)
+    from . import db
+
+    owner = _get_current_user(authorization, x_forwarded_access_token)
+    views = db.list_views(owner)
+    return {"views": views or [], "owner": owner}
+
+
+@app.get("/views/{view_id}")
+async def rest_get_view(
+    view_id: str,
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+):
+    """Get a single view by ID."""
+    _verify_rest_token(authorization, token)
+    from fastapi.responses import JSONResponse
+
+    from . import db
+
+    owner = _get_current_user(authorization, x_forwarded_access_token)
+    view = db.get_view(view_id, owner)
+    if view is None:
+        return JSONResponse(status_code=404, content={"error": "View not found"})
+    return view
+
+
+@app.post("/views")
+async def rest_create_view(
+    request: Request,
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+):
+    """Save a new view for the current user."""
+    _verify_rest_token(authorization, token)
+    from fastapi.responses import JSONResponse
+
+    from . import db
+
+    owner = _get_current_user(authorization, x_forwarded_access_token)
+    body = await request.json()
+
+    view_id = body.get("id", f"cv-{uuid.uuid4().hex[:12]}")
+    title = body.get("title", "Untitled View")
+    description = body.get("description", "")
+    layout = body.get("layout", [])
+    positions = body.get("positions", {})
+    icon = body.get("icon", "")
+
+    if not layout:
+        return JSONResponse(status_code=400, content={"error": "layout is required"})
+
+    result = db.save_view(owner, view_id, title, description, layout, positions, icon)
+    if result is None:
+        return JSONResponse(status_code=500, content={"error": "Failed to save view"})
+    return {"id": result, "owner": owner}
+
+
+@app.put("/views/{view_id}")
+async def rest_update_view(
+    view_id: str,
+    request: Request,
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+):
+    """Update a view (title, description, layout, positions). Owner only."""
+    _verify_rest_token(authorization, token)
+    from fastapi.responses import JSONResponse
+
+    from . import db
+
+    owner = _get_current_user(authorization, x_forwarded_access_token)
+    body = await request.json()
+
+    result = db.update_view(view_id, owner, **body)
+    if not result:
+        return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
+    return {"updated": True}
+
+
+@app.delete("/views/{view_id}")
+async def rest_delete_view(
+    view_id: str,
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+):
+    """Delete a view. Owner only."""
+    _verify_rest_token(authorization, token)
+    from . import db
+
+    owner = _get_current_user(authorization, x_forwarded_access_token)
+    db.delete_view(view_id, owner)
+    return {"deleted": True}
+
+
+@app.post("/views/{view_id}/clone")
+async def rest_clone_view(
+    view_id: str,
+    request: Request,
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+):
+    """Clone a view to the current user's account (for share links)."""
+    _verify_rest_token(authorization, token)
+    from fastapi.responses import JSONResponse
+
+    from . import db
+
+    owner = _get_current_user(authorization, x_forwarded_access_token)
+    new_id = db.clone_view(view_id, owner)
+    if new_id is None:
+        return JSONResponse(status_code=404, content={"error": "Source view not found"})
+    return {"id": new_id, "owner": owner}
+
+
+@app.post("/views/{view_id}/share")
+async def rest_share_view(
+    view_id: str,
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+):
+    """Generate a share link for a view. The link allows others to clone it."""
+    _verify_rest_token(authorization, token)
+    import hashlib
+    import hmac
+
+    from fastapi.responses import JSONResponse
+
+    from . import db
+
+    owner = _get_current_user(authorization, x_forwarded_access_token)
+    view = db.get_view(view_id, owner)
+    if view is None:
+        return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
+
+    secret = os.environ.get("PULSE_AGENT_WS_TOKEN", "pulse")
+    expires = int(time.time()) + 86400  # 24 hours
+    payload = f"{view_id}:{expires}"
+    signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+    share_token = f"{payload}:{signature}"
+
+    return {"share_token": share_token, "view_id": view_id, "expires_in": 86400}
+
+
+@app.post("/views/claim/{share_token:path}")
+async def rest_claim_shared_view(
+    share_token: str,
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+):
+    """Claim a shared view using a share token. Clones the view to your account."""
+    _verify_rest_token(authorization, token)
+    import hashlib
+    import hmac
+
+    from fastapi.responses import JSONResponse
+
+    from . import db
+
+    # Verify share token
+    parts = share_token.split(":")
+    if len(parts) != 3:
+        return JSONResponse(status_code=400, content={"error": "Invalid share token"})
+
+    view_id, expires_str, signature = parts
+    try:
+        expires = int(expires_str)
+    except ValueError:
+        return JSONResponse(status_code=400, content={"error": "Invalid share token"})
+
+    if int(time.time()) > expires:
+        return JSONResponse(status_code=410, content={"error": "Share link has expired"})
+
+    secret = os.environ.get("PULSE_AGENT_WS_TOKEN", "pulse")
+    expected_sig = hmac.new(secret.encode(), f"{view_id}:{expires_str}".encode(), hashlib.sha256).hexdigest()[:16]
+    if not hmac.compare_digest(signature, expected_sig):
+        return JSONResponse(status_code=400, content={"error": "Invalid share token"})
+
+    owner = _get_current_user(authorization, x_forwarded_access_token)
+    new_id = db.clone_view(view_id, owner)
+    if new_id is None:
+        return JSONResponse(status_code=404, content={"error": "Source view not found"})
+    return {"id": new_id, "owner": owner}
