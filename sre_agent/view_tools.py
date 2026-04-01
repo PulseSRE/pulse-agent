@@ -8,7 +8,9 @@ from anthropic import beta_tool
 
 from .tool_registry import register_tool
 
-# Module-level current user identity (set by API layer before agent runs)
+# Module-level current user identity (set by API layer before each agent turn).
+# Safe because agent turns are serialized per-WebSocket and set_current_user
+# is called before asyncio.to_thread spawns the tool execution thread.
 _current_user_id: str = "anonymous"
 
 
@@ -184,13 +186,13 @@ def update_view_widgets(
     new_title: str = "",
     new_description: str = "",
 ) -> str:
-    """Modify an existing view — remove a widget, rename the view, or update its description. The UI will auto-refresh after changes.
+    """Modify an existing view — remove/reorder widgets, rename, or update description. The UI auto-refreshes.
 
     Args:
         view_id: The view ID (e.g. 'cv-abc123').
-        action: One of: 'remove_widget', 'rename', 'update_description'.
-        widget_index: Index of the widget to remove (only for 'remove_widget'). Use get_view_details to see indices.
-        new_title: New title for the view (only for 'rename').
+        action: One of: 'remove_widget', 'move_widget', 'rename', 'update_description'.
+        widget_index: Widget index for remove/move actions. Use get_view_details to see indices.
+        new_title: New title (for 'rename') or new position as string (for 'move_widget', e.g. '0' for top).
         new_description: New description (only for 'update_description').
     """
     from . import db
@@ -211,6 +213,21 @@ def update_view_widgets(
         # Return a marker so the API layer can emit a view_updated event
         return f"__VIEW_UPDATED__{view_id}|Removed widget [{widget_index}]: {removed_title}. View now has {len(new_layout)} widgets."
 
+    elif action == "move_widget":
+        layout = view.get("layout", [])
+        if widget_index < 0 or widget_index >= len(layout):
+            return f"Invalid widget index {widget_index}."
+        try:
+            new_pos = int(new_title)  # reuse new_title param for target position
+        except (ValueError, TypeError):
+            return "Error: provide target position as new_title (e.g. '0' for top)."
+        new_pos = max(0, min(new_pos, len(layout) - 1))
+        widget = layout.pop(widget_index)
+        layout.insert(new_pos, widget)
+        db.update_view(view_id, owner, layout=layout)
+        moved_title = widget.get("title", widget.get("kind", "widget"))
+        return f"__VIEW_UPDATED__{view_id}|Moved widget '{moved_title}' from position {widget_index} to {new_pos}."
+
     elif action == "rename":
         if not new_title:
             return "Error: new_title is required for rename action."
@@ -222,7 +239,7 @@ def update_view_widgets(
         return f"__VIEW_UPDATED__{view_id}|Updated view description."
 
     else:
-        return f"Unknown action '{action}'. Use: remove_widget, rename, update_description."
+        return f"Unknown action '{action}'. Use: remove_widget, move_widget, rename, update_description."
 
 
 @beta_tool
