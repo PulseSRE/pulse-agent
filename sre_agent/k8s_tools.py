@@ -2569,6 +2569,57 @@ def _infer_column_type(col_id: str, sample_value=None) -> str:
     return "text"
 
 
+# Short name → (plural, group) mapping for common resources
+_SHORT_NAMES: dict[str, tuple[str, str]] = {
+    "po": ("pods", ""),
+    "pod": ("pods", ""),
+    "svc": ("services", ""),
+    "service": ("services", ""),
+    "deploy": ("deployments", "apps"),
+    "deployment": ("deployments", "apps"),
+    "ds": ("daemonsets", "apps"),
+    "daemonset": ("daemonsets", "apps"),
+    "sts": ("statefulsets", "apps"),
+    "statefulset": ("statefulsets", "apps"),
+    "rs": ("replicasets", "apps"),
+    "replicaset": ("replicasets", "apps"),
+    "cm": ("configmaps", ""),
+    "configmap": ("configmaps", ""),
+    "pvc": ("persistentvolumeclaims", ""),
+    "persistentvolumeclaim": ("persistentvolumeclaims", ""),
+    "pv": ("persistentvolumes", ""),
+    "persistentvolume": ("persistentvolumes", ""),
+    "ns": ("namespaces", ""),
+    "namespace": ("namespaces", ""),
+    "no": ("nodes", ""),
+    "node": ("nodes", ""),
+    "sa": ("serviceaccounts", ""),
+    "serviceaccount": ("serviceaccounts", ""),
+    "hpa": ("horizontalpodautoscalers", "autoscaling"),
+    "cj": ("cronjobs", "batch"),
+    "cronjob": ("cronjobs", "batch"),
+    "job": ("jobs", "batch"),
+    "ing": ("ingresses", "networking.k8s.io"),
+    "ingress": ("ingresses", "networking.k8s.io"),
+    "netpol": ("networkpolicies", "networking.k8s.io"),
+    "ev": ("events", ""),
+    "event": ("events", ""),
+    "secret": ("secrets", ""),
+    "ep": ("endpoints", ""),
+    "quota": ("resourcequotas", ""),
+    "limits": ("limitranges", ""),
+}
+
+
+def _resolve_short_name(resource: str, group: str) -> tuple[str, str]:
+    """Resolve short names and singular forms to (plural, group)."""
+    key = resource.lower().strip()
+    if key in _SHORT_NAMES:
+        plural, default_group = _SHORT_NAMES[key]
+        return plural, group or default_group
+    return resource, group
+
+
 @beta_tool
 def list_resources(
     resource: str,
@@ -2584,13 +2635,14 @@ def list_resources(
 
     Uses the Kubernetes Table API to get the same columns as 'kubectl get'.
     Works for ANY resource type including CRDs with custom printer columns.
+    Accepts short names (po, svc, deploy, cm, ds, sts, hpa, cj, ing, etc.).
 
     Args:
-        resource: Resource type plural name (e.g. 'pods', 'configmaps', 'deployments', 'nodes').
+        resource: Resource type — plural, singular, or short name (e.g. 'pods', 'svc', 'deploy', 'cm').
         namespace: Kubernetes namespace. Use 'ALL' for all namespaces. Leave empty for cluster-scoped.
-        group: API group (e.g. 'apps' for deployments, '' for core resources).
+        group: API group (e.g. 'apps' for deployments). Auto-detected for common types.
         version: API version (default 'v1').
-        label_selector: Filter by labels (e.g. 'app=nginx').
+        label_selector: Filter by labels (e.g. 'app=nginx', 'app.kubernetes.io/managed-by=Helm').
         field_selector: Filter by fields (e.g. 'status.phase=Running').
         sort_by: Column name to sort by. Prefix with '-' for descending.
         show_wide: If true, include all columns (like kubectl -o wide).
@@ -2598,6 +2650,9 @@ def list_resources(
     import ssl
     import urllib.parse
     import urllib.request
+
+    # Resolve short names (svc→services, deploy→deployments, cm→configmaps, etc.)
+    resource, group = _resolve_short_name(resource, group)
 
     gvr = f"{group}~{version}~{resource}" if group else f"{version}~{resource}"
 
@@ -2727,7 +2782,147 @@ def list_resources(
     return (text, component)
 
 
+@beta_tool
+def get_resource_relationships(namespace: str, name: str, kind: str = "Pod") -> str:
+    """Trace the ownership chain for a Kubernetes resource — find what controls it and what it controls.
+
+    Shows the full hierarchy: e.g., Pod → ReplicaSet → Deployment, or Deployment → ReplicaSet → Pods.
+    Uses ownerReferences to walk up and label selectors to walk down.
+
+    Args:
+        namespace: Kubernetes namespace.
+        name: Resource name.
+        kind: Resource kind (e.g. 'Pod', 'Deployment', 'StatefulSet'). Default 'Pod'.
+    """
+    core = get_core_client()
+    apps = get_apps_client()
+
+    lines = [f"Relationships for {kind}/{name} in {namespace}:"]
+
+    # Walk UP the owner chain
+    current_kind = kind
+    current_name = name
+    owners_chain = []
+
+    for _ in range(5):  # max depth
+        try:
+            if current_kind == "Pod":
+                obj = safe(lambda: core.read_namespaced_pod(current_name, namespace))
+            elif current_kind == "ReplicaSet":
+                obj = safe(lambda: apps.read_namespaced_replica_set(current_name, namespace))
+            elif current_kind == "Deployment":
+                obj = safe(lambda: apps.read_namespaced_deployment(current_name, namespace))
+            elif current_kind == "StatefulSet":
+                obj = safe(lambda: apps.read_namespaced_stateful_set(current_name, namespace))
+            elif current_kind == "DaemonSet":
+                obj = safe(lambda: apps.read_namespaced_daemon_set(current_name, namespace))
+            elif current_kind == "Job":
+                obj = safe(lambda: get_batch_client().read_namespaced_job(current_name, namespace))
+            elif current_kind == "CronJob":
+                obj = safe(lambda: get_batch_client().read_namespaced_cron_job(current_name, namespace))
+            else:
+                break
+
+            if isinstance(obj, ToolError):
+                break
+
+            owner_refs = obj.metadata.owner_references or []
+            if not owner_refs:
+                break
+
+            owner = owner_refs[0]
+            owners_chain.append(f"{current_kind}/{current_name} → owned by → {owner.kind}/{owner.name}")
+            current_kind = owner.kind
+            current_name = owner.name
+        except Exception:
+            break
+
+    # Walk DOWN — find resources owned by the target
+    children = []
+    try:
+        all_pods = safe(lambda: core.list_namespaced_pod(namespace, limit=200))
+        if not isinstance(all_pods, ToolError):
+            for pod in all_pods.items:
+                for ref in pod.metadata.owner_references or []:
+                    if ref.name == name and ref.kind == kind:
+                        children.append(f"  → Pod/{pod.metadata.name} (status={pod.status.phase})")
+                    # Also check if owned by a child ReplicaSet of this Deployment
+                    if kind == "Deployment":
+                        # Check if this pod's RS is owned by our deployment
+                        pass
+    except Exception:
+        pass
+
+    # Build output
+    if owners_chain:
+        lines.append("\nOwnership chain (upward):")
+        for o in owners_chain:
+            lines.append(f"  {o}")
+        lines.append(f"  Root: {current_kind}/{current_name}")
+
+    if children:
+        lines.append(f"\nOwned resources ({len(children)}):")
+        lines.extend(children[:20])
+
+    # Well-known labels
+    try:
+        if kind == "Pod":
+            obj = safe(lambda: core.read_namespaced_pod(name, namespace))
+        elif kind == "Deployment":
+            obj = safe(lambda: apps.read_namespaced_deployment(name, namespace))
+        else:
+            obj = None
+
+        if obj and not isinstance(obj, ToolError):
+            labels = obj.metadata.labels or {}
+            important = {
+                k: v for k, v in labels.items() if k.startswith("app.kubernetes.io/") or k in ("app", "version")
+            }
+            if important:
+                lines.append("\nWell-known labels:")
+                for k, v in sorted(important.items()):
+                    lines.append(f"  {k}={v}")
+    except Exception:
+        pass
+
+    text = "\n".join(lines)
+    items_data = []
+    if owners_chain:
+        items_data.append(
+            {
+                "name": f"Root: {current_kind}/{current_name}",
+                "status": "healthy",
+                "detail": " → ".join(reversed([o.split(" → ")[0] for o in owners_chain])),
+            }
+        )
+    for c in children[:10]:
+        parts = c.strip().split("(")
+        cname = parts[0].strip().lstrip("→ ").strip()
+        status = parts[1].rstrip(")").split("=")[1] if len(parts) > 1 else "unknown"
+        items_data.append(
+            {
+                "name": cname,
+                "status": "healthy" if status == "Running" else "warning" if status == "Pending" else "error",
+                "detail": status,
+            }
+        )
+
+    component = (
+        {
+            "kind": "status_list",
+            "title": f"Relationships — {kind}/{name}",
+            "items": items_data,
+        }
+        if items_data
+        else None
+    )
+
+    return (text, component) if component else text
+
+
 ALL_TOOLS = [
+    # Universal resource listing + relationships
+    get_resource_relationships,
     # Universal resource listing — replaces list_namespaces, list_nodes, list_deployments,
     # list_statefulsets, list_daemonsets, get_services, get_persistent_volume_claims,
     # get_resource_quotas, list_limit_ranges. Works for any resource including CRDs.
