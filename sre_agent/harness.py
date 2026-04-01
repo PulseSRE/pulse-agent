@@ -235,55 +235,17 @@ ALWAYS_INCLUDE = {
 
 
 def select_tools(query: str, all_tools: list, all_tool_map: dict) -> tuple[list, dict]:
-    """Select relevant tools based on the user's query intent.
+    """Return all tools — no filtering.
 
-    Returns (filtered_tool_defs, filtered_tool_map).
-    Falls back to all tools if no category matches.
+    Category-based filtering was too fragile and caused tools to be missing
+    for natural-language queries. With prompt caching, including all tools
+    has negligible token cost (~90% cache hit rate on the system prompt).
 
-    Strategy: be permissive. Include top 3 categories (not 2), always include
-    core diagnostic tools, and cross-pollinate related categories.
+    The TOOL_CATEGORIES dict above is retained for reference and for the
+    cluster context injection hints, but is no longer used for filtering.
     """
-    query_lower = query.lower()
-
-    # Score each category by keyword matches
-    scores: dict[str, int] = {}
-    for category, config in TOOL_CATEGORIES.items():
-        score = sum(1 for kw in config["keywords"] if kw in query_lower)
-        if score > 0:
-            scores[category] = score
-
-    if not scores:
-        # No match — return all tools (generic query)
-        return [t.to_dict() for t in all_tools], {t.name: t for t in all_tools}
-
-    # Take top 3 categories (was 2 — too restrictive)
-    top_categories = sorted(scores.keys(), key=lambda c: scores[c], reverse=True)[:3]
-    selected_names = set(ALWAYS_INCLUDE)
-    for cat in top_categories:
-        selected_names.update(TOOL_CATEGORIES[cat]["tools"])
-
-    # Cross-pollinate related categories
-    if "diagnostics" in top_categories or "workloads" in top_categories:
-        selected_names.update(TOOL_CATEGORIES["workloads"]["tools"])
-        selected_names.update(TOOL_CATEGORIES["diagnostics"]["tools"])
-    if "monitoring" in top_categories:
-        selected_names.update(TOOL_CATEGORIES["diagnostics"]["tools"])
-
-    # Filter to only tools that exist in the actual tool list
-    available_names = {t.name for t in all_tools}
-    selected_names &= available_names
-
-    filtered = [t for t in all_tools if t.name in selected_names]
-
-    logger.info(
-        "Tool selection: query=%r categories=%s selected=%d/%d tools",
-        query[:50],
-        top_categories,
-        len(filtered),
-        len(all_tools),
-    )
-
-    return [t.to_dict() for t in filtered], {t.name: t for t in filtered}
+    logger.info("Tool selection: returning all %d tools for query=%r", len(all_tools), query[:50])
+    return [t.to_dict() for t in all_tools], {t.name: t for t in all_tools}
 
 
 # ---------------------------------------------------------------------------

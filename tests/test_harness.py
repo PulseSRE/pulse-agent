@@ -50,7 +50,7 @@ class TestSelectTools:
         defs, selected = select_tools("check cluster health", all_tools, tool_map)
         assert "list_pods" in selected
         assert "get_events" in selected
-        assert len(defs) < len(all_tools)
+        assert len(defs) == len(all_tools)  # All tools always returned
 
     def test_security_query(self):
         all_tools, tool_map = self._all_tools()
