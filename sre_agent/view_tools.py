@@ -2,27 +2,26 @@
 
 from __future__ import annotations
 
+import contextvars
 import uuid
 
 from anthropic import beta_tool
 
 from .tool_registry import register_tool
 
-# Module-level current user identity (set by API layer before each agent turn).
-# Safe because agent turns are serialized per-WebSocket and set_current_user
-# is called before asyncio.to_thread spawns the tool execution thread.
-_current_user_id: str = "anonymous"
+# Context variable for current user identity — async-safe and propagates
+# across asyncio.to_thread boundaries (unlike threading.local or globals).
+_current_user_var: contextvars.ContextVar[str] = contextvars.ContextVar("current_user", default="anonymous")
 
 
 def set_current_user(owner: str) -> None:
     """Set the current user for view tools (called by API layer per-request)."""
-    global _current_user_id
-    _current_user_id = owner
+    _current_user_var.set(owner)
 
 
 def get_current_user() -> str:
     """Get the current user identity."""
-    return _current_user_id
+    return _current_user_var.get()
 
 
 @beta_tool
