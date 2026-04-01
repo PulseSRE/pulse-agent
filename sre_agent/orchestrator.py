@@ -43,6 +43,10 @@ SRE_KEYWORDS = [
     "volume",
     "operator",
     "update",
+    "certificate",
+    "cert",
+    "tls",
+    "expir",
 ]
 
 SECURITY_KEYWORDS = [
@@ -80,6 +84,11 @@ BOTH_KEYWORDS = [
 ]
 
 
+def _keyword_score(query_lower: str, keywords: list[str]) -> float:
+    """Score query against keywords, weighting longer (more specific) keywords higher."""
+    return sum(len(kw) for kw in keywords if kw in query_lower)
+
+
 def classify_intent(query: str) -> AgentMode:
     """Classify a user query as sre, security, or both."""
     q = query.lower()
@@ -88,8 +97,14 @@ def classify_intent(query: str) -> AgentMode:
     if any(kw in q for kw in BOTH_KEYWORDS):
         return "both"
 
-    sre_score = sum(1 for kw in SRE_KEYWORDS if kw in q)
-    sec_score = sum(1 for kw in SECURITY_KEYWORDS if kw in q)
+    sre_score = _keyword_score(q, SRE_KEYWORDS)
+    sec_score = _keyword_score(q, SECURITY_KEYWORDS)
+
+    # If both domains match and scores are close, route to both
+    if sre_score > 0 and sec_score > 0:
+        ratio = min(sre_score, sec_score) / max(sre_score, sec_score)
+        if ratio >= 0.7:
+            return "both"
 
     if sec_score > sre_score and sec_score > 0:
         return "security"

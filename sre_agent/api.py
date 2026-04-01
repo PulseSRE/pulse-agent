@@ -68,8 +68,8 @@ _pending_confirms: dict[str, asyncio.Future] = {}
 _pending_nonces: dict[str, str] = {}
 # Timestamps for TTL-based cleanup
 _pending_timestamps: dict[str, float] = {}
-# TTL for stale pending state (5 minutes)
-_PENDING_TTL_SECONDS = 300
+# TTL for stale pending state (2 minutes)
+_PENDING_TTL_SECONDS = 120
 
 # Max WebSocket message size (1MB)
 MAX_MESSAGE_SIZE = 1_048_576
@@ -977,6 +977,8 @@ async def websocket_monitor(websocket: WebSocket):
         pass  # Use defaults
 
     session = MonitorSession(websocket, trust_level, auto_fix_categories)
+    ws_id = str(uuid.uuid4())
+    _ws_alive[ws_id] = True
 
     # Start scan loop as background task
     scan_task = asyncio.create_task(session.run_loop())
@@ -987,6 +989,9 @@ async def websocket_monitor(websocket: WebSocket):
     try:
         while True:
             raw = await websocket.receive_text()
+
+            # Opportunistic cleanup of stale pending confirms
+            _cleanup_stale_pending()
 
             # H6: message size check (matching the agent WS pattern)
             if len(raw) > MAX_MESSAGE_SIZE:
@@ -1040,6 +1045,7 @@ async def websocket_monitor(websocket: WebSocket):
             await scan_task
         except asyncio.CancelledError:
             pass
+        _ws_alive.pop(ws_id, None)
 
 
 # ── Protocol v2: REST endpoints ───────────────────────────────────────────

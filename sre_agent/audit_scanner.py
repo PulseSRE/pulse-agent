@@ -49,28 +49,29 @@ def scan_config_changes() -> list[dict]:
                     )
                     break
 
-        # For each recently modified ConfigMap, check for pod failures in the same namespace
-        for cm_info in recent_cms[:20]:  # Cap to prevent excessive API calls
-            ns = cm_info["namespace"]
-            events = safe(
-                lambda: core.list_namespaced_event(
-                    ns,
-                    field_selector="reason=CrashLoopBackOff,type=Warning",
+        # Batch-fetch warning events once to avoid N+1 per-namespace API calls
+        failure_events_by_ns: dict[str, list] = {}
+        for reason in ("CrashLoopBackOff", "BackOff"):
+            all_events = safe(
+                lambda r=reason: core.list_event_for_all_namespaces(
+                    field_selector=f"reason={r},type=Warning",
+                    limit=200,
                 )
             )
-            if isinstance(events, ToolError) or not events.items:
-                # Also check for BackOff events
-                events = safe(
-                    lambda: core.list_namespaced_event(
-                        ns,
-                        field_selector="reason=BackOff,type=Warning",
-                    )
-                )
-                if isinstance(events, ToolError) or not events.items:
-                    continue
+            if not isinstance(all_events, ToolError):
+                for ev in all_events.items:
+                    ev_ns = ev.metadata.namespace
+                    failure_events_by_ns.setdefault(ev_ns, []).append(ev)
+
+        # For each recently modified ConfigMap, check for pod failures in the same namespace
+        for cm_info in recent_cms[:20]:
+            ns = cm_info["namespace"]
+            ns_events = failure_events_by_ns.get(ns, [])
+            if not ns_events:
+                continue
 
             # Check if any failure events happened after the config change
-            for event in events.items:
+            for event in ns_events:
                 event_time = event.last_timestamp or event.metadata.creation_timestamp
                 if event_time and event_time > cm_info["updated_at"]:
                     pod_name = event.involved_object.name if event.involved_object else "unknown"
@@ -202,6 +203,20 @@ def scan_recent_deployments() -> list[dict]:
         if isinstance(deploys, ToolError):
             return findings
 
+        # Batch-fetch warning events once to avoid N+1 per-deployment API calls
+        all_warning_events = safe(
+            lambda: core.list_event_for_all_namespaces(
+                field_selector="type=Warning",
+                limit=500,
+            )
+        )
+        warning_events_by_obj: dict[str, list] = {}
+        if not isinstance(all_warning_events, ToolError):
+            for ev in all_warning_events.items:
+                if ev.involved_object and ev.involved_object.name:
+                    obj_key = f"{ev.metadata.namespace}/{ev.involved_object.name}"
+                    warning_events_by_obj.setdefault(obj_key, []).append(ev)
+
         for dep in deploys.items:
             ns = dep.metadata.namespace
             if _skip_namespace(ns):
@@ -220,16 +235,10 @@ def scan_recent_deployments() -> list[dict]:
                         unavailable = dep.status.unavailable_replicas or 0
 
                         if unavailable > 0:
-                            # Check for related warning events
-                            events = safe(
-                                lambda: core.list_namespaced_event(
-                                    ns,
-                                    field_selector=f"involvedObject.name={dep.metadata.name},type=Warning",
-                                )
-                            )
-                            event_reasons = []
-                            if not isinstance(events, ToolError):
-                                event_reasons = list({e.reason for e in events.items[:5]})
+                            # Look up related warning events from batch-fetched data
+                            obj_key = f"{ns}/{dep.metadata.name}"
+                            dep_events = warning_events_by_obj.get(obj_key, [])
+                            event_reasons = list({e.reason for e in dep_events[:5]})
 
                             findings.append(
                                 _make_finding(

@@ -170,6 +170,10 @@ def describe_pod(namespace: str, pod_name: str) -> str:
         namespace: Kubernetes namespace.
         pod_name: Name of the pod.
     """
+    if err := _validate_k8s_namespace(namespace):
+        return err
+    if err := _validate_k8s_name(pod_name, "pod_name"):
+        return err
     core = get_core_client()
     result = safe(lambda: core.read_namespaced_pod(pod_name, namespace))
     if isinstance(result, ToolError):
@@ -250,6 +254,10 @@ def get_pod_logs(
         tail_lines: Number of recent log lines to retrieve (max 1000).
         previous: If True, get logs from the previous terminated container instance.
     """
+    if err := _validate_k8s_namespace(namespace):
+        return err
+    if err := _validate_k8s_name(pod_name, "pod_name"):
+        return err
     tail_lines = min(max(1, tail_lines), MAX_TAIL_LINES)
     kwargs: dict = {"name": pod_name, "namespace": namespace, "tail_lines": tail_lines, "previous": previous}
     if container:
@@ -297,6 +305,8 @@ def describe_node(node_name: str) -> str:
     Args:
         node_name: Name of the node.
     """
+    if err := _validate_k8s_name(node_name, "node_name"):
+        return err
     result = safe(lambda: get_core_client().read_node(node_name))
     if isinstance(result, ToolError):
         return str(result)

@@ -51,7 +51,7 @@ class TestScanConfigChanges:
         event = SimpleNamespace(
             reason="CrashLoopBackOff",
             last_timestamp=_ts(3),
-            metadata=SimpleNamespace(creation_timestamp=_ts(3)),
+            metadata=SimpleNamespace(creation_timestamp=_ts(3), namespace="prod"),
             involved_object=SimpleNamespace(name="web-pod-abc", kind="Pod"),
         )
         with (
@@ -59,7 +59,7 @@ class TestScanConfigChanges:
             patch("sre_agent.audit_scanner.get_apps_client"),
         ):
             core.return_value.list_config_map_for_all_namespaces.return_value = SimpleNamespace(items=[cm])
-            core.return_value.list_namespaced_event.return_value = SimpleNamespace(items=[event])
+            core.return_value.list_event_for_all_namespaces.return_value = SimpleNamespace(items=[event])
             findings = scan_config_changes()
         assert len(findings) == 1
         assert findings[0]["category"] == "audit_config"
@@ -165,7 +165,7 @@ class TestScanRecentDeployments:
             patch("sre_agent.audit_scanner.get_core_client") as core,
         ):
             apps.return_value.list_deployment_for_all_namespaces.return_value = SimpleNamespace(items=[dep])
-            core.return_value.list_namespaced_event.return_value = SimpleNamespace(items=[])
+            core.return_value.list_event_for_all_namespaces.return_value = SimpleNamespace(items=[])
             findings = scan_recent_deployments()
         assert len(findings) == 1
         assert findings[0]["category"] == "audit_deployment"

@@ -670,8 +670,8 @@ def scan_expiring_certs() -> list[dict]:
                                 resources=[{"kind": "Secret", "name": name, "namespace": ns}],
                             )
                         )
-            except Exception:
-                pass  # Skip unparseable certs
+            except Exception as e:
+                logger.debug("Failed to parse certificate: %s", e)
     except Exception as e:
         logger.error("Certificate scan failed: %s", e)
     return findings
@@ -1118,8 +1118,12 @@ def _estimate_finding_confidence(finding: dict) -> float:
     return round(base, 2)
 
 
-def _estimate_auto_fix_confidence(finding: dict) -> float:
-    """Estimate confidence for autonomous fixes for outcome calibration."""
+def _estimate_auto_fix_confidence(finding: dict, recent_fixes: dict[str, float] | None = None) -> float:
+    """Estimate confidence for autonomous fixes for outcome calibration.
+
+    Confidence is reduced when the same resource was recently fixed,
+    indicating a recurring issue that auto-fix may not resolve.
+    """
     category = str(finding.get("category", ""))
     severity = str(finding.get("severity", "warning"))
     base_by_category = {
@@ -1132,7 +1136,17 @@ def _estimate_auto_fix_confidence(finding: dict) -> float:
         base -= 0.1
     elif severity == SEVERITY_INFO:
         base += 0.05
-    return max(0.0, min(1.0, round(base, 2)))
+
+    # Reduce confidence for recurring issues on the same resource
+    if recent_fixes:
+        resources = finding.get("resources", [])
+        if resources:
+            r = resources[0]
+            resource_key = f"{r.get('kind', '')}:{r.get('namespace', '')}:{r.get('name', '')}"
+            if resource_key in recent_fixes:
+                base *= 0.7  # 30% reduction for recurring issues
+
+    return max(0.1, min(1.0, round(base, 2)))
 
 
 def _finding_key(finding: dict) -> str:
@@ -1339,8 +1353,8 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
     )
     global _investigation_tokens_used, _investigation_calls
     _investigation_calls += 1
-    # Estimate tokens from response length (rough approximation)
-    _investigation_tokens_used += len(response) * 2  # rough input+output estimate
+    # Estimate tokens (~4 chars per token for English text)
+    _investigation_tokens_used += len(response) // 4 + len(effective_system) // 4
 
     parsed = _extract_json_object(response) or {}
     summary = str(parsed.get("summary") or response[:300] or "Investigation completed")
@@ -1561,7 +1575,7 @@ class MonitorSession:
                         )
                         continue
 
-            confidence = _estimate_auto_fix_confidence(finding)
+            confidence = _estimate_auto_fix_confidence(finding, self._recent_fixes)
             action_report = _make_action_report(
                 finding_id=finding["id"],
                 tool="",
@@ -1869,26 +1883,39 @@ class MonitorSession:
             resources = payload.get("resources", [])
             matches_active = False
             matched_resource = ""
+            ns_improved = False
             for resource in resources:
                 key = f"{resource.get('kind', '')}:{resource.get('namespace', '')}:{resource.get('name', '')}"
                 if key in active_by_category.get(category, set()):
                     matches_active = True
                     matched_resource = key
                     break
-                # Also check namespace-level: if any resource in same ns+category is still failing
+                # Check namespace-level: if any resource in same ns+category is still failing
                 # This catches renamed pods (e.g. after a restart)
                 ns_key = f"{resource.get('namespace', '')}:{category}"
-                if active_ns_category.get(ns_key):
-                    matches_active = True
-                    matched_resource = f"{ns_key} (namespace-level match)"
+                ns_active = active_ns_category.get(ns_key, set())
+                if ns_active:
+                    # Count how many resources the original fix targeted in this namespace
+                    orig_ns_count = sum(1 for r in resources if r.get("namespace", "") == resource.get("namespace", ""))
+                    if len(ns_active) < orig_ns_count:
+                        # Namespace improved — fewer failures despite pod rename
+                        ns_improved = True
+                        matched_resource = f"{ns_key} (namespace count {orig_ns_count} -> {len(ns_active)})"
+                    else:
+                        matches_active = True
+                        matched_resource = f"{ns_key} (namespace-level match)"
                     break
 
-            status = "still_failing" if matches_active else "verified"
-            evidence = (
-                f"Resource still appears in active {category} findings: {matched_resource}"
-                if matches_active
-                else f"No active {category} findings for affected resources on verification scan"
-            )
+            if matches_active:
+                status = "still_failing"
+                evidence = f"Resource still appears in active {category} findings: {matched_resource}"
+            elif ns_improved:
+                status = "improved"
+                evidence = f"Namespace-level improvement in {category} findings: {matched_resource}"
+            else:
+                status = "verified"
+                evidence = f"No active {category} findings for affected resources on verification scan"
+
             verification_report = {
                 "type": "verification_report",
                 "id": f"v-{uuid.uuid4().hex[:12]}",
