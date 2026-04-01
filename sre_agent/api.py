@@ -317,35 +317,37 @@ async def _run_agent_ws(
 
     # If create_dashboard was called, emit a view_spec event with all components
     if "create_dashboard" in session_tools and session_components:
+        import re as _re
         import time as _time
 
-        # Extract title/description from the tool's marker in the messages
         view_title = "Custom Dashboard"
         view_desc = ""
         view_id = f"cv-{__import__('uuid').uuid4().hex[:12]}"
 
-        # Search the messages for the create_dashboard tool result containing the marker
+        # Search messages for the __VIEW_SPEC__ marker in tool_result blocks
         for msg in reversed(messages):
             content = msg.get("content", "")
-            if isinstance(content, str) and "__VIEW_SPEC__" in content:
-                import re as _re
-
-                match = _re.search(r"__VIEW_SPEC__([^|]+)\|([^|]+)\|(.*?)(?:\n|$)", content)
-                if match:
-                    view_id, view_title, view_desc = match.group(1), match.group(2), match.group(3)
-                break
-            # Also check list-of-blocks content format
-            if isinstance(content, list):
+            # Flatten content to searchable strings
+            texts = []
+            if isinstance(content, str):
+                texts.append(content)
+            elif isinstance(content, list):
                 for block in content:
-                    text = block.get("text", "") if isinstance(block, dict) else ""
-                    if "__VIEW_SPEC__" in text:
-                        import re as _re
+                    if isinstance(block, dict):
+                        # tool_result blocks use "content" key, text blocks use "text"
+                        texts.append(block.get("content", ""))
+                        texts.append(block.get("text", ""))
+            for text in texts:
+                if text and "__VIEW_SPEC__" in text:
+                    match = _re.search(r"__VIEW_SPEC__([^|]+)\|([^|]+)\|(.*?)(?:\n|$)", text)
+                    if match:
+                        view_id, view_title, view_desc = match.group(1), match.group(2), match.group(3)
+                    break
+            else:
+                continue
+            break
 
-                        match = _re.search(r"__VIEW_SPEC__([^|]+)\|([^|]+)\|(.*?)(?:\n|$)", text)
-                        if match:
-                            view_id, view_title, view_desc = match.group(1), match.group(2), match.group(3)
-                        break
-
+        logger.info("Emitting view_spec: id=%s title=%s components=%d", view_id, view_title, len(session_components))
         await websocket.send_json(
             {
                 "type": "view_spec",
