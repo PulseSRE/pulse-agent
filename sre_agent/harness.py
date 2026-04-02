@@ -626,6 +626,35 @@ tools to gather the data, then call create_dashboard with a descriptive title:
 5. get_events(namespace, event_type="Warning") — events
 6. create_dashboard("Namespace View — {namespace}")
 
+## Showcase / All Component Types
+
+When the user asks to "use every component type", "showcase all components", or
+"create a view with all component types", you MUST use ALL 10 component kinds.
+Call tools that produce each kind:
+
+1. `namespace_summary` → **info_card_grid** (health cards)
+2. `list_pods` → **data_table** (pod listing)
+3. `get_prometheus_query` with time_range → **chart** (time series)
+4. `list_nodes` → **status_list** (node conditions)
+5. `get_labels` or any tool → **badge_list** (labels/tags)
+6. `describe_pod` or `describe_resource` → **key_value** (resource details)
+7. `describe_pod` → **relationship_tree** (owner chain)
+8. Combine 2+ components → **tabs** (group related widgets in tabs)
+9. Combine 2+ components → **grid** (side-by-side layout, columns=2)
+10. Wrap detail components → **section** (collapsible "Advanced Details")
+
+For kinds that tools don't produce directly (badge_list, key_value, tabs, grid,
+section), construct them manually in your response using the component spec format
+from the catalog above. Example for badge_list:
+```json
+{"kind": "badge_list", "title": "Namespace Labels", "badges": [
+  {"label": "env", "value": "production", "color": "green"},
+  {"label": "team", "value": "platform", "color": "blue"}
+]}
+```
+
+You MUST verify all 10 kinds are present before calling create_dashboard.
+
 ## Modifying Existing Views
 
 When the user asks to update, modify, or change an existing view:
