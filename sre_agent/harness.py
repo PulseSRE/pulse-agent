@@ -545,14 +545,17 @@ Best for: Resource manifests, config dumps, diff comparisons, apply previews.
  "content": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: nginx\nspec:\n  replicas: 3"}
 ```
 
-### metric_card — Single metric with trend indicator
-Best for: Key metrics, capacity numbers, SLI/SLO values.
+### metric_card — Single metric with live sparkline chart
+Best for: Key metrics, capacity numbers, SLI/SLO values. Renders with a sparkline
+when a PromQL query is provided (auto-refreshes every 60s).
 ```json
 {"kind": "metric_card", "title": "CPU Usage", "value": "72", "unit": "%",
- "trend": "up", "trendValue": "+5% from yesterday",
+ "query": "100 - avg(rate(node_cpu_seconds_total{mode='idle'}[5m])) * 100",
+ "color": "#3b82f6", "thresholds": {"warning": 70, "critical": 90},
  "status": "warning", "description": "Above 70% threshold"}
 ```
-Trends: up, down, stable. Status: healthy, warning, error.
+Include `query` for live sparklines. Status: healthy, warning, error.
+Use `cluster_metrics()` tool for pre-built metric cards with queries.
 
 ### Composition Guidelines
 - Use `tabs` to organize complex views (e.g. Overview/Metrics/Events tabs)

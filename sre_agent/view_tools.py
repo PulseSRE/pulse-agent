@@ -176,52 +176,39 @@ def cluster_metrics() -> str:
     cards = [
         {
             "kind": "metric_card",
-            "title": "Nodes",
-            "value": str(node_count),
-            "unit": "total",
+            "title": "Nodes Ready",
+            "value": f"{nodes_ready}/{node_count}",
             "status": "healthy" if nodes_ready == node_count else "warning",
-            "description": f"{nodes_ready} ready",
+            "description": f"{node_count} total",
         },
         {
             "kind": "metric_card",
-            "title": "Pods",
+            "title": "Pods Running",
             "value": str(pods_running),
-            "unit": "running",
             "status": "healthy" if pods_failing == 0 else "warning",
-            "description": f"{pod_count} total, {pods_failing} failing",
+            "description": f"{pods_failing} failing" if pods_failing else f"{pod_count} total",
+        },
+        {
+            "kind": "metric_card",
+            "title": "Cluster CPU",
+            "value": "",
+            "unit": "%",
+            "query": "100 - avg(rate(node_cpu_seconds_total{mode='idle'}[5m])) * 100",
+            "color": "#3b82f6",
+            "thresholds": {"warning": 70, "critical": 90},
+        },
+        {
+            "kind": "metric_card",
+            "title": "Cluster Memory",
+            "value": "",
+            "unit": "%",
+            "query": "100 - (sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes)) * 100",
+            "color": "#8b5cf6",
+            "thresholds": {"warning": 80, "critical": 95},
         },
     ]
 
-    # Try to get CPU/memory from metrics API
-    try:
-        from kubernetes import client as k8s_client
-
-        from .units import format_cpu, format_memory, parse_cpu_millicores, parse_memory_bytes
-
-        custom = k8s_client.CustomObjectsApi()
-        node_metrics = custom.list_cluster_custom_object("metrics.k8s.io", "v1beta1", "nodes")
-        total_cpu = sum(parse_cpu_millicores(n["usage"]["cpu"]) for n in node_metrics.get("items", []))
-        total_mem = sum(parse_memory_bytes(n["usage"]["memory"]) for n in node_metrics.get("items", []))
-        cards.append(
-            {
-                "kind": "metric_card",
-                "title": "CPU Usage",
-                "value": format_cpu(total_cpu),
-                "unit": "cores",
-                "status": "healthy",
-            }
-        )
-        cards.append(
-            {
-                "kind": "metric_card",
-                "title": "Memory Usage",
-                "value": format_memory(total_mem),
-                "unit": "",
-                "status": "healthy",
-            }
-        )
-    except Exception:
-        pass
+    # CPU/memory cards use PromQL queries for live sparklines — no metrics API needed
 
     text = f"Cluster metrics: {node_count} nodes ({nodes_ready} ready), {pods_running} pods running"
     # Return as a grid of metric_cards
