@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import sys
 import threading
 from typing import Any
@@ -59,17 +58,6 @@ class Database:
         """Translate ``?`` placeholders to PostgreSQL ``%s``."""
         return query.replace("?", "%s")
 
-    def _translate_schema(self, schema: str) -> str:
-        """Translate legacy schema DDL to PostgreSQL.
-
-        Handles AUTOINCREMENT→SERIAL conversion and removes PRAGMA
-        statements for backward compatibility with older schemas.
-        """
-        schema = schema.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
-        schema = schema.replace("INSERT OR REPLACE", "INSERT")
-        schema = re.sub(r"PRAGMA\s+\w+\s*=\s*\w+\s*;?", "", schema)
-        return schema
-
     def execute(self, query: str, params: tuple = ()) -> Any:
         """Execute a query with parameter translation."""
         self._ensure_connection()
@@ -81,10 +69,9 @@ class Database:
 
     def executescript(self, script: str) -> None:
         """Execute a multi-statement schema script."""
-        translated = self._translate_schema(script)
         with self._lock:
             cur = self._conn.cursor()
-            for stmt in translated.split(";"):
+            for stmt in script.split(";"):
                 stmt = stmt.strip()
                 if stmt:
                     try:

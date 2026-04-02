@@ -1,9 +1,6 @@
 """PostgreSQL table schemas for Pulse Agent.
 
-Schemas are written in PostgreSQL syntax. The Database class translates
-SERIAL PRIMARY KEY to INTEGER PRIMARY KEY AUTOINCREMENT for SQLite tests.
-
-Import this module and pass the schema strings to ``Database.executescript()``.
+Schemas are PostgreSQL-native and are passed directly to ``Database.executescript()``.
 """
 
 INCIDENTS_SCHEMA = """

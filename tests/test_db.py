@@ -93,39 +93,6 @@ class TestQueryTranslation:
 
 
 # ---------------------------------------------------------------------------
-# Schema translation
-# ---------------------------------------------------------------------------
-
-
-class TestSchemaTranslation:
-    def test_autoincrement_to_serial(self):
-        db = Database(_TEST_DB_URL)
-        result = db._translate_schema("CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)")
-        assert "SERIAL PRIMARY KEY" in result
-        assert "AUTOINCREMENT" not in result
-        db.close()
-
-    def test_pragma_removed(self):
-        db = Database(_TEST_DB_URL)
-        result = db._translate_schema("PRAGMA journal_mode=WAL;")
-        assert "PRAGMA" not in result
-        db.close()
-
-    def test_insert_or_replace_translated(self):
-        db = Database(_TEST_DB_URL)
-        result = db._translate_schema("INSERT OR REPLACE INTO t VALUES (1)")
-        assert "INSERT INTO" in result
-        assert "OR REPLACE" not in result
-        db.close()
-
-    def test_serial_unchanged(self):
-        db = Database(_TEST_DB_URL)
-        ddl = "CREATE TABLE t (id SERIAL PRIMARY KEY)"
-        assert "SERIAL PRIMARY KEY" in db._translate_schema(ddl)
-        db.close()
-
-
-# ---------------------------------------------------------------------------
 # Singleton management
 # ---------------------------------------------------------------------------
 

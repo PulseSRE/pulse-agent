@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import collections
 import concurrent.futures
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -89,6 +91,15 @@ def _sanitize_context_field(value: str) -> str:
     if not _SAFE_CONTEXT.match(value):
         return ""  # Strict reject: non-matching values are dropped entirely
     return value
+
+
+def _verify_ws_token(websocket) -> str:
+    """Verify WebSocket token and return the client token. Closes with 4001 if invalid."""
+    client_token = websocket.query_params.get("token", "")
+    expected = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
+    if not expected or not hmac.compare_digest(client_token, expected):
+        return ""
+    return client_token
 
 
 @asynccontextmanager
@@ -600,15 +611,9 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         return
 
     # Token authentication — mandatory unless explicitly disabled
-    import hmac
-
-    expected_token = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
-    if not expected_token:
-        await websocket.close(code=4001, reason="Server not configured. PULSE_AGENT_WS_TOKEN is required.")
-        return
-    client_token = websocket.query_params.get("token", "")
-    if not hmac.compare_digest(client_token, expected_token):
-        await websocket.close(code=4001, reason="Unauthorized. Invalid or missing token.")
+    client_token = _verify_ws_token(websocket)
+    if not client_token:
+        await websocket.close(4001, "Unauthorized")
         return
 
     await websocket.accept()
@@ -662,6 +667,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
             message_timestamps.append(now)
 
             content = data.get("content", "").strip()
+            content = content[:8000]
             if not content:
                 continue
 
@@ -677,6 +683,9 @@ async def websocket_agent(websocket: WebSocket, mode: str):
 
             # Context from Pulse UI — ensures namespace/resource are explicit
             context = data.get("context")
+            if context and isinstance(context, dict):
+                if len(json.dumps(context)) > 2000:
+                    context = None
             if context and isinstance(context, dict):
                 kind = _sanitize_context_field(context.get("kind", ""))
                 ns = _sanitize_context_field(context.get("namespace", ""))
@@ -808,15 +817,9 @@ async def websocket_agent(websocket: WebSocket, mode: str):
 async def websocket_auto_agent(websocket: WebSocket):
     """Unified agent endpoint — auto-routes between SRE and Security based on query intent."""
     # Token authentication — same pattern as /ws/sre
-    import hmac
-
-    expected_token = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
-    if not expected_token:
-        await websocket.close(code=4001, reason="Server not configured. PULSE_AGENT_WS_TOKEN is required.")
-        return
-    client_token = websocket.query_params.get("token", "")
-    if not hmac.compare_digest(client_token, expected_token):
-        await websocket.close(code=4001, reason="Unauthorized. Invalid or missing token.")
+    client_token = _verify_ws_token(websocket)
+    if not client_token:
+        await websocket.close(4001, "Unauthorized")
         return
 
     await websocket.accept()
@@ -859,6 +862,7 @@ async def websocket_auto_agent(websocket: WebSocket):
             message_timestamps.append(now)
 
             content = data.get("content", "").strip()
+            content = content[:8000]
             if not content:
                 continue
 
@@ -885,6 +889,9 @@ async def websocket_auto_agent(websocket: WebSocket):
 
             # Context from Pulse UI — ensures namespace/resource are explicit
             context = data.get("context")
+            if context and isinstance(context, dict):
+                if len(json.dumps(context)) > 2000:
+                    context = None
             if context and isinstance(context, dict):
                 kind = _sanitize_context_field(context.get("kind", ""))
                 ns = _sanitize_context_field(context.get("namespace", ""))
@@ -1030,15 +1037,9 @@ async def websocket_monitor(websocket: WebSocket):
     Client sends: subscribe_monitor, action_response, get_fix_history
     """
     # Token authentication
-    import hmac
-
-    expected_token = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
-    if not expected_token:
-        await websocket.close(code=4001, reason="Server not configured. PULSE_AGENT_WS_TOKEN is required.")
-        return
-    client_token = websocket.query_params.get("token", "")
-    if not hmac.compare_digest(client_token, expected_token):
-        await websocket.close(code=4001, reason="Unauthorized. Invalid or missing token.")
+    client_token = _verify_ws_token(websocket)
+    if not client_token:
+        await websocket.close(4001, "Unauthorized")
         return
 
     await websocket.accept()
@@ -1107,6 +1108,7 @@ async def websocket_monitor(websocket: WebSocket):
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "message": "Invalid JSON"})
                 continue
 
             msg_type = data.get("type")
@@ -1122,13 +1124,18 @@ async def websocket_monitor(websocket: WebSocket):
 
             elif msg_type == "action_response":
                 action_id = data.get("actionId", "")
+                if not isinstance(action_id, str) or len(action_id) > 200:
+                    continue
                 approved = data.get("approved", False)
                 handled = session.resolve_action_response(action_id, approved)
                 logger.info("Action response: id=%s approved=%s handled=%s", action_id, approved, handled)
 
             elif msg_type == "get_fix_history":
                 filters = data.get("filters")
-                page = data.get("page", 1)
+                try:
+                    page = int(data.get("page", 1))
+                except (TypeError, ValueError):
+                    page = 1
                 result = get_fix_history(page=page, filters=filters)
                 await websocket.send_json({"type": "fix_history", **result})
 
@@ -1164,8 +1171,6 @@ def _apply_style_hint(data: dict) -> str:
 
 def _verify_rest_token(authorization: str | None = Header(None), token: str | None = Query(None)):
     """Verify token for REST endpoints — accepts Bearer header or query param."""
-    import hmac
-
     expected = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
     if not expected:
         raise HTTPException(status_code=503, detail="Server not configured")
@@ -1544,8 +1549,6 @@ def _get_current_user(
 
     Raises HTTPException(401) if token is missing or unverifiable.
     """
-    import hashlib
-
     dev_user = os.environ.get("PULSE_AGENT_DEV_USER", "")
     if dev_user:
         return dev_user
@@ -1754,9 +1757,6 @@ async def rest_share_view(
 ):
     """Generate a share link for a view. The link allows others to clone it."""
     _verify_rest_token(authorization, token)
-    import hashlib
-    import hmac
-
     from fastapi.responses import JSONResponse
 
     from . import db
@@ -1786,9 +1786,6 @@ async def rest_claim_shared_view(
 ):
     """Claim a shared view using a share token. Clones the view to your account."""
     _verify_rest_token(authorization, token)
-    import hashlib
-    import hmac
-
     from fastapi.responses import JSONResponse
 
     from . import db

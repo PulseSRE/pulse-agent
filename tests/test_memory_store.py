@@ -1,4 +1,4 @@
-"""Tests for the SQLite incident store."""
+"""Tests for the PostgreSQL incident store."""
 
 import pytest
 
