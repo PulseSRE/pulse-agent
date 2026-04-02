@@ -469,7 +469,7 @@ def update_action_verification(action_id: str, status: str, evidence: str) -> No
 
 def _skip_namespace(ns: str) -> bool:
     """Return True for system namespaces that scanners should ignore."""
-    return ns.startswith("openshift-") or ns.startswith("kube-") or ns in ("default", "openshift")
+    return ns.startswith("openshift-") or ns.startswith("kube-") or ns == "openshift"
 
 
 # ── Scan Functions ─────────────────────────────────────────────────────────

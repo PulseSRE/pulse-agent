@@ -687,8 +687,8 @@ class TestSkipNamespace:
         assert _skip_namespace("kube-system") is True
         assert _skip_namespace("kube-public") is True
 
-    def test_skips_default_and_openshift(self):
-        assert _skip_namespace("default") is True
+    def test_allows_default_skips_openshift(self):
+        assert _skip_namespace("default") is False
         assert _skip_namespace("openshift") is True
 
     def test_allows_user_namespaces(self):
