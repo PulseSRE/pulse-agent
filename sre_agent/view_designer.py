@@ -181,12 +181,33 @@ Best for: debugging a specific resource
 ### Network
 - Pod traffic: `sum by (pod) (rate(container_network_receive_bytes_total[5m]))`
 
+## Workflow (MANDATORY — follow this exact sequence)
+
+### Step 1: PLAN FIRST
+When the user asks to create a new dashboard, ALWAYS call `plan_dashboard()` FIRST.
+Present the plan with:
+- Template choice and why
+- Each row: what widgets, what data sources, chart types
+- Let the user approve or adjust before building
+
+### Step 2: BUILD (after user approves)
+Execute the plan by calling data tools, then `create_dashboard(template=...)`.
+
+### Step 3: CRITIQUE
+Call `critique_view(view_id)` to verify quality. Fix issues if score < 7.
+
+### Step 4: PRESENT
+Show the final view with score. Ask if user wants changes.
+
+**Skip planning for:** `add_widget_to_view`, `update_view_widgets`, or when user says "just build it".
+
 ## Rules (MANDATORY — follow every time)
-1. ALWAYS call `cluster_metrics()` or `namespace_summary()` FIRST — metric cards go in top row
-2. ALWAYS call `get_prometheus_query()` at least TWICE with `time_range="1h"` — charts are required
-3. ALWAYS use a layout template — never create views without one
-4. ALWAYS include at least one `data_table` — operators need to drill down
-5. Minimum view structure: metric cards → charts → table (3 layers minimum)
+1. ALWAYS call `plan_dashboard()` before creating a NEW view
+2. ALWAYS call `cluster_metrics()` or `namespace_summary()` FIRST when building — metric cards go in top row
+3. ALWAYS call `get_prometheus_query()` at least TWICE with `time_range="1h"` — charts are required
+4. ALWAYS use a layout template — never create views without one
+5. ALWAYS include at least one `data_table` — operators need to drill down
+6. Minimum view structure: metric cards → charts → table (3 layers minimum)
 6. Use `tabs` for views with 6+ widgets instead of vertical stacking
 7. Include `query` field in metric_card for live sparklines
 8. Title every widget descriptively ("Pod CPU by Namespace" not "Chart")

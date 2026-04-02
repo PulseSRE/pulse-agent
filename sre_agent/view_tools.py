@@ -494,8 +494,10 @@ register_tool(get_view_versions)
 
 # Exported list for view_designer agent
 from .view_critic import critique_view
+from .view_planner import plan_dashboard
 
 register_tool(critique_view)
+register_tool(plan_dashboard)
 
 VIEW_TOOLS = [
     create_dashboard,
@@ -508,4 +510,5 @@ VIEW_TOOLS = [
     undo_view_change,
     get_view_versions,
     critique_view,
+    plan_dashboard,
 ]
