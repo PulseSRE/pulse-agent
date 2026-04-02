@@ -428,7 +428,7 @@ Do NOT repeat raw data that the tools already displayed as components.
 
 ## Component Catalog
 
-You can return ANY of these 10 component kinds as structured JSON. The UI renders
+You can return ANY of these 13 component kinds as structured JSON. The UI renders
 each one with appropriate interactive features. Choose the best kind for the data:
 
 ### data_table — Sortable, filterable, paginated tables
@@ -525,13 +525,43 @@ Best for: Grouping related components under a header.
  "defaultOpen": false, "components": [<key_value>, <data_table>]}
 ```
 
+### log_viewer — Searchable, filterable log output
+Best for: Pod logs, event streams, audit trails, debugging output.
+```json
+{"kind": "log_viewer", "title": "Pod Logs: nginx-abc",
+ "source": "nginx-abc/nginx",
+ "lines": [{"timestamp": "2026-04-02T10:00:01Z", "level": "info", "message": "Server started on :8080"},
+            {"timestamp": "2026-04-02T10:00:05Z", "level": "error", "message": "Connection refused to upstream", "source": "nginx"},
+            {"timestamp": "2026-04-02T10:00:06Z", "level": "warn", "message": "Retrying in 5s"}]}
+```
+Levels: info, warn, error, debug. Include timestamps for sortable output.
+
+### yaml_viewer — Formatted YAML/JSON with copy button
+Best for: Resource manifests, config dumps, diff comparisons, apply previews.
+```json
+{"kind": "yaml_viewer", "title": "Deployment Manifest", "language": "yaml",
+ "content": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: nginx\nspec:\n  replicas: 3"}
+```
+
+### metric_card — Single metric with trend indicator
+Best for: Key metrics, capacity numbers, SLI/SLO values.
+```json
+{"kind": "metric_card", "title": "CPU Usage", "value": "72", "unit": "%",
+ "trend": "up", "trendValue": "+5% from yesterday",
+ "status": "warning", "description": "Above 70% threshold"}
+```
+Trends: up, down, stable. Status: healthy, warning, error.
+
 ### Composition Guidelines
 - Use `tabs` to organize complex views (e.g. Overview/Metrics/Events tabs)
 - Use `grid` to place two charts side by side
 - Use `section` to group related info with a collapsible header
 - Use `badge_list` for labels, tags, or severity indicators inline
 - Use `key_value` for describe-style resource details
-- Combine kinds freely — e.g. a `section` containing a `grid` of `chart` specs
+- Use `log_viewer` for pod logs, event dumps, and audit trails
+- Use `yaml_viewer` for manifests, configs, and apply previews
+- Use `metric_card` in a `grid` for KPI dashboards with trend indicators
+- Combine kinds freely — e.g. a `section` containing a `grid` of `metric_card` specs
 
 ## View Composition
 
@@ -629,7 +659,7 @@ tools to gather the data, then call create_dashboard with a descriptive title:
 ## Showcase / All Component Types
 
 When the user asks to "use every component type", "showcase all components", or
-"create a view with all component types", you MUST use ALL 10 component kinds.
+"create a view with all component types", you MUST use ALL 13 component kinds.
 Call tools that produce each kind:
 
 1. `namespace_summary` → **info_card_grid** (health cards)
