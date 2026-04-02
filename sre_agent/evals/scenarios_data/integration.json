@@ -85,6 +85,20 @@
       "retry_attempts": 0,
       "transient_failures": 0,
       "rollback_available": true
+    },
+    {
+      "scenario_id": "integration_all_component_types_view",
+      "category": "sre",
+      "description": "Create a view that uses every component type available.",
+      "tool_calls": ["list_pods", "list_nodes", "get_node_metrics", "get_pod_metrics", "get_prometheus_query", "get_events", "describe_pod", "create_dashboard"],
+      "rejected_tools": 0,
+      "duration_seconds": 180,
+      "user_confirmed_resolution": true,
+      "final_response": "Created a comprehensive showcase view with all 10 component types: data_table (pods list), info_card_grid (cluster health cards), chart (CPU/memory time series), status_list (node conditions), badge_list (namespace labels), key_value (deployment details), relationship_tree (deployment→replicaset→pod hierarchy), tabs (grouped views), grid (side-by-side layout), and section (collapsible details). All components populated with real cluster data.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": false
     }
   ]
 }

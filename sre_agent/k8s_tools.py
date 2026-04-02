@@ -1738,25 +1738,47 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
 
     else:
         # Instant query (vector) → build a DataTableSpec
+        # Detect label keys from first result to build dynamic columns
         rows = []
+        label_keys = []
+        if results:
+            first_metric = results[0].get("metric", {})
+            label_keys = [k for k in first_metric if k != "__name__"]
+
         for r in results[:50]:
             metric = r.get("metric", {})
             label_str = ", ".join(f"{k}={v}" for k, v in metric.items() if k != "__name__")
-            name = metric.get("__name__", query)
+            name = metric.get("__name__", "")
             _ts, val = r.get("value", [0, "?"])
-            lines.append(f"{name}{{{label_str}}} = {val}")
-            rows.append({"metric": f"{name}{{{label_str}}}" if label_str else name, "value": str(val)})
+            lines.append(f"{name}{{{label_str}}} = {val}" if label_str else f"{name} = {val}")
+
+            row: dict = {}
+            if label_keys:
+                for k in label_keys:
+                    row[k] = metric.get(k, "")
+            else:
+                row["metric"] = name or query
+            row["value"] = str(val)
+            rows.append(row)
 
         if len(results) > 50:
             lines.append(f"... and {len(results) - 50} more results (truncated)")
 
         text = "\n".join(lines)
+
+        # Build columns from label keys
+        if label_keys:
+            columns = [{"id": k, "header": k.replace("_", " ").title()} for k in label_keys]
+        else:
+            columns = [{"id": "metric", "header": "Metric"}]
+        columns.append({"id": "value", "header": "Value"})
+
         component = (
             {
                 "kind": "data_table",
                 "title": _title_from_query(query),
                 "description": _desc_from_query(query, "", len(rows)),
-                "columns": [{"id": "metric", "header": "Metric"}, {"id": "value", "header": "Value"}],
+                "columns": columns,
                 "rows": rows,
                 "query": query,
             }

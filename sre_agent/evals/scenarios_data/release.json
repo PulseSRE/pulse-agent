@@ -154,6 +154,20 @@
       "rollback_available": true,
       "retry_attempts": 0,
       "transient_failures": 0
+    },
+    {
+      "scenario_id": "release_showcase_all_component_types",
+      "category": "sre",
+      "description": "Create a view that uses every component type.",
+      "tool_calls": ["list_pods", "list_nodes", "get_node_metrics", "get_pod_metrics", "get_prometheus_query", "get_events", "create_dashboard"],
+      "rejected_tools": 0,
+      "duration_seconds": 180,
+      "user_confirmed_resolution": true,
+      "final_response": "Created a showcase dashboard with all 10 component types populated with real cluster data: data_table, info_card_grid, chart, status_list, badge_list, key_value, relationship_tree, tabs, grid, and section. Dashboard saved and accessible from Views.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
     }
   ]
 }

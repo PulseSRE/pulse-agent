@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import patch
 
 from sre_agent.harness import (
@@ -157,8 +158,33 @@ class TestGetClusterContext:
 
 
 class TestComponentHint:
+    REQUIRED_COMPONENT_KINDS: ClassVar[list[str]] = [
+        "data_table",
+        "info_card_grid",
+        "chart",
+        "status_list",
+        "badge_list",
+        "key_value",
+        "relationship_tree",
+        "tabs",
+        "grid",
+        "section",
+    ]
+
     def test_hint_mentions_dashboards(self):
         assert "dashboard" in COMPONENT_HINT.lower()
 
     def test_hint_mentions_safety(self):
         assert "dry_run" in COMPONENT_HINT
+
+    def test_hint_documents_all_component_kinds(self):
+        """Every component kind must be documented in the system prompt."""
+        for kind in self.REQUIRED_COMPONENT_KINDS:
+            assert kind in COMPONENT_HINT, f"Component kind '{kind}' missing from COMPONENT_HINT"
+
+    def test_hint_has_schema_for_each_kind(self):
+        """Each component kind should have a JSON schema example in the hint."""
+        for kind in self.REQUIRED_COMPONENT_KINDS:
+            assert f'"kind": "{kind}"' in COMPONENT_HINT, (
+                f"Component kind '{kind}' has no schema example in COMPONENT_HINT"
+            )
