@@ -679,6 +679,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
     try:
         ws_user = _get_current_user(
             x_forwarded_access_token=websocket.headers.get("x-forwarded-access-token"),
+            x_forwarded_user=websocket.headers.get("x-forwarded-user"),
         )
     except HTTPException:
         logger.warning("WebSocket session %s: no valid user token, view operations will be unavailable", session_id)
@@ -863,6 +864,7 @@ async def websocket_auto_agent(websocket: WebSocket):
     try:
         ws_user = _get_current_user(
             x_forwarded_access_token=websocket.headers.get("x-forwarded-access-token"),
+            x_forwarded_user=websocket.headers.get("x-forwarded-user"),
         )
     except HTTPException:
         logger.warning("WebSocket session %s: no valid user token, view operations will be unavailable", session_id)
@@ -1544,28 +1546,28 @@ _USER_CACHE_MAX = 500  # evict oldest entries beyond this
 
 def _get_current_user(
     x_forwarded_access_token: str | None = None,
+    x_forwarded_user: str | None = None,
 ) -> str:
-    """Extract username from OpenShift OAuth token via X-Forwarded-Access-Token.
+    """Extract username from OAuth proxy headers.
 
-    In production, the OAuth proxy sets X-Forwarded-Access-Token. We use the
-    Kubernetes TokenReview API to resolve it to a username. Results are cached
-    for 60 seconds to avoid per-request K8s API calls. In local dev,
-    PULSE_AGENT_DEV_USER overrides this.
-
-    If TokenReview fails (e.g., SA lacks permission, token format not
-    reviewable on ROSA), we fall back to a stable hash-based identity.
-    This is safe because the request already passed _verify_rest_token
-    (Bearer auth), and the OAuth proxy is trusted to set the header.
+    Priority: PULSE_AGENT_DEV_USER > X-Forwarded-User > TokenReview > JWT decode > token hash.
+    The OAuth proxy sets X-Forwarded-User with the authenticated username — this is
+    the most reliable source since OpenShift tokens are opaque (sha256~...), not JWTs.
     """
     dev_user = os.environ.get("PULSE_AGENT_DEV_USER", "")
     if dev_user:
         return dev_user
 
+    # Best source: OAuth proxy sets X-Forwarded-User directly
+    if x_forwarded_user and isinstance(x_forwarded_user, str) and x_forwarded_user.strip():
+        return x_forwarded_user.strip()
+
     token = x_forwarded_access_token or ""
 
     if not token:
         raise HTTPException(
-            status_code=401, detail="User identity required. X-Forwarded-Access-Token header is missing."
+            status_code=401,
+            detail="User identity required. X-Forwarded-Access-Token or X-Forwarded-User header is missing.",
         )
 
     # Use full hash to prevent collision attacks (was [:16])
@@ -1631,12 +1633,13 @@ async def rest_list_views(
     authorization: str | None = Header(None),
     token: str | None = Query(None),
     x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
 ):
     """List all views for the current user."""
     _verify_rest_token(authorization, token)
     from . import db
 
-    owner = _get_current_user(x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     views = db.list_views(owner)
     return {"views": views or [], "owner": owner}
 
@@ -1647,6 +1650,7 @@ async def rest_get_view(
     authorization: str | None = Header(None),
     token: str | None = Query(None),
     x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
 ):
     """Get a single view by ID."""
     _verify_rest_token(authorization, token)
@@ -1654,7 +1658,7 @@ async def rest_get_view(
 
     from . import db
 
-    owner = _get_current_user(x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     view = db.get_view(view_id, owner)
     if view is None:
         return JSONResponse(status_code=404, content={"error": "View not found"})
@@ -1667,6 +1671,7 @@ async def rest_create_view(
     authorization: str | None = Header(None),
     token: str | None = Query(None),
     x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
 ):
     """Save a new view for the current user."""
     _verify_rest_token(authorization, token)
@@ -1674,7 +1679,7 @@ async def rest_create_view(
 
     from . import db
 
-    owner = _get_current_user(x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     body = await request.json()
 
     view_id = body.get("id", f"cv-{uuid.uuid4().hex[:12]}")
@@ -1709,6 +1714,7 @@ async def rest_update_view(
     authorization: str | None = Header(None),
     token: str | None = Query(None),
     x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
 ):
     """Update a view (title, description, layout, positions). Owner only."""
     _verify_rest_token(authorization, token)
@@ -1716,7 +1722,7 @@ async def rest_update_view(
 
     from . import db
 
-    owner = _get_current_user(x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     body = await request.json()
 
     # Extract only allowed fields — never pass raw body as **kwargs
@@ -1737,6 +1743,7 @@ async def rest_delete_view(
     authorization: str | None = Header(None),
     token: str | None = Query(None),
     x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
 ):
     """Delete a view. Owner only."""
     _verify_rest_token(authorization, token)
@@ -1744,7 +1751,7 @@ async def rest_delete_view(
 
     from . import db
 
-    owner = _get_current_user(x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     deleted = db.delete_view(view_id, owner)
     if not deleted:
         return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
@@ -1758,6 +1765,7 @@ async def rest_clone_view(
     authorization: str | None = Header(None),
     token: str | None = Query(None),
     x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
 ):
     """Clone a view to the current user's account. Only the owner can clone their own views."""
     _verify_rest_token(authorization, token)
@@ -1765,7 +1773,7 @@ async def rest_clone_view(
 
     from . import db
 
-    owner = _get_current_user(x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     # Verify the caller owns the source view
     source = db.get_view(view_id, owner)
     if source is None:
@@ -1782,6 +1790,7 @@ async def rest_share_view(
     authorization: str | None = Header(None),
     token: str | None = Query(None),
     x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
 ):
     """Generate a share link for a view. The link allows others to clone it."""
     _verify_rest_token(authorization, token)
@@ -1789,7 +1798,7 @@ async def rest_share_view(
 
     from . import db
 
-    owner = _get_current_user(x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     view = db.get_view(view_id, owner)
     if view is None:
         return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
@@ -1811,6 +1820,7 @@ async def rest_claim_shared_view(
     authorization: str | None = Header(None),
     token: str | None = Query(None),
     x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
 ):
     """Claim a shared view using a share token. Clones the view to your account."""
     _verify_rest_token(authorization, token)
@@ -1840,7 +1850,7 @@ async def rest_claim_shared_view(
     if not hmac.compare_digest(signature, expected_sig):
         return JSONResponse(status_code=400, content={"error": "Invalid share token"})
 
-    owner = _get_current_user(x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     new_id = db.clone_view(view_id, owner)
     if new_id is None:
         return JSONResponse(status_code=404, content={"error": "Source view not found"})
@@ -1858,12 +1868,13 @@ async def rest_view_versions(
     authorization: str | None = Header(None),
     token: str | None = Query(None),
     x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
 ):
     """List version history for a view."""
     _verify_rest_token(authorization, token)
     from . import db
 
-    owner = _get_current_user(x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     # Verify ownership
     view = db.get_view(view_id, owner)
     if not view:
@@ -1881,6 +1892,7 @@ async def rest_undo_view(
     authorization: str | None = Header(None),
     token: str | None = Query(None),
     x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
 ):
     """Undo the last change to a view (restore previous version)."""
     _verify_rest_token(authorization, token)
@@ -1888,7 +1900,7 @@ async def rest_undo_view(
 
     from . import db
 
-    owner = _get_current_user(x_forwarded_access_token)
+    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     body = await request.json()
     version = body.get("version")
 
