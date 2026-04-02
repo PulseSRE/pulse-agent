@@ -1,10 +1,10 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.13.0"><img src="https://img.shields.io/badge/release-v1.13.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.13.1"><img src="https://img.shields.io/badge/release-v1.13.1-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-103-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-11-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-665-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-753-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 
@@ -416,6 +416,7 @@ Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_val
 
 | Pulse Agent | OpenShift Pulse UI | Protocol |
 |------------|-------------------|----------|
+| v1.13.1 | v5.16.2+ | 2 |
 | v1.13.0 | v5.16.2+ | 2 |
 | v1.12.0 | v5.16.2+ | 2 |
 | v1.9.0 | v5.14.0+ | 2 |
@@ -509,7 +510,7 @@ helm install pulse-agent ./chart --set wsAuth.existingSecret=pulse-ws-token
 
 ### Deployment Strategy
 
-The chart uses the `Recreate` strategy to avoid doubling resource usage during rollouts, which is critical on quota-constrained namespaces. All old pods are terminated before new ones start.
+The chart uses `RollingUpdate` strategy with a `PodDisruptionBudget` (PDB) for zero-downtime rollouts. Startup probes give the agent 60 seconds and PostgreSQL 30 seconds to initialize before health checks begin.
 
 ### GCP Authentication
 
@@ -600,8 +601,8 @@ git push && git push --tags   # GitHub Actions builds and pushes automatically
 
 **Manual build:**
 ```bash
-podman build --platform linux/amd64 -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.13.0 .
-podman push quay.io/amobrem/pulse-agent:v1.13.0
+podman build --platform linux/amd64 -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.13.1 .
+podman push quay.io/amobrem/pulse-agent:v1.13.1
 ```
 
 **Required GitHub Secrets:**
@@ -617,7 +618,7 @@ pip install -e '.[test]'
 python -m pytest tests/ -v
 ```
 
-665 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, and the memory system. All tests run without a cluster or API key (fully mocked).
+753 tests covering all tools, all 11 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ## Evaluation Framework
 
@@ -671,7 +672,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>103 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>665 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>103 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>753 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">
