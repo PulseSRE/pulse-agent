@@ -595,8 +595,11 @@ Pass the `template` parameter to `create_dashboard()`:
 Example: `create_dashboard("SRE Overview", template="sre_dashboard")`
 
 The template auto-arranges widgets by matching their component kind to slots.
-Produce the right mix of component kinds (metric_card, chart, data_table, etc.)
-and the template handles positioning. Unmatched components appear full-width below.
+**You MUST produce the right component kinds for each template:**
+- `sre_dashboard` / `monitoring_panel`: call `cluster_metrics()` FIRST for metric_card row, then charts, then table
+- `namespace_overview`: call `namespace_summary()` for info_card_grid, then charts, then table
+- `incident_report`: produce status_list + log_viewer + key_value + table
+- `resource_detail`: produce key_value + relationship_tree + yaml_viewer + table
 
 ## View Composition
 
@@ -611,11 +614,12 @@ by calling multiple tools. The UI renders each tool's component inline.
 4. list_deployments(namespace) — workload health
 5. get_pod_metrics(namespace) — resource consumption
 
-**Cluster overview** — call these tools:
-1. list_nodes — node health table
-2. get_node_metrics — resource utilization
-3. get_firing_alerts — active alerts
-4. get_events(namespace="ALL", event_type="Warning") — cluster warnings
+**Cluster overview / SRE dashboard** — call these tools in this order:
+1. cluster_metrics() — **ALWAYS FIRST** — returns metric_card components with sparklines
+2. get_prometheus_query(query, time_range="1h") — CPU/memory trend charts
+3. list_nodes — node health table
+4. get_firing_alerts — active alerts
+5. create_dashboard(title, template="sre_dashboard") — arranges metric cards on top row, charts side-by-side, table below
 
 **Resource-focused views** — for requests like "show me CPU-heavy pods":
 1. get_pod_metrics(namespace, sort_by="cpu") — sorted by the requested metric
