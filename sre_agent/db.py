@@ -458,9 +458,17 @@ def list_view_versions(view_id: str, limit: int = 20) -> list[dict]:
     """List version history for a view."""
     db = get_database()
     rows = db.fetchall(
-        "SELECT version, action, title, created_at FROM view_versions WHERE view_id = ? ORDER BY version DESC LIMIT ?",
+        "SELECT version, action, title, description, layout, created_at FROM view_versions WHERE view_id = ? ORDER BY version DESC LIMIT ?",
         (view_id, limit),
     )
+    import json as _json
+
+    for row in rows:
+        if isinstance(row.get("layout"), str):
+            try:
+                row["layout"] = _json.loads(row["layout"])
+            except (ValueError, TypeError):
+                pass
     return rows
 
 

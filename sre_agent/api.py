@@ -340,8 +340,9 @@ async def _run_agent_ws(
         finally:
             _pending_confirms.pop(ws_id, None)
 
-    # Augment system prompt with memory context
+    # Augment system prompt with memory context and start timing
     effective_system = system_prompt
+    manager = None
     if os.environ.get("PULSE_AGENT_MEMORY", "1") == "1":
         try:
             from .memory import get_manager
@@ -351,6 +352,7 @@ async def _run_agent_ws(
                 last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
                 if isinstance(last_user, str) and last_user:
                     effective_system = manager.augment_prompt(system_prompt, last_user)
+                manager.start_turn()  # Start timing BEFORE agent runs
         except Exception as e:
             logger.debug("Memory retrieval failed: %s", e)
 
@@ -468,24 +470,19 @@ async def _run_agent_ws(
         except Exception:
             pass
 
-    # Evaluate the interaction for memory scoring
-    if os.environ.get("PULSE_AGENT_MEMORY", "1") == "1":
+    # Record interaction for memory scoring (start_turn was called before agent ran)
+    if manager and hasattr(manager, "finish_turn"):
         try:
-            from .memory import get_manager
-
-            manager = get_manager()
-            if manager and hasattr(manager, "finish_turn"):
-                user_msgs = [m for m in messages if m["role"] == "user"]
-                if user_msgs:
-                    query = (
-                        user_msgs[-1]["content"]
-                        if isinstance(user_msgs[-1]["content"], str)
-                        else str(user_msgs[-1]["content"])
-                    )
-                    manager.start_turn()
-                    for t in session_tools:
-                        manager.record_tool_call(t, {})
-                    manager.finish_turn(query, full_response)
+            user_msgs = [m for m in messages if m["role"] == "user"]
+            if user_msgs:
+                query = (
+                    user_msgs[-1]["content"]
+                    if isinstance(user_msgs[-1]["content"], str)
+                    else str(user_msgs[-1]["content"])
+                )
+                for t in session_tools:
+                    manager.record_tool_call(t, {})
+                manager.finish_turn(query, full_response)
         except Exception:
             pass
 

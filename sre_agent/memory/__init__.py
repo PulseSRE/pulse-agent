@@ -159,16 +159,17 @@ class MemoryManager:
             if not is_duplicate_runbook(self.store, self._tool_calls):
                 runbook_id = extract_runbook(self.store, incident_id)
 
-        new_patterns = []
+        # Run pattern detection on a background thread every 10 incidents
         if self.store.get_incident_count() % 10 == 0:
-            new_patterns = detect_patterns(self.store)
+            import threading
+
+            threading.Thread(target=detect_patterns, args=(self.store,), daemon=True).start()
 
         return {
             "incident_id": incident_id,
             "score": eval_result.score,
             "breakdown": eval_result.breakdown,
             "runbook_id": runbook_id,
-            "new_patterns": new_patterns,
         }
 
     def update_last_outcome(self, resolved: bool) -> dict | None:
