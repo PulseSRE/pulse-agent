@@ -61,6 +61,7 @@ TOOL_CATEGORIES = {
             "get_pod_metrics",
             "correlate_incident",
             "namespace_summary",
+            "cluster_metrics",
         ],
     },
     "workloads": {
@@ -219,6 +220,7 @@ ALWAYS_INCLUDE = {
     "create_dashboard",
     "list_saved_views",
     "namespace_summary",
+    "cluster_metrics",
     "list_pods",
     "get_events",
     "get_firing_alerts",
@@ -642,9 +644,17 @@ Steps:
 - Metrics / alerting → `template="monitoring_panel"`
 - Resource deep-dive → `template="resource_detail"`
 
-**Important:** If a view with the same title already exists, the new widgets will be
-ADDED to the existing view instead of creating a duplicate. To modify an existing view,
-use get_view_details + update_view_widgets or add_widget_to_view instead.
+**Adding to existing views:** When the user wants to add widgets to a view that already
+exists, do NOT call create_dashboard again. Instead:
+1. Call `list_saved_views` to find the view ID
+2. Call the data tools to generate the new components
+3. Call `add_widget_to_view(view_id)` for each new component
+
+Only use `create_dashboard` for NEW views. Use `add_widget_to_view` to extend existing ones.
+
+**Metric cards:** Use `cluster_metrics()` to get metric_card components for dashboard headers.
+These render as single KPI numbers with trend indicators — ideal for the top row of an
+`sre_dashboard` or `monitoring_panel` template.
 
 ## Charts via PromQL
 

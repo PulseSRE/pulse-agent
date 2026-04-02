@@ -140,6 +140,96 @@ def namespace_summary(namespace: str) -> str:
 
 
 @beta_tool
+def cluster_metrics() -> str:
+    """Get key cluster metrics as metric cards: node count, pod count, CPU usage, memory usage. Returns metric_card components ideal for dashboard headers.
+
+    Use this when the user wants metric cards, KPIs, or summary numbers at the top of a dashboard.
+    """
+    from .errors import ToolError
+    from .k8s_client import get_core_client, safe
+
+    core = get_core_client()
+
+    # Node count
+    nodes_result = safe(lambda: core.list_node())
+    node_count = 0
+    nodes_ready = 0
+    if not isinstance(nodes_result, ToolError):
+        node_count = len(nodes_result.items)
+        nodes_ready = sum(
+            1
+            for n in nodes_result.items
+            for c in (n.status.conditions or [])
+            if c.type == "Ready" and c.status == "True"
+        )
+
+    # Pod count
+    pods_result = safe(lambda: core.list_pod_for_all_namespaces(limit=1000))
+    pod_count = 0
+    pods_running = 0
+    pods_failing = 0
+    if not isinstance(pods_result, ToolError):
+        pod_count = len(pods_result.items)
+        pods_running = sum(1 for p in pods_result.items if p.status.phase == "Running")
+        pods_failing = sum(1 for p in pods_result.items if p.status.phase in ("Failed", "Unknown"))
+
+    cards = [
+        {
+            "kind": "metric_card",
+            "title": "Nodes",
+            "value": str(node_count),
+            "unit": "total",
+            "status": "healthy" if nodes_ready == node_count else "warning",
+            "description": f"{nodes_ready} ready",
+        },
+        {
+            "kind": "metric_card",
+            "title": "Pods",
+            "value": str(pods_running),
+            "unit": "running",
+            "status": "healthy" if pods_failing == 0 else "warning",
+            "description": f"{pod_count} total, {pods_failing} failing",
+        },
+    ]
+
+    # Try to get CPU/memory from metrics API
+    try:
+        from kubernetes import client as k8s_client
+
+        from .units import format_cpu, format_memory, parse_cpu_millicores, parse_memory_bytes
+
+        custom = k8s_client.CustomObjectsApi()
+        node_metrics = custom.list_cluster_custom_object("metrics.k8s.io", "v1beta1", "nodes")
+        total_cpu = sum(parse_cpu_millicores(n["usage"]["cpu"]) for n in node_metrics.get("items", []))
+        total_mem = sum(parse_memory_bytes(n["usage"]["memory"]) for n in node_metrics.get("items", []))
+        cards.append(
+            {
+                "kind": "metric_card",
+                "title": "CPU Usage",
+                "value": format_cpu(total_cpu),
+                "unit": "cores",
+                "status": "healthy",
+            }
+        )
+        cards.append(
+            {
+                "kind": "metric_card",
+                "title": "Memory Usage",
+                "value": format_memory(total_mem),
+                "unit": "",
+                "status": "healthy",
+            }
+        )
+    except Exception:
+        pass
+
+    text = f"Cluster metrics: {node_count} nodes ({nodes_ready} ready), {pods_running} pods running"
+    # Return as a grid of metric_cards
+    component = {"kind": "grid", "columns": len(cards), "items": cards}
+    return (text, component)
+
+
+@beta_tool
 def list_saved_views() -> str:
     """List all custom dashboard views saved by the current user. Returns view titles, descriptions, widget counts, and direct links. Use this when the user asks to see their dashboards, saved views, or custom views."""
     from . import db
