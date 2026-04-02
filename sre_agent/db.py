@@ -236,13 +236,26 @@ def _db_safe(fn):
 
 
 def _deserialize_view_row(row: dict) -> dict:
-    """Parse JSON fields in a view row from the database."""
+    """Parse JSON fields in a view row from the database.
+
+    Replaces NaN/Infinity with None to ensure valid JSON output.
+    """
     import json
+    import math
+
+    def _sanitize(obj):
+        if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+            return None
+        if isinstance(obj, list):
+            return [_sanitize(v) for v in obj]
+        if isinstance(obj, dict):
+            return {k: _sanitize(v) for k, v in obj.items()}
+        return obj
 
     for field in ("layout", "positions"):
         val = row.get(field)
         if isinstance(val, str):
-            row[field] = json.loads(val)
+            row[field] = _sanitize(json.loads(val))
     return row
 
 

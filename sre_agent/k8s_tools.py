@@ -1712,7 +1712,9 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
             label_parts = [f"{v}" for k, v in metric.items() if k != "__name__"]
             label = ", ".join(label_parts) or metric.get("__name__", f"series-{i}")
             values = r.get("values", [])
-            data = [[int(float(ts) * 1000), float(val)] for ts, val in values]
+            import math
+
+            data = [[int(float(ts) * 1000), float(val)] for ts, val in values if not math.isnan(float(val))]
             latest = values[-1][1] if values else "?"
             lines.append(f"{label} = {latest} (latest of {len(values)} samples)")
             series.append({"label": label[:60], "data": data, "color": _CHART_COLORS[i % len(_CHART_COLORS)]})
