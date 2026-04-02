@@ -130,8 +130,12 @@ class IncidentStore:
         if db is not None:
             self.db = db
         else:
-            url = db_path or DEFAULT_DB_PATH
-            self.db = Database(url)
+            from ..db import get_database
+
+            if db_path:
+                self.db = Database(db_path)
+            else:
+                self.db = get_database()
         self.db.executescript(SCHEMA)
 
     @db_safe(default=-1)
@@ -419,7 +423,6 @@ class IncidentStore:
         cur = self.db.execute("DELETE FROM incidents WHERE timestamp < ?", (cutoff_str,))
         # Clean up orphaned metrics too
         self.db.execute("DELETE FROM metrics WHERE timestamp < ?", (cutoff_str,))
-        self.db.execute("VACUUM")
         self.db.commit()
         return cur.rowcount
 

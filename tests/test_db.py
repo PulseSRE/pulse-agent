@@ -1,6 +1,8 @@
-"""Tests for sre_agent.db — PostgreSQL database layer."""
+"""Tests for sre_agent.db — PostgreSQL database layer with connection pooling."""
 
 from __future__ import annotations
+
+import threading
 
 from sre_agent.db import Database, get_database, reset_database, set_database
 
@@ -90,6 +92,86 @@ class TestQueryTranslation:
         result = db._translate_query("INSERT INTO t VALUES (?, ?, ?)")
         assert result == "INSERT INTO t VALUES (%s, %s, %s)"
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Connection pool
+# ---------------------------------------------------------------------------
+
+
+class TestConnectionPool:
+    def test_concurrent_reads(self):
+        """Multiple threads can read concurrently from the pool."""
+        db = Database(_TEST_DB_URL)
+        db.execute("DROP TABLE IF EXISTS pool_test CASCADE")
+        db.execute("CREATE TABLE pool_test (id INTEGER PRIMARY KEY, val TEXT)")
+        for i in range(10):
+            db.execute("INSERT INTO pool_test VALUES (%s, %s)", (i, f"v{i}"))
+        db.commit()
+
+        results = []
+        errors = []
+
+        def reader(thread_id):
+            try:
+                rows = db.fetchall("SELECT * FROM pool_test ORDER BY id")
+                results.append((thread_id, len(rows)))
+            except Exception as e:
+                errors.append((thread_id, e))
+
+        threads = [threading.Thread(target=reader, args=(i,)) for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert not errors, f"Errors in threads: {errors}"
+        assert len(results) == 5
+        assert all(count == 10 for _, count in results)
+
+        db.execute("DROP TABLE pool_test")
+        db.commit()
+        db.close()
+
+    def test_concurrent_writes(self):
+        """Multiple threads can write concurrently using execute+commit."""
+        db = Database(_TEST_DB_URL)
+        db.execute("DROP TABLE IF EXISTS pool_write CASCADE")
+        db.execute("CREATE TABLE pool_write (id TEXT PRIMARY KEY, thread_id INTEGER)")
+        db.commit()
+
+        errors = []
+
+        def writer(thread_id):
+            try:
+                for i in range(3):
+                    db.execute(
+                        "INSERT INTO pool_write VALUES (%s, %s)",
+                        (f"t{thread_id}-{i}", thread_id),
+                    )
+                    db.commit()
+            except Exception as e:
+                errors.append((thread_id, e))
+
+        threads = [threading.Thread(target=writer, args=(i,)) for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert not errors, f"Errors in threads: {errors}"
+        rows = db.fetchall("SELECT * FROM pool_write")
+        assert len(rows) == 15  # 5 threads x 3 rows each
+
+        db.execute("DROP TABLE pool_write")
+        db.commit()
+        db.close()
+
+    def test_health_check_with_pool(self):
+        db = Database(_TEST_DB_URL)
+        assert db.health_check() is True
+        db.close()
+        assert db.health_check() is False
 
 
 # ---------------------------------------------------------------------------

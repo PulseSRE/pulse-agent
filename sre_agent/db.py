@@ -18,113 +18,137 @@ import threading
 from typing import Any
 
 import psycopg2
+import psycopg2.pool
 
 logger = logging.getLogger("pulse_agent.db")
 
 
 class Database:
-    """PostgreSQL database interface for Pulse Agent."""
+    """PostgreSQL database interface backed by a threaded connection pool."""
 
     def __init__(self, url: str):
         self.url = url
-        self._lock = threading.Lock()
-        self._conn: Any = None
-        self._connect()
+        minconn = int(os.environ.get("PULSE_AGENT_DB_POOL_MIN", "2"))
+        maxconn = int(os.environ.get("PULSE_AGENT_DB_POOL_MAX", "10"))
+        self._pool = psycopg2.pool.ThreadedConnectionPool(minconn, maxconn, dsn=url)
+        self._local = threading.local()
 
-    def _connect(self) -> None:
-        """Establish a new PostgreSQL connection."""
-        self._conn = psycopg2.connect(self.url)
-        self._conn.autocommit = False
+    # ------------------------------------------------------------------
+    # Thread-local connection management (for execute/commit sequences)
+    # ------------------------------------------------------------------
 
-    def _ensure_connection(self) -> None:
-        """Reconnect if the connection is stale."""
-        if self._conn is None:
-            self._connect()
-            return
-        try:
-            cur = self._conn.cursor()
-            cur.execute("SELECT 1")
-            cur.close()
-        except Exception:
-            logger.warning("Database connection lost, reconnecting...")
-            try:
-                self._conn.close()
-            except Exception:
-                pass
-            self._conn = None
-            self._connect()
+    def _get_conn(self):
+        """Get the thread-local connection, checking it out from the pool if needed."""
+        if not hasattr(self._local, "conn") or self._local.conn is None:
+            self._local.conn = self._pool.getconn()
+            self._local.conn.autocommit = False
+        return self._local.conn
+
+    def _put_conn(self):
+        """Return the thread-local connection to the pool."""
+        if hasattr(self._local, "conn") and self._local.conn is not None:
+            self._pool.putconn(self._local.conn)
+            self._local.conn = None
+
+    # ------------------------------------------------------------------
+    # Query helpers
+    # ------------------------------------------------------------------
 
     def _translate_query(self, query: str) -> str:
         """Translate ``?`` placeholders to PostgreSQL ``%s``."""
         return query.replace("?", "%s")
 
     def execute(self, query: str, params: tuple = ()) -> Any:
-        """Execute a query with parameter translation."""
-        self._ensure_connection()
-        with self._lock:
-            translated = self._translate_query(query)
-            cur = self._conn.cursor()
-            cur.execute(translated, params)
-            return cur
+        """Execute a query with parameter translation.
+
+        The connection is kept checked out until :meth:`commit` is called.
+        """
+        conn = self._get_conn()
+        translated = self._translate_query(query)
+        cur = conn.cursor()
+        cur.execute(translated, params)
+        return cur
 
     def executescript(self, script: str) -> None:
         """Execute a multi-statement schema script."""
-        with self._lock:
-            cur = self._conn.cursor()
+        conn = self._pool.getconn()
+        try:
+            cur = conn.cursor()
             for stmt in script.split(";"):
                 stmt = stmt.strip()
                 if stmt:
                     try:
                         cur.execute(stmt)
                     except Exception:
-                        self._conn.rollback()
+                        conn.rollback()
                         continue
-            self._conn.commit()
+            conn.commit()
+        finally:
+            self._pool.putconn(conn)
 
     def fetchone(self, query: str, params: tuple = ()) -> dict | None:
         """Execute and fetch one row as dict."""
-        self._ensure_connection()
-        with self._lock:
+        conn = self._pool.getconn()
+        try:
             translated = self._translate_query(query)
-            cur = self._conn.cursor()
+            cur = conn.cursor()
             cur.execute(translated, params)
             row = cur.fetchone()
             if row is None:
                 return None
             cols = [desc[0] for desc in cur.description]
             return dict(zip(cols, row))
+        finally:
+            self._pool.putconn(conn)
 
     def fetchall(self, query: str, params: tuple = ()) -> list[dict]:
         """Execute and fetch all rows as dicts."""
-        self._ensure_connection()
-        with self._lock:
+        conn = self._pool.getconn()
+        try:
             translated = self._translate_query(query)
-            cur = self._conn.cursor()
+            cur = conn.cursor()
             cur.execute(translated, params)
             cols = [desc[0] for desc in cur.description]
             return [dict(zip(cols, row)) for row in cur.fetchall()]
+        finally:
+            self._pool.putconn(conn)
 
     def commit(self) -> None:
-        with self._lock:
-            self._conn.commit()
+        """Commit the current thread-local transaction and return the connection."""
+        if hasattr(self._local, "conn") and self._local.conn is not None:
+            self._local.conn.commit()
+            self._put_conn()
 
     def close(self) -> None:
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        """Return any thread-local connection and close all pool connections."""
+        if hasattr(self, "_local") and hasattr(self._local, "conn") and self._local.conn is not None:
+            try:
+                self._pool.putconn(self._local.conn)
+            except Exception:
+                pass
+            self._local.conn = None
+        if hasattr(self, "_pool") and self._pool is not None:
+            self._pool.closeall()
+            self._pool = None
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def health_check(self) -> bool:
-        """Check if the current connection is alive (does not reconnect)."""
-        if self._conn is None:
+        """Check if the pool can serve a connection."""
+        if self._pool is None:
             return False
         try:
-            with self._lock:
-                cur = self._conn.cursor()
+            conn = self._pool.getconn()
+            try:
+                cur = conn.cursor()
                 cur.execute("SELECT 1")
                 cur.close()
+            finally:
+                self._pool.putconn(conn)
             return True
         except Exception:
             return False
@@ -154,6 +178,10 @@ def get_database() -> Database:
                 "Set it to a PostgreSQL connection URL (e.g. postgresql://user:pass@host/db)."
             )
         _db = Database(url)
+        # Run migrations on first connect
+        from .db_migrations import run_migrations
+
+        run_migrations(_db)
         return _db
 
 
