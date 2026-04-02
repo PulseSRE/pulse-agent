@@ -563,6 +563,25 @@ Trends: up, down, stable. Status: healthy, warning, error.
 - Use `metric_card` in a `grid` for KPI dashboards with trend indicators
 - Combine kinds freely — e.g. a `section` containing a `grid` of `metric_card` specs
 
+## Layout Templates
+
+When creating dashboards, use a layout template for professional, consistent layouts.
+Pass the `template` parameter to `create_dashboard()`:
+
+| Template | Layout | Best For |
+|----------|--------|----------|
+| `sre_dashboard` | 4 metric cards + 2 charts side-by-side + table | Cluster health, SRE overviews |
+| `namespace_overview` | Summary cards + 2 charts + table + events | Namespace status pages |
+| `incident_report` | Status timeline + logs/details side-by-side + table | Incident triage, debugging |
+| `monitoring_panel` | 4 metric cards + 2x2 chart grid + alert list | Metrics dashboards |
+| `resource_detail` | Key-value + resource tree + YAML + table | Resource deep-dives |
+
+Example: `create_dashboard("SRE Overview", template="sre_dashboard")`
+
+The template auto-arranges widgets by matching their component kind to slots.
+Produce the right mix of component kinds (metric_card, chart, data_table, etc.)
+and the template handles positioning. Unmatched components appear full-width below.
+
 ## View Composition
 
 When the user asks a high-level question like "what's happening in my namespace",

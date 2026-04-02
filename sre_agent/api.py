@@ -415,6 +415,7 @@ async def _run_agent_ws(
             view_id = sig.get("view_id", f"cv-{uuid.uuid4().hex[:12]}")
             view_title = sig.get("title", "Custom View")
             view_desc = sig.get("description", "")
+            view_template = sig.get("template", "")
 
             existing = _db.get_view_by_title(current_user, view_title)
             if existing:
@@ -435,18 +436,16 @@ async def _run_agent_ws(
                 logger.info(
                     "Saved new view: id=%s title=%s components=%d", view_id, view_title, len(session_components)
                 )
-                await websocket.send_json(
-                    {
-                        "type": "view_spec",
-                        "spec": {
-                            "id": view_id,
-                            "title": view_title,
-                            "description": view_desc,
-                            "layout": session_components,
-                            "generatedAt": int(_time.time() * 1000),
-                        },
-                    }
-                )
+                spec = {
+                    "id": view_id,
+                    "title": view_title,
+                    "description": view_desc,
+                    "layout": session_components,
+                    "generatedAt": int(_time.time() * 1000),
+                }
+                if view_template:
+                    spec["templateId"] = view_template
+                await websocket.send_json({"type": "view_spec", "spec": spec})
 
         elif sig_type == "view_updated":
             _view_updated_ids.add(sig.get("view_id", ""))

@@ -41,17 +41,27 @@ def get_current_user() -> str:
 
 
 @beta_tool
-def create_dashboard(title: str, description: str = "") -> str:
+def create_dashboard(title: str, description: str = "", template: str = "") -> str:
     """Create a custom dashboard view that the user can save and access from the sidebar. Use this when the user asks to create a dashboard, custom view, or persistent display of data. The dashboard will contain the component specs from the current conversation.
+
+    If a layout template is specified, widgets are automatically arranged in a
+    professional grid layout instead of stacking vertically.
 
     Args:
         title: Name for the dashboard (e.g. "SRE Overview", "Node Health").
         description: Brief description of what the dashboard shows.
+        template: Optional layout template ID. Available templates:
+                  'sre_dashboard' — 4 metric cards + 2 charts side-by-side + table
+                  'namespace_overview' — summary cards + 2 charts + table + events
+                  'incident_report' — status timeline + logs/details side-by-side + table
+                  'monitoring_panel' — 4 metric cards + 2x2 chart grid + alerts
+                  'resource_detail' — key-value + resource tree + yaml + table
     """
     view_id = f"cv-{uuid.uuid4().hex[:12]}"
-    return _signal(
-        "view_spec", f"Created view '{title}' with ID {view_id}.", view_id=view_id, title=title, description=description
-    )
+    kwargs = {"view_id": view_id, "title": title, "description": description}
+    if template:
+        kwargs["template"] = template
+    return _signal("view_spec", f"Created view '{title}' with ID {view_id}.", **kwargs)
 
 
 @beta_tool
