@@ -61,12 +61,8 @@ Validate AI backend credentials — fail at install time if missing.
 {{- end }}
 
 {{/*
-WS auth token secret name — auto-generates a secret if wsAuth.existingSecret is not set.
+WS auth token secret name — must be provided by the umbrella chart.
 */}}
 {{- define "sre-agent.wsTokenSecretName" -}}
-{{- if .Values.wsAuth.existingSecret }}
-{{- .Values.wsAuth.existingSecret }}
-{{- else }}
-{{- printf "%s-ws-token" (include "sre-agent.fullname" .) }}
-{{- end }}
+{{- required "wsAuth.existingSecret is required — the umbrella chart (deploy/helm/pulse) owns the WS token secret" .Values.wsAuth.existingSecret }}
 {{- end }}

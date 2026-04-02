@@ -55,10 +55,8 @@ memory:
     storageClass: ""
     size: 1Gi
 
-# WebSocket authentication
-# A token secret is auto-generated if existingSecret is empty.
-# To use a pre-created secret: kubectl create secret generic pulse-ws-token --from-literal=token=your-secret-token
-# Then set wsAuth.existingSecret=pulse-ws-token
+# WebSocket authentication — token secret is owned by the umbrella chart (pulse-ws-token).
+# The umbrella sets this via agent.wsAuth.existingSecret in its values.yaml.
 wsAuth:
   existingSecret: ""
   secretKey: "token"
