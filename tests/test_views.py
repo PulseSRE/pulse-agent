@@ -174,6 +174,50 @@ class TestDeleteView:
 
 
 # ---------------------------------------------------------------------------
+# version_history
+# ---------------------------------------------------------------------------
+
+
+class TestVersionHistory:
+    def test_save_view_creates_initial_version(self):
+        db_module.save_view("alice", "cv-1", "My View", "desc", _layout())
+        versions = db_module.list_view_versions("cv-1")
+        assert len(versions) == 1
+        assert versions[0]["action"] == "created"
+        assert versions[0]["title"] == "My View"
+
+    def test_update_view_creates_snapshot(self):
+        db_module.save_view("alice", "cv-1", "Original", "", _layout())
+        db_module.update_view("cv-1", "alice", title="Renamed")
+        versions = db_module.list_view_versions("cv-1")
+        assert len(versions) == 2
+        assert versions[0]["action"] == "update"
+        assert versions[1]["action"] == "created"
+
+    def test_layout_update_creates_snapshot(self):
+        db_module.save_view("alice", "cv-1", "V1", "", _layout())
+        new_layout = [{"kind": "key_value", "pairs": [{"key": "a", "value": "b"}]}]
+        db_module.update_view("cv-1", "alice", layout=new_layout)
+        versions = db_module.list_view_versions("cv-1")
+        assert len(versions) == 2
+
+    def test_restore_version(self):
+        db_module.save_view("alice", "cv-1", "Original Title", "", _layout())
+        db_module.update_view("cv-1", "alice", title="Changed")
+        view = db_module.get_view("cv-1", "alice")
+        assert view["title"] == "Changed"
+
+        result = db_module.restore_view_version("cv-1", "alice", 1)
+        assert result is True
+        view = db_module.get_view("cv-1", "alice")
+        assert view["title"] == "Original Title"
+
+    def test_list_versions_empty_for_nonexistent(self):
+        versions = db_module.list_view_versions("cv-nope")
+        assert versions == []
+
+
+# ---------------------------------------------------------------------------
 # clone_view
 # ---------------------------------------------------------------------------
 

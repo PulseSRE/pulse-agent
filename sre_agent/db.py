@@ -280,6 +280,13 @@ def save_view(
         (view_id, owner, title, description, icon, json.dumps(layout), json.dumps(positions or {}), now, now),
     )
     db.commit()
+
+    # Snapshot the initial version so version history is never empty
+    try:
+        snapshot_view(view_id, "created")
+    except Exception:
+        pass
+
     return view_id
 
 
@@ -323,12 +330,11 @@ def update_view(view_id: str, owner: str, **updates) -> bool:
     from datetime import UTC, datetime
 
     # Auto-snapshot before any change (for undo/version history)
-    action = updates.get("_action", "update")
-    if isinstance(action, str) and "layout" in updates:
-        try:
-            snapshot_view(view_id, action)
-        except Exception:
-            pass  # Don't block the update if snapshot fails
+    action = updates.pop("_action", "update")
+    try:
+        snapshot_view(view_id, action)
+    except Exception:
+        pass  # Don't block the update if snapshot fails
 
     allowed = {"title", "description", "icon", "layout", "positions"}
     fields = []
