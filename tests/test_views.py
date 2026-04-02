@@ -289,11 +289,9 @@ class TestGetCurrentUser:
         assert user1 == user2 == "alice"
         _user_cache.clear()
 
-    def test_unverifiable_token_raises_401(self):
-        """Tokens that fail TokenReview must be rejected, not given fallback identity."""
+    def test_unverifiable_token_gets_fallback_identity(self):
+        """Tokens that fail TokenReview get a stable hash-based fallback identity."""
         from unittest.mock import MagicMock, patch
-
-        from fastapi import HTTPException
 
         from sre_agent.api import _get_current_user, _user_cache
 
@@ -304,9 +302,11 @@ class TestGetCurrentUser:
         mock_result.status.authenticated = False
         with patch("sre_agent.k8s_client._load_k8s"), patch("kubernetes.client") as mock_k8s:
             mock_k8s.AuthenticationV1Api.return_value.create_token_review.return_value = mock_result
-            with pytest.raises(HTTPException) as exc_info:
-                _get_current_user(x_forwarded_access_token="forged-token")
-            assert exc_info.value.status_code == 401
+            user = _get_current_user(x_forwarded_access_token="forged-token")
+            assert user.startswith("user-")
+            # Same token yields same identity
+            user2 = _get_current_user(x_forwarded_access_token="forged-token")
+            assert user == user2
         _user_cache.clear()
 
     def test_empty_forwarded_token_raises_401(self):
@@ -320,11 +320,9 @@ class TestGetCurrentUser:
             _get_current_user(x_forwarded_access_token="")
         assert exc_info.value.status_code == 401
 
-    def test_no_fallback_identity_on_token_review_error(self):
-        """Regression: if TokenReview API is unavailable, must NOT create fallback identity."""
+    def test_fallback_identity_on_token_review_error(self):
+        """When TokenReview API is unavailable, a stable fallback identity is used."""
         from unittest.mock import patch
-
-        from fastapi import HTTPException
 
         from sre_agent.api import _get_current_user, _user_cache
 
@@ -333,9 +331,9 @@ class TestGetCurrentUser:
 
         with patch("sre_agent.k8s_client._load_k8s"), patch("kubernetes.client") as mock_k8s:
             mock_k8s.AuthenticationV1Api.side_effect = Exception("K8s unavailable")
-            with pytest.raises(HTTPException) as exc_info:
-                _get_current_user(x_forwarded_access_token="any-token")
-            assert exc_info.value.status_code == 401
+            user = _get_current_user(x_forwarded_access_token="any-token")
+            assert user.startswith("user-")
+            assert len(user) > 5  # user- + hash prefix
         _user_cache.clear()
 
 

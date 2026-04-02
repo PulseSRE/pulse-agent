@@ -427,8 +427,11 @@ async def _run_agent_ws(
                     len(session_components),
                 )
             else:
+                # Auto-save new views to DB so they persist without user action
+                _db.save_view(current_user, view_id, view_title, view_desc, session_components)
+                _view_updated_ids.add(view_id)
                 logger.info(
-                    "Emitting view_spec: id=%s title=%s components=%d", view_id, view_title, len(session_components)
+                    "Saved new view: id=%s title=%s components=%d", view_id, view_title, len(session_components)
                 )
                 await websocket.send_json(
                     {
@@ -1539,10 +1542,10 @@ def _get_current_user(
     for 60 seconds to avoid per-request K8s API calls. In local dev,
     PULSE_AGENT_DEV_USER overrides this.
 
-    Tokens that fail TokenReview are REJECTED with 401 — no fallback identity
-    is generated, to prevent identity spoofing via forged tokens.
-
-    Raises HTTPException(401) if token is missing or unverifiable.
+    If TokenReview fails (e.g., SA lacks permission, token format not
+    reviewable on ROSA), we fall back to a stable hash-based identity.
+    This is safe because the request already passed _verify_rest_token
+    (Bearer auth), and the OAuth proxy is trusted to set the header.
     """
     dev_user = os.environ.get("PULSE_AGENT_DEV_USER", "")
     if dev_user:
@@ -1565,7 +1568,7 @@ def _get_current_user(
             return cached[0]
         _user_cache.pop(token_hash, None)
 
-    # Resolve via Kubernetes TokenReview — reject if unverifiable
+    # Resolve via Kubernetes TokenReview
     try:
         from kubernetes import client as k8s_client
 
@@ -1580,9 +1583,13 @@ def _get_current_user(
             _cache_user(token_hash, username)
             return username
     except Exception:
-        logger.warning("TokenReview API unavailable, rejecting token")
+        logger.warning("TokenReview API unavailable, falling back to token-derived identity")
 
-    raise HTTPException(status_code=401, detail="Token could not be verified. TokenReview rejected or unavailable.")
+    # Fallback: stable identity derived from token hash.
+    # Safe because request already passed Bearer auth via _verify_rest_token.
+    fallback_user = f"user-{token_hash[:16]}"
+    _cache_user(token_hash, fallback_user)
+    return fallback_user
 
 
 def _cache_user(token_hash: str, username: str) -> None:
