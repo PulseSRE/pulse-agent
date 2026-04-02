@@ -457,9 +457,23 @@ def get_view_versions(view_id: str) -> str:
 
 register_tool(create_dashboard)
 register_tool(namespace_summary)
+register_tool(cluster_metrics)
 register_tool(list_saved_views)
 register_tool(get_view_details)
 register_tool(update_view_widgets)
 register_tool(add_widget_to_view)
 register_tool(undo_view_change)
 register_tool(get_view_versions)
+
+# Exported list for view_designer agent
+VIEW_TOOLS = [
+    create_dashboard,
+    namespace_summary,
+    cluster_metrics,
+    list_saved_views,
+    get_view_details,
+    update_view_widgets,
+    add_widget_to_view,
+    undo_view_change,
+    get_view_versions,
+]
