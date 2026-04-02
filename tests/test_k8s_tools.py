@@ -477,7 +477,7 @@ class TestMetricsTools:
 
 class TestDescribeResource:
     def test_returns_resource_details(self, mock_k8s):
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import MagicMock
 
         mock_api = MagicMock()
         mock_api.call_api.return_value = {
@@ -495,15 +495,9 @@ class TestDescribeResource:
         }
         # Mock events
         mock_k8s["core"].list_namespaced_event.return_value = _list_result([])
+        mock_k8s["core"].api_client = mock_api
 
-        with patch("kubernetes.client.ApiClient", return_value=mock_api):
-            result = describe_resource.call(
-                {
-                    "namespace": "default",
-                    "name": "my-config",
-                    "kind": "ConfigMap",
-                }
-            )
+        result = describe_resource.call({"namespace": "default", "name": "my-config", "kind": "ConfigMap"})
         assert isinstance(result, tuple)
         text, component = result
         assert '"my-config"' in text
@@ -513,7 +507,7 @@ class TestDescribeResource:
         assert "badge_list" in kinds
 
     def test_cluster_scoped_resource(self, mock_k8s):
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import MagicMock
 
         mock_api = MagicMock()
         mock_api.call_api.return_value = {
@@ -533,14 +527,8 @@ class TestDescribeResource:
             },
         }
 
-        with patch("kubernetes.client.ApiClient", return_value=mock_api):
-            result = describe_resource.call(
-                {
-                    "namespace": "_",
-                    "name": "node-1",
-                    "kind": "Node",
-                }
-            )
+        mock_k8s["core"].api_client = mock_api
+        result = describe_resource.call({"namespace": "_", "name": "node-1", "kind": "Node"})
         assert isinstance(result, tuple)
         text, component = result
         assert '"node-1"' in text
@@ -549,23 +537,17 @@ class TestDescribeResource:
         assert "status_list" in kinds
 
     def test_api_error(self, mock_k8s):
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import MagicMock
 
         mock_api = MagicMock()
         mock_api.call_api.side_effect = ApiException(status=404, reason="Not Found")
 
-        with patch("kubernetes.client.ApiClient", return_value=mock_api):
-            result = describe_resource.call(
-                {
-                    "namespace": "default",
-                    "name": "ghost",
-                    "kind": "ConfigMap",
-                }
-            )
+        mock_k8s["core"].api_client = mock_api
+        result = describe_resource.call({"namespace": "default", "name": "ghost", "kind": "ConfigMap"})
         assert "Error (404)" in result
 
     def test_grouped_resource(self, mock_k8s):
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import MagicMock
 
         mock_api = MagicMock()
         mock_api.call_api.return_value = {
@@ -583,15 +565,10 @@ class TestDescribeResource:
         }
         mock_k8s["core"].list_namespaced_event.return_value = _list_result([])
 
-        with patch("kubernetes.client.ApiClient", return_value=mock_api):
-            result = describe_resource.call(
-                {
-                    "namespace": "default",
-                    "name": "my-sts",
-                    "kind": "StatefulSet",
-                    "group": "apps",
-                }
-            )
+        mock_k8s["core"].api_client = mock_api
+        result = describe_resource.call(
+            {"namespace": "default", "name": "my-sts", "kind": "StatefulSet", "group": "apps"}
+        )
         assert isinstance(result, tuple)
         text, _ = result
         assert '"my-sts"' in text

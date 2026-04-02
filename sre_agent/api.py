@@ -681,12 +681,9 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                     + content
                 )
 
-            # Context from Pulse UI — ensures namespace/resource are explicit
+            # Context from Pulse UI — cap size, sanitize fields
             context = data.get("context")
-            if context and isinstance(context, dict):
-                if len(json.dumps(context)) > 2000:
-                    context = None
-            if context and isinstance(context, dict):
+            if context and isinstance(context, dict) and len(str(context)) <= 2000:
                 kind = _sanitize_context_field(context.get("kind", ""))
                 ns = _sanitize_context_field(context.get("namespace", ""))
                 name = _sanitize_context_field(context.get("name", ""))
@@ -887,12 +884,9 @@ async def websocket_auto_agent(websocket: WebSocket):
             tool_map = config["tool_map"]
             write_tools = config["write_tools"]
 
-            # Context from Pulse UI — ensures namespace/resource are explicit
+            # Context from Pulse UI — cap size, sanitize fields
             context = data.get("context")
-            if context and isinstance(context, dict):
-                if len(json.dumps(context)) > 2000:
-                    context = None
-            if context and isinstance(context, dict):
+            if context and isinstance(context, dict) and len(str(context)) <= 2000:
                 kind = _sanitize_context_field(context.get("kind", ""))
                 ns = _sanitize_context_field(context.get("namespace", ""))
                 name = _sanitize_context_field(context.get("name", ""))

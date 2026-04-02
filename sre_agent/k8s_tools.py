@@ -3144,10 +3144,8 @@ def describe_resource(namespace: str, name: str, kind: str, group: str = "", ver
     else:
         path = f"{api_base}/{plural}/{name}"
 
-    # Use the kubernetes client's ApiClient to make the request
-    from kubernetes import client as k8s_client
-
-    api = k8s_client.ApiClient()
+    # Reuse the existing core client's ApiClient (singleton, already authed)
+    api = get_core_client().api_client
 
     try:
         resp = api.call_api(

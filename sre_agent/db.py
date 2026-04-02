@@ -62,12 +62,18 @@ class Database:
         """Execute a query with parameter translation.
 
         The connection is kept checked out until :meth:`commit` is called.
+        On error, the connection is rolled back and returned to the pool.
         """
         conn = self._get_conn()
-        translated = self._translate_query(query)
-        cur = conn.cursor()
-        cur.execute(translated, params)
-        return cur
+        try:
+            translated = self._translate_query(query)
+            cur = conn.cursor()
+            cur.execute(translated, params)
+            return cur
+        except Exception:
+            conn.rollback()
+            self._put_conn()
+            raise
 
     def executescript(self, script: str) -> None:
         """Execute a multi-statement schema script."""
