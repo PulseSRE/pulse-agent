@@ -2,9 +2,9 @@
 
 <p>
   <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.13.0"><img src="https://img.shields.io/badge/release-v1.13.0-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-73-10b981?style=for-the-badge" alt="Tools">
+  <img src="https://img.shields.io/badge/tools-103-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-11-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-658-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-665-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 
@@ -34,6 +34,7 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Secret Hygiene** — Find old unrotated secrets, env-exposed secrets, unused secrets
 
 ### Error Intelligence
+- **Token Identity Fallback** — `_get_current_user` falls back to token-hash identity when TokenReview fails, enabling ROSA and managed cluster compatibility
 - **Structured Error Types** — ToolError classification with 7 categories (permission, not_found, conflict, validation, server, network, quota) and actionable suggestions
 - **Error Tracking** — Thread-safe ring buffer (500 entries) with per-category aggregation and top-tool breakdown
 - **Health Endpoint** — `/health` returns circuit breaker state, error summary, and recent errors
@@ -42,6 +43,8 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 ### Autonomous Monitor
 - **Continuous Scanning** — 60-second scan interval via `/ws/monitor` endpoint, pushing findings to the Pulse UI in real time
 - **11 Scanners** — Crashlooping pods, pending pods, failed deployments, node pressure, certificate expiry, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation
+- **Warning-Severity Investigations** — Monitor now investigates warning findings, not just critical, for earlier detection
+- **Default Namespace Scanning** — `default` namespace removed from skip list so user workloads are always detected
 - **Auto-Fix at Trust Level 3** — Automatically applies fixes for safe categories (crashloop pod deletion, deployment restarts) without user approval
 - **Auto-Fix at Trust Level 4** — Applies all fixable findings automatically, with rollback snapshots for every action
 - **Confidence Scores** — Every finding, investigation, and action includes a confidence score (0-100%) so you know exactly how much to trust each suggestion
@@ -318,7 +321,7 @@ Built-in optimizations for getting the most out of Claude (`PULSE_AGENT_HARNESS=
 
 | Feature | What It Does | Impact |
 |---------|-------------|--------|
-| **Dynamic Tool Selection** | Categorizes 109 tools into 8 groups, loads only relevant ones per query | 109→15-25 tools, faster + cheaper |
+| **Dynamic Tool Selection** | Categorizes 103 tools into 8 groups, loads only relevant ones per query | 103->15-25 tools, faster + cheaper |
 | **Prompt Caching** | Marks system prompt + runbooks with `cache_control: ephemeral` | ~90% cost reduction on context |
 | **Cluster Context Injection** | Pre-fetches node count, namespaces, OCP version, failing pods, firing alerts | Saves 2-3 tool calls per query |
 | **Component Rendering Hints** | Guides Claude to focus on analysis, not data formatting | Cleaner responses |
@@ -405,12 +408,15 @@ Tools can return structured UI specs alongside text. The [Pulse UI](https://gith
 return (text, {"kind": "data_table", "title": "Pods", "columns": [...], "rows": [...]})
 ```
 
-Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_value`, `chart`.
+Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_value`, `chart`, `metric_card`, `log_viewer`, `yaml_viewer`, `markdown`.
+
+**Views auto-save:** `create_dashboard` saves views directly to PostgreSQL — no frontend click needed. View deserialization sanitizes NaN/Infinity values. Prometheus chart data filters NaN before rendering.
 
 ## Compatibility
 
 | Pulse Agent | OpenShift Pulse UI | Protocol |
 |------------|-------------------|----------|
+| v1.13.0 | v5.16.2+ | 2 |
 | v1.12.0 | v5.16.2+ | 2 |
 | v1.9.0 | v5.14.0+ | 2 |
 | v1.8.0 | v5.14.0+ | 2 |
@@ -594,8 +600,8 @@ git push && git push --tags   # GitHub Actions builds and pushes automatically
 
 **Manual build:**
 ```bash
-podman build --platform linux/amd64 -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.12.0 .
-podman push quay.io/amobrem/pulse-agent:v1.12.0
+podman build --platform linux/amd64 -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.13.0 .
+podman push quay.io/amobrem/pulse-agent:v1.13.0
 ```
 
 **Required GitHub Secrets:**
@@ -611,7 +617,7 @@ pip install -e '.[test]'
 python -m pytest tests/ -v
 ```
 
-450 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, and the memory system. All tests run without a cluster or API key (fully mocked).
+665 tests covering all tools, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ## Evaluation Framework
 
@@ -665,7 +671,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>113 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>627 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>103 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>665 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">
