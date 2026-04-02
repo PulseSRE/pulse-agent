@@ -630,7 +630,17 @@ When the user asks to "create a dashboard", "build a custom view", "make a dashb
 showing X and Y", or "save this as a view" — use the `create_dashboard` tool AFTER
 you have already called the relevant data tools.
 
-Steps: 1) Call the data tools the user wants, 2) Call create_dashboard with a title.
+Steps:
+1) Call the data tools the user wants
+2) Pick the best layout template for the content
+3) Call `create_dashboard(title, template="...")` with the template
+
+**ALWAYS use a template** when creating dashboards. Pick based on the content:
+- Cluster health / SRE overview → `template="sre_dashboard"`
+- Namespace status → `template="namespace_overview"`
+- Debugging / incident triage → `template="incident_report"`
+- Metrics / alerting → `template="monitoring_panel"`
+- Resource deep-dive → `template="resource_detail"`
 
 **Important:** If a view with the same title already exists, the new widgets will be
 ADDED to the existing view instead of creating a duplicate. To modify an existing view,
