@@ -720,6 +720,23 @@ def describe_deployment(namespace: str, name: str) -> str:
             }
         )
 
+    # Pod template spec as YAML
+    try:
+        import yaml as _yaml
+
+        template_spec = dep.spec.template.spec.to_dict() if hasattr(dep.spec.template.spec, "to_dict") else {}
+        if template_spec:
+            components.append(
+                {
+                    "kind": "yaml_viewer",
+                    "title": "Pod Template Spec",
+                    "content": _yaml.dump(template_spec, default_flow_style=False),
+                    "language": "yaml",
+                }
+            )
+    except Exception:
+        pass
+
     component = {
         "kind": "section",
         "title": f"Deployment Details — {name}",
@@ -3334,6 +3351,25 @@ def describe_resource(namespace: str, name: str, kind: str, group: str = "", ver
             )
 
     text = json.dumps(obj, indent=2, default=str)
+
+    # Add YAML manifest viewer (spec only, not full object — cleaner for users)
+    spec = obj.get("spec")
+    if spec:
+        import yaml as _yaml
+
+        try:
+            yaml_content = _yaml.dump(spec, default_flow_style=False)
+        except Exception:
+            yaml_content = json.dumps(spec, indent=2, default=str)
+        components.append(
+            {
+                "kind": "yaml_viewer",
+                "title": f"{kind} Spec",
+                "content": yaml_content,
+                "language": "yaml",
+            }
+        )
+
     component = {
         "kind": "section",
         "title": f"{kind} Details — {name}",
