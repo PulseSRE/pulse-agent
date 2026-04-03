@@ -42,7 +42,7 @@ def get_current_user() -> str:
 
 @beta_tool
 def create_dashboard(title: str, description: str = "", template: str = "") -> str:
-    """Create a custom dashboard view that the user can save and access from the sidebar. Use this when the user asks to create a dashboard, custom view, or persistent display of data. The dashboard will contain the component specs from the current conversation.
+    """Create a custom dashboard view. IMPORTANT: Call plan_dashboard() FIRST to show the user a plan before building. Only call create_dashboard after the user approves the plan.
 
     If a layout template is specified, widgets are automatically arranged in a
     professional grid layout instead of stacking vertically.

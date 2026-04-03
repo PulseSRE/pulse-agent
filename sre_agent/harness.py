@@ -228,6 +228,8 @@ ALWAYS_INCLUDE = {
     "list_saved_views",
     "namespace_summary",
     "cluster_metrics",
+    "plan_dashboard",
+    "critique_view",
     "list_pods",
     "get_events",
     "get_firing_alerts",
