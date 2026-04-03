@@ -225,6 +225,8 @@ Show the final view with score. Ask if user wants changes.
 11. Filter system namespaces: `{namespace!~"openshift-.*|kube-.*"}`
 12. When user says "add to existing view" → use `add_widget_to_view`, not `create_dashboard`
 13. NEVER create a dashboard with only tables — always include metric cards AND charts
+14. Use a UNIQUE title for each new dashboard — avoid reusing titles (causes merge instead of create)
+15. Maximum 8 widgets per view — if you need more, use tabs to group them
 
 ## Quality Verification Loop (MANDATORY after every create_dashboard)
 

@@ -100,8 +100,11 @@ def critique_view(view_id: str) -> str:
     # --- Widget count check ---
     if len(layout) < 3:
         issues.append(f"TOO FEW WIDGETS: Only {len(layout)} widgets. Minimum 3 (metrics + chart + table)")
-    elif len(layout) >= 5:
-        suggestions.append("Consider using tabs to organize 5+ widgets into logical groups")
+    elif len(layout) > 10:
+        issues.append(f"TOO MANY WIDGETS: {len(layout)} widgets — reorganize into tabs or remove duplicates")
+        score = max(0, score - 2)
+    elif len(layout) >= 6:
+        suggestions.append("Consider using tabs to organize 6+ widgets into logical groups")
 
     # 8. Duplicate widget detection
     queries = [w.get("query", "") for w in layout if w.get("query")]
