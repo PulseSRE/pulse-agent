@@ -59,11 +59,21 @@ _DATA_TOOL_NAMES = {
 
 _DATA_TOOLS = [t for t in SRE_TOOLS if t.name in _DATA_TOOL_NAMES]
 _SEC_TOOLS = [
-    t for t in ALL_SECURITY_TOOLS if t.name in {"get_security_summary", "scan_pod_security", "scan_rbac_risks"}
+    t
+    for t in ALL_SECURITY_TOOLS
+    if t.name in {"get_security_summary", "scan_pod_security", "scan_rbac_risks"}
+    and t.name not in _DATA_TOOL_NAMES  # avoid duplicates
 ]
 
-# Combine data tools + all view tools (no write ops like scale, restart, delete)
-ALL_TOOLS = _DATA_TOOLS + _SEC_TOOLS + VIEW_TOOLS
+# Combine data tools + security tools + view tools (no cluster write ops)
+_combined = _DATA_TOOLS + _SEC_TOOLS + VIEW_TOOLS
+# Deduplicate by name (keep first occurrence)
+_seen: set[str] = set()
+ALL_TOOLS = []
+for t in _combined:
+    if t.name not in _seen:
+        _seen.add(t.name)
+        ALL_TOOLS.append(t)
 TOOL_DEFS = [t.to_dict() for t in ALL_TOOLS]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 
@@ -208,13 +218,13 @@ Show the final view with score. Ask if user wants changes.
 4. ALWAYS use a layout template — never create views without one
 5. ALWAYS include at least one `data_table` — operators need to drill down
 6. Minimum view structure: metric cards → charts → table (3 layers minimum)
-6. Use `tabs` for views with 6+ widgets instead of vertical stacking
-7. Include `query` field in metric_card for live sparklines
-8. Title every widget descriptively ("Pod CPU by Namespace" not "Chart")
-9. Add `description` to charts explaining what to watch for
-10. Filter system namespaces: add `{namespace!~"openshift-.*|kube-.*"}` to PromQL
-11. When user says "add to existing view" → use `add_widget_to_view`, never `create_dashboard`
-12. NEVER create a dashboard with only tables — always include metric cards AND charts
+7. Use `tabs` for views with 6+ widgets instead of vertical stacking
+8. Include `query` field in metric_card for live sparklines
+9. Title every widget descriptively ("Pod CPU by Namespace" not "Chart")
+10. Add `description` to charts explaining what to watch for
+11. Filter system namespaces: `{namespace!~"openshift-.*|kube-.*"}`
+12. When user says "add to existing view" → use `add_widget_to_view`, not `create_dashboard`
+13. NEVER create a dashboard with only tables — always include metric cards AND charts
 
 ## Quality Verification Loop (MANDATORY after every create_dashboard)
 

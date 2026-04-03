@@ -544,3 +544,56 @@ def mock_k8s():
         patch("sre_agent.k8s_client.get_custom_client", return_value=custom),
     ):
         yield {"core": core, "apps": apps, "custom": custom}
+
+
+# ---------------------------------------------------------------------------
+# critique_view
+# ---------------------------------------------------------------------------
+
+
+class TestCritiqueView:
+    def test_empty_view_scores_low(self):
+        db_module.save_view("alice", "cv-crit1", "Empty", "", [])
+        from sre_agent.view_critic import critique_view
+
+        result = critique_view.call({"view_id": "cv-crit1"})
+        assert "0/" in result or "1/" in result or "2/" in result
+        assert "NO METRIC CARDS" in result
+
+    def test_full_view_scores_high(self):
+        layout = [
+            {
+                "kind": "grid",
+                "items": [
+                    {"kind": "metric_card", "title": "CPU", "value": "5%", "query": "rate(cpu[5m])"},
+                    {"kind": "metric_card", "title": "Mem", "value": "30%", "query": "mem_usage"},
+                ],
+            },
+            {"kind": "chart", "title": "CPU Trend", "description": "Watch for spikes", "timeRange": "1h", "series": []},
+            {"kind": "chart", "title": "Mem Trend", "description": "Watch for leaks", "timeRange": "1h", "series": []},
+            {"kind": "data_table", "title": "Pods", "columns": [], "rows": []},
+        ]
+        db_module.save_view(
+            "alice", "cv-crit2", "Full View", "", layout, positions={0: {"x": 0, "y": 0, "w": 4, "h": 2}}
+        )
+        from sre_agent.view_critic import critique_view
+
+        result = critique_view.call({"view_id": "cv-crit2"})
+        assert "passes quality" in result.lower() or "/10" in result
+
+    def test_missing_charts(self):
+        layout = [
+            {"kind": "info_card_grid", "title": "Summary", "cards": []},
+            {"kind": "data_table", "title": "Pods", "columns": [], "rows": []},
+        ]
+        db_module.save_view("alice", "cv-crit3", "No Charts", "", layout)
+        from sre_agent.view_critic import critique_view
+
+        result = critique_view.call({"view_id": "cv-crit3"})
+        assert "NO CHART" in result
+
+    def test_nonexistent_view(self):
+        from sre_agent.view_critic import critique_view
+
+        result = critique_view.call({"view_id": "cv-nope"})
+        assert "not found" in result.lower()

@@ -542,9 +542,8 @@ def migrate_view_ownership(new_owner: str) -> int:
     total = 0
     for row in hash_owners:
         old_owner = row["owner"]
-        db.execute("UPDATE views SET owner = ? WHERE owner = ?", (new_owner, old_owner))
-        count = db.fetchone("SELECT changes() as n")
-        total += count["n"] if count else 0
+        result = db.execute("UPDATE views SET owner = ? WHERE owner = ?", (new_owner, old_owner))
+        total += getattr(result, "rowcount", 0) if result else 0
 
     if total > 0:
         db.commit()

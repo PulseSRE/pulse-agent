@@ -184,3 +184,40 @@ class TestComponentHint:
             assert f'"kind": "{kind}"' in COMPONENT_HINT, (
                 f"Component kind '{kind}' has no schema example in COMPONENT_HINT"
             )
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator: view_designer routing
+# ---------------------------------------------------------------------------
+
+from sre_agent.orchestrator import build_orchestrated_config, classify_intent
+
+
+class TestViewDesignerRouting:
+    def test_dashboard_keyword_routes_to_view_designer(self):
+        assert classify_intent("create a dashboard for my cluster") == "view_designer"
+
+    def test_widget_keyword_routes_to_view_designer(self):
+        assert classify_intent("add a widget to my view") == "view_designer"
+
+    def test_metric_card_routes_to_view_designer(self):
+        assert classify_intent("add metric cards with sparklines") == "view_designer"
+
+    def test_sre_query_does_not_route_to_view_designer(self):
+        assert classify_intent("what pods are crashing") == "sre"
+
+    def test_security_query_does_not_route_to_view_designer(self):
+        assert classify_intent("scan rbac permissions") == "security"
+
+    def test_build_config_returns_no_write_tools(self):
+        config = build_orchestrated_config("view_designer")
+        assert config["write_tools"] == set()
+        assert len(config["tool_defs"]) > 0
+        assert "view_designer" not in [d.get("name") for d in config["tool_defs"]]  # no meta-tool
+
+    def test_build_config_has_critique_and_plan_tools(self):
+        config = build_orchestrated_config("view_designer")
+        tool_names = {d.get("name") for d in config["tool_defs"]}
+        assert "critique_view" in tool_names
+        assert "plan_dashboard" in tool_names
+        assert "create_dashboard" in tool_names
