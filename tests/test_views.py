@@ -186,24 +186,30 @@ class TestVersionHistory:
         assert versions[0]["action"] == "created"
         assert versions[0]["title"] == "My View"
 
-    def test_update_view_creates_snapshot(self):
+    def test_update_with_snapshot_creates_version(self):
         db_module.save_view("alice", "cv-1", "Original", "", _layout())
-        db_module.update_view("cv-1", "alice", title="Renamed")
+        db_module.update_view("cv-1", "alice", _snapshot=True, title="Renamed")
         versions = db_module.list_view_versions("cv-1")
         assert len(versions) == 2
         assert versions[0]["action"] == "update"
         assert versions[1]["action"] == "created"
 
-    def test_layout_update_creates_snapshot(self):
+    def test_update_without_snapshot_no_version(self):
+        db_module.save_view("alice", "cv-1", "V1", "", _layout())
+        db_module.update_view("cv-1", "alice", positions={"0": {"x": 0, "y": 0, "w": 4, "h": 3}})
+        versions = db_module.list_view_versions("cv-1")
+        assert len(versions) == 1  # Only the initial "created" version
+
+    def test_layout_update_with_snapshot(self):
         db_module.save_view("alice", "cv-1", "V1", "", _layout())
         new_layout = [{"kind": "key_value", "pairs": [{"key": "a", "value": "b"}]}]
-        db_module.update_view("cv-1", "alice", layout=new_layout)
+        db_module.update_view("cv-1", "alice", _snapshot=True, layout=new_layout)
         versions = db_module.list_view_versions("cv-1")
         assert len(versions) == 2
 
     def test_restore_version(self):
         db_module.save_view("alice", "cv-1", "Original Title", "", _layout())
-        db_module.update_view("cv-1", "alice", title="Changed")
+        db_module.update_view("cv-1", "alice", _snapshot=True, title="Changed")
         view = db_module.get_view("cv-1", "alice")
         assert view["title"] == "Changed"
 

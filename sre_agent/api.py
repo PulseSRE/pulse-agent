@@ -433,7 +433,7 @@ async def _run_agent_ws(
                 update_kwargs: dict = {"layout": merged_layout, "description": view_desc}
                 if positions:
                     update_kwargs["positions"] = positions
-                _db.update_view(existing["id"], current_user, **update_kwargs)
+                _db.update_view(existing["id"], current_user, _snapshot=True, _action="agent_update", **update_kwargs)
                 _view_updated_ids.add(existing["id"])
                 logger.info(
                     "Updated existing view: id=%s title=%s (+%d components)",
@@ -475,7 +475,7 @@ async def _run_agent_ws(
             view = _db.get_view(vid, current_user)
             if view:
                 new_layout = view.get("layout", []) + [latest_component]
-                _db.update_view(vid, current_user, layout=new_layout)
+                _db.update_view(vid, current_user, _snapshot=True, _action="add_widget", layout=new_layout)
 
     for vid in _view_updated_ids:
         if not vid:
@@ -1733,6 +1733,11 @@ async def rest_update_view(
     for key in ("title", "description", "icon", "layout", "positions"):
         if key in body:
             updates[key] = body[key]
+
+    # Create version snapshot only when explicitly requested (save=true in body)
+    if body.get("save"):
+        updates["_snapshot"] = True
+        updates["_action"] = body.get("action", "save")
 
     result = db.update_view(view_id, owner, **updates)
     if not result:

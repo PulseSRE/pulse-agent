@@ -325,16 +325,22 @@ def get_view(view_id: str, owner: str | None = None) -> dict | None:
 
 @_db_safe
 def update_view(view_id: str, owner: str, **updates) -> bool:
-    """Update a view's fields. Only the owner can update. Auto-snapshots before changes."""
+    """Update a view's fields. Only the owner can update.
+
+    Pass _snapshot=True to create a version snapshot (explicit save).
+    Auto-saves from drag/resize should NOT create versions.
+    """
     import json
     from datetime import UTC, datetime
 
-    # Auto-snapshot before any change (for undo/version history)
+    # Only snapshot when explicitly requested (user clicks save, agent updates)
     action = updates.pop("_action", "update")
-    try:
-        snapshot_view(view_id, action)
-    except Exception:
-        pass  # Don't block the update if snapshot fails
+    should_snapshot = updates.pop("_snapshot", False)
+    if should_snapshot:
+        try:
+            snapshot_view(view_id, action)
+        except Exception:
+            pass
 
     allowed = {"title", "description", "icon", "layout", "positions"}
     fields = []
