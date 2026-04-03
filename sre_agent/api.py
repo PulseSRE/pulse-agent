@@ -1592,7 +1592,7 @@ def _get_current_user(
     if cached:
         if (time.time() - cached[1]) < _USER_CACHE_TTL:
             return cached[0]
-        _user_cache.pop(token_hash, None)
+        # Don't evict yet — keep stale entry in case TokenReview fails
 
     # Resolve via Kubernetes TokenReview
     try:
@@ -1609,7 +1609,12 @@ def _get_current_user(
             _cache_user(token_hash, username)
             return username
     except Exception:
-        logger.warning("TokenReview API unavailable, falling back to token-derived identity")
+        # If we have a cached identity (even stale), keep using it during API outage
+        if cached:
+            logger.warning("TokenReview API unavailable, extending cached identity '%s'", cached[0])
+            _cache_user(token_hash, cached[0])  # refresh timestamp
+            return cached[0]
+        logger.warning("TokenReview API unavailable, using token-derived identity")
 
     # Final fallback: stable identity derived from token hash.
     # OpenShift tokens are sha256~ format (not JWTs), so we can't decode them.
@@ -1801,7 +1806,7 @@ async def rest_share_view(
     if view is None:
         return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
 
-    secret = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
+    secret = os.environ.get("PULSE_SHARE_TOKEN_KEY", "") or os.environ.get("PULSE_AGENT_WS_TOKEN", "")
     if not secret:
         return JSONResponse(status_code=503, content={"error": "Server not configured for sharing"})
     expires = int(time.time()) + 86400  # 24 hours

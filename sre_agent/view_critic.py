@@ -103,6 +103,28 @@ def critique_view(view_id: str) -> str:
     elif len(layout) >= 5:
         suggestions.append("Consider using tabs to organize 5+ widgets into logical groups")
 
+    # 8. Duplicate widget detection
+    queries = [w.get("query", "") for w in layout if w.get("query")]
+    # Also check inside grids
+    for w in layout:
+        if w.get("kind") == "grid":
+            queries.extend(item.get("query", "") for item in w.get("items", []) if item.get("query"))
+    seen_queries: set[str] = set()
+    for q in queries:
+        if q and q in seen_queries:
+            issues.append(f"DUPLICATE QUERY: '{q[:60]}' appears multiple times — use different metrics")
+            break
+        if q:
+            seen_queries.add(q)
+
+    # 9. Data quality — charts with no data
+    for w in layout:
+        if w.get("kind") == "chart":
+            series = w.get("series", [])
+            total_points = sum(len(s.get("data", [])) for s in series)
+            if total_points == 0 and w.get("title"):
+                suggestions.append(f"Chart '{w['title']}' has no data — verify Prometheus connectivity")
+
     # --- Build result ---
     result_lines = [
         f"## View Quality Score: {score}/{max_score}",
