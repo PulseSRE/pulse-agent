@@ -1026,6 +1026,11 @@ async def websocket_auto_agent(websocket: WebSocket):
 
             # --- Auto-classify intent ---
             intent = classify_intent(content)
+            # Sticky mode: if previous turn was view_designer and new intent
+            # defaults to sre (no strong signal), keep view_designer — the user
+            # is likely continuing the dashboard conversation (e.g. "yes, build it")
+            if last_mode == "view_designer" and intent == "sre":
+                intent = "view_designer"
             config = build_orchestrated_config(intent)
             last_mode = intent
             logger.info("Auto-agent classified intent=%s for session=%s", intent, session_id)
