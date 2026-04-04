@@ -15,7 +15,10 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/healthz` | public | Liveness probe. Returns `{"status": "ok"}` |
 | `GET` | `/version` | public | Protocol version, agent version (dynamic from package), tool count, feature flags |
 | `GET` | `/health` | token | Circuit breaker state, error summary, investigation stats, autofix_paused status |
-| `GET` | `/tools` | token | All tools grouped by mode (sre, security) with `requires_confirmation` flags |
+| `GET` | `/tools` | token | All tools grouped by mode (sre, security) with `requires_confirmation` flags and `category` |
+| `GET` | `/agents` | token | All agent modes with metadata (name, description, tool count, categories, write capability) |
+| `GET` | `/tools/usage` | token | Paginated audit log of tool invocations (query params: `tool_name`, `agent_mode`, `status`, `session_id`, `from`, `to`, `page`, `per_page`) |
+| `GET` | `/tools/usage/stats` | token | Aggregated tool usage statistics (totals, by tool, by mode, by category, error rates) (query params: `from`, `to`) |
 | `GET` | `/fix-history` | token | Paginated fix history with filters (`status`, `category`, `since`, `search`) |
 | `GET` | `/fix-history/{id}` | token | Single action detail with before/after state |
 | `POST` | `/fix-history/{id}/rollback` | token | Rollback a completed action (supported for `restart_deployment`; returns error for unsupported action types) |
@@ -74,15 +77,114 @@ The `agent` version is read dynamically from the installed package metadata. The
 ```json
 {
   "sre": [
-    {"name": "list_pods", "description": "...", "requires_confirmation": false},
-    {"name": "delete_pod", "description": "...", "requires_confirmation": true}
+    {"name": "list_pods", "description": "...", "requires_confirmation": false, "category": "pods"},
+    {"name": "delete_pod", "description": "...", "requires_confirmation": true, "category": "pods"}
   ],
   "security": [
-    {"name": "scan_pod_security", "description": "...", "requires_confirmation": false}
+    {"name": "scan_pod_security", "description": "...", "requires_confirmation": false, "category": "scanning"}
   ],
   "write_tools": ["apply_yaml", "cordon_node", "delete_pod", "..."]
 }
 ```
+
+### `/agents` Response
+
+```json
+[
+  {
+    "name": "sre",
+    "description": "OpenShift cluster diagnostics, incident triage, remediation",
+    "tools_count": 70,
+    "has_write_tools": true,
+    "categories": ["pods", "nodes", "deployments", "services", "config", "logs", "fleet"]
+  },
+  {
+    "name": "security",
+    "description": "Pod security, RBAC, network policies, compliance",
+    "tools_count": 9,
+    "has_write_tools": false,
+    "categories": ["scanning", "rbac", "network"]
+  }
+]
+```
+
+### `/tools/usage` Response
+
+```json
+{
+  "entries": [
+    {
+      "id": 123,
+      "tool_name": "list_pods",
+      "agent_mode": "sre",
+      "category": "pods",
+      "status": "success",
+      "duration_ms": 245,
+      "result_bytes": 1234,
+      "session_id": "sess-abc123",
+      "timestamp": "2026-04-03T10:15:30Z",
+      "query_summary": "list all pods in default namespace"
+    }
+  ],
+  "total": 1523,
+  "page": 1,
+  "per_page": 50
+}
+```
+
+Query parameters:
+- `tool_name`: Filter by tool name
+- `agent_mode`: Filter by agent mode (`sre`, `security`, `orchestrated`)
+- `status`: Filter by status (`success`, `error`)
+- `session_id`: Filter by session ID
+- `from`: ISO 8601 timestamp (start of time range)
+- `to`: ISO 8601 timestamp (end of time range)
+- `page`: Page number (default: 1)
+- `per_page`: Items per page (default: 50, max: 200)
+
+### `/tools/usage/stats` Response
+
+```json
+{
+  "total_calls": 1523,
+  "unique_tools_used": 42,
+  "error_rate": 0.0079,
+  "avg_duration_ms": 345,
+  "avg_result_bytes": 5120,
+  "by_tool": [
+    {
+      "tool_name": "list_pods",
+      "count": 450,
+      "error_count": 2,
+      "avg_duration_ms": 230,
+      "avg_result_bytes": 4800
+    },
+    {
+      "tool_name": "get_pod_logs",
+      "count": 380,
+      "error_count": 5,
+      "avg_duration_ms": 1250,
+      "avg_result_bytes": 12500
+    }
+  ],
+  "by_mode": [
+    {"mode": "sre", "count": 1400},
+    {"mode": "security", "count": 123}
+  ],
+  "by_category": [
+    {"category": "pods", "count": 830},
+    {"category": "nodes", "count": 210}
+  ],
+  "by_status": {
+    "success": 1511,
+    "error": 12
+  }
+}
+```
+
+Query parameters:
+- `from`: ISO 8601 timestamp (start of time range)
+- `to`: ISO 8601 timestamp (end of time range)
 
 ---
 

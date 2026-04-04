@@ -153,6 +153,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `k8s_client.py` — lazy-initialized K8s client with `safe()` wrapper
 - `context_bus.py` — shared context bus for cross-agent communication
 - `orchestrator.py` — intent classification + agent routing for `/ws/agent`
+- `tool_usage.py` — tool invocation audit log (PostgreSQL, fire-and-forget recording, query/stats)
 
 ### Claude Code Agents (`.claude/agents/`)
 8 specialized agents with hooks in `.claude/settings.json`:
