@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from sre_agent.db import Database, reset_database, set_database
 from sre_agent.db_migrations import run_migrations
-from sre_agent.tool_usage import record_tool_call, record_turn, sanitize_input, update_turn_feedback
+from sre_agent.tool_usage import (
+    get_usage_stats,
+    query_usage,
+    record_tool_call,
+    record_turn,
+    sanitize_input,
+    update_turn_feedback,
+)
 
 from .conftest import _TEST_DB_URL
 
@@ -15,6 +22,64 @@ def _make_test_db() -> Database:
     db.execute("DROP TABLE IF EXISTS tool_turns CASCADE")
     db.commit()
     return db
+
+
+def _seed_usage(db):
+    """Insert test data for query/stats tests."""
+    for i in range(5):
+        record_tool_call(
+            session_id="stats-s1",
+            turn_number=i + 1,
+            agent_mode="sre",
+            tool_name="list_pods",
+            tool_category="diagnostics",
+            input_data={"namespace": "default"},
+            status="success",
+            error_message=None,
+            error_category=None,
+            duration_ms=100 + i * 10,
+            result_bytes=500 + i * 100,
+            requires_confirmation=False,
+            was_confirmed=None,
+        )
+    record_tool_call(
+        session_id="stats-s1",
+        turn_number=6,
+        agent_mode="sre",
+        tool_name="bad_tool",
+        tool_category="operations",
+        input_data={},
+        status="error",
+        error_message="RuntimeError",
+        error_category="server",
+        duration_ms=50,
+        result_bytes=0,
+        requires_confirmation=False,
+        was_confirmed=None,
+    )
+    record_tool_call(
+        session_id="stats-s2",
+        turn_number=1,
+        agent_mode="security",
+        tool_name="scan_rbac_risks",
+        tool_category="security",
+        input_data={},
+        status="success",
+        error_message=None,
+        error_category=None,
+        duration_ms=200,
+        result_bytes=1000,
+        requires_confirmation=False,
+        was_confirmed=None,
+    )
+    record_turn(
+        session_id="stats-s1",
+        turn_number=1,
+        agent_mode="sre",
+        query_summary="show me pods",
+        tools_offered=["list_pods", "get_events"],
+        tools_called=["list_pods"],
+    )
 
 
 class TestToolUsageTables:
@@ -335,3 +400,94 @@ class TestUpdateTurnFeedback:
 
     def test_no_turns_does_not_raise(self):
         update_turn_feedback(session_id="nonexistent", feedback="negative")
+
+
+class TestQueryUsage:
+    def setup_method(self):
+        self.db = _make_test_db()
+        db2 = Database(_TEST_DB_URL)
+        db2.execute("DELETE FROM schema_migrations WHERE version >= 2")
+        db2.commit()
+        db2.close()
+        set_database(self.db)
+        run_migrations(self.db)
+        _seed_usage(self.db)
+
+    def teardown_method(self):
+        reset_database()
+
+    def test_basic_query(self):
+        result = query_usage()
+        assert result["total"] == 7
+        assert len(result["entries"]) == 7
+
+    def test_filter_by_tool_name(self):
+        result = query_usage(tool_name="list_pods")
+        assert result["total"] == 5
+        assert all(e["tool_name"] == "list_pods" for e in result["entries"])
+
+    def test_filter_by_status(self):
+        result = query_usage(status="error")
+        assert result["total"] == 1
+
+    def test_filter_by_mode(self):
+        result = query_usage(agent_mode="security")
+        assert result["total"] == 1
+
+    def test_pagination(self):
+        result = query_usage(page=1, per_page=3)
+        assert len(result["entries"]) == 3
+        assert result["total"] == 7
+        assert result["page"] == 1
+        assert result["per_page"] == 3
+
+    def test_page_2(self):
+        result = query_usage(page=2, per_page=3)
+        assert len(result["entries"]) == 3
+
+    def test_filter_by_session(self):
+        result = query_usage(session_id="stats-s2")
+        assert result["total"] == 1
+
+
+class TestGetUsageStats:
+    def setup_method(self):
+        self.db = _make_test_db()
+        db2 = Database(_TEST_DB_URL)
+        db2.execute("DELETE FROM schema_migrations WHERE version >= 2")
+        db2.commit()
+        db2.close()
+        set_database(self.db)
+        run_migrations(self.db)
+        _seed_usage(self.db)
+
+    def teardown_method(self):
+        reset_database()
+
+    def test_total_calls(self):
+        stats = get_usage_stats()
+        assert stats["total_calls"] == 7
+
+    def test_unique_tools(self):
+        stats = get_usage_stats()
+        assert stats["unique_tools_used"] == 3
+
+    def test_error_rate(self):
+        stats = get_usage_stats()
+        assert 0 < stats["error_rate"] < 1
+
+    def test_by_tool(self):
+        stats = get_usage_stats()
+        assert len(stats["by_tool"]) > 0
+        pods = next(t for t in stats["by_tool"] if t["tool_name"] == "list_pods")
+        assert pods["count"] == 5
+
+    def test_by_mode(self):
+        stats = get_usage_stats()
+        sre = next(m for m in stats["by_mode"] if m["mode"] == "sre")
+        assert sre["count"] == 6
+
+    def test_by_status(self):
+        stats = get_usage_stats()
+        assert stats["by_status"]["success"] == 6
+        assert stats["by_status"]["error"] == 1

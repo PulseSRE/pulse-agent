@@ -189,3 +189,235 @@ def update_turn_feedback(
         logger.debug(f"Updated turn feedback: session={session_id}, feedback={feedback}")
     except Exception as e:
         logger.debug(f"Failed to update turn feedback: {e}")
+
+
+def query_usage(
+    *,
+    tool_name: str | None = None,
+    agent_mode: str | None = None,
+    status: str | None = None,
+    session_id: str | None = None,
+    time_from: str | None = None,
+    time_to: str | None = None,
+    page: int = 1,
+    per_page: int = 50,
+) -> dict:
+    """Query the tool_usage table with optional filters and pagination.
+
+    Args:
+        tool_name: Filter by tool name
+        agent_mode: Filter by agent mode (sre, security, etc)
+        status: Filter by status (success, error)
+        session_id: Filter by session ID
+        time_from: ISO timestamp lower bound (inclusive)
+        time_to: ISO timestamp upper bound (inclusive)
+        page: Page number (1-indexed)
+        per_page: Results per page (max 200)
+
+    Returns:
+        {
+            "entries": [...],  # list of dicts with all tool_usage columns + query_summary
+            "total": int,
+            "page": int,
+            "per_page": int
+        }
+    """
+    from .db import get_database
+
+    db = get_database()
+
+    # Cap per_page at 200
+    per_page = min(per_page, 200)
+    offset = (page - 1) * per_page
+
+    # Build WHERE clause dynamically
+    where_clauses = []
+    params = []
+
+    if tool_name is not None:
+        where_clauses.append("u.tool_name = %s")
+        params.append(tool_name)
+
+    if agent_mode is not None:
+        where_clauses.append("u.agent_mode = %s")
+        params.append(agent_mode)
+
+    if status is not None:
+        where_clauses.append("u.status = %s")
+        params.append(status)
+
+    if session_id is not None:
+        where_clauses.append("u.session_id = %s")
+        params.append(session_id)
+
+    if time_from is not None:
+        where_clauses.append("u.timestamp >= %s")
+        params.append(time_from)
+
+    if time_to is not None:
+        where_clauses.append("u.timestamp <= %s")
+        params.append(time_to)
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+
+    # Count total matching rows
+    count_sql = f"SELECT COUNT(*) AS total FROM tool_usage u {where_sql}"
+    count_row = db.fetchone(count_sql, tuple(params))
+    total = count_row["total"] if count_row else 0
+
+    # Fetch paginated results with LEFT JOIN on tool_turns
+    query_sql = f"""
+        SELECT
+            u.id, u.timestamp, u.session_id, u.turn_number, u.agent_mode,
+            u.tool_name, u.tool_category, u.input_summary, u.status,
+            u.error_message, u.error_category, u.duration_ms, u.result_bytes,
+            u.requires_confirmation, u.was_confirmed,
+            t.query_summary
+        FROM tool_usage u
+        LEFT JOIN tool_turns t ON u.session_id = t.session_id AND u.turn_number = t.turn_number
+        {where_sql}
+        ORDER BY u.timestamp DESC
+        LIMIT %s OFFSET %s
+    """
+
+    rows = db.fetchall(query_sql, tuple(params) + (per_page, offset))
+
+    # Convert rows to dicts with ISO timestamps and parsed input_summary
+    entries = []
+    for row in rows:
+        entry = dict(row)
+        # Convert timestamp to ISO string
+        if entry["timestamp"]:
+            entry["timestamp"] = entry["timestamp"].isoformat()
+        # Parse input_summary from string to dict if needed
+        if entry["input_summary"] and isinstance(entry["input_summary"], str):
+            try:
+                entry["input_summary"] = json.loads(entry["input_summary"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        entries.append(entry)
+
+    return {"entries": entries, "total": total, "page": page, "per_page": per_page}
+
+
+def get_usage_stats(
+    *,
+    time_from: str | None = None,
+    time_to: str | None = None,
+) -> dict:
+    """Get aggregated statistics from the tool_usage table.
+
+    Args:
+        time_from: ISO timestamp lower bound (inclusive)
+        time_to: ISO timestamp upper bound (inclusive)
+
+    Returns:
+        {
+            "total_calls": int,
+            "unique_tools_used": int,
+            "error_rate": float,
+            "avg_duration_ms": int,
+            "avg_result_bytes": int,
+            "by_tool": [{"tool_name": str, "count": int, "error_count": int, "avg_duration_ms": int, "avg_result_bytes": int}],
+            "by_mode": [{"mode": str, "count": int}],
+            "by_category": [{"category": str, "count": int}],
+            "by_status": {"success": int, "error": int}
+        }
+    """
+    from .db import get_database
+
+    db = get_database()
+
+    # Build WHERE clause for time filters
+    where_clauses = []
+    params = []
+
+    if time_from is not None:
+        where_clauses.append("timestamp >= %s")
+        params.append(time_from)
+
+    if time_to is not None:
+        where_clauses.append("timestamp <= %s")
+        params.append(time_to)
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+
+    # Overall stats
+    overall_sql = f"""
+        SELECT
+            COUNT(*) AS total_calls,
+            COUNT(DISTINCT tool_name) AS unique_tools_used,
+            COALESCE(AVG(CASE WHEN status = 'error' THEN 1.0 ELSE 0.0 END), 0) AS error_rate,
+            COALESCE(ROUND(AVG(duration_ms)), 0) AS avg_duration_ms,
+            COALESCE(ROUND(AVG(result_bytes)), 0) AS avg_result_bytes
+        FROM tool_usage
+        {where_sql}
+    """
+    overall = db.fetchone(overall_sql, tuple(params))
+
+    # By tool
+    by_tool_sql = f"""
+        SELECT
+            tool_name,
+            COUNT(*) AS count,
+            SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_count,
+            COALESCE(ROUND(AVG(duration_ms)), 0) AS avg_duration_ms,
+            COALESCE(ROUND(AVG(result_bytes)), 0) AS avg_result_bytes
+        FROM tool_usage
+        {where_sql}
+        GROUP BY tool_name
+        ORDER BY count DESC
+    """
+    by_tool = db.fetchall(by_tool_sql, tuple(params))
+
+    # By mode
+    by_mode_sql = f"""
+        SELECT agent_mode AS mode, COUNT(*) AS count
+        FROM tool_usage
+        {where_sql}
+        GROUP BY agent_mode
+        ORDER BY count DESC
+    """
+    by_mode = db.fetchall(by_mode_sql, tuple(params))
+
+    # By category (filter out NULLs)
+    category_where_sql = where_sql
+    if category_where_sql:
+        category_where_sql += " AND tool_category IS NOT NULL"
+    else:
+        category_where_sql = "WHERE tool_category IS NOT NULL"
+
+    by_category_sql = f"""
+        SELECT tool_category AS category, COUNT(*) AS count
+        FROM tool_usage
+        {category_where_sql}
+        GROUP BY tool_category
+        ORDER BY count DESC
+    """
+    by_category = db.fetchall(by_category_sql, tuple(params))
+
+    # By status
+    by_status_sql = f"""
+        SELECT status, COUNT(*) AS count
+        FROM tool_usage
+        {where_sql}
+        GROUP BY status
+    """
+    by_status_rows = db.fetchall(by_status_sql, tuple(params))
+    by_status = {row["status"]: row["count"] for row in by_status_rows}
+
+    return {
+        "total_calls": overall["total_calls"],
+        "unique_tools_used": overall["unique_tools_used"],
+        "error_rate": float(overall["error_rate"]),
+        "avg_duration_ms": int(overall["avg_duration_ms"]),
+        "avg_result_bytes": int(overall["avg_result_bytes"]),
+        "by_tool": [dict(row) for row in by_tool],
+        "by_mode": [dict(row) for row in by_mode],
+        "by_category": [dict(row) for row in by_category],
+        "by_status": by_status,
+    }
