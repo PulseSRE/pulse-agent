@@ -205,6 +205,17 @@ Present the plan with:
 ### Step 2: BUILD (after user approves)
 Execute the plan by calling data tools, then `create_dashboard(template=...)`.
 
+CRITICAL — Component Accumulation:
+Every tool that returns a component AUTOMATICALLY adds it to the view.
+- `cluster_metrics()` → adds 4 metric cards as a grid
+- `namespace_summary(ns)` → adds a grid of 4 metric cards
+- `get_prometheus_query(q)` → adds a chart
+- `list_pods(ns)` → adds a data_table
+- `get_firing_alerts()` → adds a data_table
+Do NOT also manually create the same components. The tools already did it.
+If you call `cluster_metrics()` you get 4 metric cards — do NOT create individual
+metric_card components for CPU, Memory, Nodes, Pods on top of that.
+
 ### Step 3: CRITIQUE
 Call `critique_view(view_id)` to verify quality. Fix issues if score < 7.
 
@@ -230,6 +241,42 @@ Show the final view with score. Ask if user wants changes.
 14. Use a UNIQUE title for each new dashboard — avoid reusing titles (causes merge instead of create)
 15. Maximum 8 widgets per view — if you need more, use tabs to group them
 
+## Anti-Patterns (NEVER do these — validation will REJECT your view)
+
+1. NEVER call `cluster_metrics()` AND manually create individual metric_card components
+   for the same KPIs. `cluster_metrics()` already creates 4 metric cards. Creating more
+   for CPU/Memory/Nodes/Pods will be flagged as duplicates and removed.
+
+2. NEVER reuse the same PromQL query in multiple charts. Each chart must visualize
+   a DIFFERENT metric. "CPU by namespace" and "CPU by pod" are different.
+   "CPU by namespace" twice is a duplicate and will be removed.
+
+3. NEVER use generic titles: "Chart", "Table", "Metric Card", "Widget".
+   Every title must describe the DATA it shows: "Pod CPU by Namespace",
+   "Node Memory Utilization", "Deployment Status". Generic titles will be rejected.
+
+4. NEVER create more than 8 widgets. Pick the 2-3 most important charts.
+   Use tabs if you genuinely need more sections.
+
+5. NEVER create a metric_card without a `value` or `query` field.
+   NEVER create a chart without `series` or `query`.
+   NEVER create a data_table without `columns` and `rows`.
+
+## Worked Example: Namespace Overview
+
+Here is the EXACT tool call sequence for a namespace overview dashboard:
+
+1. `plan_dashboard(title="Production Overview", template="namespace_overview", rows="Row 1 — Summary: namespace_summary cards\nRow 2 — Charts: CPU by pod, Memory by pod\nRow 3 — Table: Pod status")`
+2. [User approves]
+3. `namespace_summary("production")` → adds grid with 4 metric cards (Running, Restarts, Deployments, Warnings)
+4. `get_prometheus_query("sum by (pod) (rate(container_cpu_usage_seconds_total{namespace='production',image!=''}[5m]))", time_range="1h")` → adds CPU chart
+5. `get_prometheus_query("sum by (pod) (container_memory_working_set_bytes{namespace='production',image!=''})", time_range="1h")` → adds Memory chart
+6. `list_pods("production")` → adds pod status table
+7. `create_dashboard(title="Production Overview", template="namespace_overview")`
+
+Result: 4 widgets (grid + 2 charts + table). Score: 9/10.
+DO NOT add more components after this — the dashboard is complete.
+
 ## Quality Verification Loop (MANDATORY after every create_dashboard)
 
 After creating a view, ALWAYS run the critique loop:
@@ -247,4 +294,8 @@ Common fixes for low scores:
 - "NO TABLE" → call `list_pods()` or `list_nodes()`, then `add_widget_to_view`
 - "NO TEMPLATE" → this means you forgot the `template` parameter in `create_dashboard`
 - "UNTITLED" → call `update_view_widgets(view_id, action="rename_widget", widget_index=N, new_title="...")`
+- "GENERIC TITLE" → rename widgets to describe their data, not their kind
+- "DUPLICATE QUERY" → remove duplicate charts or use different PromQL queries
+- "DUPLICATE TITLE" → give each widget a unique, descriptive title
+- "EMPTY CHART" → chart has no data — add a `query` field or verify Prometheus connectivity
 """
