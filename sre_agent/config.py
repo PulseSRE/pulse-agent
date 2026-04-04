@@ -60,6 +60,11 @@ class PulseAgentSettings(BaseSettings):
         "image-registry.openshift-image-registry.svc",
     ]
 
+    # Tool chain intelligence
+    chain_hints: bool = True
+    chain_min_probability: float = 0.6
+    chain_min_frequency: int = 3
+
     @field_validator("model")
     @classmethod
     def model_must_be_claude(cls, v: str) -> str:
