@@ -46,9 +46,10 @@ make verify                                    # lint + type-check + test
 make release VERSION=1.6.0            # bump version everywhere, commit, tag
 # then: git push && git push --tags   # triggers build-push.yml
 
-# Deploy (OpenShift)
-./deploy/quick-deploy.sh openshiftpulse        # fast Podman build + push to internal registry
-make helm-lint                                 # validate chart locally (tests PostgreSQL StatefulSet)
+# Deploy (OpenShift) — uses umbrella script in UI repo
+cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh   # builds UI + Agent, pushes to Quay, Helm upgrade
+cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --dry-run  # preview without applying
+cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --skip-build  # redeploy with existing images
 ```
 
 ## Architecture
