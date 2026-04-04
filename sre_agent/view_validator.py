@@ -232,7 +232,7 @@ def is_generic_title(title: str, kind: str) -> bool:
         return True
 
     # Kind-as-title (e.g. "data table" for kind "data_table")
-    kind_as_title = kind.replace("_", " ")
+    kind_as_title = kind.replace("_", " ").lower()
     return lower == kind_as_title
 
 

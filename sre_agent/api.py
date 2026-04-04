@@ -558,6 +558,20 @@ async def _run_agent_ws(
             if existing:
                 old_layout = existing.get("layout", [])
                 merged_layout = old_layout + session_components
+                # Re-validate the merged layout (dedup + structural checks)
+                _vr_merged = _validate(merged_layout)
+                if not _vr_merged.valid:
+                    logger.warning("Merged view blocked: %s", "; ".join(_vr_merged.errors))
+                    await websocket.send_json(
+                        {
+                            "type": "view_validation_error",
+                            "errors": _vr_merged.errors,
+                            "warnings": _vr_merged.warnings,
+                            "deduped_count": _vr_merged.deduped_count,
+                        }
+                    )
+                    continue
+                merged_layout = _vr_merged.components
                 update_kwargs: dict = {"layout": merged_layout, "description": view_desc}
                 if positions:
                     update_kwargs["positions"] = positions

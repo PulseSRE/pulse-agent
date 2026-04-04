@@ -103,7 +103,7 @@ def critique_view(view_id: str) -> str:
     # --- Widget count check ---
     if len(layout) < 3:
         issues.append(f"TOO FEW WIDGETS: Only {len(layout)} widgets. Minimum 3 (metrics + chart + table)")
-    elif len(layout) > 10:
+    elif len(layout) > 8:
         issues.append(f"TOO MANY WIDGETS: {len(layout)} widgets — reorganize into tabs or remove duplicates")
         score = max(0, score - 2)
     elif len(layout) >= 6:
