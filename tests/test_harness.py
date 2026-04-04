@@ -123,12 +123,25 @@ class TestBuildCachedSystemPrompt:
 
 
 class TestGetClusterContext:
-    def test_caches_result(self):
+    def _clear_caches(self):
         import sre_agent.harness as h
 
         h._cluster_context_cache.clear()
+        try:
+            from sre_agent.tool_chains import _chain_hints_cache
 
-        with patch("sre_agent.harness.gather_cluster_context", return_value="cached data") as mock_gather:
+            _chain_hints_cache.clear()
+        except ImportError:
+            pass
+
+    def test_caches_result(self):
+        self._clear_caches()
+
+        with (
+            patch("sre_agent.harness.gather_cluster_context", return_value="cached data") as mock_gather,
+            patch("sre_agent.tool_chains.ensure_hints_fresh"),
+            patch("sre_agent.tool_chains.get_chain_hints_text", return_value=""),
+        ):
             result1 = get_cluster_context(max_age=60, mode="sre")
             result2 = get_cluster_context(max_age=60, mode="sre")
         assert result1 == "cached data"
@@ -136,11 +149,16 @@ class TestGetClusterContext:
         assert mock_gather.call_count == 1
 
     def test_refreshes_when_stale(self):
+        self._clear_caches()
         import sre_agent.harness as h
 
         h._cluster_context_cache["sre"] = ("old", 0)  # ancient timestamp
 
-        with patch("sre_agent.harness.gather_cluster_context", return_value="new data"):
+        with (
+            patch("sre_agent.harness.gather_cluster_context", return_value="new data"),
+            patch("sre_agent.tool_chains.ensure_hints_fresh"),
+            patch("sre_agent.tool_chains.get_chain_hints_text", return_value=""),
+        ):
             result = get_cluster_context(max_age=60, mode="sre")
         assert result == "new data"
 
