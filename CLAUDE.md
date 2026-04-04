@@ -38,7 +38,7 @@ python -m sre_agent.main security     # Security scanner
 pulse-agent-api                       # FastAPI on port 8080
 
 # Tests
-python3 -m pytest tests/ -v           # all tests (~846 tests)
+python3 -m pytest tests/ -v           # all tests (~917 tests)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
 make verify                                    # lint + type-check + test
 
@@ -150,6 +150,8 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `runbooks.py` — 10 built-in SRE runbooks injected into system prompt
 - `memory/` — self-improving agent (PostgreSQL, pattern detection, learned runbooks)
 - `view_tools.py` — `namespace_summary` + `create_dashboard` tools for generative views
+- `view_validator.py` — component validation + dedup before view save (blocks bad dashboards)
+- `view_critic.py` — post-creation quality scoring rubric (0-10 scale, dedup/title/balance checks)
 - `db.py` — Database abstraction (PostgreSQL production, SQLite tests) + view CRUD functions
 - `k8s_client.py` — lazy-initialized K8s client with `safe()` wrapper
 - `context_bus.py` — shared context bus for cross-agent communication
