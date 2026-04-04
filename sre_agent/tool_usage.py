@@ -421,3 +421,35 @@ def get_usage_stats(
         "by_category": [dict(row) for row in by_category],
         "by_status": by_status,
     }
+
+
+_AGENT_DESCRIPTIONS = {
+    "sre": "Cluster diagnostics, incident triage, and resource management",
+    "security": "Security scanning, RBAC analysis, and compliance checks",
+    "view_designer": "Dashboard creation and component design",
+}
+
+
+def get_agents_metadata() -> list[dict]:
+    """Return metadata for all agent modes."""
+    from .harness import MODE_CATEGORIES
+    from .orchestrator import build_orchestrated_config
+
+    agents = []
+    for mode, categories in MODE_CATEGORIES.items():
+        if mode == "both":
+            continue
+
+        config = build_orchestrated_config(mode)
+
+        agents.append(
+            {
+                "name": mode,
+                "description": _AGENT_DESCRIPTIONS.get(mode, ""),
+                "tools_count": len(config["tool_defs"]),
+                "has_write_tools": len(config["write_tools"]) > 0,
+                "categories": categories or [],
+            }
+        )
+
+    return agents

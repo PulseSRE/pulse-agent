@@ -5,6 +5,7 @@ from __future__ import annotations
 from sre_agent.db import Database, reset_database, set_database
 from sre_agent.db_migrations import run_migrations
 from sre_agent.tool_usage import (
+    get_agents_metadata,
     get_usage_stats,
     query_usage,
     record_tool_call,
@@ -491,3 +492,32 @@ class TestGetUsageStats:
         stats = get_usage_stats()
         assert stats["by_status"]["success"] == 6
         assert stats["by_status"]["error"] == 1
+
+
+class TestGetAgentsMetadata:
+    def test_returns_list(self):
+        result = get_agents_metadata()
+        assert isinstance(result, list)
+        assert len(result) >= 3
+
+    def test_sre_agent(self):
+        result = get_agents_metadata()
+        sre = next(a for a in result if a["name"] == "sre")
+        assert sre["has_write_tools"] is True
+        assert sre["tools_count"] > 0
+        assert "diagnostics" in sre["categories"]
+
+    def test_security_agent(self):
+        result = get_agents_metadata()
+        sec = next(a for a in result if a["name"] == "security")
+        assert sec["has_write_tools"] is False
+
+    def test_view_designer_agent(self):
+        result = get_agents_metadata()
+        vd = next(a for a in result if a["name"] == "view_designer")
+        assert vd["has_write_tools"] is False
+
+    def test_no_both_mode(self):
+        result = get_agents_metadata()
+        names = {a["name"] for a in result}
+        assert "both" not in names
