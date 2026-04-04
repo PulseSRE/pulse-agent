@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.13.0, Protocol v2, ~103 tools, 16 scanners, 846 tests. Aladdin MVP foundation: chart-first canvas view builder, generic list_resources with K8s Table API, 14 smart column renderers, resource relationship tracer. Auto-routing orchestrator classifies queries and routes to SRE or Security agent. Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence (bigram discovery, next-tool hints injected into system prompt).
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.13.0, Protocol v2, ~105 tools, 16 scanners, 846 tests. Aladdin MVP foundation: chart-first canvas view builder, generic list_resources with K8s Table API, 14 smart column renderers, resource relationship tracer. Auto-routing orchestrator classifies queries and routes to SRE or Security agent. Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence (bigram discovery, next-tool hints injected into system prompt).
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -38,7 +38,7 @@ python -m sre_agent.main security     # Security scanner
 pulse-agent-api                       # FastAPI on port 8080
 
 # Tests
-python3 -m pytest tests/ -v           # all tests (~917 tests)
+python3 -m pytest tests/ -v           # all tests (~1026 tests)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
 make verify                                    # lint + type-check + test
 
@@ -158,6 +158,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `orchestrator.py` — intent classification + agent routing for `/ws/agent`
 - `tool_usage.py` — tool invocation audit log (PostgreSQL, fire-and-forget recording, query/stats)
 - `tool_chains.py` — tool chain discovery and next-tool hints (bigram analysis, system prompt injection)
+- `promql_recipes.py` — 73 production-tested PromQL recipes + learned queries DB (sources: OpenShift console, cluster-monitoring-operator, kube-state-metrics, node_exporter, ACM)
 
 ### Claude Code Agents (`.claude/agents/`)
 8 specialized agents with hooks in `.claude/settings.json`:
