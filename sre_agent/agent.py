@@ -29,14 +29,8 @@ from .predict_tools import PREDICT_TOOLS
 from .runbooks import ALERT_TRIAGE_CONTEXT, RUNBOOKS
 from .timeline_tools import TIMELINE_TOOLS
 from .view_tools import (
-    add_widget_to_view,
-    create_dashboard,
-    get_view_details,
-    get_view_versions,
-    list_saved_views,
+    cluster_metrics,
     namespace_summary,
-    undo_view_change,
-    update_view_widgets,
 )
 
 ALL_TOOLS = (
@@ -48,14 +42,8 @@ ALL_TOOLS = (
     + PREDICT_TOOLS
     + [
         request_security_scan,
-        create_dashboard,
         namespace_summary,
-        list_saved_views,
-        get_view_details,
-        update_view_widgets,
-        add_widget_to_view,
-        undo_view_change,
-        get_view_versions,
+        cluster_metrics,
     ]
 )
 

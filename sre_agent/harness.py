@@ -234,22 +234,13 @@ ALWAYS_INCLUDE = {
     "get_cluster_version",
     "record_audit_entry",
     "suggest_remediation",
-    "create_dashboard",
-    "list_saved_views",
     "namespace_summary",
     "cluster_metrics",
     "visualize_nodes",
-    "plan_dashboard",
-    "critique_view",
     "list_pods",
     "get_events",
     "get_firing_alerts",
     "request_sre_investigation",
-    "get_view_details",
-    "update_view_widgets",
-    "add_widget_to_view",
-    "undo_view_change",
-    "get_view_versions",
 }
 
 

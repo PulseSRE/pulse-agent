@@ -250,7 +250,22 @@ class TestCategoryCoverage:
             all_categorized.update(config["tools"])
 
         # These tools are internal/meta and intentionally uncategorized
-        EXCLUDED = {"set_store", "set_current_user", "get_current_user", "get_cluster_patterns"}
+        # Internal/meta tools and view-designer-only tools (assembled separately by view_designer.py)
+        EXCLUDED = {
+            "set_store",
+            "set_current_user",
+            "get_current_user",
+            "get_cluster_patterns",
+            "create_dashboard",
+            "plan_dashboard",
+            "critique_view",
+            "list_saved_views",
+            "get_view_details",
+            "update_view_widgets",
+            "add_widget_to_view",
+            "undo_view_change",
+            "get_view_versions",
+        }
 
         missing = set()
         for tool_name in TOOL_REGISTRY:
