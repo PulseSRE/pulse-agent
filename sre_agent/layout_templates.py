@@ -2,10 +2,11 @@
 
 TEMPLATES: dict[str, list[dict]] = {
     "sre_dashboard": [
-        {"kinds": ["metric_card", "info_card_grid", "grid"], "x": 0, "y": 0, "w": 1, "h": 2},
-        {"kinds": ["metric_card", "info_card_grid", "grid"], "x": 1, "y": 0, "w": 1, "h": 2},
-        {"kinds": ["metric_card", "info_card_grid", "grid"], "x": 2, "y": 0, "w": 1, "h": 2},
-        {"kinds": ["metric_card", "info_card_grid", "grid"], "x": 3, "y": 0, "w": 1, "h": 2, "optional": True},
+        {"kinds": ["grid", "info_card_grid"], "x": 0, "y": 0, "w": 4, "h": 2},
+        {"kinds": ["metric_card"], "x": 0, "y": 0, "w": 1, "h": 2},
+        {"kinds": ["metric_card"], "x": 1, "y": 0, "w": 1, "h": 2},
+        {"kinds": ["metric_card"], "x": 2, "y": 0, "w": 1, "h": 2},
+        {"kinds": ["metric_card"], "x": 3, "y": 0, "w": 1, "h": 2, "optional": True},
         {"kinds": ["chart"], "x": 0, "y": 2, "w": 2, "h": 5},
         {"kinds": ["chart"], "x": 2, "y": 2, "w": 2, "h": 5, "optional": True},
         {"kinds": ["data_table", "status_list"], "x": 0, "y": 7, "w": 4, "h": 6},
@@ -24,6 +25,7 @@ TEMPLATES: dict[str, list[dict]] = {
         {"kinds": ["data_table"], "x": 0, "y": 9, "w": 4, "h": 5, "optional": True},
     ],
     "monitoring_panel": [
+        {"kinds": ["grid", "info_card_grid"], "x": 0, "y": 0, "w": 4, "h": 2},
         {"kinds": ["metric_card"], "x": 0, "y": 0, "w": 1, "h": 2},
         {"kinds": ["metric_card"], "x": 1, "y": 0, "w": 1, "h": 2},
         {"kinds": ["metric_card"], "x": 2, "y": 0, "w": 1, "h": 2},
