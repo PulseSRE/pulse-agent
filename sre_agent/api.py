@@ -517,8 +517,30 @@ async def _run_agent_ws(
             import time as _time
 
             from . import db as _db
+            from .view_validator import validate_components as _validate
 
             _sanitize_components(session_components)
+
+            # Validate and deduplicate components before saving
+            _vr = _validate(session_components)
+            session_components = _vr.components  # Use deduped list
+            if _vr.deduped_count > 0:
+                logger.info("Deduped %d duplicate components from view", _vr.deduped_count)
+
+            if not _vr.valid:
+                logger.warning(
+                    "View blocked by validation: %s",
+                    "; ".join(_vr.errors),
+                )
+                await websocket.send_json(
+                    {
+                        "type": "view_validation_error",
+                        "errors": _vr.errors,
+                        "warnings": _vr.warnings,
+                        "deduped_count": _vr.deduped_count,
+                    }
+                )
+                continue  # Skip saving — errors returned to agent
 
             view_id = sig.get("view_id", f"cv-{uuid.uuid4().hex[:12]}")
             view_title = sig.get("title", "Custom View")

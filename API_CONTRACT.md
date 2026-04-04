@@ -552,6 +552,25 @@ Emitted when the agent calls `create_dashboard`. Contains a collection of compon
 
 The UI shows a "Save Dashboard" prompt. Saved views are accessible at `/custom/:viewId` and persist in localStorage.
 
+#### `view_validation_error` — Dashboard blocked by validation
+
+Emitted when the agent's `create_dashboard` call is blocked because the generated components fail validation (duplicates, missing required structure, generic titles, etc.). The view is NOT saved. The agent should fix the issues and retry.
+
+```json
+{
+  "type": "view_validation_error",
+  "errors": ["Dashboard must include at least one chart.", "Generic title 'Table' — provide a descriptive title."],
+  "warnings": ["PromQL has unbalanced braces {} in: rate(cpu[5m]"],
+  "deduped_count": 2
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `errors` | `string[]` | Blocking validation errors (view not saved) |
+| `warnings` | `string[]` | Non-blocking PromQL or quality warnings |
+| `deduped_count` | `number` | Number of duplicate components that were removed |
+
 #### `findings_snapshot` — Active findings reconciliation
 
 Sent after each scan cycle. Contains the IDs of all currently active findings. The UI removes any locally-held findings whose IDs are not in `activeIds`, preventing stale entries from accumulating after issues are resolved.
