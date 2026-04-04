@@ -59,7 +59,15 @@ def _migrate_002_tool_usage(db: Database) -> None:
     db.executescript(TOOL_USAGE_SCHEMA + TOOL_TURNS_SCHEMA + TOOL_USAGE_INDEX_SCHEMA)
 
 
+def _migrate_003_promql_queries(db: Database) -> None:
+    """Add promql_queries table for tracking query success/failure rates."""
+    from .db_schema import PROMQL_QUERIES_SCHEMA
+
+    db.executescript(PROMQL_QUERIES_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
+    (3, "promql_queries", _migrate_003_promql_queries),
 ]

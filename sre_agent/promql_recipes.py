@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import logging
+import re
 from dataclasses import dataclass, field
+
+logger = logging.getLogger("pulse_agent.promql_recipes")
 
 
 @dataclass
@@ -706,3 +711,93 @@ def get_fallback(category: str, scope: str = "cluster") -> PromQLRecipe | None:
         if r.scope == scope:
             return r
     return recipes[0] if recipes else None
+
+
+# ---------------------------------------------------------------------------
+# Learned-query DB layer
+# ---------------------------------------------------------------------------
+
+
+def normalize_query(query: str) -> str:
+    """Normalize a PromQL query for hashing — strip namespace/pod/instance values, lowercase."""
+    if not query:
+        return ""
+    q = str(query).lower()
+    q = re.sub(r'namespace\s*=~?\s*"[^"]*"', 'namespace="__NS__"', q)
+    q = re.sub(r'pod\s*=~?\s*"[^"]*"', 'pod="__POD__"', q)
+    q = re.sub(r'instance\s*=~?\s*"[^"]*"', 'instance="__INSTANCE__"', q)
+    q = re.sub(r'deployment\s*=~?\s*"[^"]*"', 'deployment="__DEP__"', q)
+    return q.strip()
+
+
+def record_query_result(query: str, *, success: bool, series_count: int = 0) -> None:
+    """Record a PromQL query result. Fire-and-forget: swallows all exceptions."""
+    try:
+        if not query:
+            return
+        from .db import get_database
+
+        db = get_database()
+        normalized = normalize_query(query)
+        qhash = hashlib.sha256(normalized.encode()).hexdigest()
+
+        if success:
+            db.execute(
+                "INSERT INTO promql_queries (query_hash, query_template, success_count, last_success, avg_series_count) "
+                "VALUES (%s, %s, 1, NOW(), %s) "
+                "ON CONFLICT (query_hash) DO UPDATE SET "
+                "success_count = promql_queries.success_count + 1, "
+                "last_success = NOW(), "
+                "avg_series_count = (promql_queries.avg_series_count + %s) / 2",
+                (qhash, normalized, float(series_count), float(series_count)),
+            )
+        else:
+            db.execute(
+                "INSERT INTO promql_queries (query_hash, query_template, failure_count, last_failure) "
+                "VALUES (%s, %s, 1, NOW()) "
+                "ON CONFLICT (query_hash) DO UPDATE SET "
+                "failure_count = promql_queries.failure_count + 1, "
+                "last_failure = NOW()",
+                (qhash, normalized),
+            )
+    except Exception:
+        logger.debug("Failed to record query result", exc_info=True)
+
+
+def get_query_reliability(query_template: str) -> dict | None:
+    """Return success/failure counts for a normalized query template."""
+    try:
+        from .db import get_database
+
+        db = get_database()
+        qhash = hashlib.sha256(query_template.encode()).hexdigest()
+        row = db.fetch_one(
+            "SELECT success_count, failure_count, avg_series_count FROM promql_queries WHERE query_hash = %s",
+            (qhash,),
+        )
+        if row:
+            return {"success_count": row[0], "failure_count": row[1], "avg_series_count": row[2]}
+    except Exception:
+        logger.debug("Failed to get query reliability", exc_info=True)
+    return None
+
+
+def get_reliable_queries(category: str, min_success: int = 3) -> list[dict]:
+    """Return queries with high success rates for a category."""
+    try:
+        from .db import get_database
+
+        db = get_database()
+        rows = db.fetch_all(
+            "SELECT query_template, success_count, failure_count, avg_series_count "
+            "FROM promql_queries WHERE category = %s AND success_count >= %s "
+            "ORDER BY success_count DESC LIMIT 20",
+            (category, min_success),
+        )
+        return [
+            {"query_template": r[0], "success_count": r[1], "failure_count": r[2], "avg_series_count": r[3]}
+            for r in rows
+        ]
+    except Exception:
+        logger.debug("Failed to get reliable queries", exc_info=True)
+    return []

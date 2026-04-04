@@ -202,6 +202,22 @@ CREATE INDEX IF NOT EXISTS idx_tool_turns_session ON tool_turns(session_id);
 CREATE INDEX IF NOT EXISTS idx_tool_turns_feedback ON tool_turns(feedback) WHERE feedback IS NOT NULL;
 """
 
+PROMQL_QUERIES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS promql_queries (
+    id SERIAL PRIMARY KEY,
+    query_hash TEXT NOT NULL,
+    query_template TEXT NOT NULL,
+    category TEXT DEFAULT '',
+    success_count INT DEFAULT 0,
+    failure_count INT DEFAULT 0,
+    last_success TIMESTAMPTZ,
+    last_failure TIMESTAMPTZ,
+    avg_series_count FLOAT DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(query_hash)
+);
+"""
+
 INDEX_SCHEMA = """
 CREATE INDEX IF NOT EXISTS idx_incidents_keywords ON incidents(query_keywords);
 CREATE INDEX IF NOT EXISTS idx_incidents_error_type ON incidents(error_type);
@@ -235,4 +251,5 @@ ALL_SCHEMAS = (
     + TOOL_TURNS_SCHEMA
     + INDEX_SCHEMA
     + TOOL_USAGE_INDEX_SCHEMA
+    + PROMQL_QUERIES_SCHEMA
 )
