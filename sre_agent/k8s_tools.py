@@ -2024,12 +2024,24 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
         return f"Cannot reach Prometheus/Thanos at {base_url}: {e}"
 
     if data.get("status") != "success":
+        try:
+            from .promql_recipes import record_query_result
+
+            record_query_result(query, success=False, series_count=0)
+        except Exception:
+            pass
         return f"Query error: {data.get('error', 'unknown')}"
 
     result_type = data.get("data", {}).get("resultType", "")
     results = data.get("data", {}).get("result", [])
 
     if not results:
+        try:
+            from .promql_recipes import record_query_result
+
+            record_query_result(query, success=False, series_count=0)
+        except Exception:
+            pass
         return f"Query returned no results for: {query}"
 
     # Default color palette for chart series
@@ -2171,6 +2183,12 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
             "query": query,
             "timeRange": time_range,
         }
+        try:
+            from .promql_recipes import record_query_result
+
+            record_query_result(query, success=True, series_count=len(series))
+        except Exception:
+            pass
         return (text, component)
 
     else:
@@ -2222,6 +2240,12 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
             if rows
             else None
         )
+        try:
+            from .promql_recipes import record_query_result
+
+            record_query_result(query, success=True, series_count=len(rows))
+        except Exception:
+            pass
         return (text, component)
 
 
