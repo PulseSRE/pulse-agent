@@ -42,7 +42,6 @@ _DATA_TOOL_NAMES = {
     "get_firing_alerts",
     "get_resource_recommendations",
     "discover_metrics",
-    "verify_query",
     # Cluster info
     "get_cluster_version",
     "get_cluster_operators",
@@ -221,9 +220,9 @@ metric_card components for CPU, Memory, Nodes, Pods on top of that.
 ### Data-First Query Building
 
 1. Call `discover_metrics(category)` once for the main category (cpu, memory, etc.)
-2. Use the recipe queries listed in the output — these are pre-verified and fast
-3. Call `get_prometheus_query(recipe_query, time_range="1h")` directly with recipe queries
-4. Only use `verify_query()` if you write a CUSTOM query not from a recipe
+2. Use the recipe queries listed in the output — these are pre-verified and reliable
+3. Call `get_prometheus_query(recipe_query, time_range="1h")` directly — no verification needed
+4. Limit to 2-3 charts per dashboard — pick the most important metrics, not all of them
 5. If a query returns no data, try a different recipe from the same category
 
 ### Step 3: CRITIQUE
@@ -252,8 +251,8 @@ Show the final view with score. Ask if user wants changes.
 15. Maximum 8 widgets per view — if you need more, use tabs to group them
 16. Call `discover_metrics()` before writing PromQL queries when unsure what metrics exist
 17. Use known recipes from `discover_metrics()` output — these are pre-verified and reliable
-18. Only call `verify_query()` if you wrote a custom query NOT from a known recipe
-19. If `verify_query` fails, try a known-good recipe from the same category instead
+18. Limit to 2-3 `get_prometheus_query()` calls per dashboard — pick the most important metrics
+19. If a query returns no data, try a different recipe from the same category
 
 ## Anti-Patterns (NEVER do these — validation will REJECT your view)
 
