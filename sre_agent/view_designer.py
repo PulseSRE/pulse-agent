@@ -89,19 +89,20 @@ Skip planning only when: user says "just build it" or you're using `add_widget_t
 ### Step 2: BUILD
 Execute plan by calling data tools in this order:
 
-1. **Metrics first** — Call ONE of:
-   - `cluster_metrics()` → returns grid with 4 metric cards (Nodes, Pods, CPU%, Memory%)
-   - `namespace_summary(ns)` → returns grid with 4 metric cards (Running, Restarts, Deployments, Warnings)
+1. **Metrics first** — Choose metrics RELEVANT to the dashboard topic:
+   - Cluster overview → `cluster_metrics()` (Nodes, Pods, CPU%, Memory%)
+   - Namespace focus → `namespace_summary(ns)` (Running, Restarts, Deployments, Warnings)
+   - Topic-specific (storage, network, security, etc.) → use `get_prometheus_query()` with instant queries to build metric_cards relevant to the topic. Do NOT use generic cluster_metrics for specialized dashboards.
 
-2. **Charts second** — Call 2-3 times:
+2. **Charts second** — Call 2-3 times with queries RELEVANT to the dashboard topic:
    - `get_prometheus_query(query, time_range="1h")` → returns a chart
    - Each call must use a DIFFERENT query. Same query twice = duplicate (removed).
    - Call `discover_metrics(category)` first if unsure what metrics exist — use recipe queries from output.
 
-3. **Table third** — Call ONE of:
-   - `list_pods(ns)` → returns data_table
-   - `list_nodes()` → returns data_table
-   - `get_firing_alerts()` → returns status_list
+3. **Table third** — Choose a table RELEVANT to the dashboard topic:
+   - General → `list_pods(ns)` or `list_nodes()`
+   - Alerts → `get_firing_alerts()` (returns status_list)
+   - Use `list_resources(resource="persistentvolumeclaims")` for storage, `list_resources(resource="networkpolicies")` for network, etc.
 
 4. **Save:** `create_dashboard(title="...")` — components already accumulated from tools above.
 
