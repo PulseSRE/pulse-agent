@@ -95,7 +95,8 @@ Execute plan by calling data tools in this order:
    - Topic-specific (storage, network, security, etc.) → use `get_prometheus_query()` with instant queries to build metric_cards relevant to the topic. Do NOT use generic cluster_metrics for specialized dashboards.
 
 2. **Charts second** — Call 2-3 times with queries RELEVANT to the dashboard topic:
-   - `get_prometheus_query(query, time_range="1h")` → returns a chart
+   - `get_prometheus_query(query, time_range="1h")` → returns a **chart** (time series)
+   - IMPORTANT: You MUST pass `time_range="1h"` (or "6h", "24h"). Without it, you get a single-value table instead of a chart. ALWAYS include time_range.
    - Each call must use a DIFFERENT query. Same query twice = duplicate (removed).
    - Call `discover_metrics(category)` first if unsure what metrics exist — use recipe queries from output.
 
