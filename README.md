@@ -94,8 +94,16 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Pre-Save Validation** — `view_validator.py` validates dashboard components before save: deduplication, schema conformance, title uniqueness, widget count limits
 - **Quality Critic** — Enhanced `view_critic.py` scoring rubric evaluates dashboard quality on multiple dimensions before persisting
 
+### Tool Analytics
+- **Full Audit Log** — Every tool invocation recorded to PostgreSQL (`tool_usage` table): tool name, category, status, duration, input summary, error details, session/turn tracking
+- **Turn Tracking** — Per-turn data in `tool_turns`: query summary, tools offered vs called, user feedback, token usage (input/output/cache_read/cache_creation)
+- **Tool Chain Discovery** — `tool_chains.py` discovers frequent tool call sequences via SQL bigram analysis (e.g., "after list_pods, 67% call describe_pod"). Top chains injected into system prompt as hints
+- **Usage Stats API** — `GET /tools/usage/stats` returns total calls, error rate, avg duration, breakdowns by tool/mode/category. `GET /tools/usage` for paginated audit log. `GET /tools/usage/chains` for chain data
+- **Learned PromQL Queries** — `promql_queries` table tracks success/failure rates per PromQL query with auto-detected category. Feeds into `discover_metrics` tool for query selection
+- **Tools Page (UI)** — Catalog tab (agents + tools by category), Usage Log tab (paginated tool calls), Analytics tab (top tools, by mode/category, context hogs, chain patterns, unused tools coverage chart)
+
 ### Intelligence Loop
-- **Analytics Feedback** — `intelligence.py` feeds operational analytics back into the system prompt: query reliability scores, dashboard generation patterns, error hotspots, and token efficiency metrics
+- **Analytics Feedback** — `intelligence.py` feeds tool analytics back into the system prompt: query reliability scores, dashboard generation patterns, error hotspots, and token efficiency metrics
 - **Token Usage Tracking** — Records input/output/cache tokens per turn from the Claude API for cost visibility and optimization
 - **Prompt Optimization** — SRE system prompt reduced from 28KB to 8KB (71% reduction) via selective component schema injection and selective runbook injection
 
