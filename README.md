@@ -2,15 +2,16 @@
 
 <p>
   <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.13.1"><img src="https://img.shields.io/badge/release-v1.13.1-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-72-10b981?style=for-the-badge" alt="Tools">
-  <img src="https://img.shields.io/badge/scanners-11-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-753-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tools-105-10b981?style=for-the-badge" alt="Tools">
+  <img src="https://img.shields.io/badge/scanners-16-10b981?style=for-the-badge" alt="Scanners">
+  <img src="https://img.shields.io/badge/tests-1078-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/PromQL%20recipes-73-10b981?style=for-the-badge" alt="PromQL Recipes">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 
 AI-powered OpenShift/Kubernetes SRE and Security Agent built on Claude.
 
-Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude Opus to diagnose issues, triage incidents, manage resources, execute runbooks, and perform security audits — all through a conversational interface. Integrates with [OpenShift Pulse](https://github.com/alimobrem/OpenshiftPulse) for rich UI rendering, or runs standalone as a CLI.
+Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude Opus to diagnose issues, triage incidents, manage resources, execute runbooks, and perform security audits — all through a conversational interface. Integrates with [OpenShift Pulse](https://github.com/alimobrem/OpenshiftPulse) for rich UI rendering, or runs standalone as a CLI. Includes 73 production-tested PromQL recipes, a semantic layout engine for dashboard generation, and an intelligence loop that feeds analytics back into the system prompt.
 
 ## Features
 
@@ -19,7 +20,7 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Incident Triage** — Correlate events, pod status, logs, and Prometheus metrics to identify root causes
 - **Resource Management** — Analyze quotas, capacity, utilization, and HPA status across nodes
 - **Runbook Execution** — Scale deployments, restart pods, cordon/drain nodes, apply YAML manifests (with confirmation)
-- **Alerting** — Query firing alerts from Alertmanager and run PromQL queries
+- **Alerting & Metrics** — Query firing alerts from Alertmanager, run PromQL queries, discover available metrics via `discover_metrics`, verify queries before use via `verify_query`, and draw from 73 production-tested PromQL recipes across 16 categories
 - **Cluster Operations** — Inspect StatefulSets, DaemonSets, Jobs, CronJobs, Ingresses, Routes, and OLM operators
 - **Generic Resource Tools** — `list_resources` and `describe_resource` work with any K8s resource type including CRDs via the Table API
 - **Interactive Debugging** — `exec_command` for kubectl exec, `search_logs` for multi-pod log search, `test_connectivity` for network testing
@@ -42,7 +43,7 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 
 ### Autonomous Monitor
 - **Continuous Scanning** — 60-second scan interval via `/ws/monitor` endpoint, pushing findings to the Pulse UI in real time
-- **11 Scanners** — Crashlooping pods, pending pods, failed deployments, node pressure, certificate expiry, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation
+- **16 Scanners** — Crashlooping pods, pending pods, failed deployments, node pressure, certificate expiry, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation, plus 5 audit scanners (config changes, RBAC, deployments, warning events, auth)
 - **Warning-Severity Investigations** — Monitor now investigates warning findings, not just critical, for earlier detection
 - **Default Namespace Scanning** — `default` namespace removed from skip list so user workloads are always detected
 - **Auto-Fix at Trust Level 3** — Automatically applies fixes for safe categories (crashloop pod deletion, deployment restarts) without user approval
@@ -78,6 +79,25 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 
 ### Pydantic Configuration
 - **`PulseAgentSettings`** — All configuration via `pydantic-settings` with `PULSE_AGENT_` env prefix, `.env` file support, and type validation at startup (`config.py`)
+
+### PromQL Recipes
+- **73 Production-Tested Queries** — Curated from 7 OpenShift/K8s repos (openshift/console, cluster-monitoring-operator, kube-state-metrics, node_exporter, prometheus-operator, cluster-version-operator, ACM)
+- **16 Categories** — CPU, memory, network, disk, pod health, node health, API server, etcd, scheduling, HPA, alerts, operators, containers, namespaces, cluster, and custom
+- **Metric Discovery** — `discover_metrics` tool queries Prometheus for available metrics before writing PromQL, preventing hallucinated metric names
+- **Query Verification** — `verify_query` tool tests PromQL queries against the live cluster before embedding in dashboards
+
+### Semantic Layout Engine
+- **Role-Based Auto-Layout** — Replaced 5 fixed dashboard templates with a semantic layout engine (`layout_engine.py`) that arranges widgets based on their role (KPI, chart, table, status) and content relationships
+- **Adaptive Grid** — Automatically assigns widget sizes and positions based on component type and dashboard composition
+
+### View Validator
+- **Pre-Save Validation** — `view_validator.py` validates dashboard components before save: deduplication, schema conformance, title uniqueness, widget count limits
+- **Quality Critic** — Enhanced `view_critic.py` scoring rubric evaluates dashboard quality on multiple dimensions before persisting
+
+### Intelligence Loop
+- **Analytics Feedback** — `intelligence.py` feeds operational analytics back into the system prompt: query reliability scores, dashboard generation patterns, error hotspots, and token efficiency metrics
+- **Token Usage Tracking** — Records input/output/cache tokens per turn from the Claude API for cost visibility and optimization
+- **Prompt Optimization** — SRE system prompt reduced from 28KB to 8KB (71% reduction) via selective component schema injection and selective runbook injection
 
 ### Self-Improving Agent
 - **Incident Memory** — Stores every interaction with query, tool sequence, resolution, and outcome in the database
@@ -255,7 +275,7 @@ The trust level is persisted in the UI's `localStorage` (via `trustStore`) and d
 
 ## Tools
 
-### SRE Tools (59)
+### SRE Tools (72+)
 
 | Category | Tools |
 |----------|-------|
@@ -263,10 +283,11 @@ The trust level is persisted in the UI's `localStorage` (via `trustStore`) and d
 | **Workloads** | `list_deployments`, `describe_deployment`, `list_statefulsets`, `list_daemonsets`, `list_jobs`, `list_cronjobs`, `list_replicasets`, `get_recent_changes`, `get_resource_relationships`, `top_pods_by_restarts` |
 | **Networking** | `get_services`, `describe_service`, `list_ingresses`, `list_routes`, `get_endpoint_slices`, `test_connectivity` |
 | **Storage & resources** | `get_persistent_volume_claims`, `get_resource_quotas`, `get_configmap`, `list_limit_ranges`, `get_pod_disruption_budgets` |
-| **Metrics** | `get_node_metrics`, `get_pod_metrics`, `list_hpas`, `get_prometheus_query`, `get_resource_recommendations` |
+| **Metrics** | `get_node_metrics`, `get_pod_metrics`, `list_hpas`, `get_prometheus_query`, `get_resource_recommendations`, `discover_metrics`, `verify_query` |
 | **Cluster info** | `get_cluster_version`, `get_cluster_operators`, `list_operator_subscriptions`, `get_firing_alerts`, `get_tls_certificates` |
 | **Write operations** | `scale_deployment`, `restart_deployment`, `rollback_deployment`, `cordon_node`, `uncordon_node`, `drain_node`, `delete_pod`, `apply_yaml`, `create_network_policy`, `exec_command` |
 | **GitOps** | `get_argo_applications`, `get_argo_app_detail`, `get_argo_sync_diff`, `create_argo_application`, `detect_gitops_drift`, `install_gitops_operator` |
+| **Views** | `plan_dashboard`, `create_dashboard`, `delete_dashboard`, `clone_dashboard`, `namespace_summary`, `visualize_nodes` |
 | **Audit** | `record_audit_entry` |
 
 ### Security Tools (9)
@@ -322,7 +343,7 @@ Built-in optimizations for getting the most out of Claude (`PULSE_AGENT_HARNESS=
 
 | Feature | What It Does | Impact |
 |---------|-------------|--------|
-| **Dynamic Tool Selection** | Categorizes 72 tools into 8 groups, loads only relevant ones per query | 72->15-25 tools, faster + cheaper |
+| **Dynamic Tool Selection** | Categorizes 105 tools into 8 groups, loads only relevant ones per query | 105->15-25 tools, faster + cheaper |
 | **Prompt Caching** | Marks system prompt + runbooks with `cache_control: ephemeral` | ~90% cost reduction on context |
 | **Cluster Context Injection** | Pre-fetches node count, namespaces, OCP version, failing pods, firing alerts | Saves 2-3 tool calls per query |
 | **Component Rendering Hints** | Guides Claude to focus on analysis, not data formatting | Cleaner responses |
@@ -542,6 +563,14 @@ sre_agent/
 ├── context_bus.py       # Shared context bus for cross-agent communication (database-backed)
 ├── units.py             # Kubernetes resource unit parsing (CPU, memory)
 ├── runbooks.py          # Built-in SRE runbooks and alert triage context
+├── promql_recipes.py    # 73 production-tested PromQL queries across 16 categories
+├── prometheus.py        # Shared Prometheus client with SSL CA handling
+├── layout_engine.py     # Semantic layout engine — role-based auto-layout for dashboards
+├── view_validator.py    # Dashboard validation (dedup, schema, titles, widget count)
+├── view_critic.py       # Dashboard quality scoring rubric
+├── intelligence.py      # Intelligence loop — analytics feedback into system prompt
+├── tool_usage.py        # Tool invocation audit log (PostgreSQL)
+├── tool_chains.py       # Tool chain discovery and next-tool hints (bigram analysis)
 └── memory/              # Self-improving agent layer
     ├── __init__.py      # MemoryManager orchestrator
     ├── store.py         # Database persistence (incidents, runbooks, patterns, metrics)
@@ -619,7 +648,7 @@ pip install -e '.[test]'
 python -m pytest tests/ -v
 ```
 
-753 tests covering all tools, all 11 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, and the memory system. All tests run without a cluster or API key (fully mocked).
+1,078 tests covering all tools, all 16 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, PromQL recipes, view validation, layout engine, intelligence loop, token tracking, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ## Evaluation Framework
 
@@ -688,7 +717,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>72 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>8 tool categories</strong> &bull; <strong>753 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>105 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>84 eval prompts</strong> &bull; <strong>1,078 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">
