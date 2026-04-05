@@ -12,6 +12,22 @@ on:
 jobs:
   evals:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pulse
+          POSTGRES_PASSWORD: pulse
+          POSTGRES_DB: pulse_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PULSE_AGENT_DATABASE_URL: postgresql://pulse:pulse@localhost:5433/pulse_test
     steps:
       - name: Checkout
         uses: actions/checkout@v4
