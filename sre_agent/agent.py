@@ -314,6 +314,7 @@ def run_agent_streaming(
     on_confirm=None,
     on_component=None,
     on_tool_result=None,
+    on_usage=None,
     mode: str = "sre",
 ) -> str:
     """Run an agent turn with streaming, handling the tool loop manually.
@@ -333,6 +334,8 @@ def run_agent_streaming(
         on_confirm: Callback to confirm write operations. Returns True to proceed.
         on_component: Callback when a tool returns a UI component spec (name, spec).
         on_tool_result: Callback fired after each tool execution with full metadata dict.
+        on_usage: Callback fired after each API response with token usage kwargs
+            (input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens).
 
     Returns the full final text response.
     """
@@ -445,6 +448,16 @@ def run_agent_streaming(
                             on_thinking(event.delta.thinking)
 
             response = stream.get_final_message()
+
+        # Extract token usage from API response
+        _usage = getattr(response, "usage", None)
+        if _usage and on_usage:
+            on_usage(
+                input_tokens=getattr(_usage, "input_tokens", 0),
+                output_tokens=getattr(_usage, "output_tokens", 0),
+                cache_read_tokens=getattr(_usage, "cache_read_input_tokens", 0),
+                cache_creation_tokens=getattr(_usage, "cache_creation_input_tokens", 0),
+            )
 
         # API call succeeded — reset circuit breaker
         _circuit_breaker.record_success()

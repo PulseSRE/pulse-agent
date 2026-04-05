@@ -188,6 +188,10 @@ CREATE TABLE IF NOT EXISTS tool_turns (
     tools_offered   TEXT[],
     tools_called    TEXT[],
     feedback        TEXT,
+    input_tokens    INTEGER,
+    output_tokens   INTEGER,
+    cache_read_tokens INTEGER,
+    cache_creation_tokens INTEGER,
     UNIQUE(session_id, turn_number)
 );
 """

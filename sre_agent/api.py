@@ -397,6 +397,12 @@ async def _run_agent_ws(
 
     session_tools: list[str] = []
     session_components: list[dict] = []
+    turn_token_usage: dict[str, int] = {}
+
+    def on_usage(**kwargs):
+        # Accumulate tokens across iterations (agent loop may call API multiple times)
+        for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"):
+            turn_token_usage[key] = turn_token_usage.get(key, 0) + kwargs.get(key, 0)
 
     def on_tool_use(name: str):
         session_tools.append(name)
@@ -475,6 +481,7 @@ async def _run_agent_ws(
         on_confirm=on_confirm,
         on_component=on_component,
         on_tool_result=tool_result_handler,
+        on_usage=on_usage,
         mode=mode,
     )
 
@@ -621,6 +628,31 @@ async def _run_agent_ws(
             await websocket.send_json({"type": "view_updated", "viewId": vid})
         except Exception:
             pass
+
+    # Record turn-level data (tools + token usage)
+    try:
+        from .tool_usage import record_turn
+
+        user_msgs = [m for m in messages if m["role"] == "user"]
+        query_text = ""
+        if user_msgs:
+            raw = user_msgs[-1]["content"]
+            query_text = raw if isinstance(raw, str) else str(raw)
+
+        # Determine tools offered from tool_defs
+        offered = [td.get("name", "") for td in tool_defs if isinstance(td, dict)]
+
+        record_turn(
+            session_id=ws_id,
+            turn_number=1,
+            agent_mode=mode,
+            query_summary=query_text,
+            tools_offered=offered,
+            tools_called=session_tools,
+            **turn_token_usage,
+        )
+    except Exception:
+        logger.debug("Failed to record turn", exc_info=True)
 
     # Record interaction for memory scoring (start_turn was called before agent ran)
     if manager and hasattr(manager, "finish_turn"):

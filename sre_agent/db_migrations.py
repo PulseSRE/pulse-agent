@@ -66,8 +66,18 @@ def _migrate_003_promql_queries(db: Database) -> None:
     db.executescript(PROMQL_QUERIES_SCHEMA)
 
 
+def _migrate_004_token_tracking(db: Database) -> None:
+    """Add token usage columns to tool_turns."""
+    for col in ["input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"]:
+        try:
+            db.execute(f"ALTER TABLE tool_turns ADD COLUMN {col} INTEGER")
+        except Exception:
+            pass  # Column may already exist
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
     (3, "promql_queries", _migrate_003_promql_queries),
+    (4, "token_tracking", _migrate_004_token_tracking),
 ]

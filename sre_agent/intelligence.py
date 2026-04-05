@@ -34,6 +34,9 @@ def get_intelligence_context(mode: str = "sre", max_age_days: int = 7) -> str:
         eh = _compute_error_hotspots(max_age_days)
         if eh:
             sections.append(eh)
+        te = _compute_token_efficiency(max_age_days)
+        if te:
+            sections.append(te)
 
         if not sections:
             result = ""
@@ -198,4 +201,37 @@ def _compute_error_hotspots(days: int) -> str:
         return "\n".join(lines)
     except Exception:
         logger.debug("Failed to compute error hotspots", exc_info=True)
+        return ""
+
+
+def _compute_token_efficiency(days: int) -> str:
+    """Compute token usage efficiency metrics from tool_turns."""
+    try:
+        from .db import get_database
+
+        db = get_database()
+        row = db.fetchone(
+            f"SELECT COALESCE(ROUND(AVG(input_tokens)), 0) AS avg_input, "
+            f"COALESCE(ROUND(AVG(output_tokens)), 0) AS avg_output, "
+            f"COALESCE(ROUND(AVG(cache_read_tokens)), 0) AS avg_cache, "
+            f"COUNT(*) AS total_turns "
+            f"FROM tool_turns "
+            f"WHERE input_tokens IS NOT NULL "
+            f"AND timestamp > NOW() - INTERVAL '{days} days'",
+        )
+        if not row or not row.get("total_turns"):
+            return ""
+
+        lines = ["### Token Efficiency"]
+        lines.append(f"Average input tokens per turn: {int(row['avg_input'])}")
+        lines.append(f"Average output tokens per turn: {int(row['avg_output'])}")
+        avg_cache = int(row["avg_cache"])
+        if avg_cache:
+            total_input = int(row["avg_input"]) or 1
+            cache_pct = round((avg_cache / total_input) * 100)
+            lines.append(f"Cache hit rate: {cache_pct}%")
+        lines.append(f"Total turns analyzed: {row['total_turns']}")
+        return "\n".join(lines)
+    except Exception:
+        logger.debug("Failed to compute token efficiency", exc_info=True)
         return ""

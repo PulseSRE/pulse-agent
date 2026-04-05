@@ -133,6 +133,10 @@ def record_turn(
     query_summary: str,
     tools_offered: list[str],
     tools_called: list[str],
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
 ) -> None:
     """Record a turn to the tool_turns table.
 
@@ -151,11 +155,27 @@ def record_turn(
 
         db.execute(
             "INSERT INTO tool_turns "
-            "(session_id, turn_number, agent_mode, query_summary, tools_offered, tools_called) "
-            "VALUES (%s, %s, %s, %s, %s, %s) "
+            "(session_id, turn_number, agent_mode, query_summary, tools_offered, tools_called, "
+            "input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (session_id, turn_number) DO UPDATE SET "
-            "tools_called = EXCLUDED.tools_called",
-            (session_id, turn_number, agent_mode, query_summary, tools_offered, tools_called),
+            "tools_called = EXCLUDED.tools_called, "
+            "input_tokens = EXCLUDED.input_tokens, "
+            "output_tokens = EXCLUDED.output_tokens, "
+            "cache_read_tokens = EXCLUDED.cache_read_tokens, "
+            "cache_creation_tokens = EXCLUDED.cache_creation_tokens",
+            (
+                session_id,
+                turn_number,
+                agent_mode,
+                query_summary,
+                tools_offered,
+                tools_called,
+                input_tokens or None,
+                output_tokens or None,
+                cache_read_tokens or None,
+                cache_creation_tokens or None,
+            ),
         )
         db.commit()
         logger.debug(
@@ -410,7 +430,30 @@ def get_usage_stats(
     by_status_rows = db.fetchall(by_status_sql, tuple(params))
     by_status = {row["status"]: row["count"] for row in by_status_rows}
 
-    return {
+    # Token usage averages from tool_turns
+    token_avg = {}
+    try:
+        token_where = where_sql.replace("timestamp", "t.timestamp") if where_sql else ""
+        token_sql = f"""
+            SELECT
+                COALESCE(ROUND(AVG(input_tokens)), 0) AS avg_input,
+                COALESCE(ROUND(AVG(output_tokens)), 0) AS avg_output,
+                COALESCE(ROUND(AVG(cache_read_tokens)), 0) AS avg_cache_read
+            FROM tool_turns t
+            {token_where}
+            {"AND" if token_where else "WHERE"} input_tokens IS NOT NULL
+        """
+        avg_row = db.fetchone(token_sql, tuple(params))
+        if avg_row:
+            token_avg = {
+                "input": int(avg_row["avg_input"]),
+                "output": int(avg_row["avg_output"]),
+                "cache_read": int(avg_row["avg_cache_read"]),
+            }
+    except Exception:
+        logger.debug("Failed to compute token averages", exc_info=True)
+
+    stats = {
         "total_calls": overall["total_calls"],
         "unique_tools_used": overall["unique_tools_used"],
         "error_rate": float(overall["error_rate"]),
@@ -421,6 +464,9 @@ def get_usage_stats(
         "by_category": [dict(row) for row in by_category],
         "by_status": by_status,
     }
+    if token_avg:
+        stats["token_avg"] = token_avg
+    return stats
 
 
 _AGENT_DESCRIPTIONS = {
