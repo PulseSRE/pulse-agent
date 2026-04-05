@@ -42,7 +42,7 @@ def get_current_user() -> str:
 
 @beta_tool
 def create_dashboard(title: str, description: str = "", template: str = "") -> str:
-    """Create a custom dashboard view. IMPORTANT: Call plan_dashboard() FIRST to show the user a plan before building. Only call create_dashboard after the user approves the plan.
+    """Create a custom dashboard view. ALWAYS call critique_view(view_id) immediately after this to check quality.
 
     Layout is computed automatically based on component types — no template needed.
 
@@ -55,7 +55,11 @@ def create_dashboard(title: str, description: str = "", template: str = "") -> s
     kwargs = {"view_id": view_id, "title": title, "description": description}
     if template:
         kwargs["template"] = template
-    return _signal("view_spec", f"Created view '{title}' with ID {view_id}.", **kwargs)
+    return _signal(
+        "view_spec",
+        f"Created view '{title}' with ID {view_id}. NEXT: Call critique_view('{view_id}') to check quality score.",
+        **kwargs,
+    )
 
 
 @beta_tool

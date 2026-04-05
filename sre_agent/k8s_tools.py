@@ -1960,6 +1960,10 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
     if any(c in query for c in [";", "\\", "\n", "\r"]):
         return "Error: Invalid characters in query."
 
+    # Default to range query — instant queries produce tables, not charts
+    if not time_range:
+        time_range = "1h"
+
     base_url = os.environ.get("THANOS_URL", "")
     if not base_url:
         # Try OpenShift Thanos

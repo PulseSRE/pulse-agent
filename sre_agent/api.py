@@ -596,6 +596,7 @@ async def _run_agent_ws(
                 }
                 if view_template:
                     spec["templateId"] = view_template
+
                 await websocket.send_json({"type": "view_spec", "spec": spec})
                 session_components.clear()
 
