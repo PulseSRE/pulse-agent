@@ -54,14 +54,13 @@ def _compute_query_reliability(days: int) -> str:
 
         db = get_database()
         rows = db.fetchall(
-            "SELECT query_template, success_count, failure_count "
-            "FROM promql_queries "
-            "WHERE (last_success > NOW() - INTERVAL '? days' "
-            "   OR last_failure > NOW() - INTERVAL '? days') "
-            "AND success_count + failure_count >= 3 "
-            "ORDER BY success_count + failure_count DESC "
-            "LIMIT 20",
-            (days, days),
+            f"SELECT query_template, success_count, failure_count "
+            f"FROM promql_queries "
+            f"WHERE (last_success > NOW() - INTERVAL '{days} days' "
+            f"   OR last_failure > NOW() - INTERVAL '{days} days') "
+            f"AND success_count + failure_count >= 3 "
+            f"ORDER BY success_count + failure_count DESC "
+            f"LIMIT 20",
         )
         if not rows:
             return ""
@@ -107,26 +106,24 @@ def _compute_dashboard_patterns(days: int) -> str:
         db = get_database()
 
         tool_rows = db.fetchall(
-            "SELECT tool_name, COUNT(*) as call_count "
-            "FROM tool_usage "
-            "WHERE agent_mode = 'view_designer' "
-            "  AND timestamp > NOW() - INTERVAL '? days' "
-            "  AND status = 'success' "
-            "GROUP BY tool_name "
-            "ORDER BY call_count DESC "
-            "LIMIT 10",
-            (days,),
+            f"SELECT tool_name, COUNT(*) as call_count "
+            f"FROM tool_usage "
+            f"WHERE agent_mode = 'view_designer' "
+            f"  AND timestamp > NOW() - INTERVAL '{days} days' "
+            f"  AND status = 'success' "
+            f"GROUP BY tool_name "
+            f"ORDER BY call_count DESC "
+            f"LIMIT 10",
         )
 
         avg_row = db.fetchone(
-            "SELECT AVG(tool_count)::int as avg_tools FROM ("
-            "    SELECT session_id, COUNT(*) as tool_count "
-            "    FROM tool_usage "
-            "    WHERE agent_mode = 'view_designer' "
-            "      AND timestamp > NOW() - INTERVAL '? days' "
-            "    GROUP BY session_id"
-            ") sub",
-            (days,),
+            f"SELECT AVG(tool_count)::int as avg_tools FROM ("
+            f"    SELECT session_id, COUNT(*) as tool_count "
+            f"    FROM tool_usage "
+            f"    WHERE agent_mode = 'view_designer' "
+            f"      AND timestamp > NOW() - INTERVAL '{days} days' "
+            f"    GROUP BY session_id"
+            f") sub",
         )
 
         if not tool_rows:
@@ -152,17 +149,16 @@ def _compute_error_hotspots(days: int) -> str:
         db = get_database()
 
         hotspot_rows = db.fetchall(
-            "SELECT tool_name, "
-            "       COUNT(*) FILTER (WHERE status = 'error') as error_count, "
-            "       COUNT(*) as total_count "
-            "FROM tool_usage "
-            "WHERE timestamp > NOW() - INTERVAL '? days' "
-            "GROUP BY tool_name "
-            "HAVING COUNT(*) > 5 "
-            "   AND COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) > 0.05 "
-            "ORDER BY COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) DESC "
-            "LIMIT 5",
-            (days,),
+            f"SELECT tool_name, "
+            f"       COUNT(*) FILTER (WHERE status = 'error') as error_count, "
+            f"       COUNT(*) as total_count "
+            f"FROM tool_usage "
+            f"WHERE timestamp > NOW() - INTERVAL '{days} days' "
+            f"GROUP BY tool_name "
+            f"HAVING COUNT(*) > 5 "
+            f"   AND COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) > 0.05 "
+            f"ORDER BY COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) DESC "
+            f"LIMIT 5",
         )
 
         if not hotspot_rows:
@@ -179,15 +175,15 @@ def _compute_error_hotspots(days: int) -> str:
             err_msg = ""
             try:
                 err_row = db.fetchone(
-                    "SELECT error_message, COUNT(*) as cnt "
-                    "FROM tool_usage "
-                    "WHERE tool_name = ? AND status = 'error' "
-                    "  AND timestamp > NOW() - INTERVAL '? days' "
-                    "  AND error_message IS NOT NULL "
-                    "GROUP BY error_message "
-                    "ORDER BY cnt DESC "
-                    "LIMIT 1",
-                    (tool, days),
+                    f"SELECT error_message, COUNT(*) as cnt "
+                    f"FROM tool_usage "
+                    f"WHERE tool_name = ? AND status = 'error' "
+                    f"  AND timestamp > NOW() - INTERVAL '{days} days' "
+                    f"  AND error_message IS NOT NULL "
+                    f"GROUP BY error_message "
+                    f"ORDER BY cnt DESC "
+                    f"LIMIT 1",
+                    (tool,),
                 )
                 if err_row and err_row.get("error_message"):
                     err_msg = err_row["error_message"][:80]

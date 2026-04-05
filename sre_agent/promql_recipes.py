@@ -730,7 +730,31 @@ def normalize_query(query: str) -> str:
     return q.strip()
 
 
-def record_query_result(query: str, *, success: bool, series_count: int = 0) -> None:
+def _detect_category(query: str) -> str:
+    """Best-effort category detection from a PromQL query string."""
+    q = query.lower()
+    if "cpu" in q:
+        return "cpu"
+    if "memory" in q or "mem_" in q:
+        return "memory"
+    if "network" in q or "transmit" in q or "receive" in q:
+        return "network"
+    if "filesystem" in q or "volume" in q or "pvc" in q or "disk" in q:
+        return "storage"
+    if "apiserver" in q:
+        return "control_plane"
+    if "etcd" in q:
+        return "control_plane"
+    if "alerts" in q or "ALERTS" in query:
+        return "alerts"
+    if "kube_pod" in q or "pod" in q:
+        return "pods"
+    if "kube_node" in q or "node_" in q:
+        return "nodes"
+    return ""
+
+
+def record_query_result(query: str, *, success: bool, series_count: int = 0, category: str = "") -> None:
     """Record a PromQL query result. Fire-and-forget: swallows all exceptions."""
     try:
         if not query:
@@ -741,24 +765,30 @@ def record_query_result(query: str, *, success: bool, series_count: int = 0) -> 
         normalized = normalize_query(query)
         qhash = hashlib.sha256(normalized.encode()).hexdigest()
 
+        # Auto-detect category from query if not provided
+        if not category:
+            category = _detect_category(query)
+
         if success:
             db.execute(
-                "INSERT INTO promql_queries (query_hash, query_template, success_count, last_success, avg_series_count) "
-                "VALUES (%s, %s, 1, NOW(), %s) "
+                "INSERT INTO promql_queries (query_hash, query_template, category, success_count, last_success, avg_series_count) "
+                "VALUES (%s, %s, %s, 1, NOW(), %s) "
                 "ON CONFLICT (query_hash) DO UPDATE SET "
+                "category = COALESCE(NULLIF(promql_queries.category, ''), %s), "
                 "success_count = promql_queries.success_count + 1, "
                 "last_success = NOW(), "
                 "avg_series_count = (promql_queries.avg_series_count + %s) / 2",
-                (qhash, normalized, float(series_count), float(series_count)),
+                (qhash, normalized, category, float(series_count), category, float(series_count)),
             )
         else:
             db.execute(
-                "INSERT INTO promql_queries (query_hash, query_template, failure_count, last_failure) "
-                "VALUES (%s, %s, 1, NOW()) "
+                "INSERT INTO promql_queries (query_hash, query_template, category, failure_count, last_failure) "
+                "VALUES (%s, %s, %s, 1, NOW()) "
                 "ON CONFLICT (query_hash) DO UPDATE SET "
+                "category = COALESCE(NULLIF(promql_queries.category, ''), %s), "
                 "failure_count = promql_queries.failure_count + 1, "
                 "last_failure = NOW()",
-                (qhash, normalized),
+                (qhash, normalized, category, category),
             )
     except Exception:
         logger.debug("Failed to record query result", exc_info=True)
