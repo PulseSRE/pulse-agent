@@ -2,7 +2,7 @@
 
 Real-world user prompts mapped to expected tool calls. Used for evaluating agent tool selection quality.
 
-**Total prompts:** 82
+**Total prompts:** 84
 **Tools excluded from eval:** 8 (internal/meta)
 
 ## SRE (64 prompts)
@@ -88,7 +88,7 @@ Real-world user prompts mapped to expected tool calls. Used for evaluating agent
 | list service account secrets in production | `list_service_account_secrets` | Service account secret listing |
 | this security finding needs SRE investigation | `request_sre_investigation` | Security to SRE handoff |
 
-## VIEW DESIGNER (9 prompts)
+## VIEW DESIGNER (11 prompts)
 
 | Prompt | Expected Tools | Description |
 |--------|---------------|-------------|
@@ -99,6 +99,8 @@ Real-world user prompts mapped to expected tool calls. Used for evaluating agent
 | remove the third widget from my dashboard | `update_view_widgets` | Widget removal |
 | what metrics are available for network monitoring | `discover_metrics` | Metric discovery for dashboard building |
 | undo the last change to my dashboard | `undo_view_change` | View undo operation |
+| delete my old cluster dashboard | `delete_dashboard` | Dashboard deletion |
+| clone my production dashboard for staging | `clone_dashboard` | Dashboard cloning |
 | show me cluster KPI metrics | `cluster_metrics` | Cluster metric cards |
 | give me a namespace summary for staging | `namespace_summary` | Namespace summary cards |
 

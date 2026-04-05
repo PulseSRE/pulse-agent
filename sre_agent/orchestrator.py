@@ -116,6 +116,13 @@ VIEW_DESIGNER_KEYWORDS = [
     "overview dashboard",
     "monitoring dashboard",
     "monitoring view",
+    "delete dashboard",
+    "delete the dashboard",
+    "delete my dashboard",
+    "clone dashboard",
+    "clone my dashboard",
+    "duplicate dashboard",
+    "copy dashboard",
 ]
 
 

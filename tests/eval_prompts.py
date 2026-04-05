@@ -491,6 +491,18 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "View undo operation",
     ),
     (
+        "delete my old cluster dashboard",
+        ["delete_dashboard"],
+        "view_designer",
+        "Dashboard deletion",
+    ),
+    (
+        "clone my production dashboard for staging",
+        ["clone_dashboard"],
+        "view_designer",
+        "Dashboard cloning",
+    ),
+    (
         "show me cluster KPI metrics",
         ["cluster_metrics"],
         "view_designer",

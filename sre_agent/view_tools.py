@@ -479,6 +479,51 @@ def get_view_versions(view_id: str) -> str:
     return (text, component)
 
 
+@beta_tool
+def delete_dashboard(view_id: str) -> str:
+    """Delete a saved dashboard view permanently. This cannot be undone.
+
+    Args:
+        view_id: The view ID to delete (e.g. 'cv-abc123'). Use list_saved_views to find IDs.
+    """
+    from . import db
+
+    owner = get_current_user()
+    success = db.delete_view(view_id, owner)
+    if not success:
+        return f"View '{view_id}' not found or you don't have permission to delete it."
+    return _signal("view_deleted", f"Deleted dashboard {view_id}.", view_id=view_id)
+
+
+@beta_tool
+def clone_dashboard(view_id: str, new_title: str = "") -> str:
+    """Clone an existing dashboard to create a copy you can modify independently.
+
+    Args:
+        view_id: The view ID to clone (e.g. 'cv-abc123'). Use list_saved_views to find IDs.
+        new_title: Optional new title for the cloned view. If empty, appends '(copy)' to original title.
+    """
+    from . import db
+
+    owner = get_current_user()
+    new_id = db.clone_view(view_id, owner)
+    if not new_id:
+        return f"View '{view_id}' not found or you don't have permission to clone it."
+
+    # Rename if new_title provided
+    if new_title:
+        db.update_view(new_id, owner, title=new_title)
+
+    return _signal(
+        "view_cloned",
+        f"Cloned dashboard {view_id} → {new_id}." + (f" Renamed to '{new_title}'." if new_title else ""),
+        view_id=new_id,
+        source_view_id=view_id,
+    )
+
+
+register_tool(delete_dashboard)
+register_tool(clone_dashboard)
 register_tool(create_dashboard)
 register_tool(namespace_summary)
 register_tool(cluster_metrics)
@@ -498,6 +543,8 @@ register_tool(plan_dashboard)
 
 VIEW_TOOLS = [
     create_dashboard,
+    delete_dashboard,
+    clone_dashboard,
     namespace_summary,
     cluster_metrics,
     list_saved_views,
