@@ -191,11 +191,15 @@ def _validate_component(comp: dict, result: ValidationResult) -> None:
         return
 
     # --- title ---
-    if not title or not str(title).strip():
+    # Structural wrappers (grid, tabs, section) don't require titles —
+    # they contain other components that have their own titles.
+    title_required = kind not in ("grid", "tabs", "section")
+    if title_required and (not title or not str(title).strip()):
         result.errors.append(f"Component (kind={kind}) missing required 'title' field.")
         return
 
-    _check_generic_title(str(title), kind, result)
+    if title and title_required:
+        _check_generic_title(str(title), kind, result)
 
     # --- kind-specific schema ---
     if kind == "chart":

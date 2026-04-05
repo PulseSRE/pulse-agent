@@ -143,14 +143,14 @@ class TestGenericTitles:
         ],
     )
     def test_generic_titles_rejected(self, title: str):
-        d = _dash({"title": title})
+        d = _dash({}, {"title": title})  # Set generic title on chart (index 1), not grid
         result = validate_components(d)
         assert result.valid is False
         assert any("generic" in e.lower() or "title" in e.lower() for e in result.errors)
 
     @pytest.mark.parametrize("title", ["Chart 1", "Table 2", "metric card 3", "Widget 99", "Component 0"])
     def test_numbered_generic_rejected(self, title: str):
-        d = _dash({"title": title})
+        d = _dash({}, {"title": title})  # Set on chart (index 1), not grid
         result = validate_components(d)
         assert result.valid is False
 
