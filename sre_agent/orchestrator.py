@@ -110,10 +110,18 @@ VIEW_DESIGNER_KEYWORDS = [
     "modify the view",
     "redesign",
     "rearrange",
+    "build me an overview",
+    "create an overview",
+    "build an overview",
+    "overview dashboard",
+    "monitoring dashboard",
+    "monitoring view",
 ]
 
 
-_VIEW_TRIGGER_WORDS = {"widget", "sparkline", "metric card"}
+_VIEW_TRIGGER_WORDS = {"widget", "sparkline", "metric card", "overview", "page"}
+# Patterns where "view" means "dashboard", not "look at"
+_VIEW_TRIGGER_PHRASES = {"a view", "the view", "my view", "this view", "new view"}
 
 
 def _keyword_score(query_lower: str, keywords: list[str]) -> float:
@@ -136,7 +144,11 @@ def classify_intent(query: str) -> tuple[AgentMode, bool]:
         return "both", True
 
     # Check view designer (dashboard/view creation requests)
-    if any(kw in q for kw in VIEW_DESIGNER_KEYWORDS) or any(w in q for w in _VIEW_TRIGGER_WORDS):
+    if (
+        any(kw in q for kw in VIEW_DESIGNER_KEYWORDS)
+        or any(w in q for w in _VIEW_TRIGGER_WORDS)
+        or any(p in q for p in _VIEW_TRIGGER_PHRASES)
+    ):
         return "view_designer", True
 
     sre_score = _keyword_score(q, SRE_KEYWORDS)
