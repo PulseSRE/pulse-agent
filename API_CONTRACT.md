@@ -552,13 +552,13 @@ Emitted when the agent calls `create_dashboard`. Contains a collection of compon
 
 The UI shows a "Save Dashboard" prompt. Saved views are accessible at `/custom/:viewId` and persist in localStorage.
 
-#### `view_validation_error` — Dashboard blocked by validation
+#### `view_validation_warning` — Dashboard saved with quality issues
 
-Emitted when the agent's `create_dashboard` call is blocked because the generated components fail validation (duplicates, missing required structure, generic titles, etc.). The view is NOT saved. The agent should fix the issues and retry.
+Emitted when the agent's `create_dashboard` call produces components with validation issues (missing structure, generic titles, etc.). The view IS saved (after dedup) so the agent can critique and fix it. Duplicates are silently removed.
 
 ```json
 {
-  "type": "view_validation_error",
+  "type": "view_validation_warning",
   "errors": ["Dashboard must include at least one chart.", "Generic title 'Table' — provide a descriptive title."],
   "warnings": ["PromQL has unbalanced braces {} in: rate(cpu[5m]"],
   "deduped_count": 2
@@ -567,7 +567,7 @@ Emitted when the agent's `create_dashboard` call is blocked because the generate
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `errors` | `string[]` | Blocking validation errors (view not saved) |
+| `errors` | `string[]` | Quality issues detected (view saved anyway) |
 | `warnings` | `string[]` | Non-blocking PromQL or quality warnings |
 | `deduped_count` | `number` | Number of duplicate components that were removed |
 

@@ -377,9 +377,9 @@ class TestEdgeCases:
         score = _extract_score(result)
         assert score < 3
 
-    def test_no_template_penalty(self):
+    def test_no_layout_penalty(self):
         result = _save_and_critique(GOLDEN_SRE, positions={}, view_id="cv-notempl")
-        assert "NO TEMPLATE" in result
+        assert "NO LAYOUT" in result
 
 
 class TestExistingChecksPreserved:

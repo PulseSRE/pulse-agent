@@ -66,11 +66,11 @@ def critique_view(view_id: str) -> str:
     else:
         issues.append("NO TABLE: Add a data_table for drill-down (list_pods, list_nodes, etc.)")
 
-    # 4. Template applied (positions not empty)? (2 points)
+    # 4. Layout positions computed? (2 points)
     if positions and len(positions) > 0:
         score += 2
     else:
-        issues.append("NO TEMPLATE: Use create_dashboard(template='...') for professional layout")
+        issues.append("NO LAYOUT: Positions not computed — this may indicate a save error")
 
     # 5. All widgets have titles? (1 point)
     titled = sum(1 for w in layout if w.get("title"))

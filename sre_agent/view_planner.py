@@ -45,8 +45,6 @@ def plan_dashboard(
             plan_lines.append(f"- {row_line}")
 
     plan_lines.append("")
-    plan_lines.append(
-        "Shall I build this? You can ask me to change the template, add/remove widgets, or adjust the layout."
-    )
+    plan_lines.append("Shall I build this? You can ask me to add/remove widgets or adjust the layout.")
 
     return "\n".join(plan_lines)

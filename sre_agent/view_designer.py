@@ -212,7 +212,7 @@ Every tool that returns a component AUTOMATICALLY adds it to the view.
 - `namespace_summary(ns)` → adds a grid of 4 metric cards
 - `get_prometheus_query(q)` → adds a chart
 - `list_pods(ns)` → adds a data_table
-- `get_firing_alerts()` → adds a data_table
+- `get_firing_alerts()` → adds a status_list
 Do NOT also manually create the same components. The tools already did it.
 If you call `cluster_metrics()` you get 4 metric cards — do NOT create individual
 metric_card components for CPU, Memory, Nodes, Pods on top of that.

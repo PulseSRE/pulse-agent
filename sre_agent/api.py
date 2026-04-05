@@ -528,19 +528,21 @@ async def _run_agent_ws(
                 logger.info("Deduped %d duplicate components from view", _vr.deduped_count)
 
             if not _vr.valid:
+                # Log warnings but SAVE ANYWAY — the agent needs the view to exist
+                # so critique_view can score it and guide fixes. Blocking here causes
+                # the agent to enter a confused loop ("view not found").
                 logger.warning(
-                    "View blocked by validation: %s",
+                    "View has validation issues (saving anyway): %s",
                     "; ".join(_vr.errors),
                 )
                 await websocket.send_json(
                     {
-                        "type": "view_validation_error",
+                        "type": "view_validation_warning",
                         "errors": _vr.errors,
                         "warnings": _vr.warnings,
                         "deduped_count": _vr.deduped_count,
                     }
                 )
-                continue  # Skip saving — errors returned to agent
 
             view_id = sig.get("view_id", f"cv-{uuid.uuid4().hex[:12]}")
             view_title = sig.get("title", "Custom View")
@@ -558,18 +560,9 @@ async def _run_agent_ws(
                 merged_layout = old_layout + session_components
                 # Re-validate the merged layout (dedup + structural checks)
                 _vr_merged = _validate(merged_layout)
+                merged_layout = _vr_merged.components  # Always use deduped
                 if not _vr_merged.valid:
-                    logger.warning("Merged view blocked: %s", "; ".join(_vr_merged.errors))
-                    await websocket.send_json(
-                        {
-                            "type": "view_validation_error",
-                            "errors": _vr_merged.errors,
-                            "warnings": _vr_merged.warnings,
-                            "deduped_count": _vr_merged.deduped_count,
-                        }
-                    )
-                    continue
-                merged_layout = _vr_merged.components
+                    logger.warning("Merged view has issues (saving anyway): %s", "; ".join(_vr_merged.errors))
                 positions = compute_layout(merged_layout)
                 update_kwargs: dict = {"layout": merged_layout, "description": view_desc}
                 if positions:
