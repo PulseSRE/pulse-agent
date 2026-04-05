@@ -901,6 +901,15 @@ async def websocket_agent(websocket: WebSocket, mode: str):
             if shared_context:
                 effective_system = effective_system + "\n\n" + shared_context
 
+            # Inject relevant runbooks based on the user query
+            if mode == "sre":
+                try:
+                    from .runbooks import select_runbooks
+
+                    effective_system += "\n\n" + select_runbooks(content)
+                except Exception:
+                    pass
+
             try:
                 full_response = await _run_agent_ws(
                     websocket,
@@ -1091,6 +1100,15 @@ async def websocket_auto_agent(websocket: WebSocket):
             effective_system = system_prompt + style_hint
             if shared_context:
                 effective_system = effective_system + "\n\n" + shared_context
+
+            # Inject relevant runbooks based on the user query
+            if intent in ("sre", "both"):
+                try:
+                    from .runbooks import select_runbooks
+
+                    effective_system += "\n\n" + select_runbooks(content)
+                except Exception:
+                    pass
 
             try:
                 full_response = await _run_agent_ws(
