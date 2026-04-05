@@ -45,6 +45,24 @@ def plan_dashboard(
         else:
             plan_lines.append(f"- {row_line}")
 
+    # Validate plan structure
+    rows_lower = rows.lower()
+    warnings = []
+    if not any(kw in rows_lower for kw in ["metric", "kpi", "card", "summary", "cluster_metrics", "namespace_summary"]):
+        warnings.append("Missing metric cards — add cluster_metrics() or namespace_summary() for KPI row")
+    if not any(kw in rows_lower for kw in ["chart", "trend", "graph", "prometheus", "cpu", "memory"]):
+        warnings.append("Missing charts — add get_prometheus_query() calls for trend visualization")
+    if not any(kw in rows_lower for kw in ["table", "list", "pods", "nodes", "events"]):
+        warnings.append("Missing data table — add list_pods() or list_nodes() for drill-down")
+
+    if warnings:
+        plan_lines.append("")
+        plan_lines.append("⚠️ **Plan issues:**")
+        for w in warnings:
+            plan_lines.append(f"- {w}")
+        plan_lines.append("")
+        plan_lines.append("Fix these before building. A good dashboard needs: metric cards → charts → table.")
+
     plan_lines.append("")
     plan_lines.append("Shall I build this? You can ask me to add/remove widgets or adjust the layout.")
 
