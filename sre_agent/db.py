@@ -29,7 +29,7 @@ class Database:
     def __init__(self, url: str):
         self.url = url
         minconn = int(os.environ.get("PULSE_AGENT_DB_POOL_MIN", "2"))
-        maxconn = int(os.environ.get("PULSE_AGENT_DB_POOL_MAX", "10"))
+        maxconn = int(os.environ.get("PULSE_AGENT_DB_POOL_MAX", "20"))
         self._pool = psycopg2.pool.ThreadedConnectionPool(minconn, maxconn, dsn=url)
         self._local = threading.local()
 

@@ -803,6 +803,7 @@ def record_query_result(query: str, *, success: bool, series_count: int = 0, cat
                 "last_failure = NOW()",
                 (qhash, normalized, category, category),
             )
+        db.commit()
     except Exception:
         logger.debug("Failed to record query result", exc_info=True)
 
