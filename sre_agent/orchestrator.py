@@ -168,6 +168,14 @@ def classify_intent(query: str) -> tuple[AgentMode, bool]:
     """
     q = query.lower()
 
+    # Fuzzy match for "dashboard" — catch common typos
+    # Check if any word is within edit distance 2 of "dashboard"
+    for word in q.split():
+        if len(word) >= 7 and word.startswith("dash") and word not in ("dashing",):
+            return "view_designer", True
+        if len(word) >= 7 and word.startswith("das") and ("board" in word or "bord" in word or "baord" in word):
+            return "view_designer", True
+
     # Check "both" first (explicit full-audit requests)
     if any(kw in q for kw in BOTH_KEYWORDS):
         return "both", True
