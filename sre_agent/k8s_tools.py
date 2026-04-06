@@ -1944,12 +1944,14 @@ def verify_query(query: str) -> str:
 
 
 @beta_tool
-def get_prometheus_query(query: str, time_range: str = "1h") -> str:
+def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", description: str = "") -> str:
     """Execute a PromQL query against Prometheus/Thanos and return the results as an interactive chart.
 
     Args:
         query: PromQL query string, e.g. 'up', 'node_memory_MemAvailable_bytes', 'rate(container_cpu_usage_seconds_total[5m])'.
-        time_range: Time range for the query (e.g. '5m', '1h', '24h'). Defaults to '1h'. Use '' for instant queries (returns a table instead of chart).
+        time_range: Time range for the query (e.g. '5m', '1h', '24h'). Defaults to '1h'.
+        title: Human-readable title for the chart (e.g. 'CPU Usage by Namespace'). If empty, auto-generated from the query.
+        description: Description of what to watch for (e.g. 'Spikes above 80% indicate resource pressure').
     """
     import os
     import urllib.error
@@ -2105,9 +2107,64 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
             return "Disk Usage"
         if "predict_linear" in q:
             return "Capacity Projection"
-        # Fallback: use the metric name, cleaned up
-        metric = _re.search(r"([a-z_]+)\{", q) or _re.search(r"([a-z_]+)\(", q) or _re.search(r"^([a-z_]+)", q)
-        return metric.group(1).replace("_", " ").title() if metric else q[:60]
+        # Fallback: extract the actual metric name (not function wrappers like sum/rate/topk)
+        _PROMQL_FUNCS = {
+            "sum",
+            "avg",
+            "min",
+            "max",
+            "count",
+            "rate",
+            "irate",
+            "increase",
+            "topk",
+            "bottomk",
+            "histogram_quantile",
+            "predict_linear",
+            "sort",
+            "sort_desc",
+            "abs",
+            "ceil",
+            "floor",
+            "round",
+            "deriv",
+            "delta",
+            "idelta",
+            "changes",
+            "resets",
+            "vector",
+            "scalar",
+            "time",
+            "label_replace",
+            "label_join",
+            "avg_over_time",
+            "sum_over_time",
+            "quantile_over_time",
+            "min_over_time",
+            "max_over_time",
+            "count_over_time",
+            "last_over_time",
+        }
+        # Find metric names (contain underscores, not just function names)
+        candidates = _re.findall(r"([a-z][a-z0-9_]{4,})\b", q.lower())
+        metric_name = ""
+        for c in candidates:
+            if c not in _PROMQL_FUNCS and "_" in c:
+                metric_name = c
+                break
+        if metric_name:
+            # Clean up metric name into a title
+            group = _re.search(r"by\s*\(([^)]+)\)", q)
+            by = f" by {group.group(1)}" if group else ""
+            title = (
+                metric_name.replace("_total", "")
+                .replace("_seconds", "")
+                .replace("kube_", "")
+                .replace("container_", "")
+                .replace("node_", "Node ")
+            )
+            return title.replace("_", " ").strip().title() + by
+        return q[:60]
 
     def _desc_from_query(q: str, tr: str, count: int) -> str:
         """Generate a useful description explaining why this data matters."""
@@ -2194,8 +2251,8 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
         component = {
             "kind": "chart",
             "chartType": chart_type,
-            "title": _title_from_query(query),
-            "description": _desc_from_query(query, time_range, len(series)),
+            "title": title or _title_from_query(query),
+            "description": description or _desc_from_query(query, time_range, len(series)),
             "series": series,
             "yAxisLabel": "",
             "height": 300,
@@ -2250,8 +2307,8 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
         component = (
             {
                 "kind": "data_table",
-                "title": _title_from_query(query),
-                "description": _desc_from_query(query, "", len(rows)),
+                "title": title or _title_from_query(query),
+                "description": description or _desc_from_query(query, "", len(rows)),
                 "columns": columns,
                 "rows": rows,
                 "query": query,
