@@ -488,29 +488,30 @@ The `/version` endpoint returns the protocol version. The UI checks this on conn
 
 ## Deploy to Cluster
 
-### Quick Deploy (Quay.io)
-
-```bash
-# Build locally and push to Quay.io
-podman build --platform linux/amd64 -t quay.io/amobrem/pulse-agent:latest -f Dockerfile.full .
-podman push quay.io/amobrem/pulse-agent:latest
-oc rollout restart deployment/pulse-agent-openshift-sre-agent -n openshiftpulse
-```
-
-### Full Deploy (UI + Agent together)
+### Recommended: Unified Deploy (UI + Agent)
 
 From the [Pulse UI](https://github.com/alimobrem/OpenshiftPulse) repo:
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... ./deploy/deploy.sh --agent-repo ../pulse-agent
+# Full pipeline: rspack build → podman build (UI + Agent in parallel) → push → helm upgrade
+cd ../OpenshiftPulse
+./deploy/deploy.sh
+
+# Required logins first:
+oc login https://api.your-cluster:6443
+podman login quay.io  # or your registry
 ```
 
-Builds both images locally with Podman, pushes to Quay.io, deploys via Helm. Agent deploys first (auto-generates WS token), then UI reads and uses that token. Never uses S2I or on-cluster builds.
+This builds both images locally with Podman, pushes to your registry, and deploys via Helm. Agent deploys first (auto-generates WS token), then UI reads and uses that token.
 
-### Build Image
+### Agent-Only Deploy
 
 ```bash
-podman build --platform linux/amd64 -t quay.io/amobrem/pulse-agent:v1.13.1 -f Dockerfile.full .
-podman push quay.io/amobrem/pulse-agent:v1.13.1
+# Build and push agent image only
+podman build --platform linux/amd64 -t ${PULSE_AGENT_IMAGE:-quay.io/your-org/pulse-agent}:latest -f Dockerfile.full .
+podman push ${PULSE_AGENT_IMAGE:-quay.io/your-org/pulse-agent}:latest
+
+# Restart the agent pod to pick up new image
+oc rollout restart deployment/pulse-openshift-sre-agent -n openshiftpulse
 ```
 
 ### Helm Install
