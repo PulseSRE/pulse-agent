@@ -1096,13 +1096,36 @@ async def websocket_auto_agent(websocket: WebSocket):
                     + content
                 )
 
-            # --- Auto-classify intent with session locking ---
+            # --- Auto-classify intent with sticky mode ---
             intent, is_strong = classify_intent(content)
-            # Session locking: keep the current mode unless there's a strong
-            # signal to switch. Weak/default classifications (e.g. "yes build it"
-            # returning sre with no keyword matches) don't break the session flow.
-            if last_mode != "sre" and not is_strong:
+
+            # Sticky view_designer: once in dashboard mode, stay there unless
+            # the user clearly asks about something SRE/security-specific.
+            # This prevents "update the chart" from routing to SRE.
+            _HARD_SWITCH_SRE = {
+                "crash",
+                "oom",
+                "pending",
+                "drain",
+                "cordon",
+                "crashloop",
+                "node not ready",
+                "why are",
+                "what's wrong",
+            }
+            _HARD_SWITCH_SEC = {"rbac", "scc", "vulnerability", "compliance", "privilege", "security audit"}
+
+            q_lower = content.lower()
+            if last_mode == "view_designer" and intent != "view_designer":
+                # Only break out of view_designer for unambiguous SRE/Security
+                has_hard_sre = any(kw in q_lower for kw in _HARD_SWITCH_SRE)
+                has_hard_sec = any(kw in q_lower for kw in _HARD_SWITCH_SEC)
+                if not has_hard_sre and not has_hard_sec:
+                    intent = "view_designer"
+            elif last_mode != "sre" and not is_strong:
+                # For other non-default modes, keep on weak signals
                 intent = last_mode
+
             config = build_orchestrated_config(intent)
             last_mode = intent
             logger.info("Auto-agent classified intent=%s strong=%s for session=%s", intent, is_strong, session_id)

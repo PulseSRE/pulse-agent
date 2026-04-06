@@ -42,7 +42,6 @@ SRE_KEYWORDS = [
     "pvc",
     "volume",
     "operator",
-    "update",
     "certificate",
     "cert",
     "tls",
