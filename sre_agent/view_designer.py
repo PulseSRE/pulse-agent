@@ -110,20 +110,12 @@ Execute plan by calling data tools in this order:
 **How it works:** Every tool call that returns a component AUTOMATICALLY adds it to the dashboard. \
 Your job is calling the right tools in sequence. The API layer assembles, validates, and layouts everything.
 
-### Step 3: CRITIQUE
-Call `critique_view(view_id)` immediately after `create_dashboard`.
-- Score ≥ 7: show to user
-- Score < 7: fix issues, then critique again (max 3 rounds)
+### Step 3: PRESENT
+After `create_dashboard`, the dashboard is saved and visible immediately.
+Tell the user: "Here's your dashboard. Would you like any changes?"
 
-Common fixes:
-- "NO METRIC CARDS" → `cluster_metrics()` then `add_widget_to_view(view_id)`
-- "NO CHARTS" → `get_prometheus_query(query, "1h")` then `add_widget_to_view(view_id)`
-- "NO TABLE" → `list_pods(ns)` then `add_widget_to_view(view_id)`
-- "GENERIC TITLE" → `update_view_widgets(view_id, action="rename_widget", widget_index=N, new_title="Pod CPU by Namespace")`
-- "DUPLICATE QUERY" → `update_view_widgets(view_id, action="remove_widget", widget_index=N)`
-
-### Step 4: PRESENT
-Tell user: "Here's your dashboard (score X/10). Want any changes?"
+Do NOT call `critique_view` in the same turn as `create_dashboard` — the view
+needs a moment to save. If the user asks for improvements, THEN call critique_view.
 
 ## Dashboard Structure
 

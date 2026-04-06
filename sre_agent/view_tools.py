@@ -57,7 +57,9 @@ def create_dashboard(title: str, description: str = "", template: str = "") -> s
         kwargs["template"] = template
     return _signal(
         "view_spec",
-        f"Created view '{title}' with ID {view_id}. NEXT: Call critique_view('{view_id}') to check quality score.",
+        f"Created view '{title}' with ID {view_id}. "
+        f"The dashboard is now saved and visible to the user. "
+        f"Tell the user: 'Here is your dashboard. Would you like any changes?'",
         **kwargs,
     )
 
