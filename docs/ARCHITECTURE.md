@@ -24,6 +24,7 @@ Comprehensive architecture reference for Pulse Agent v1.13.x, Protocol v2.
 14. [Communication Diagram](#14-communication-diagram)
 15. [Data Flow Diagrams](#15-data-flow-diagrams)
 16. [Future Roadmap](#16-future-roadmap)
+17. [Architecture Decision Record](#17-architecture-decision-record)
 
 ---
 
@@ -1454,6 +1455,108 @@ interactions. MCP servers offer a standardized alternative. The strategy:
 - View designer tools (create_dashboard, critique_view, layout_engine)
 - Intelligence loop (tool_usage recording, chain hints)
 - Confirmation gate (nonce-based, UI-integrated)
+
+---
+
+## 17. Architecture Decision Record
+
+Key decisions made during development and the reasoning behind them.
+
+### ADR-1: Custom Tools vs MCP
+
+**Decision:** Build 82 custom `@beta_tool` functions instead of using MCP servers.
+
+**Why:** Our tools return `(text, component_spec)` tuples for rich UI rendering — interactive charts, tables, metric cards with live sparklines. MCP tools return text only. Our tools also embed domain logic (health scoring, chart type detection, PromQL title generation), feed the intelligence loop (tool_usage recording, chain hints), and integrate with the write confirmation gate. MCP was not mature for Kubernetes when we started.
+
+**Trade-off:** More code to maintain. Mitigated by the tool registry pattern and the eval prompt coverage (84 prompts ensuring every tool is reachable).
+
+**Future:** Adopt MCP for raw infrastructure access (Layer 2), keep custom tools for domain logic (see Roadmap §16).
+
+### ADR-2: Keyword-Based Intent Classification vs LLM Classification
+
+**Decision:** Use keyword scoring in `classify_intent()` instead of an LLM call for routing.
+
+**Why:** Zero latency. Every message is classified in <1ms. An LLM call would add 200-500ms per message. For an interactive chat, that delay is noticeable. Keyword scoring handles 95% of cases correctly. Sticky mode and fuzzy matching handle the remaining edge cases.
+
+**Trade-off:** Requires maintaining keyword lists. New phrasings can misroute. Mitigated by trigger words, trigger phrases, fuzzy "dashboard" matching, and hard-switch overrides for sticky mode.
+
+**Rejected alternative:** Claude Haiku classification — reliable but adds latency and API cost on every message, including simple follow-ups like "yes" or "show me more".
+
+### ADR-3: Signal-Based View Creation vs Direct DB Save in Tool
+
+**Decision:** `create_dashboard` emits a `__SIGNAL__` marker. The API layer processes signals AFTER the agent loop, performing validation, layout, and DB save.
+
+**Why:** Tools execute in a thread pool — they don't have access to `session_components` (which accumulates in the API layer). The signal pattern decouples tool execution from view assembly. Tools focus on generating data; the API layer assembles, validates, and persists.
+
+**Trade-off:** The agent can't critique the view in the same turn (view doesn't exist in DB yet when the agent calls critique_view). Mitigated by deferring critique to a separate user turn and telling the agent to present the dashboard directly.
+
+**Lesson learned:** We initially tried blocking saves on validation failure (C5 bug). The agent got "view not found" errors and looped. Fixed by saving with warnings instead of blocking — let the view exist so the agent can fix it.
+
+### ADR-4: Tiered Prompt Architecture vs Monolithic System Prompt
+
+**Decision:** Split the system prompt into 4 tiers (universal, mode-specific, query-specific, dynamic) instead of one large static prompt.
+
+**Why:** The original SRE prompt was 28KB (~8,000 tokens). With prompt caching, the cost wasn't the issue — attention dilution was. Instructions buried in the middle of a 28KB prompt get ignored ("lost in the middle" effect). Selective injection ensures only relevant content is included.
+
+**Result:** 28KB → 8KB (71% reduction). Component schemas: 13 → 2-3 per query. Runbooks: 10 → 2-3 per query. The prompt is smaller AND more relevant.
+
+**Trade-off:** More complex prompt assembly code. Cache hit rate slightly lower for Tier 3 (varies per query). Mitigated by keeping Tier 1+2 as a stable cached prefix.
+
+### ADR-5: PostgreSQL vs SQLite for Production
+
+**Decision:** PostgreSQL only (no SQLite fallback in production). SQLite used only in tests.
+
+**Why:** Views, tool usage, learned queries, and memory all need concurrent writes from multiple async tasks (agent loop + monitor + tool recording). SQLite's single-writer lock would serialize everything. PostgreSQL's ThreadedConnectionPool handles concurrent access properly.
+
+**Trade-off:** Requires a PostgreSQL instance. The Helm chart deploys a PostgreSQL StatefulSet automatically. Connection pool management is critical — a missing `db.commit()` leaks connections (ADR lesson: always commit after execute).
+
+### ADR-6: Semantic Auto-Layout vs Fixed Templates
+
+**Decision:** Replace 5 fixed layout templates with a role-based auto-layout engine.
+
+**Why:** Templates required the agent to pick a template ID — another decision point in an already complex prompt. Template slot matching was greedy first-match, breaking when components arrived in wrong order. A `grid` containing metric cards could match a `w=1` metric_card slot and get squished.
+
+**Result:** The layout engine classifies components by role (kpi, chart, detail, table), sorts by priority, and packs with smart pairing (log_viewer + key_value side-by-side). Works for any combination of components. The agent never needs to think about layout.
+
+**Trade-off:** Less explicit control over positioning. Users can't override layout. Mitigated by the role-based packing producing sensible defaults for all known dashboard patterns.
+
+### ADR-7: Fire-and-Forget Recording vs Synchronous Audit
+
+**Decision:** All analytics recording (tool_usage, promql_queries, token tracking) is fire-and-forget — wrapped in try/except that swallows all exceptions.
+
+**Why:** Recording should never block or break tool execution. A database error in `record_tool_call` must not prevent the agent from responding to the user. The tool result matters; the audit trail is a nice-to-have.
+
+**Trade-off:** Silent data loss if the DB is down. Mitigated by debug-level logging of failures. The intelligence loop degrades gracefully (returns empty string on DB errors).
+
+**Critical lesson:** Fire-and-forget still needs `db.commit()`. Missing commits leaked connections and exhausted the pool (the connection pool leak bug). Fire-and-forget means "don't crash on errors", not "skip cleanup".
+
+### ADR-8: View Designer as Separate Agent Mode vs Inline in SRE
+
+**Decision:** Dashboard creation is a dedicated `view_designer` mode with its own system prompt and tool set, not a capability of the SRE agent.
+
+**Why:** The SRE prompt is optimized for diagnostics — "gather data, correlate, diagnose, fix." The view designer prompt is optimized for composition — "plan the layout, select metrics, build components, assemble." Combining them into one prompt would be 2x the size and confuse the agent about which workflow to follow.
+
+**Result:** Each mode has a focused prompt (<1KB for view designer, ~2KB for SRE) with exactly the tools and instructions it needs. The orchestrator routes between them automatically.
+
+**Trade-off:** Follow-up messages can misroute (e.g., "update the chart" going to SRE). Mitigated by sticky mode — once in view_designer, stay there unless the user clearly asks about pods crashing or RBAC.
+
+### ADR-9: 73 Hardcoded PromQL Recipes vs Dynamic Discovery Only
+
+**Decision:** Ship 73 production-tested PromQL recipes in code (`promql_recipes.py`) instead of relying solely on runtime metric discovery.
+
+**Why:** `discover_metrics` queries Prometheus for available metric names, but metric names don't tell you how to USE them. `container_cpu_usage_seconds_total` exists, but the correct query is `sum by (namespace) (rate(container_cpu_usage_seconds_total{image!=""}[5m]))` — with rate(), sum by(), and the `image!=""` filter. Without recipes, the agent writes ad-hoc PromQL that often fails.
+
+**Sources:** OpenShift console (`cluster-dashboard.ts`, `project-dashboard.ts`, `resource-metrics.ts`), cluster-monitoring-operator recording rules, kube-state-metrics, node_exporter mixin, prometheus-operator alerts, cluster-version-operator, ACM multicluster observability.
+
+**Trade-off:** Recipes may not match every cluster's metric landscape. Mitigated by `discover_metrics` checking which metrics actually exist, and the learned queries DB tracking success/failure rates per cluster.
+
+### ADR-10: Owner-Based View Access vs Global Views
+
+**Decision:** Views are scoped to the creating user (`owner` column). Access control enforced at the DB layer.
+
+**Why:** In a multi-user cluster, one user's dashboards shouldn't clutter another's list. Share tokens provide explicit sharing. Clone creates independent copies.
+
+**Trade-off:** OAuth identity can differ across sessions (different token resolution), causing "view not found" errors for the same user. Mitigated by owner fallback — all view CRUD operations try without owner filter when the first lookup fails. The view's actual owner (from DB) is used for writes.
 
 ---
 
