@@ -597,7 +597,9 @@ async def _run_agent_ws(
                 update_kwargs: dict = {"layout": merged_layout, "description": view_desc}
                 if positions:
                     update_kwargs["positions"] = positions
-                _db.update_view(existing["id"], current_user, _snapshot=True, _action="agent_update", **update_kwargs)
+                # Use view's actual owner for update (identity may differ)
+                actual_owner = existing.get("owner", current_user)
+                _db.update_view(existing["id"], actual_owner, _snapshot=True, _action="agent_update", **update_kwargs)
                 _view_updated_ids.add(existing["id"])
                 logger.info(
                     "Updated existing view: id=%s title=%s (+%d components)",
@@ -605,6 +607,16 @@ async def _run_agent_ws(
                     view_title,
                     len(session_components),
                 )
+                # Emit view_spec so the UI navigates to the updated view
+                spec = {
+                    "id": existing["id"],
+                    "title": view_title,
+                    "description": view_desc,
+                    "layout": merged_layout,
+                    "positions": positions or {},
+                    "generatedAt": int(_time.time() * 1000),
+                }
+                await websocket.send_json({"type": "view_spec", "spec": spec})
                 session_components.clear()
             else:
                 _db.save_view(current_user, view_id, view_title, view_desc, session_components, positions=positions)
