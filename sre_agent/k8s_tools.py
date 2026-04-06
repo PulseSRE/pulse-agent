@@ -2046,6 +2046,21 @@ def get_prometheus_query(query: str, time_range: str = "1h") -> str:
             record_query_result(query, success=False, series_count=0)
         except Exception:
             pass
+        # Suggest verified recipe alternatives
+        try:
+            from .promql_recipes import _detect_category, get_recipes_for_category
+
+            cat = _detect_category(query)
+            if cat:
+                alternatives = get_recipes_for_category(cat)[:3]
+                if alternatives:
+                    alt_text = "\n".join(f"  - {r.name}: {r.query}" for r in alternatives)
+                    return (
+                        f"Query returned no results for: {query}\n\n"
+                        f"Try these verified alternatives for '{cat}':\n{alt_text}"
+                    )
+        except Exception:
+            pass
         return f"Query returned no results for: {query}"
 
     # Default color palette for chart series
