@@ -123,12 +123,35 @@ VIEW_DESIGNER_KEYWORDS = [
     "clone my dashboard",
     "duplicate dashboard",
     "copy dashboard",
+    "rebuild dashboard",
+    "rebuild the dashboard",
+    "fix the dashboard",
+    "fix my dashboard",
+    "improve the dashboard",
+    "update the dashboard",
+    "rename the chart",
+    "rename the widget",
+    "change the title",
+    "fix the title",
+    "update the title",
 ]
 
 
 _VIEW_TRIGGER_WORDS = {"widget", "sparkline", "metric card", "overview", "page"}
-# Patterns where "view" means "dashboard", not "look at"
-_VIEW_TRIGGER_PHRASES = {"a view", "the view", "my view", "this view", "new view"}
+# Phrases that indicate view/dashboard editing intent
+_VIEW_TRIGGER_PHRASES = {
+    "a view",
+    "the view",
+    "my view",
+    "this view",
+    "new view",
+    "the chart",
+    "my chart",
+    "the widget",
+    "my widget",
+    "the title",
+    "the description",
+}
 
 
 def _keyword_score(query_lower: str, keywords: list[str]) -> float:
