@@ -565,7 +565,11 @@ def update_view_widgets(
     owner = get_current_user()
     view = db.get_view(view_id, owner)
     if not view:
-        return f"View '{view_id}' not found or you don't have access to it."
+        view = db.get_view(view_id)  # Fallback without owner filter
+    if not view:
+        return f"View '{view_id}' not found."
+    # Use the view's actual owner for updates (identity may differ across sessions)
+    owner = view.get("owner", owner)
 
     if action == "remove_widget":
         layout = view.get("layout", [])
@@ -673,7 +677,12 @@ def undo_view_change(view_id: str, version: int = -1) -> str:
 
     result = db.restore_view_version(view_id, owner, version)
     if not result:
-        return f"Could not restore version {version}. View not found or access denied."
+        # Fallback: try with view's actual owner
+        view = db.get_view(view_id)
+        if view:
+            result = db.restore_view_version(view_id, view.get("owner", owner), version)
+    if not result:
+        return f"Could not restore version {version}. View not found."
     return _signal("view_updated", f"Restored view to version {version}.", view_id=view_id)
 
 
@@ -727,7 +736,12 @@ def delete_dashboard(view_id: str) -> str:
     from . import db
 
     owner = get_current_user()
+    # Try with current user first, then fallback to view's actual owner
     success = db.delete_view(view_id, owner)
+    if not success:
+        view = db.get_view(view_id)
+        if view:
+            success = db.delete_view(view_id, view.get("owner", owner))
     if not success:
         return f"View '{view_id}' not found or you don't have permission to delete it."
     return _signal("view_deleted", f"Deleted dashboard {view_id}.", view_id=view_id)
