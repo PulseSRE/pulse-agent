@@ -161,7 +161,13 @@ def namespace_summary(namespace: str) -> str:
             "color": "#f59e0b" if warning_count > 0 else "#10b981",
         },
     ]
-    component = {"kind": "grid", "title": f"{namespace} Overview", "columns": 4, "items": cards}
+    component = {
+        "kind": "grid",
+        "title": f"{namespace} Overview",
+        "description": f"Key health indicators for the {namespace} namespace",
+        "columns": 4,
+        "items": cards,
+    }
     return (text, component)
 
 
