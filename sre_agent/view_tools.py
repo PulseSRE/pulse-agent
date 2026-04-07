@@ -161,7 +161,7 @@ def namespace_summary(namespace: str) -> str:
             "color": "#f59e0b" if warning_count > 0 else "#10b981",
         },
     ]
-    component = {"kind": "grid", "columns": 4, "items": cards}
+    component = {"kind": "grid", "title": f"{namespace} Overview", "columns": 4, "items": cards}
     return (text, component)
 
 
@@ -461,7 +461,12 @@ def cluster_metrics(category: str = "overview") -> str:
         ]
 
     text = f"Cluster metrics ({category}): {len(cards)} KPI cards"
-    component = {"kind": "grid", "columns": len(cards), "items": cards}
+    component = {
+        "kind": "grid",
+        "title": f"Cluster {category.replace('_', ' ').title()}",
+        "columns": len(cards),
+        "items": cards,
+    }
     return (text, component)
 
 
