@@ -44,8 +44,8 @@ def _classify(component: dict) -> tuple[str, int, int]:
         cols = component.get("columns", 2)
         rows = max(1, -(-len(items) // cols))  # ceil division
         if any(item.get("kind") == "metric_card" for item in items):
-            return "kpi_group", 4, max(4, 2 + rows * 2)
-        return "container", 4, max(5, 2 + rows * 3)
+            return "kpi_group", 4, 2 + rows * 2
+        return "container", 4, 2 + rows * 3
 
     if kind in _KIND_MAP:
         return _KIND_MAP[kind]
