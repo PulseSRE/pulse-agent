@@ -304,10 +304,14 @@ def list_views(owner: str, limit: int = 50) -> list[dict]:
 
 @_db_safe
 def get_view_by_title(owner: str, title: str) -> dict | None:
-    """Find a view by title (lightweight — returns id and title only)."""
+    """Find a view by title — returns full view data for merging."""
     db = get_database()
-    row = db.fetchone("SELECT id, title FROM views WHERE owner = ? AND title = ? LIMIT 1", (owner, title))
-    return row
+    row = db.fetchone(
+        "SELECT id, owner, title, description, icon, layout, positions, created_at, updated_at "
+        "FROM views WHERE owner = ? AND title = ? LIMIT 1",
+        (owner, title),
+    )
+    return _deserialize_view_row(row) if row else None
 
 
 @_db_safe
