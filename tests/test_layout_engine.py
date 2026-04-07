@@ -185,3 +185,40 @@ class TestEdgeCases:
         components = [{"kind": "grid", "items": [{"kind": "chart"}]}]
         layout = compute_layout(components)
         assert layout[0]["w"] == 4
+
+
+class TestNewComponentTypes:
+    def test_bar_list_full_width_when_alone(self):
+        """Single detail-role component gets full width."""
+        components = [{"kind": "bar_list", "items": [{"label": "a", "value": 1}]}]
+        layout = compute_layout(components)
+        assert layout[0]["w"] == 4
+        assert layout[0]["h"] == 8
+
+    def test_progress_list_full_width_when_alone(self):
+        components = [{"kind": "progress_list", "items": [{"label": "a", "value": 50, "max": 100}]}]
+        layout = compute_layout(components)
+        assert layout[0]["w"] == 4
+        assert layout[0]["h"] == 8
+
+    def test_stat_card_full_width_when_alone(self):
+        """Single kpi-role component gets full width."""
+        components = [{"kind": "stat_card", "title": "CPU", "value": "42%"}]
+        layout = compute_layout(components)
+        assert layout[0]["w"] == 4
+        assert layout[0]["h"] == 4
+
+    def test_stat_cards_pack_like_metric_cards(self):
+        """stat_card has kpi role, so 4 should pack in a row."""
+        components = [{"kind": "stat_card"} for _ in range(4)]
+        layout = compute_layout(components)
+        ys = {layout[i]["y"] for i in range(4)}
+        assert len(ys) == 1, "All 4 stat_cards should share same y"
+
+    def test_grid_metric_height_scales_with_rows(self):
+        """Grid height should increase with more rows of metric cards."""
+        one_row = [{"kind": "grid", "columns": 4, "items": [{"kind": "metric_card"}] * 4}]
+        two_rows = [{"kind": "grid", "columns": 2, "items": [{"kind": "metric_card"}] * 4}]
+        h1 = compute_layout(one_row)[0]["h"]
+        h2 = compute_layout(two_rows)[0]["h"]
+        assert h2 > h1, "2-row grid should be taller than 1-row grid"
