@@ -659,6 +659,48 @@ def add_widget_to_view(view_id: str) -> str:
 
 
 @beta_tool
+def remove_widget_from_view(view_id: str, widget_title: str) -> str:
+    """Remove a widget from a view by its title. Case-insensitive partial match. The UI will auto-refresh.
+
+    Args:
+        view_id: The view ID (e.g. 'cv-abc123').
+        widget_title: Title (or substring) of the widget to remove.
+    """
+    from . import db
+
+    owner = get_current_user()
+    view = db.get_view(view_id, owner)
+    if not view:
+        view = db.get_view(view_id)
+    if not view:
+        return f"View '{view_id}' not found."
+
+    owner = view.get("owner", owner)
+    layout = view.get("layout", [])
+    search = widget_title.lower()
+
+    matches = [(i, w) for i, w in enumerate(layout) if search in (w.get("title") or "").lower()]
+
+    if not matches:
+        titles = [w.get("title", w.get("kind", "?")) for w in layout]
+        return f"No widget matching '{widget_title}'. Widgets: {titles}"
+
+    if len(matches) > 1:
+        names = [w.get("title", w.get("kind", "?")) for _, w in matches]
+        return f"Multiple matches for '{widget_title}': {names}. Be more specific."
+
+    idx, removed = matches[0]
+    removed_title = removed.get("title", removed.get("kind", "widget"))
+    new_layout = [w for i, w in enumerate(layout) if i != idx]
+    db.update_view(view_id, owner, _snapshot=True, _action="remove_widget", layout=new_layout)
+    return _signal(
+        "view_updated",
+        f"Removed '{removed_title}' from view. {len(new_layout)} widgets remaining.",
+        view_id=view_id,
+    )
+
+
+@beta_tool
 def undo_view_change(view_id: str, version: int = -1) -> str:
     """Undo the last change to a view, or restore a specific version. Every view change is automatically versioned.
 
@@ -783,6 +825,7 @@ register_tool(list_saved_views)
 register_tool(get_view_details)
 register_tool(update_view_widgets)
 register_tool(add_widget_to_view)
+register_tool(remove_widget_from_view)
 register_tool(undo_view_change)
 register_tool(get_view_versions)
 
@@ -803,6 +846,7 @@ VIEW_TOOLS = [
     get_view_details,
     update_view_widgets,
     add_widget_to_view,
+    remove_widget_from_view,
     undo_view_change,
     get_view_versions,
     critique_view,

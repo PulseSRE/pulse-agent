@@ -476,7 +476,13 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "remove the third widget from my dashboard",
         ["update_view_widgets"],
         "view_designer",
-        "Widget removal",
+        "Widget removal by index",
+    ),
+    (
+        "remove the CPU Usage widget from my network view",
+        ["remove_widget_from_view"],
+        "view_designer",
+        "Widget removal by title",
     ),
     (
         "what metrics are available for network monitoring",
