@@ -276,10 +276,33 @@ def correlate_incident(
         "change": "normal",
     }
 
+    import re
+
+    def _normalize_resource(resource: str) -> str:
+        """Collapse pod replicas under parent resource.
+
+        Pod/app-name-7fb5f6d4d7-hx4tk → Pod/app-name (strip replicaset + pod hash)
+        ReplicaSet/app-name-7fb5f6d4d7 → ReplicaSet/app-name (strip hash)
+        Deployment/app-name → unchanged
+        """
+        kind, _, name = resource.partition("/")
+        if not name:
+            return resource
+        if kind == "Pod":
+            # Strip -<rs-hash>-<pod-hash> (two segments of 5-10 alphanumeric chars)
+            name = re.sub(r"-[a-z0-9]{8,10}-[a-z0-9]{4,5}$", "", name)
+            # Also strip single hash suffix for non-deployment pods
+            name = re.sub(r"-[a-f0-9]{8,}$", "", name)
+        elif kind == "ReplicaSet":
+            # Strip -<hash> suffix
+            name = re.sub(r"-[a-z0-9]{8,10}$", "", name)
+        return f"{kind}/{name}"
+
     lanes_by_resource: dict[str, list[dict]] = defaultdict(list)
     for entry in timeline:
         resource = entry.get("resource", entry["source"].replace("-", " ").title())
-        lanes_by_resource[resource].append(entry)
+        normalized = _normalize_resource(resource)
+        lanes_by_resource[normalized].append(entry)
 
     component = {
         "kind": "timeline",
