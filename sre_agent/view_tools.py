@@ -466,6 +466,34 @@ def cluster_metrics(category: str = "overview") -> str:
             cards[3],
         ]
 
+    # Add stat_card summary for overview (big numbers without sparklines)
+    if category == "overview":
+        stat_cards = [
+            {
+                "kind": "stat_card",
+                "title": "Cluster Uptime",
+                "value": "",
+                "description": "Since last API server restart",
+                "status": "healthy",
+            },
+            {
+                "kind": "stat_card",
+                "title": "Namespaces",
+                "value": "",
+                "description": "Active namespaces",
+            },
+        ]
+        # Enrich with live data
+        try:
+            ns_result = safe(lambda: core.list_namespace())
+            if not isinstance(ns_result, ToolError):
+                active_ns = sum(1 for n in ns_result.items if n.status.phase == "Active")
+                stat_cards[1]["value"] = str(active_ns)
+        except Exception:
+            pass
+
+        cards = cards + stat_cards
+
     text = f"Cluster metrics ({category}): {len(cards)} KPI cards"
     component = {
         "kind": "grid",
