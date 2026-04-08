@@ -136,7 +136,19 @@ VIEW_DESIGNER_KEYWORDS = [
 ]
 
 
-_VIEW_TRIGGER_WORDS = {"widget", "sparkline", "metric card", "overview", "page"}
+_VIEW_TRIGGER_WORDS = {
+    "widget",
+    "sparkline",
+    "metric card",
+    "overview",
+    "page",
+    "stat card",
+    "bar list",
+    "progress list",
+    "bar_list",
+    "progress_list",
+    "stat_card",
+}
 # Phrases that indicate view/dashboard editing intent
 _VIEW_TRIGGER_PHRASES = {
     "a view",
