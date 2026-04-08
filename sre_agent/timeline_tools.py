@@ -10,6 +10,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
 from anthropic import beta_tool
@@ -23,7 +24,7 @@ def correlate_incident(
     namespace: str = "default",
     minutes_back: int = 30,
     resource_name: str = "",
-) -> str:
+) -> tuple[str, dict]:
     """Build a unified incident timeline by correlating Prometheus alerts, Kubernetes events, deployment rollouts, and config changes within a time window.
 
     Automatically highlights the probable cause of issues by finding changes that preceded symptoms.
@@ -32,6 +33,9 @@ def correlate_incident(
         namespace: Namespace to investigate. Use 'ALL' for cluster-wide.
         minutes_back: How many minutes of history to include (1-120).
         resource_name: Optional resource name to focus on.
+
+    Returns:
+        Tuple of (text summary, timeline component dict)
     """
     minutes_back = min(max(1, minutes_back), 120)
     cutoff = datetime.now(UTC) - timedelta(minutes=minutes_back)
@@ -207,7 +211,14 @@ def correlate_incident(
         pass  # ArgoCD not installed
 
     if not timeline:
-        return f"No events found in the last {minutes_back} minutes."
+        empty_text = f"No events found in the last {minutes_back} minutes."
+        empty_component = {
+            "kind": "timeline",
+            "title": f"Incident Timeline — {namespace} (last {minutes_back}m)",
+            "description": "No events found in the time window",
+            "lanes": [],
+        }
+        return (empty_text, empty_component)
 
     # Sort by time
     timeline.sort(key=lambda e: e["time"])
@@ -230,7 +241,7 @@ def correlate_incident(
                 f"({int((alert_time - datetime.fromisoformat(cause['time'])).total_seconds())}s before)"
             )
 
-    # Format output
+    # Format text output
     lines = [f"Timeline ({len(timeline)} events, last {minutes_back} minutes):\n"]
     for e in timeline:
         ts_short = e["time"][11:19]
@@ -243,7 +254,51 @@ def correlate_incident(
         for note in correlation_notes:
             lines.append(note)
 
-    return "\n".join(lines)
+    text_summary = "\n".join(lines)
+
+    # Build component
+    category_map = {
+        "k8s-event": "event",
+        "deployment": "rollout",
+        "rollout": "rollout",
+        "alert": "alert",
+        "argocd": "config",
+    }
+    severity_map = {
+        "warning": "warning",
+        "critical": "critical",
+        "info": "info",
+        "change": "normal",
+    }
+
+    lanes_by_source: dict[str, list[dict]] = defaultdict(list)
+    for entry in timeline:
+        lanes_by_source[entry["source"]].append(entry)
+
+    component = {
+        "kind": "timeline",
+        "title": f"Incident Timeline — {namespace} (last {minutes_back}m)",
+        "description": f"{len(timeline)} events correlated across {len(lanes_by_source)} sources",
+        "lanes": [],
+    }
+
+    for source, entries in lanes_by_source.items():
+        lane = {
+            "label": source.replace("-", " ").title(),
+            "category": category_map.get(source, "event"),
+            "events": [
+                {
+                    "timestamp": int(datetime.fromisoformat(e["time"].replace("Z", "+00:00")).timestamp() * 1000),
+                    "label": e["summary"][:60],
+                    "severity": severity_map.get(e["severity"], "normal"),
+                    "detail": e["summary"],
+                }
+                for e in entries
+            ],
+        }
+        component["lanes"].append(lane)
+
+    return (text_summary, component)
 
 
 TIMELINE_TOOLS = [correlate_incident]

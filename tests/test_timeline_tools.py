@@ -86,10 +86,12 @@ class TestCorrelateIncident:
         )
         mock_timeline["apps"].list_namespaced_replica_set.return_value = SimpleNamespace(items=[])
 
-        result = correlate_incident.call({"namespace": "default", "minutes_back": 30})
-        assert "BackOff" in result
-        assert "web" in result
-        assert "Timeline" in result
+        text, component = correlate_incident.call({"namespace": "default", "minutes_back": 30})
+        assert "BackOff" in text
+        assert "web" in text
+        assert "Timeline" in text
+        assert component["kind"] == "timeline"
+        assert len(component["lanes"]) > 0
 
     def test_auto_correlation(self, mock_timeline):
         # Warning event 3 min ago, deployment change 5 min ago → correlation
@@ -105,16 +107,19 @@ class TestCorrelateIncident:
         )
         mock_timeline["apps"].list_namespaced_replica_set.return_value = SimpleNamespace(items=[])
 
-        result = correlate_incident.call({"namespace": "default", "minutes_back": 30})
-        assert "PROBABLE CAUSE" in result
+        text, component = correlate_incident.call({"namespace": "default", "minutes_back": 30})
+        assert "PROBABLE CAUSE" in text
+        assert component["kind"] == "timeline"
 
     def test_empty_timeline(self, mock_timeline):
         mock_timeline["core"].list_namespaced_event.return_value = SimpleNamespace(items=[])
         mock_timeline["apps"].list_namespaced_deployment.return_value = SimpleNamespace(items=[])
         mock_timeline["apps"].list_namespaced_replica_set.return_value = SimpleNamespace(items=[])
 
-        result = correlate_incident.call({"namespace": "default", "minutes_back": 5})
-        assert "No events found" in result
+        text, component = correlate_incident.call({"namespace": "default", "minutes_back": 5})
+        assert "No events found" in text
+        assert component["kind"] == "timeline"
+        assert component["lanes"] == []
 
     def test_clamps_minutes(self, mock_timeline):
         mock_timeline["core"].list_namespaced_event.return_value = SimpleNamespace(items=[])
