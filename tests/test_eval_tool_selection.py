@@ -18,7 +18,7 @@ from sre_agent import (
     view_tools,  # noqa: F401
 )
 from sre_agent.tool_registry import TOOL_REGISTRY
-from tests.eval_prompts import EVAL_PROMPTS, EXCLUDED_FROM_EVAL
+from tests.eval_prompts import EVAL_PROMPTS, EXCLUDED_FROM_EVAL, get_all_eval_prompts
 
 
 class TestEvalCoverage:
@@ -56,3 +56,32 @@ class TestEvalCoverage:
     def test_minimum_eval_count(self):
         """Should have at least 50 eval prompts."""
         assert len(EVAL_PROMPTS) >= 50, f"Only {len(EVAL_PROMPTS)} eval prompts, need 50+"
+
+
+class TestLearnedEvalIntegration:
+    """Verify learned eval prompts merge correctly with static ones."""
+
+    def test_get_all_includes_static(self):
+        """get_all_eval_prompts always includes all static prompts."""
+        all_prompts = get_all_eval_prompts()
+        assert len(all_prompts) >= len(EVAL_PROMPTS)
+
+    def test_learned_prompts_have_valid_format(self):
+        """Any learned prompts must have the same 4-tuple structure."""
+        all_prompts = get_all_eval_prompts()
+        for i, entry in enumerate(all_prompts):
+            assert len(entry) == 4, f"Prompt {i} has {len(entry)} fields"
+            prompt, tools, mode, desc = entry
+            assert isinstance(prompt, str) and prompt
+            assert isinstance(tools, list) and tools
+            assert mode in ("sre", "security", "view_designer", "both")
+            assert isinstance(desc, str) and desc
+
+    def test_no_duplicate_queries(self):
+        """Learned prompts should not duplicate static prompt queries."""
+        all_prompts = get_all_eval_prompts()
+        seen = set()
+        for prompt, _, _, _ in all_prompts:
+            key = prompt.lower().strip()
+            assert key not in seen, f"Duplicate eval prompt: '{prompt}'"
+            seen.add(key)
