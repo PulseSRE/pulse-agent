@@ -222,3 +222,9 @@ class TestNewComponentTypes:
         h1 = compute_layout(one_row)[0]["h"]
         h2 = compute_layout(two_rows)[0]["h"]
         assert h2 > h1, "2-row grid should be taller than 1-row grid"
+
+    def test_timeline_full_width(self):
+        components = [{"kind": "timeline"}]
+        layout = compute_layout(components)
+        assert layout[0]["w"] == 4
+        assert layout[0]["h"] == 10

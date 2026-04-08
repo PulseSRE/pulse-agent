@@ -29,6 +29,7 @@ _KIND_MAP: dict[str, tuple[str, int, int]] = {
     "bar_list": ("detail", 2, 8),
     "progress_list": ("detail", 2, 8),
     "stat_card": ("kpi", 1, 4),
+    "timeline": ("chart", 4, 10),
 }
 
 # Detail pairing: kind -> set of compatible partner kinds
