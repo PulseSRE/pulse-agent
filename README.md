@@ -773,7 +773,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>84 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>86 eval prompts</strong> &bull; <strong>1,136 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>84 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>86 eval prompts</strong> &bull; <strong>1,139 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">
