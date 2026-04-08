@@ -468,31 +468,20 @@ def cluster_metrics(category: str = "overview") -> str:
 
     # Add stat_card summary for overview (big numbers without sparklines)
     if category == "overview":
-        stat_cards = [
-            {
-                "kind": "stat_card",
-                "title": "Cluster Uptime",
-                "value": "",
-                "description": "Since last API server restart",
-                "status": "healthy",
-            },
-            {
-                "kind": "stat_card",
-                "title": "Namespaces",
-                "value": "",
-                "description": "Active namespaces",
-            },
-        ]
-        # Enrich with live data
         try:
             ns_result = safe(lambda: core.list_namespace())
             if not isinstance(ns_result, ToolError):
                 active_ns = sum(1 for n in ns_result.items if n.status.phase == "Active")
-                stat_cards[1]["value"] = str(active_ns)
+                cards.append(
+                    {
+                        "kind": "stat_card",
+                        "title": "Namespaces",
+                        "value": str(active_ns),
+                        "description": "Active namespaces",
+                    }
+                )
         except Exception:
             pass
-
-        cards = cards + stat_cards
 
     text = f"Cluster metrics ({category}): {len(cards)} KPI cards"
     component = {
@@ -761,13 +750,15 @@ def emit_component(kind: str, spec_json: str) -> str:
 
     spec["kind"] = kind
 
-    from .quality_engine import VALID_KINDS, evaluate_components
+    from .quality_engine import VALID_KINDS, QualityResult, _validate_component
 
     if kind not in VALID_KINDS:
         return f"Invalid kind '{kind}'. Valid: {', '.join(sorted(VALID_KINDS))}"
 
-    result = evaluate_components([spec], min_widgets=1, max_widgets=1)
-    if not result.valid:
+    # Schema-only validation (no dashboard structure rules like "must have chart + table")
+    result = QualityResult()
+    _validate_component(spec, result)
+    if result.errors:
         return f"Invalid {kind} spec: {'; '.join(result.errors)}"
 
     text = f"Emitted {kind} component"
