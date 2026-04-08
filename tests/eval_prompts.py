@@ -559,3 +559,19 @@ EXCLUDED_FROM_EVAL = {
     "get_view_details",  # Called by agent internally during view editing
     "get_view_versions",  # Called by agent internally for undo
 }
+
+
+def get_all_eval_prompts() -> list[tuple[str, list[str], str, str]]:
+    """Static EVAL_PROMPTS + learned prompts from DB (if available)."""
+    all_prompts = list(EVAL_PROMPTS)
+    try:
+        from sre_agent.tool_usage import get_learned_eval_prompts
+
+        learned = get_learned_eval_prompts()
+        static_queries = {p[0].lower().strip() for p in EVAL_PROMPTS}
+        for prompt in learned:
+            if prompt[0].lower().strip() not in static_queries:
+                all_prompts.append(prompt)
+    except Exception:
+        pass  # DB unavailable — use static only
+    return all_prompts

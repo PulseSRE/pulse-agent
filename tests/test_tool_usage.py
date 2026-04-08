@@ -5,7 +5,9 @@ from __future__ import annotations
 from sre_agent.db import Database, reset_database, set_database
 from sre_agent.db_migrations import run_migrations
 from sre_agent.tool_usage import (
+    _RETRY_KEYWORDS,
     get_agents_metadata,
+    get_learned_eval_prompts,
     get_usage_stats,
     query_usage,
     record_tool_call,
@@ -521,3 +523,90 @@ class TestGetAgentsMetadata:
         result = get_agents_metadata()
         names = {a["name"] for a in result}
         assert "both" not in names
+
+
+import pytest
+
+
+@pytest.mark.requires_pg
+class TestLearnedEvalPrompts:
+    """Tests for get_learned_eval_prompts — implicit positive feedback detection."""
+
+    def _setup_db(self):
+        db = Database(_TEST_DB_URL)
+        set_database(db)
+        # Drop and recreate tool tables for a clean state
+        db.execute("DROP TABLE IF EXISTS tool_usage CASCADE")
+        db.execute("DROP TABLE IF EXISTS tool_turns CASCADE")
+        db.execute("DROP TABLE IF EXISTS schema_migrations CASCADE")
+        db.commit()
+        run_migrations(db)
+        return db
+
+    def _turn(self, sid, num, mode, query, tools_offered, tools_called):
+        record_turn(
+            session_id=sid,
+            turn_number=num,
+            agent_mode=mode,
+            query_summary=query,
+            tools_offered=tools_offered,
+            tools_called=tools_called,
+        )
+
+    def test_positive_signal_detected(self):
+        db = self._setup_db()
+        try:
+            self._turn("sess-1", 1, "sre", "list all pods in production", ["list_pods"], ["list_pods"])
+            self._turn("sess-1", 2, "sre", "show me node metrics", ["get_node_metrics"], ["get_node_metrics"])
+            db.commit()
+
+            prompts = get_learned_eval_prompts(days=1)
+            assert len(prompts) >= 1
+            assert prompts[0][0] == "list all pods in production"
+            assert "list_pods" in prompts[0][1]
+            assert prompts[0][2] == "sre"
+            assert prompts[0][3] == "Learned from usage"
+        finally:
+            reset_database()
+
+    def test_retry_filtered_out(self):
+        db = self._setup_db()
+        try:
+            self._turn("sess-2", 1, "sre", "show pods", ["list_pods"], ["list_pods"])
+            self._turn("sess-2", 2, "sre", "no try again with namespace default", [], [])
+            db.commit()
+
+            prompts = get_learned_eval_prompts(days=1)
+            queries = [p[0].lower() for p in prompts]
+            assert "show pods" not in queries
+        finally:
+            reset_database()
+
+    def test_deduplication(self):
+        db = self._setup_db()
+        try:
+            self._turn("sess-3", 1, "sre", "list pods", ["list_pods"], ["list_pods"])
+            self._turn("sess-3", 2, "sre", "what is the weather", [], [])
+            self._turn("sess-4", 1, "sre", "list pods", ["list_pods"], ["list_pods"])
+            self._turn("sess-4", 2, "sre", "show deployments", ["list_deployments"], ["list_deployments"])
+            db.commit()
+
+            prompts = get_learned_eval_prompts(days=1)
+            pod_prompts = [p for p in prompts if p[0].lower() == "list pods"]
+            assert len(pod_prompts) == 1
+        finally:
+            reset_database()
+
+    def test_empty_db_returns_empty(self):
+        self._setup_db()
+        try:
+            prompts = get_learned_eval_prompts(days=1)
+            assert prompts == []
+        finally:
+            reset_database()
+
+    def test_retry_keywords_coverage(self):
+        """All retry keywords should be present in the frozenset."""
+        assert "try again" in _RETRY_KEYWORDS
+        assert "wrong" in _RETRY_KEYWORDS
+        assert "i meant" in _RETRY_KEYWORDS

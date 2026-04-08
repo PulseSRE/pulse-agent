@@ -499,3 +499,78 @@ def get_agents_metadata() -> list[dict]:
         )
 
     return agents
+
+
+# ---------------------------------------------------------------------------
+# Learned eval prompts from implicit user feedback
+# ---------------------------------------------------------------------------
+
+_RETRY_KEYWORDS = frozenset(
+    [
+        "no ",
+        "wrong",
+        "not what i",
+        "try again",
+        "i meant",
+        "actually ",
+        "instead ",
+        "that's not",
+        "thats not",
+        "retry",
+        "redo",
+    ]
+)
+
+
+def get_learned_eval_prompts(days: int = 30, limit: int = 50) -> list[tuple[str, list[str], str, str]]:
+    """Generate eval prompts from implicit positive user feedback.
+
+    A turn is implicitly positive when the user's next message in the same
+    session is a new topic (not a retry/correction detected by keyword check).
+    """
+    try:
+        from .db import get_database
+
+        db = get_database()
+        rows = db.fetchall(
+            "SELECT t1.query_summary, t1.tools_called, t1.agent_mode, t2.query_summary AS next_query "
+            "FROM tool_turns t1 "
+            "JOIN tool_turns t2 ON t1.session_id = t2.session_id AND t2.turn_number = t1.turn_number + 1 "
+            "WHERE t1.tools_called IS NOT NULL "
+            "AND array_length(t1.tools_called, 1) > 0 "
+            "AND t1.query_summary IS NOT NULL AND t1.query_summary != '' "
+            "AND t1.timestamp > NOW() - INTERVAL '1 day' * ? "
+            "ORDER BY t1.timestamp DESC "
+            "LIMIT ?",
+            (days, limit * 3),
+        )
+    except Exception:
+        logger.debug("Failed to query learned eval prompts", exc_info=True)
+        return []
+
+    seen: set[str] = set()
+    prompts: list[tuple[str, list[str], str, str]] = []
+    for row in rows:
+        query = (row["query_summary"] or "").strip()
+        next_q = (row["next_query"] or "").lower()
+        tools = row["tools_called"] or []
+        mode = row["agent_mode"] or "sre"
+
+        if not query or not tools:
+            continue
+
+        # Skip if next message looks like a retry
+        if any(kw in next_q for kw in _RETRY_KEYWORDS):
+            continue
+
+        # Deduplicate by normalized query
+        key = query.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        prompts.append((query, list(tools), mode, "Learned from usage"))
+        if len(prompts) >= limit:
+            break
+
+    return prompts
