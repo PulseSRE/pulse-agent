@@ -390,6 +390,7 @@ async def _run_agent_ws(
     session_id: str,
     current_user: str = "anonymous",
     mode: str = "sre",
+    turn_number: int = 1,
 ):
     """Run an agent turn and stream results over WebSocket."""
     from .view_tools import set_current_user
@@ -668,18 +669,28 @@ async def _run_agent_ws(
     try:
         from .tool_usage import record_turn
 
+        # Extract the user's text (not tool results or content blocks)
         user_msgs = [m for m in messages if m["role"] == "user"]
         query_text = ""
         if user_msgs:
             raw = user_msgs[-1]["content"]
-            query_text = raw if isinstance(raw, str) else str(raw)
+            if isinstance(raw, str):
+                query_text = raw
+            elif isinstance(raw, list):
+                # Content blocks — find the text block
+                for block in raw:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        query_text = block.get("text", "")
+                        break
+                if not query_text:
+                    query_text = str(raw)
 
         # Determine tools offered from tool_defs
         offered = [td.get("name", "") for td in tool_defs if isinstance(td, dict)]
 
         record_turn(
             session_id=ws_id,
-            turn_number=1,
+            turn_number=turn_number,
             agent_mode=mode,
             query_summary=query_text,
             tools_offered=offered,
@@ -913,6 +924,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
     incoming: asyncio.Queue = asyncio.Queue()
     _receive_loop = _make_receive_loop(websocket, session_id, messages, incoming)
     receive_task = asyncio.create_task(_receive_loop())
+    turn_counter = 0
 
     try:
         while True:
@@ -923,6 +935,8 @@ async def websocket_agent(websocket: WebSocket, mode: str):
             msg_type = data.get("type")
             if msg_type != "message":
                 continue
+
+            turn_counter += 1
 
             # Rate limiting
             now = time.time()
@@ -989,6 +1003,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                     session_id,
                     current_user=ws_user,
                     mode=mode,
+                    turn_number=turn_counter,
                 )
                 messages.append({"role": "assistant", "content": full_response})
 
@@ -1097,6 +1112,7 @@ async def websocket_auto_agent(websocket: WebSocket):
     incoming: asyncio.Queue = asyncio.Queue()
     _receive_loop = _make_receive_loop(websocket, session_id, messages, incoming)
     receive_task = asyncio.create_task(_receive_loop())
+    turn_counter = 0
 
     try:
         while True:
@@ -1107,6 +1123,8 @@ async def websocket_auto_agent(websocket: WebSocket):
             msg_type = data.get("type")
             if msg_type != "message":
                 continue
+
+            turn_counter += 1
 
             # Rate limiting
             now = time.time()
@@ -1212,6 +1230,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                     session_id,
                     current_user=ws_user,
                     mode=intent,
+                    turn_number=turn_counter,
                 )
                 messages.append({"role": "assistant", "content": full_response})
 
