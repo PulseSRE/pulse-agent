@@ -1,10 +1,10 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.14.1"><img src="https://img.shields.io/badge/release-v1.14.1-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-82-10b981?style=for-the-badge" alt="Tools">
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.15.0"><img src="https://img.shields.io/badge/release-v1.15.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <img src="https://img.shields.io/badge/tools-84-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-16-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-1078-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1152-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/PromQL%20recipes-73-10b981?style=for-the-badge" alt="PromQL Recipes">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
@@ -62,6 +62,7 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 ### Orchestrator
 - **Auto-Routing Agent** — `/ws/agent` endpoint classifies each message as SRE or Security intent and routes to the appropriate agent with the correct system prompt and tool set
 - **Keyword-Based Classification** — Fast intent detection via keyword scoring (no LLM call for routing)
+- **Typo Auto-Correction** — `fix_typos()` corrects ~130 common K8s/SRE misspellings (depoyment→deployment, promethues→prometheus, etc.) before classification and tool selection, with automatic plural/suffix handling
 - **Shared Context Bus** — Cross-agent context sharing: SRE and Security agents publish findings to a shared bus, enabling handoff tools (`request_security_scan`, `request_sre_investigation`)
 
 ### Auto-Fix
@@ -79,8 +80,10 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Connection Pooling** — `ThreadedConnectionPool` with configurable min/max connections (`PULSE_AGENT_DB_POOL_MIN/MAX`). Thread-local connection tracking for write sequences.
 - **Schema Migrations** — Version-tracked forward-only migrations via `db_migrations.py`. Applied automatically on startup.
 
-### Pydantic Configuration
-- **`PulseAgentSettings`** — All configuration via `pydantic-settings` with `PULSE_AGENT_` env prefix, `.env` file support, and type validation at startup (`config.py`)
+### Modular Architecture
+- **Package-Based Layout** — Three largest modules split into focused subpackages: `k8s_tools/` (11 modules), `monitor/` (10 modules), `api/` (12 modules). No file exceeds 910 lines
+- **Backward-Compatible Imports** — All `from sre_agent.k8s_tools import X` patterns continue to work via `__init__.py` re-exports
+- **Centralized Config** — All settings via `PulseAgentSettings` (Pydantic v2) with `PULSE_AGENT_` env prefix, `.env` file support, and type validation at startup. No raw `os.environ` access in production code
 
 ### PromQL Recipes
 - **73 Production-Tested Queries** — Curated from 7 OpenShift/K8s repos (openshift/console, cluster-monitoring-operator, kube-state-metrics, node_exporter, prometheus-operator, cluster-version-operator, ACM)
@@ -498,7 +501,7 @@ Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_val
 
 | Pulse Agent | OpenShift Pulse UI | Protocol |
 |------------|-------------------|----------|
-| v1.14.1 | v5.16.2+ | 2 |
+| v1.15.0 | v5.16.2+ | 2 |
 | v1.13.0 | v5.16.2+ | 2 |
 | v1.12.0 | v5.16.2+ | 2 |
 | v1.9.0 | v5.14.0+ | 2 |
@@ -693,8 +696,8 @@ git push && git push --tags   # GitHub Actions builds and pushes automatically
 
 **Manual build:**
 ```bash
-podman build --platform linux/amd64 -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.14.1 .
-podman push quay.io/amobrem/pulse-agent:v1.14.1
+podman build --platform linux/amd64 -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.15.0 .
+podman push quay.io/amobrem/pulse-agent:v1.15.0
 ```
 
 **Required GitHub Secrets:**

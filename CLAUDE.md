@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.14.0, Protocol v2, 84 tools, 16 scanners, 1139 tests, 73 PromQL recipes, 86 eval prompts. Aladdin MVP foundation: chart-first canvas view builder, generic list_resources with K8s Table API, 14 smart column renderers, resource relationship tracer. Auto-routing orchestrator classifies queries and routes to SRE or Security agent. Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence (bigram discovery, next-tool hints injected into system prompt).
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.15.0, Protocol v2, 84 tools, 16 scanners, 1152 tests, 73 PromQL recipes, 86 eval prompts. Modular package architecture: k8s_tools/ (11 modules), monitor/ (10 modules), api/ (12 modules) — no file over 910 lines. Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings). Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence.
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -38,7 +38,7 @@ python -m sre_agent.main security     # Security scanner
 pulse-agent-api                       # FastAPI on port 8080
 
 # Tests
-python3 -m pytest tests/ -v           # all tests (~1139 tests)
+python3 -m pytest tests/ -v           # all tests (~1152 tests)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
 make verify                                    # lint + type-check + test
 
@@ -56,7 +56,7 @@ cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --skip-build  # redep
 
 ### Entry Points
 - `sre_agent/main.py` — Interactive CLI with Rich UI
-- `sre_agent/serve.py` → `sre_agent/api.py` — FastAPI WebSocket server
+- `sre_agent/serve.py` → `sre_agent/api/` — FastAPI WebSocket server
 
 ### Agent Loop
 - `agent.py` — shared `run_agent_streaming()` loop used by both SRE and Security agents
@@ -71,8 +71,8 @@ cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --skip-build  # redep
 - `/ws/agent` — Auto-routing orchestrated agent (classifies intent per message, routes to SRE or Security)
 - Auth: `PULSE_AGENT_WS_TOKEN` via query param, constant-time comparison
 
-### Monitor System (`monitor.py`)
-- `MonitorSession` — periodic cluster scanning (default 60s interval)
+### Monitor System (`monitor/` package — 10 modules)
+- `MonitorSession` (session.py) — periodic cluster scanning (default 60s interval)
 - 16 scanners: crashlooping pods, pending pods, failed deployments, node pressure, expiring certs, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation + 5 audit scanners (config changes, RBAC, deployments, warning events, auth)
 - Auto-fix at trust level 3+: deletes crashlooping pods, restarts failed deployments
 - Confidence scores on all findings, investigations, and action proposals
@@ -89,11 +89,12 @@ cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --skip-build  # redep
 
 ### Orchestrator (`orchestrator.py`)
 - `classify_intent()` — keyword-based SRE/Security/Both classification
+- `fix_typos()` — corrects ~130 common K8s/SRE misspellings before classification
 - `build_orchestrated_config()` — returns system_prompt, tool_defs, tool_map, write_tools for the classified mode
 - Used by `/ws/agent` endpoint for auto-routing
 
 ### Tools
-- `k8s_tools.py` — 35 K8s tools (`@beta_tool` decorated). Write tools in `WRITE_TOOLS` set require confirmation.
+- `k8s_tools/` — 11-module package with 41 K8s tools (`@beta_tool` decorated). Write tools in `WRITE_TOOLS` set require confirmation. Submodules: validators, pods, nodes, deployments, workloads, monitoring, diagnostics, generic, advanced, audit.
 - `security_tools.py` — 9 security scanning tools (read-only)
 - `fleet_tools.py` — 5 multi-cluster tools
 - `gitops_tools.py` — 6 ArgoCD tools
@@ -156,7 +157,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `db.py` — Database abstraction (PostgreSQL production, SQLite tests) + view CRUD functions
 - `k8s_client.py` — lazy-initialized K8s client with `safe()` wrapper
 - `context_bus.py` — shared context bus for cross-agent communication
-- `orchestrator.py` — intent classification + agent routing for `/ws/agent`
+- `orchestrator.py` — intent classification + typo correction + agent routing for `/ws/agent`
 - `tool_usage.py` — tool invocation audit log (PostgreSQL, fire-and-forget recording, query/stats)
 - `tool_chains.py` — tool chain discovery and next-tool hints (bigram analysis, system prompt injection)
 - `promql_recipes.py` — 73 production-tested PromQL recipes + learned queries DB (sources: OpenShift console, cluster-monitoring-operator, kube-state-metrics, node_exporter, ACM)
