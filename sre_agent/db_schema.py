@@ -222,6 +222,18 @@ CREATE TABLE IF NOT EXISTS promql_queries (
 );
 """
 
+SCAN_RUNS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS scan_runs (
+    id SERIAL PRIMARY KEY,
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    duration_ms INTEGER,
+    total_findings INTEGER,
+    scanner_results JSONB,
+    session_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_scan_runs_timestamp ON scan_runs (timestamp DESC);
+"""
+
 INDEX_SCHEMA = """
 CREATE INDEX IF NOT EXISTS idx_incidents_keywords ON incidents(query_keywords);
 CREATE INDEX IF NOT EXISTS idx_incidents_error_type ON incidents(error_type);
@@ -256,4 +268,5 @@ ALL_SCHEMAS = (
     + INDEX_SCHEMA
     + TOOL_USAGE_INDEX_SCHEMA
     + PROMQL_QUERIES_SCHEMA
+    + SCAN_RUNS_SCHEMA
 )

@@ -76,9 +76,17 @@ def _migrate_004_token_tracking(db: Database) -> None:
             pass  # Column may already exist (execute rolls back on error)
 
 
+def _migrate_005_scan_runs(db: Database) -> None:
+    """Add scan_runs table for scan history tracking."""
+    from .db_schema import SCAN_RUNS_SCHEMA
+
+    db.executescript(SCAN_RUNS_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
     (3, "promql_queries", _migrate_003_promql_queries),
     (4, "token_tracking", _migrate_004_token_tracking),
+    (5, "scan_runs", _migrate_005_scan_runs),
 ]
