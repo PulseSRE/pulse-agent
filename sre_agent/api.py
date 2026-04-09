@@ -1792,7 +1792,12 @@ async def memory_patterns(
     manager = get_manager()
     if not manager:
         return {"patterns": []}
-    return {"patterns": manager.store.list_patterns()}
+    patterns = manager.store.list_patterns()
+    # Convert keywords from space-separated string to array for frontend
+    for p in patterns:
+        kw = p.get("keywords", "")
+        p["keywords"] = kw.split() if isinstance(kw, str) else kw
+    return {"patterns": patterns}
 
 
 @app.get("/context")
