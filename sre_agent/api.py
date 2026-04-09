@@ -619,7 +619,7 @@ async def _run_agent_ws(
                     "generatedAt": int(_time.time() * 1000),
                 }
                 await websocket.send_json({"type": "view_spec", "spec": spec})
-                session_components.clear()
+                # Don't clear session_components — agent may call create_dashboard again in same turn
             else:
                 _db.save_view(current_user, view_id, view_title, view_desc, session_components, positions=positions)
                 _view_updated_ids.add(view_id)
@@ -642,7 +642,7 @@ async def _run_agent_ws(
                     spec["templateId"] = view_template
 
                 await websocket.send_json({"type": "view_spec", "spec": spec})
-                session_components.clear()
+                # Don't clear — components persist for the rest of the turn
 
         elif sig_type == "view_updated":
             _view_updated_ids.add(sig.get("view_id", ""))
