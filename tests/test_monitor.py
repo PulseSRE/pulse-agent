@@ -39,7 +39,7 @@ def _use_temp_db(monkeypatch, tmp_path):
     db = Database(_TEST_DB_URL)
     set_database(db)
     # Reset table-creation flags so each test creates tables fresh
-    _mon._tables_ensured = False
+    _mon.findings._tables_ensured = False
     _cb._tables_ensured = False
     # Ensure tables exist then truncate for isolation
     # Drop and recreate tables to pick up schema changes
@@ -58,13 +58,13 @@ def _use_temp_db(monkeypatch, tmp_path):
         except Exception:
             pass
     db.commit()
-    _mon._tables_ensured = False
+    _mon.findings._tables_ensured = False
     _cb._tables_ensured = False
     _mon._ensure_tables()
     _cb._ensure_tables()
     yield
     reset_database()
-    _mon._tables_ensured = False
+    _mon.findings._tables_ensured = False
     _cb._tables_ensured = False
 
 
@@ -359,8 +359,8 @@ class TestSecurityFollowup:
         }
 
         with (
-            patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
-            patch("sre_agent.monitor._run_security_followup_sync", return_value=mock_sec_result) as mock_sec,
+            patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor.session._run_security_followup_sync", return_value=mock_sec_result) as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
         ):
             mock_cb.is_open = False
@@ -408,8 +408,8 @@ class TestSecurityFollowup:
         }
 
         with (
-            patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
-            patch("sre_agent.monitor._run_security_followup_sync") as mock_sec,
+            patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor.session._run_security_followup_sync") as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
         ):
             mock_cb.is_open = False
@@ -465,8 +465,8 @@ class TestSecurityFollowup:
         }
 
         with (
-            patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
-            patch("sre_agent.monitor._run_security_followup_sync", return_value=mock_sec_result) as mock_sec,
+            patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor.session._run_security_followup_sync", return_value=mock_sec_result) as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
         ):
             mock_cb.is_open = False
@@ -518,7 +518,7 @@ class TestMonitorAutoLearn:
         }
 
         with (
-            patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
         ):
             mock_cb.is_open = False
@@ -573,7 +573,7 @@ class TestMonitorAutoLearn:
         }
 
         with (
-            patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
         ):
             mock_cb.is_open = False
@@ -624,7 +624,7 @@ class TestMonitorAutoLearn:
         }
 
         with (
-            patch("sre_agent.monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
         ):
             mock_cb.is_open = False
@@ -775,8 +775,8 @@ class TestFixImagePullRollback:
         )
 
         with (
-            patch("sre_agent.monitor.get_core_client") as mock_core,
-            patch("sre_agent.monitor.get_apps_client") as mock_apps,
+            patch("sre_agent.monitor.autofix.get_core_client") as mock_core,
+            patch("sre_agent.monitor.autofix.get_apps_client") as mock_apps,
         ):
             mock_core.return_value.read_namespaced_pod.return_value = mock_pod
             mock_apps.return_value.read_namespaced_replica_set.return_value = mock_rs

@@ -39,7 +39,7 @@ def _use_temp_db(monkeypatch):
 
     db = Database(_TEST_DB_URL)
     set_database(db)
-    _mon._tables_ensured = False
+    _mon.findings._tables_ensured = False
     _cb._tables_ensured = False
     for table in (
         "actions",
@@ -56,13 +56,13 @@ def _use_temp_db(monkeypatch):
         except Exception:
             pass
     db.commit()
-    _mon._tables_ensured = False
+    _mon.findings._tables_ensured = False
     _cb._tables_ensured = False
     _mon._ensure_tables()
     _cb._ensure_tables()
     yield
     reset_database()
-    _mon._tables_ensured = False
+    _mon.findings._tables_ensured = False
     _cb._tables_ensured = False
 
 
@@ -231,7 +231,7 @@ class TestScanCrashloopingPods:
         assert findings == []
 
     def test_api_error_returns_empty(self):
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_pod_for_all_namespaces.side_effect = Exception("API down")
             findings = scan_crashlooping_pods(pods=None)
             # The safe() call will produce a ToolError, scanner returns []
@@ -276,7 +276,7 @@ class TestScanPendingPods:
         pod.status.conditions = [
             SimpleNamespace(type="PodScheduled", status="False", reason="Unschedulable", message="No nodes available"),
         ]
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_pod_for_all_namespaces.return_value = _list_result([pod])
             findings = scan_pending_pods()
         assert len(findings) == 1
@@ -287,7 +287,7 @@ class TestScanPendingPods:
 
     def test_warning_under_30_minutes(self):
         pod = _make_pod(name="stuck", namespace="default", created_minutes_ago=10)
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_pod_for_all_namespaces.return_value = _list_result([pod])
             findings = scan_pending_pods()
         assert len(findings) == 1
@@ -295,7 +295,7 @@ class TestScanPendingPods:
 
     def test_critical_over_30_minutes(self):
         pod = _make_pod(name="stuck", namespace="default", created_minutes_ago=60)
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_pod_for_all_namespaces.return_value = _list_result([pod])
             findings = scan_pending_pods()
         assert len(findings) == 1
@@ -303,26 +303,26 @@ class TestScanPendingPods:
 
     def test_ignores_recently_created_pods(self):
         pod = _make_pod(name="new", namespace="default", created_minutes_ago=2)
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_pod_for_all_namespaces.return_value = _list_result([pod])
             findings = scan_pending_pods()
         assert len(findings) == 0
 
     def test_skips_system_namespaces(self):
         pod = _make_pod(name="sys", namespace="kube-system", created_minutes_ago=60)
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_pod_for_all_namespaces.return_value = _list_result([pod])
             findings = scan_pending_pods()
         assert len(findings) == 0
 
     def test_empty_list(self):
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_pod_for_all_namespaces.return_value = _list_result([])
             findings = scan_pending_pods()
         assert findings == []
 
     def test_api_error_returns_empty(self):
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_pod_for_all_namespaces.side_effect = Exception("timeout")
             findings = scan_pending_pods()
         assert findings == []
@@ -331,7 +331,7 @@ class TestScanPendingPods:
         """Pod pending > 5 min with no conditions still produces a finding (empty reason)."""
         pod = _make_pod(name="nocond", namespace="default", created_minutes_ago=10)
         pod.status.conditions = None
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_pod_for_all_namespaces.return_value = _list_result([pod])
             findings = scan_pending_pods()
         assert len(findings) == 1
@@ -345,7 +345,7 @@ class TestScanPendingPods:
 class TestScanFailedDeployments:
     def test_detects_degraded_deployment(self):
         dep = _make_deployment(name="api", namespace="prod", replicas=3, available=1)
-        with patch("sre_agent.monitor.get_apps_client") as mock_apps:
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
             mock_apps.return_value.list_deployment_for_all_namespaces.return_value = _list_result([dep])
             findings = scan_failed_deployments()
         assert len(findings) == 1
@@ -357,7 +357,7 @@ class TestScanFailedDeployments:
 
     def test_critical_when_zero_available(self):
         dep = _make_deployment(name="api", namespace="prod", replicas=3, available=0)
-        with patch("sre_agent.monitor.get_apps_client") as mock_apps:
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
             mock_apps.return_value.list_deployment_for_all_namespaces.return_value = _list_result([dep])
             findings = scan_failed_deployments()
         assert len(findings) == 1
@@ -365,21 +365,21 @@ class TestScanFailedDeployments:
 
     def test_healthy_deployment_no_findings(self):
         dep = _make_deployment(name="web", namespace="default", replicas=3, available=3)
-        with patch("sre_agent.monitor.get_apps_client") as mock_apps:
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
             mock_apps.return_value.list_deployment_for_all_namespaces.return_value = _list_result([dep])
             findings = scan_failed_deployments()
         assert findings == []
 
     def test_skips_system_namespaces(self):
         dep = _make_deployment(name="api", namespace="openshift-operators", replicas=3, available=0)
-        with patch("sre_agent.monitor.get_apps_client") as mock_apps:
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
             mock_apps.return_value.list_deployment_for_all_namespaces.return_value = _list_result([dep])
             findings = scan_failed_deployments()
         assert findings == []
 
     def test_zero_replicas_no_finding(self):
         dep = _make_deployment(name="scaled-down", namespace="default", replicas=0, available=0)
-        with patch("sre_agent.monitor.get_apps_client") as mock_apps:
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
             mock_apps.return_value.list_deployment_for_all_namespaces.return_value = _list_result([dep])
             findings = scan_failed_deployments()
         assert findings == []
@@ -388,14 +388,14 @@ class TestScanFailedDeployments:
         """available_replicas can be None when no pods are ready."""
         dep = _make_deployment(name="broken", namespace="default", replicas=2, available=None)
         dep.status.available_replicas = None
-        with patch("sre_agent.monitor.get_apps_client") as mock_apps:
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
             mock_apps.return_value.list_deployment_for_all_namespaces.return_value = _list_result([dep])
             findings = scan_failed_deployments()
         assert len(findings) == 1
         assert findings[0]["severity"] == SEVERITY_CRITICAL
 
     def test_api_error_returns_empty(self):
-        with patch("sre_agent.monitor.get_apps_client") as mock_apps:
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
             mock_apps.return_value.list_deployment_for_all_namespaces.side_effect = Exception("fail")
             findings = scan_failed_deployments()
         assert findings == []
@@ -415,7 +415,7 @@ class TestScanNodePressure:
                 SimpleNamespace(type="Ready", status="True", message="ok", reason="KubeletReady"),
             ],
         )
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_node.return_value = _list_result([node])
             findings = scan_node_pressure()
         assert len(findings) == 1
@@ -431,7 +431,7 @@ class TestScanNodePressure:
                 SimpleNamespace(type="Ready", status="True", message="ok", reason="KubeletReady"),
             ],
         )
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_node.return_value = _list_result([node])
             findings = scan_node_pressure()
         assert len(findings) == 1
@@ -445,7 +445,7 @@ class TestScanNodePressure:
                 SimpleNamespace(type="Ready", status="True", message="ok", reason="KubeletReady"),
             ],
         )
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_node.return_value = _list_result([node])
             findings = scan_node_pressure()
         assert len(findings) == 1
@@ -458,7 +458,7 @@ class TestScanNodePressure:
                 SimpleNamespace(type="Ready", status="False", message="kubelet stopped", reason="KubeletNotReady"),
             ],
         )
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_node.return_value = _list_result([node])
             findings = scan_node_pressure()
         assert len(findings) == 1
@@ -474,7 +474,7 @@ class TestScanNodePressure:
                 SimpleNamespace(type="Ready", status="False", message="down", reason="down"),
             ],
         )
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_node.return_value = _list_result([node])
             findings = scan_node_pressure()
         # DiskPressure + MemoryPressure + NotReady = 3 findings
@@ -489,13 +489,13 @@ class TestScanNodePressure:
                 SimpleNamespace(type="MemoryPressure", status="False", message="ok", reason="ok"),
             ],
         )
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_node.return_value = _list_result([node])
             findings = scan_node_pressure()
         assert findings == []
 
     def test_empty_node_list(self):
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_node.return_value = _list_result([])
             findings = scan_node_pressure()
         assert findings == []
@@ -503,13 +503,13 @@ class TestScanNodePressure:
     def test_none_conditions(self):
         node = _make_node("noinfo")
         node.status.conditions = None
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_node.return_value = _list_result([node])
             findings = scan_node_pressure()
         assert findings == []
 
     def test_api_error_returns_empty(self):
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_node.side_effect = Exception("fail")
             findings = scan_node_pressure()
         assert findings == []
@@ -529,26 +529,26 @@ class TestScanExpiringCerts:
 
     def test_skips_system_namespaces(self):
         secret = self._make_tls_secret(namespace="openshift-ingress", cert_data="dGVzdA==")
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_secret_for_all_namespaces.return_value = _list_result([secret])
             findings = scan_expiring_certs()
         assert findings == []
 
     def test_skips_secret_without_cert_data(self):
         secret = self._make_tls_secret(namespace="default", cert_data=None)
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_secret_for_all_namespaces.return_value = _list_result([secret])
             findings = scan_expiring_certs()
         assert findings == []
 
     def test_empty_secrets_list(self):
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_secret_for_all_namespaces.return_value = _list_result([])
             findings = scan_expiring_certs()
         assert findings == []
 
     def test_api_error_returns_empty(self):
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_secret_for_all_namespaces.side_effect = Exception("fail")
             findings = scan_expiring_certs()
         assert findings == []
@@ -579,7 +579,7 @@ class TestScanExpiringCerts:
         cert_b64 = base64.b64encode(cert_pem).decode()
 
         secret = self._make_tls_secret(name="expired-cert", namespace="default", cert_data=cert_b64)
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_secret_for_all_namespaces.return_value = _list_result([secret])
             findings = scan_expiring_certs()
 
@@ -613,7 +613,7 @@ class TestScanExpiringCerts:
         cert_b64 = base64.b64encode(cert_pem).decode()
 
         secret = self._make_tls_secret(name="soon-cert", namespace="default", cert_data=cert_b64)
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_secret_for_all_namespaces.return_value = _list_result([secret])
             findings = scan_expiring_certs()
 
@@ -646,7 +646,7 @@ class TestScanExpiringCerts:
         cert_b64 = base64.b64encode(cert_pem).decode()
 
         secret = self._make_tls_secret(name="valid-cert", namespace="default", cert_data=cert_b64)
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_secret_for_all_namespaces.return_value = _list_result([secret])
             findings = scan_expiring_certs()
 
@@ -689,7 +689,7 @@ class TestScanFiringAlerts:
         response = MagicMock()
         response.data = json.dumps(self._make_alert_response([alert]))
 
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = response
             findings = scan_firing_alerts()
 
@@ -707,7 +707,7 @@ class TestScanFiringAlerts:
         }
         response = MagicMock()
         response.data = json.dumps(self._make_alert_response([alert]))
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = response
             findings = scan_firing_alerts()
         assert len(findings) == 1
@@ -728,7 +728,7 @@ class TestScanFiringAlerts:
         ]
         response = MagicMock()
         response.data = json.dumps(self._make_alert_response(alerts))
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = response
             findings = scan_firing_alerts()
         assert findings == []
@@ -741,7 +741,7 @@ class TestScanFiringAlerts:
         }
         response = MagicMock()
         response.data = json.dumps(self._make_alert_response([alert]))
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = response
             findings = scan_firing_alerts()
         assert findings[0]["resources"] == [{"kind": "Deployment", "name": "web", "namespace": "ns"}]
@@ -754,7 +754,7 @@ class TestScanFiringAlerts:
         }
         response = MagicMock()
         response.data = json.dumps(self._make_alert_response([alert]))
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = response
             findings = scan_firing_alerts()
         assert findings[0]["resources"] == [{"kind": "Node", "name": "worker-1"}]
@@ -762,13 +762,13 @@ class TestScanFiringAlerts:
     def test_non_success_status_returns_empty(self):
         response = MagicMock()
         response.data = json.dumps({"status": "error", "data": {}})
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = response
             findings = scan_firing_alerts()
         assert findings == []
 
     def test_api_error_returns_empty(self):
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.connect_get_namespaced_service_proxy_with_path.side_effect = Exception(
                 "no monitoring"
             )
@@ -783,7 +783,7 @@ class TestScanFiringAlerts:
         }
         response = MagicMock()
         response.data = json.dumps(self._make_alert_response([alert]))
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = response
             findings = scan_firing_alerts()
         assert len(findings) == 1
@@ -833,7 +833,7 @@ class TestScanOOMKilledPods:
         assert findings == []
 
     def test_api_error_returns_empty(self):
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_pod_for_all_namespaces.side_effect = Exception("fail")
             findings = scan_oom_killed_pods(pods=None)
         assert findings == []
@@ -880,7 +880,7 @@ class TestScanImagePullErrors:
         assert findings == []
 
     def test_api_error_returns_empty(self):
-        with patch("sre_agent.monitor.get_core_client") as mock_core:
+        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
             mock_core.return_value.list_pod_for_all_namespaces.side_effect = Exception("fail")
             findings = scan_image_pull_errors(pods=None)
         assert findings == []
@@ -918,7 +918,7 @@ class TestScanDegradedOperators:
                 }
             ],
         }
-        with patch("sre_agent.monitor.get_custom_client") as mock_custom:
+        with patch("sre_agent.monitor.scanners.get_custom_client") as mock_custom:
             mock_custom.return_value.list_cluster_custom_object.return_value = result
             findings = scan_degraded_operators()
         assert len(findings) == 1
@@ -942,33 +942,33 @@ class TestScanDegradedOperators:
                 }
             ],
         }
-        with patch("sre_agent.monitor.get_custom_client") as mock_custom:
+        with patch("sre_agent.monitor.scanners.get_custom_client") as mock_custom:
             mock_custom.return_value.list_cluster_custom_object.return_value = result
             findings = scan_degraded_operators()
         assert findings == []
 
     def test_empty_items(self):
-        with patch("sre_agent.monitor.get_custom_client") as mock_custom:
+        with patch("sre_agent.monitor.scanners.get_custom_client") as mock_custom:
             mock_custom.return_value.list_cluster_custom_object.return_value = {"items": []}
             findings = scan_degraded_operators()
         assert findings == []
 
     def test_missing_status(self):
         result = {"items": [{"metadata": {"name": "x"}}]}
-        with patch("sre_agent.monitor.get_custom_client") as mock_custom:
+        with patch("sre_agent.monitor.scanners.get_custom_client") as mock_custom:
             mock_custom.return_value.list_cluster_custom_object.return_value = result
             findings = scan_degraded_operators()
         assert findings == []
 
     def test_missing_conditions(self):
         result = {"items": [{"metadata": {"name": "x"}, "status": {}}]}
-        with patch("sre_agent.monitor.get_custom_client") as mock_custom:
+        with patch("sre_agent.monitor.scanners.get_custom_client") as mock_custom:
             mock_custom.return_value.list_cluster_custom_object.return_value = result
             findings = scan_degraded_operators()
         assert findings == []
 
     def test_api_error_returns_empty(self):
-        with patch("sre_agent.monitor.get_custom_client") as mock_custom:
+        with patch("sre_agent.monitor.scanners.get_custom_client") as mock_custom:
             mock_custom.return_value.list_cluster_custom_object.side_effect = Exception("fail")
             findings = scan_degraded_operators()
         assert findings == []
@@ -986,7 +986,7 @@ class TestScanDegradedOperators:
                 },
             ],
         }
-        with patch("sre_agent.monitor.get_custom_client") as mock_custom:
+        with patch("sre_agent.monitor.scanners.get_custom_client") as mock_custom:
             mock_custom.return_value.list_cluster_custom_object.return_value = result
             findings = scan_degraded_operators()
         assert len(findings) == 2
@@ -1000,7 +1000,7 @@ class TestScanDegradedOperators:
 class TestScanDaemonsetGaps:
     def test_detects_gap(self):
         ds = _make_daemonset(name="fluentd", namespace="logging", desired=5, ready=3)
-        with patch("sre_agent.monitor.get_apps_client") as mock_apps:
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
             mock_apps.return_value.list_daemon_set_for_all_namespaces.return_value = _list_result([ds])
             findings = scan_daemonset_gaps()
         assert len(findings) == 1
@@ -1011,7 +1011,7 @@ class TestScanDaemonsetGaps:
 
     def test_critical_when_zero_ready(self):
         ds = _make_daemonset(name="agent", namespace="infra", desired=3, ready=0)
-        with patch("sre_agent.monitor.get_apps_client") as mock_apps:
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
             mock_apps.return_value.list_daemon_set_for_all_namespaces.return_value = _list_result([ds])
             findings = scan_daemonset_gaps()
         assert len(findings) == 1
@@ -1019,21 +1019,21 @@ class TestScanDaemonsetGaps:
 
     def test_healthy_daemonset_no_finding(self):
         ds = _make_daemonset(name="ok", namespace="default", desired=5, ready=5)
-        with patch("sre_agent.monitor.get_apps_client") as mock_apps:
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
             mock_apps.return_value.list_daemon_set_for_all_namespaces.return_value = _list_result([ds])
             findings = scan_daemonset_gaps()
         assert findings == []
 
     def test_skips_system_namespaces(self):
         ds = _make_daemonset(name="sys", namespace="openshift-sdn", desired=5, ready=2)
-        with patch("sre_agent.monitor.get_apps_client") as mock_apps:
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
             mock_apps.return_value.list_daemon_set_for_all_namespaces.return_value = _list_result([ds])
             findings = scan_daemonset_gaps()
         assert findings == []
 
     def test_zero_desired_no_finding(self):
         ds = _make_daemonset(name="empty", namespace="default", desired=0, ready=0)
-        with patch("sre_agent.monitor.get_apps_client") as mock_apps:
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
             mock_apps.return_value.list_daemon_set_for_all_namespaces.return_value = _list_result([ds])
             findings = scan_daemonset_gaps()
         assert findings == []
@@ -1041,20 +1041,20 @@ class TestScanDaemonsetGaps:
     def test_none_ready(self):
         ds = _make_daemonset(name="x", namespace="default", desired=3, ready=None)
         ds.status.number_ready = None
-        with patch("sre_agent.monitor.get_apps_client") as mock_apps:
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
             mock_apps.return_value.list_daemon_set_for_all_namespaces.return_value = _list_result([ds])
             findings = scan_daemonset_gaps()
         assert len(findings) == 1
         assert findings[0]["severity"] == SEVERITY_CRITICAL
 
     def test_empty_list(self):
-        with patch("sre_agent.monitor.get_apps_client") as mock_apps:
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
             mock_apps.return_value.list_daemon_set_for_all_namespaces.return_value = _list_result([])
             findings = scan_daemonset_gaps()
         assert findings == []
 
     def test_api_error_returns_empty(self):
-        with patch("sre_agent.monitor.get_apps_client") as mock_apps:
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
             mock_apps.return_value.list_daemon_set_for_all_namespaces.side_effect = Exception("fail")
             findings = scan_daemonset_gaps()
         assert findings == []
@@ -1068,7 +1068,7 @@ class TestScanDaemonsetGaps:
 class TestScanHpaSaturation:
     def test_detects_saturated_hpa(self):
         hpa = _make_hpa(name="web-hpa", namespace="prod", max_replicas=10, current_replicas=10)
-        with patch("sre_agent.monitor.get_autoscaling_client") as mock_as:
+        with patch("sre_agent.monitor.scanners.get_autoscaling_client") as mock_as:
             mock_as.return_value.list_horizontal_pod_autoscaler_for_all_namespaces.return_value = _list_result([hpa])
             findings = scan_hpa_saturation()
         assert len(findings) == 1
@@ -1080,28 +1080,28 @@ class TestScanHpaSaturation:
     def test_hpa_over_max(self):
         """current > max should still trigger (edge case during scale-down lag)."""
         hpa = _make_hpa(name="over", namespace="default", max_replicas=5, current_replicas=7)
-        with patch("sre_agent.monitor.get_autoscaling_client") as mock_as:
+        with patch("sre_agent.monitor.scanners.get_autoscaling_client") as mock_as:
             mock_as.return_value.list_horizontal_pod_autoscaler_for_all_namespaces.return_value = _list_result([hpa])
             findings = scan_hpa_saturation()
         assert len(findings) == 1
 
     def test_healthy_hpa_no_finding(self):
         hpa = _make_hpa(name="ok", namespace="default", max_replicas=10, current_replicas=5)
-        with patch("sre_agent.monitor.get_autoscaling_client") as mock_as:
+        with patch("sre_agent.monitor.scanners.get_autoscaling_client") as mock_as:
             mock_as.return_value.list_horizontal_pod_autoscaler_for_all_namespaces.return_value = _list_result([hpa])
             findings = scan_hpa_saturation()
         assert findings == []
 
     def test_skips_system_namespaces(self):
         hpa = _make_hpa(name="sys", namespace="openshift-ingress", max_replicas=5, current_replicas=5)
-        with patch("sre_agent.monitor.get_autoscaling_client") as mock_as:
+        with patch("sre_agent.monitor.scanners.get_autoscaling_client") as mock_as:
             mock_as.return_value.list_horizontal_pod_autoscaler_for_all_namespaces.return_value = _list_result([hpa])
             findings = scan_hpa_saturation()
         assert findings == []
 
     def test_zero_max_replicas_no_finding(self):
         hpa = _make_hpa(name="zero", namespace="default", max_replicas=0, current_replicas=0)
-        with patch("sre_agent.monitor.get_autoscaling_client") as mock_as:
+        with patch("sre_agent.monitor.scanners.get_autoscaling_client") as mock_as:
             mock_as.return_value.list_horizontal_pod_autoscaler_for_all_namespaces.return_value = _list_result([hpa])
             findings = scan_hpa_saturation()
         assert findings == []
@@ -1109,19 +1109,19 @@ class TestScanHpaSaturation:
     def test_none_current_replicas(self):
         hpa = _make_hpa(name="x", namespace="default", max_replicas=10, current_replicas=None)
         hpa.status.current_replicas = None
-        with patch("sre_agent.monitor.get_autoscaling_client") as mock_as:
+        with patch("sre_agent.monitor.scanners.get_autoscaling_client") as mock_as:
             mock_as.return_value.list_horizontal_pod_autoscaler_for_all_namespaces.return_value = _list_result([hpa])
             findings = scan_hpa_saturation()
         assert findings == []
 
     def test_empty_list(self):
-        with patch("sre_agent.monitor.get_autoscaling_client") as mock_as:
+        with patch("sre_agent.monitor.scanners.get_autoscaling_client") as mock_as:
             mock_as.return_value.list_horizontal_pod_autoscaler_for_all_namespaces.return_value = _list_result([])
             findings = scan_hpa_saturation()
         assert findings == []
 
     def test_api_error_returns_empty(self):
-        with patch("sre_agent.monitor.get_autoscaling_client") as mock_as:
+        with patch("sre_agent.monitor.scanners.get_autoscaling_client") as mock_as:
             mock_as.return_value.list_horizontal_pod_autoscaler_for_all_namespaces.side_effect = Exception("fail")
             findings = scan_hpa_saturation()
         assert findings == []

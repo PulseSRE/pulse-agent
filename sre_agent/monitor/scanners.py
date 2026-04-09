@@ -1,0 +1,479 @@
+"""All scan_* functions for cluster health monitoring."""
+
+from __future__ import annotations
+
+import json
+import logging
+from collections.abc import Callable
+from datetime import UTC, datetime
+
+from ..config import get_settings
+from ..errors import ToolError
+from ..k8s_client import get_apps_client, get_autoscaling_client, get_core_client, get_custom_client, safe
+from .findings import _make_finding, _skip_namespace
+from .registry import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING
+
+logger = logging.getLogger("pulse_agent.monitor")
+
+
+# ── Scan Functions ─────────────────────────────────────────────────────────
+
+
+def scan_crashlooping_pods(pods=None) -> list[dict]:
+    """Find pods in CrashLoopBackOff or high restart counts."""
+    crashloop_threshold = get_settings().crashloop_threshold
+    findings = []
+    try:
+        if pods is None:
+            pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
+        if isinstance(pods, ToolError):
+            return findings
+        for pod in pods.items:
+            ns = pod.metadata.namespace
+            name = pod.metadata.name
+            # Skip system namespaces
+            if _skip_namespace(ns):
+                continue
+            for cs in pod.status.container_statuses or []:
+                if cs.restart_count >= crashloop_threshold:
+                    waiting = cs.state.waiting
+                    reason = waiting.reason if waiting else "Unknown"
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_CRITICAL if cs.restart_count >= 10 else SEVERITY_WARNING,
+                            category="crashloop",
+                            title=f"Pod {name} restarting ({cs.restart_count}x)",
+                            summary=f"Container '{cs.name}' has restarted {cs.restart_count} times. Reason: {reason}",
+                            resources=[{"kind": "Pod", "name": name, "namespace": ns}],
+                            auto_fixable=True,
+                            runbook_id="crashloop-restart",
+                        )
+                    )
+    except Exception as e:
+        logger.error("Crash loop scan failed: %s", e)
+    return findings
+
+
+def scan_pending_pods() -> list[dict]:
+    """Find pods stuck in Pending state."""
+    findings = []
+    try:
+        core = get_core_client()
+        pods = safe(lambda: core.list_pod_for_all_namespaces(field_selector="status.phase=Pending"))
+        if isinstance(pods, ToolError):
+            return findings
+        for pod in pods.items:
+            ns = pod.metadata.namespace
+            name = pod.metadata.name
+            if _skip_namespace(ns):
+                continue
+            # Check how long it's been pending
+            created = pod.metadata.creation_timestamp
+            if created:
+                age_minutes = (datetime.now(UTC) - created).total_seconds() / 60
+                if age_minutes > 5:
+                    reason = ""
+                    for cond in pod.status.conditions or []:
+                        if cond.type == "PodScheduled" and cond.status == "False":
+                            reason = cond.message or cond.reason or "Unschedulable"
+                            break
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_WARNING if age_minutes < 30 else SEVERITY_CRITICAL,
+                            category="scheduling",
+                            title=f"Pod {name} pending for {int(age_minutes)}m",
+                            summary=f"Pod has been pending for {int(age_minutes)} minutes. {reason}",
+                            resources=[{"kind": "Pod", "name": name, "namespace": ns}],
+                        )
+                    )
+    except Exception as e:
+        logger.error("Pending pod scan failed: %s", e)
+    return findings
+
+
+def scan_failed_deployments() -> list[dict]:
+    """Find deployments with unavailable replicas."""
+    findings = []
+    try:
+        apps = get_apps_client()
+        deploys = safe(lambda: apps.list_deployment_for_all_namespaces())
+        if isinstance(deploys, ToolError):
+            return findings
+        for d in deploys.items:
+            ns = d.metadata.namespace
+            name = d.metadata.name
+            if _skip_namespace(ns):
+                continue
+            desired = d.spec.replicas or 0
+            available = d.status.available_replicas or 0
+            if desired > 0 and available < desired:
+                findings.append(
+                    _make_finding(
+                        severity=SEVERITY_WARNING if available > 0 else SEVERITY_CRITICAL,
+                        category="workloads",
+                        title=f"Deployment {name} degraded ({available}/{desired})",
+                        summary=f"Only {available} of {desired} replicas available",
+                        resources=[{"kind": "Deployment", "name": name, "namespace": ns}],
+                        auto_fixable=True,
+                        runbook_id="deployment-degraded",
+                    )
+                )
+    except Exception as e:
+        logger.error("Deployment scan failed: %s", e)
+    return findings
+
+
+def scan_node_pressure() -> list[dict]:
+    """Find nodes with pressure conditions (DiskPressure, MemoryPressure, PIDPressure)."""
+    findings = []
+    try:
+        core = get_core_client()
+        nodes = safe(lambda: core.list_node())
+        if isinstance(nodes, ToolError):
+            return findings
+        for node in nodes.items:
+            name = node.metadata.name
+            for cond in node.status.conditions or []:
+                if cond.type in ("DiskPressure", "MemoryPressure", "PIDPressure") and cond.status == "True":
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_CRITICAL,
+                            category="nodes",
+                            title=f"Node {name} has {cond.type}",
+                            summary=f"{cond.type}: {cond.message or cond.reason or 'Condition active'}",
+                            resources=[{"kind": "Node", "name": name}],
+                        )
+                    )
+                if cond.type == "Ready" and cond.status != "True":
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_CRITICAL,
+                            category="nodes",
+                            title=f"Node {name} NotReady",
+                            summary=f"Node is not ready: {cond.message or cond.reason or 'Unknown'}",
+                            resources=[{"kind": "Node", "name": name}],
+                        )
+                    )
+    except Exception as e:
+        logger.error("Node pressure scan failed: %s", e)
+    return findings
+
+
+def scan_expiring_certs() -> list[dict]:
+    """Find TLS secrets with certificates expiring within 30 days."""
+    findings = []
+    try:
+        import base64
+        from datetime import timedelta
+
+        core = get_core_client()
+        secrets = safe(lambda: core.list_secret_for_all_namespaces(field_selector="type=kubernetes.io/tls"))
+        if isinstance(secrets, ToolError):
+            return findings
+        now = datetime.now(UTC)
+        warn_threshold = timedelta(days=30)
+
+        for secret in secrets.items:
+            ns = secret.metadata.namespace
+            name = secret.metadata.name
+            # Intentionally skips default/openshift too — certs there are cluster-managed
+            if _skip_namespace(ns):
+                continue
+            cert_data = (secret.data or {}).get("tls.crt")
+            if not cert_data:
+                continue
+            try:
+                import ssl
+                import tempfile
+
+                cert_bytes = base64.b64decode(cert_data)
+                with tempfile.NamedTemporaryFile(suffix=".crt", delete=True) as f:
+                    f.write(cert_bytes)
+                    f.flush()
+                    try:
+                        cert_info = ssl._ssl._test_decode_cert(f.name)  # type: ignore[attr-defined]
+                    except (AttributeError, Exception) as cert_err:
+                        logger.warning(
+                            "Cannot decode cert %s/%s (CPython-specific API): %s",
+                            ns,
+                            name,
+                            cert_err,
+                        )
+                        continue
+                not_after_str = cert_info.get("notAfter", "")
+                if not_after_str:
+                    # Format: "Mon DD HH:MM:SS YYYY GMT"
+                    not_after = datetime.strptime(not_after_str, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=UTC)
+                    remaining = not_after - now
+                    if remaining < timedelta(0):
+                        findings.append(
+                            _make_finding(
+                                severity=SEVERITY_CRITICAL,
+                                category="cert_expiry",
+                                title=f"Certificate {name} EXPIRED",
+                                summary=f"TLS certificate expired {abs(remaining.days)} days ago",
+                                resources=[{"kind": "Secret", "name": name, "namespace": ns}],
+                            )
+                        )
+                    elif remaining < warn_threshold:
+                        findings.append(
+                            _make_finding(
+                                severity=SEVERITY_WARNING,
+                                category="cert_expiry",
+                                title=f"Certificate {name} expiring in {remaining.days}d",
+                                summary=f"TLS certificate expires on {not_after.isoformat()}",
+                                resources=[{"kind": "Secret", "name": name, "namespace": ns}],
+                            )
+                        )
+            except Exception as e:
+                logger.debug("Failed to parse certificate: %s", e)
+    except Exception as e:
+        logger.error("Certificate scan failed: %s", e)
+    return findings
+
+
+def scan_firing_alerts() -> list[dict]:
+    """Check Prometheus for firing alerts."""
+    findings = []
+    try:
+        core = get_core_client()
+        result = core.connect_get_namespaced_service_proxy_with_path(
+            "thanos-querier:web",
+            "openshift-monitoring",
+            path="api/v1/rules?type=alert",
+            _preload_content=False,
+        )
+        data = json.loads(result.data)
+        if data.get("status") != "success":
+            return findings
+        for group in data.get("data", {}).get("groups", []):
+            for rule in group.get("rules", []):
+                if rule.get("state") != "firing":
+                    continue
+                for alert in rule.get("alerts", []):
+                    if alert.get("state") != "firing":
+                        continue
+                    labels = alert.get("labels", {})
+                    severity = labels.get("severity", "warning")
+                    ns = labels.get("namespace", "")
+                    alertname = labels.get("alertname", rule.get("name", "Unknown"))
+                    # Skip watchdog and info alerts
+                    if alertname in ("Watchdog", "InfoInhibitor"):
+                        continue
+                    sev = (
+                        SEVERITY_CRITICAL
+                        if severity == "critical"
+                        else SEVERITY_WARNING
+                        if severity == "warning"
+                        else SEVERITY_INFO
+                    )
+                    summary = alert.get("annotations", {}).get(
+                        "summary", alert.get("annotations", {}).get("message", "")
+                    )
+                    resources = []
+                    if labels.get("pod"):
+                        resources.append({"kind": "Pod", "name": labels["pod"], "namespace": ns})
+                    elif labels.get("deployment"):
+                        resources.append({"kind": "Deployment", "name": labels["deployment"], "namespace": ns})
+                    elif labels.get("node"):
+                        resources.append({"kind": "Node", "name": labels["node"]})
+                    findings.append(
+                        _make_finding(
+                            severity=sev,
+                            category="alerts",
+                            title=alertname,
+                            summary=summary[:200] if summary else f"Alert {alertname} firing",
+                            resources=resources,
+                        )
+                    )
+    except Exception as e:
+        logger.debug("Alert scan failed (monitoring may not be available): %s", e)
+    return findings
+
+
+def scan_oom_killed_pods(pods=None) -> list[dict]:
+    """Find pods with OOMKilled exit code in last terminated state."""
+    findings = []
+    try:
+        if pods is None:
+            pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
+        if isinstance(pods, ToolError):
+            return findings
+        for pod in pods.items:
+            ns = pod.metadata.namespace
+            name = pod.metadata.name
+            if _skip_namespace(ns):
+                continue
+            for cs in pod.status.container_statuses or []:
+                last = cs.last_state
+                if last and last.terminated and last.terminated.reason == "OOMKilled":
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_CRITICAL,
+                            category="oom",
+                            title=f"Pod {name} OOMKilled",
+                            summary=f"Container '{cs.name}' was OOMKilled (exit code {last.terminated.exit_code})",
+                            resources=[{"kind": "Pod", "name": name, "namespace": ns}],
+                        )
+                    )
+    except Exception as e:
+        logger.error("OOMKilled scan failed: %s", e)
+    return findings
+
+
+def scan_image_pull_errors(pods=None) -> list[dict]:
+    """Find pods in ImagePullBackOff or ErrImagePull state."""
+    findings = []
+    try:
+        if pods is None:
+            pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
+        if isinstance(pods, ToolError):
+            return findings
+        for pod in pods.items:
+            ns = pod.metadata.namespace
+            name = pod.metadata.name
+            if _skip_namespace(ns):
+                continue
+            for cs in pod.status.container_statuses or []:
+                waiting = cs.state.waiting if cs.state else None
+                if waiting and waiting.reason in ("ImagePullBackOff", "ErrImagePull"):
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_WARNING,
+                            category="image_pull",
+                            title=f"Pod {name} {waiting.reason}",
+                            summary=f"Container '{cs.name}' cannot pull image: {waiting.message or waiting.reason}",
+                            resources=[{"kind": "Pod", "name": name, "namespace": ns}],
+                            auto_fixable=True,
+                            runbook_id="image-pull-restart",
+                        )
+                    )
+    except Exception as e:
+        logger.error("Image pull scan failed: %s", e)
+    return findings
+
+
+def scan_degraded_operators() -> list[dict]:
+    """Find ClusterOperators with Degraded=True condition."""
+    findings = []
+    try:
+        custom = get_custom_client()
+        result = safe(
+            lambda: custom.list_cluster_custom_object(
+                group="config.openshift.io",
+                version="v1",
+                plural="clusteroperators",
+            )
+        )
+        if isinstance(result, ToolError):
+            return findings
+        for op in result.get("items", []):
+            name = op.get("metadata", {}).get("name", "")
+            for cond in op.get("status", {}).get("conditions", []):
+                if cond.get("type") == "Degraded" and cond.get("status") == "True":
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_CRITICAL,
+                            category="operators",
+                            title=f"ClusterOperator {name} degraded",
+                            summary=f"Operator degraded: {cond.get('message', cond.get('reason', 'Unknown'))}",
+                            resources=[{"kind": "ClusterOperator", "name": name}],
+                        )
+                    )
+    except Exception as e:
+        logger.error("Degraded operators scan failed: %s", e)
+    return findings
+
+
+def scan_daemonset_gaps() -> list[dict]:
+    """Find DaemonSets where desiredNumberScheduled != numberReady."""
+    findings = []
+    try:
+        apps = get_apps_client()
+        dsets = safe(lambda: apps.list_daemon_set_for_all_namespaces())
+        if isinstance(dsets, ToolError):
+            return findings
+        for ds in dsets.items:
+            ns = ds.metadata.namespace
+            name = ds.metadata.name
+            if _skip_namespace(ns):
+                continue
+            desired = ds.status.desired_number_scheduled or 0
+            ready = ds.status.number_ready or 0
+            if desired > 0 and ready < desired:
+                findings.append(
+                    _make_finding(
+                        severity=SEVERITY_WARNING if ready > 0 else SEVERITY_CRITICAL,
+                        category="daemonsets",
+                        title=f"DaemonSet {name} not fully ready ({ready}/{desired})",
+                        summary=f"Only {ready} of {desired} desired pods are ready",
+                        resources=[{"kind": "DaemonSet", "name": name, "namespace": ns}],
+                    )
+                )
+    except Exception as e:
+        logger.error("DaemonSet gap scan failed: %s", e)
+    return findings
+
+
+def scan_hpa_saturation() -> list[dict]:
+    """Find HPAs at maxReplicas."""
+    findings = []
+    try:
+        autoscaling = get_autoscaling_client()
+        hpas = safe(lambda: autoscaling.list_horizontal_pod_autoscaler_for_all_namespaces())
+        if isinstance(hpas, ToolError):
+            return findings
+        for hpa in hpas.items:
+            ns = hpa.metadata.namespace
+            name = hpa.metadata.name
+            if _skip_namespace(ns):
+                continue
+            max_replicas = hpa.spec.max_replicas or 0
+            current = hpa.status.current_replicas or 0
+            if max_replicas > 0 and current >= max_replicas:
+                findings.append(
+                    _make_finding(
+                        severity=SEVERITY_WARNING,
+                        category="hpa",
+                        title=f"HPA {name} at max replicas ({current}/{max_replicas})",
+                        summary=f"HPA is at maximum capacity ({current}/{max_replicas} replicas)",
+                        resources=[{"kind": "HorizontalPodAutoscaler", "name": name, "namespace": ns}],
+                    )
+                )
+    except Exception as e:
+        logger.error("HPA saturation scan failed: %s", e)
+    return findings
+
+
+ALL_SCANNERS = [
+    ("crashloop", scan_crashlooping_pods),
+    ("pending", scan_pending_pods),
+    ("workloads", scan_failed_deployments),
+    ("nodes", scan_node_pressure),
+    ("cert_expiry", scan_expiring_certs),
+    ("alerts", scan_firing_alerts),
+    ("oom", scan_oom_killed_pods),
+    ("image_pull", scan_image_pull_errors),
+    ("operators", scan_degraded_operators),
+    ("daemonsets", scan_daemonset_gaps),
+    ("hpa", scan_hpa_saturation),
+]
+
+
+def _get_all_scanners() -> list[tuple[str, Callable]]:
+    """Return all scanners including audit scanners (lazy import to avoid circular dependency)."""
+    from ..audit_scanner import (
+        scan_auth_events,
+        scan_config_changes,
+        scan_rbac_changes,
+        scan_recent_deployments,
+        scan_warning_events,
+    )
+
+    return ALL_SCANNERS + [
+        ("audit_config", scan_config_changes),
+        ("audit_rbac", scan_rbac_changes),
+        ("audit_deployment", scan_recent_deployments),
+        ("audit_events", scan_warning_events),
+        ("audit_auth", scan_auth_events),
+    ]

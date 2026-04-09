@@ -22,7 +22,7 @@ def _use_temp_db(monkeypatch, tmp_path):
 
     db = Database(_TEST_DB_URL)
     set_database(db)
-    _mon._tables_ensured = False
+    _mon.findings._tables_ensured = False
     _cb._tables_ensured = False
     _mon._ensure_tables()
     _cb._ensure_tables()
@@ -34,7 +34,7 @@ def _use_temp_db(monkeypatch, tmp_path):
     db.commit()
     yield
     reset_database()
-    _mon._tables_ensured = False
+    _mon.findings._tables_ensured = False
     _cb._tables_ensured = False
 
 
@@ -121,7 +121,8 @@ class TestProcessHandoffs:
         )
 
         with patch(
-            "sre_agent.monitor._run_security_followup_sync", return_value={"security_issues": [], "risk_level": "low"}
+            "sre_agent.monitor.session._run_security_followup_sync",
+            return_value={"security_issues": [], "risk_level": "low"},
         ) as mock_sec:
             loop = asyncio.new_event_loop()
             try:
@@ -152,7 +153,8 @@ class TestProcessHandoffs:
         )
 
         with patch(
-            "sre_agent.monitor._run_proactive_investigation_sync", return_value={"summary": "ok", "confidence": 0.5}
+            "sre_agent.monitor.session._run_proactive_investigation_sync",
+            return_value={"summary": "ok", "confidence": 0.5},
         ) as mock_sre:
             loop = asyncio.new_event_loop()
             try:
@@ -178,7 +180,7 @@ class TestProcessHandoffs:
             )
         )
 
-        with patch("sre_agent.monitor._run_security_followup_sync", return_value={}):
+        with patch("sre_agent.monitor.session._run_security_followup_sync", return_value={}):
             loop = asyncio.new_event_loop()
             try:
                 loop.run_until_complete(session.process_handoffs())
@@ -218,8 +220,8 @@ class TestProcessHandoffs:
 
         # Should not call either investigation function
         with (
-            patch("sre_agent.monitor._run_security_followup_sync") as mock_sec,
-            patch("sre_agent.monitor._run_proactive_investigation_sync") as mock_sre,
+            patch("sre_agent.monitor.session._run_security_followup_sync") as mock_sec,
+            patch("sre_agent.monitor.session._run_proactive_investigation_sync") as mock_sre,
         ):
             loop = asyncio.new_event_loop()
             try:
