@@ -146,19 +146,22 @@ jobs:
         env:
           ANTHROPIC_VERTEX_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
           CLOUD_ML_REGION: ${{ secrets.VERTEX_REGION }}
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GCP_SA_KEY_PATH }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: |
           mkdir -p artifacts
-          if [ -n "$ANTHROPIC_VERTEX_PROJECT_ID" ]; then
+          if [ -n "$ANTHROPIC_VERTEX_PROJECT_ID" ] && [ -n "$GCP_SA_KEY" ]; then
+            echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
+            export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json
             python -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 --format json > artifacts/live_judge.json 2>/dev/null || true
             python -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 --format text > artifacts/live_judge.txt 2>/dev/null || true
             echo "### Live Judge Results" >> "$GITHUB_STEP_SUMMARY"
             if [ -s artifacts/live_judge.txt ]; then
               tail -5 artifacts/live_judge.txt >> "$GITHUB_STEP_SUMMARY"
             fi
+            rm -f /tmp/gcp-sa-key.json
           else
             echo "Skipping live judge — no Vertex AI credentials configured"
-            echo "Set VERTEX_PROJECT_ID and VERTEX_REGION secrets to enable"
+            echo "Set VERTEX_PROJECT_ID, VERTEX_REGION, and GCP_SA_KEY secrets to enable"
           fi
 
       - name: Run safety and integration evals (non-gating)
