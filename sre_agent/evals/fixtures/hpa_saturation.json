@@ -1,0 +1,17 @@
+{
+    "name": "hpa_saturation",
+    "prompt": "Our HPA for the checkout service seems stuck at max replicas. Why isn't it scaling down?",
+    "recorded_responses": {
+        "list_hpas": "production/checkout-hpa  Ref=Deployment/checkout  Min=2  Max=10  Current=10  CPU=85%/60%  Memory=72%/80%",
+        "describe_resource": "{\"kind\": \"HorizontalPodAutoscaler\", \"name\": \"checkout-hpa\", \"namespace\": \"production\", \"spec\": {\"minReplicas\": 2, \"maxReplicas\": 10, \"metrics\": [{\"type\": \"Resource\", \"resource\": {\"name\": \"cpu\", \"target\": {\"type\": \"Utilization\", \"averageUtilization\": 60}}}], \"behavior\": {\"scaleDown\": {\"stabilizationWindowSeconds\": 300, \"policies\": [{\"type\": \"Percent\", \"value\": 10, \"periodSeconds\": 60}]}}}, \"status\": {\"currentReplicas\": 10, \"desiredReplicas\": 10, \"currentMetrics\": [{\"type\": \"Resource\", \"resource\": {\"name\": \"cpu\", \"current\": {\"averageUtilization\": 85}}}], \"conditions\": [{\"type\": \"ScalingActive\", \"status\": \"True\"}, {\"type\": \"AbleToScale\", \"status\": \"True\"}, {\"type\": \"ScalingLimited\", \"status\": \"True\", \"reason\": \"TooManyReplicas\", \"message\": \"the desired replica count is more than the maximum replica count\"}]}}",
+        "get_pod_metrics": "production/checkout-7f8d9-a1b2c  CPU=450m  Memory=380Mi\nproduction/checkout-7f8d9-d3e4f  CPU=520m  Memory=410Mi\nproduction/checkout-7f8d9-g5h6i  CPU=480m  Memory=390Mi\nproduction/checkout-7f8d9-j7k8l  CPU=510m  Memory=400Mi\nproduction/checkout-7f8d9-m9n0o  CPU=495m  Memory=395Mi\nproduction/checkout-7f8d9-p1q2r  CPU=530m  Memory=420Mi\nproduction/checkout-7f8d9-s3t4u  CPU=460m  Memory=375Mi\nproduction/checkout-7f8d9-v5w6x  CPU=540m  Memory=430Mi\nproduction/checkout-7f8d9-y7z8a  CPU=470m  Memory=385Mi\nproduction/checkout-7f8d9-b9c0d  CPU=500m  Memory=405Mi",
+        "get_prometheus_query": "Query: sum(rate(container_cpu_usage_seconds_total{namespace=\"production\",pod=~\"checkout.*\"}[5m])) by (pod)\nResults (10 series):\n  Average per pod: 0.49 cores\n  Total: 4.9 cores across 10 pods",
+        "get_events": "5m ago  Normal  SuccessfulRescale  HorizontalPodAutoscaler/checkout-hpa  New size: 10; reason: cpu resource utilization above target\n1h ago  Normal  SuccessfulRescale  HorizontalPodAutoscaler/checkout-hpa  New size: 8; reason: cpu resource utilization above target\n3h ago  Normal  SuccessfulRescale  HorizontalPodAutoscaler/checkout-hpa  New size: 6; reason: cpu resource utilization above target"
+    },
+    "expected": {
+        "should_mention": ["CPU", "85%", "max", "replicas"],
+        "should_use_tools": ["list_hpas"],
+        "should_not_use_tools": ["delete_pod", "drain_node", "scale_deployment"],
+        "max_tool_calls": 8
+    }
+}

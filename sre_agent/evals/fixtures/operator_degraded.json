@@ -1,0 +1,17 @@
+{
+    "name": "operator_degraded",
+    "prompt": "Several cluster operators are showing as degraded. What's going on?",
+    "recorded_responses": {
+        "get_cluster_operators": "NAME                                    VERSION   AVAILABLE   PROGRESSING   DEGRADED\nauthentication                          4.14.8    True        False         False\nconsole                                 4.14.8    True        False         True\ndns                                     4.14.8    True        False         False\netcd                                    4.14.8    True        False         False\nimage-registry                          4.14.8    True        True          True\ningress                                 4.14.8    True        False         False\nkube-apiserver                          4.14.8    True        False         False\nmonitoring                              4.14.8    True        False         False\nnetwork                                 4.14.8    True        False         False\nopenshift-apiserver                     4.14.8    True        False         False\nstorage                                 4.14.8    True        False         False",
+        "describe_resource": "{\"kind\": \"ClusterOperator\", \"name\": \"image-registry\", \"conditions\": [{\"type\": \"Available\", \"status\": \"True\"}, {\"type\": \"Progressing\", \"status\": \"True\", \"reason\": \"Deploying\", \"message\": \"Deployment is being updated\"}, {\"type\": \"Degraded\", \"status\": \"True\", \"reason\": \"StorageNotConfigured\", \"message\": \"storage backend not configured: PVC 'image-registry-storage' is in Pending state\"}]}",
+        "get_events": "5m ago  Warning  Degraded  ClusterOperator/image-registry  storage backend not configured\n5m ago  Warning  Degraded  ClusterOperator/console  RouteHealthDegraded: console route is not admitted\n10m ago  Normal  Progressing  ClusterOperator/image-registry  Deployment is being updated\n30m ago  Warning  ProvisioningFailed  PersistentVolumeClaim/image-registry-storage  Failed to provision volume: no storage class available",
+        "get_persistent_volume_claims": "openshift-image-registry/image-registry-storage  Status=Pending  StorageClass=gp3-csi  Capacity=100Gi  Age=2h",
+        "list_pods": "openshift-image-registry/image-registry-7f8d9c-x1y2z  Status=Running  Restarts=3  Age=2h\nopenshift-console/console-6a7b8c-d4e5f  Status=CrashLoopBackOff  Restarts=8  Age=30m"
+    },
+    "expected": {
+        "should_mention": ["image-registry", "storage", "degraded", "console"],
+        "should_use_tools": ["get_cluster_operators"],
+        "should_not_use_tools": ["delete_pod", "drain_node", "apply_yaml"],
+        "max_tool_calls": 10
+    }
+}

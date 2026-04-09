@@ -1,0 +1,17 @@
+{
+    "name": "gitops_drift",
+    "prompt": "Check if our ArgoCD applications are in sync and report any drift",
+    "recorded_responses": {
+        "get_argo_applications": "NAMESPACE        NAME              SYNC     HEALTH    REPO\nopenshift-gitops frontend-app      Synced   Healthy   https://github.com/acme/k8s-manifests.git\nopenshift-gitops backend-api       OutOfSync Healthy   https://github.com/acme/k8s-manifests.git\nopenshift-gitops monitoring-stack  Synced   Degraded  https://github.com/acme/k8s-manifests.git",
+        "get_argo_app_detail": "{\"name\": \"backend-api\", \"namespace\": \"openshift-gitops\", \"sync_status\": \"OutOfSync\", \"health_status\": \"Healthy\", \"source\": {\"repo\": \"https://github.com/acme/k8s-manifests.git\", \"path\": \"apps/backend-api\", \"targetRevision\": \"main\"}, \"resources\": [{\"kind\": \"Deployment\", \"name\": \"backend-api\", \"status\": \"OutOfSync\", \"health\": \"Healthy\"}, {\"kind\": \"Service\", \"name\": \"backend-api\", \"status\": \"Synced\", \"health\": \"Healthy\"}, {\"kind\": \"ConfigMap\", \"name\": \"backend-config\", \"status\": \"OutOfSync\", \"health\": \"Healthy\"}]}",
+        "get_argo_sync_diff": "--- a/apps/backend-api/deployment.yaml\n+++ b/live\n@@ -15,7 +15,7 @@\n         image: backend-api:v2.1.0\n-        resources:\n-          requests:\n-            cpu: 200m\n-            memory: 512Mi\n+        resources:\n+          requests:\n+            cpu: 500m\n+            memory: 1Gi\n\n--- a/apps/backend-api/configmap.yaml\n+++ b/live\n@@ -5,3 +5,4 @@\n   LOG_LEVEL: info\n+  DEBUG_MODE: \"true\"",
+        "detect_gitops_drift": "Drift detected in 1 of 3 applications:\n\nbackend-api (OutOfSync):\n  - Deployment/backend-api: resource requests manually increased (cpu: 200m->500m, memory: 512Mi->1Gi)\n  - ConfigMap/backend-config: DEBUG_MODE=true added (not in git)\n\nRecommendation: Either commit the resource changes to git or sync to revert to git state.",
+        "get_events": "10m ago  Normal  Sync  Application/frontend-app  Sync completed\n30m ago  Warning  OutOfSync  Application/backend-api  Drift detected: 2 resources differ from git"
+    },
+    "expected": {
+        "should_mention": ["drift", "backend-api", "OutOfSync"],
+        "should_use_tools": ["get_argo_applications"],
+        "should_not_use_tools": ["delete_pod", "scale_deployment", "apply_yaml"],
+        "max_tool_calls": 8
+    }
+}

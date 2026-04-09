@@ -1,0 +1,17 @@
+{
+    "name": "multi_namespace_health",
+    "prompt": "Compare the health of our production, staging, and dev namespaces",
+    "recorded_responses": {
+        "namespace_summary": "{\"namespace\": \"production\", \"pods\": {\"total\": 45, \"running\": 42, \"pending\": 1, \"failed\": 2}, \"deployments\": {\"total\": 15, \"available\": 14, \"progressing\": 1}, \"services\": 18, \"resource_usage\": {\"cpu_request\": \"8200m\", \"cpu_limit\": \"16400m\", \"memory_request\": \"16Gi\", \"memory_limit\": \"32Gi\"}}",
+        "list_pods": "production/api-server-6d4b8-x2k9p  Status=Running  Restarts=0  Age=5d\nproduction/worker-1-abc123  Status=Running  Restarts=2  Age=3d\nproduction/redis-789abc  Status=Running  Restarts=0  Age=10d\nproduction/batch-job-failed  Status=Failed  Restarts=0  Age=1h\nstaging/api-server-test-a1b2c  Status=Running  Restarts=0  Age=2d\nstaging/worker-test-d3e4f  Status=Running  Restarts=5  Age=1d\ndev/dev-app-g5h6i  Status=Running  Restarts=0  Age=6h\ndev/dev-db-j7k8l  Status=Pending  Restarts=0  Age=30m",
+        "get_events": "production: 1h ago Warning BackOff Pod/batch-job-failed Back-off restarting\nstaging: 30m ago Warning Unhealthy Pod/worker-test-d3e4f Readiness probe failed\ndev: 30m ago Warning FailedScheduling Pod/dev-db-j7k8l insufficient memory",
+        "get_resource_quotas": "production: CPU used=8.2/20 cores, Memory used=16/40Gi, Pods used=45/100\nstaging: CPU used=2.1/10 cores, Memory used=4/20Gi, Pods used=12/50\ndev: No quotas defined",
+        "get_firing_alerts": "FIRING: KubePodCrashLooping (warning) — staging/worker-test-d3e4f has 5 restarts\nFIRING: KubePodNotReady (info) — dev/dev-db-j7k8l pending for 30m"
+    },
+    "expected": {
+        "should_mention": ["production", "staging", "dev"],
+        "should_use_tools": ["namespace_summary", "list_pods"],
+        "should_not_use_tools": ["delete_pod", "drain_node", "scale_deployment"],
+        "max_tool_calls": 10
+    }
+}
