@@ -406,7 +406,86 @@ def score_eval_prompts(
 
 
 # ---------------------------------------------------------------------------
-# 2. Prompt Caching — structure system prompt for cache reuse
+# 2. Prompt Audit — measure token cost of each injected section
+# ---------------------------------------------------------------------------
+
+
+def measure_prompt_sections(mode: str = "sre") -> dict:
+    """Measure character/token cost of each prompt section for auditing.
+
+    Returns a dict with sections breakdown and totals. Uses chars/4 as
+    a token estimate (no API call needed, close enough for comparison).
+    """
+    from .agent import SYSTEM_PROMPT
+    from .runbooks import select_runbooks
+
+    sections: list[dict] = []
+
+    # Base system prompt
+    sections.append({"name": "base_prompt", "chars": len(SYSTEM_PROMPT)})
+
+    # Runbooks (worst-case: select all)
+    runbook_text = select_runbooks("crashloop pod crash deploy node oom")
+    sections.append({"name": "runbooks", "chars": len(runbook_text)})
+
+    # Cluster context (without chain hints and intelligence — measured separately)
+    try:
+        ctx = gather_cluster_context(mode=mode)
+    except Exception:
+        ctx = ""
+    sections.append({"name": "cluster_context", "chars": len(ctx)})
+
+    # Chain hints
+    try:
+        from .tool_chains import get_chain_hints_text
+
+        hints = get_chain_hints_text()
+    except Exception:
+        hints = ""
+    sections.append({"name": "chain_hints", "chars": len(hints)})
+
+    # Intelligence context
+    try:
+        from .intelligence import get_intelligence_context
+
+        intel = get_intelligence_context(mode=mode)
+    except Exception:
+        intel = ""
+    sections.append({"name": "intelligence_context", "chars": len(intel)})
+
+    # Component hints (mode-dependent)
+    hint = get_component_hint(mode=mode)
+    if hint:
+        # Split into sub-sections
+        core_end = hint.find("\n## Component Catalog")
+        ops_start = hint.find("\n## Table Guidelines")
+        if ops_start == -1:
+            ops_start = hint.find("\n## PromQL Syntax")
+
+        if core_end > 0:
+            sections.append({"name": "component_hint_core", "chars": core_end})
+        if core_end > 0 and ops_start > 0:
+            sections.append({"name": "component_schemas", "chars": ops_start - core_end})
+            sections.append({"name": "component_hint_ops", "chars": len(hint) - ops_start})
+        elif core_end > 0:
+            sections.append({"name": "component_schemas", "chars": len(hint) - core_end})
+        else:
+            sections.append({"name": "component_hint_all", "chars": len(hint)})
+
+    total_chars = sum(s["chars"] for s in sections)
+    for s in sections:
+        s["pct"] = round(s["chars"] / total_chars * 100, 1) if total_chars > 0 else 0.0
+
+    return {
+        "mode": mode,
+        "sections": sections,
+        "total_chars": total_chars,
+        "estimated_tokens": total_chars // 4,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 3. Prompt Caching — structure system prompt for cache reuse
 # ---------------------------------------------------------------------------
 
 
@@ -581,16 +660,21 @@ def get_cluster_context(max_age: float = 60, mode: str = "sre") -> str:
 
     try:
         ctx = gather_cluster_context(mode=mode)
-        # Append chain hints if available
-        try:
-            from .tool_chains import ensure_hints_fresh, get_chain_hints_text
+        # Check ablation exclusions
+        import os as _os
 
-            ensure_hints_fresh()
-            hints = get_chain_hints_text()
-            if hints:
-                ctx += hints
-        except Exception:
-            pass
+        _excluded = {s.strip() for s in _os.environ.get("PULSE_PROMPT_EXCLUDE_SECTIONS", "").split(",") if s.strip()}
+        # Append chain hints if available
+        if "chain_hints" not in _excluded:
+            try:
+                from .tool_chains import ensure_hints_fresh, get_chain_hints_text
+
+                ensure_hints_fresh()
+                hints = get_chain_hints_text()
+                if hints:
+                    ctx += hints
+            except Exception:
+                pass
         try:
             from .intelligence import get_intelligence_context
 
@@ -802,18 +886,27 @@ def get_component_hint(mode: str = "sre", tool_names: list[str] | None = None) -
     if mode in ("view_designer", "security"):
         return ""
 
-    # Core guidance (always included)
-    hint = COMPONENT_HINT_CORE
+    # Check ablation exclusions
+    import os as _os
+
+    _excluded = {s.strip() for s in _os.environ.get("PULSE_PROMPT_EXCLUDE_SECTIONS", "").split(",") if s.strip()}
+
+    hint = ""
+
+    # Core guidance
+    if "component_hint_core" not in _excluded:
+        hint += COMPONENT_HINT_CORE
 
     # Selected schemas only
-    if tool_names:
-        schemas = _select_relevant_schemas(tool_names)
-    else:
-        schemas = list(COMPONENT_SCHEMAS.values())  # fallback: all
+    if "component_schemas" not in _excluded:
+        if tool_names:
+            schemas = _select_relevant_schemas(tool_names)
+        else:
+            schemas = list(COMPONENT_SCHEMAS.values())  # fallback: all
+        hint += "\n## Component Catalog\n\n" + "\n\n".join(schemas)
 
-    hint += "\n## Component Catalog\n\n" + "\n\n".join(schemas)
-
-    # Essential operational guidance (always included)
-    hint += "\n\n" + COMPONENT_HINT_OPS
+    # Essential operational guidance
+    if "component_hint_ops" not in _excluded:
+        hint += "\n\n" + COMPONENT_HINT_OPS
 
     return hint

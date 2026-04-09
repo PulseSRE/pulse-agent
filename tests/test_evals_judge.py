@@ -125,7 +125,7 @@ class TestJudgeResponse:
 
         judge_response("q", "a", ["t"], client=client)
         call_kwargs = client.messages.create.call_args[1]
-        assert call_kwargs["model"] == "claude-sonnet-4-20250514"
+        assert call_kwargs["model"] == "claude-3-5-haiku@20241022"
 
     def test_custom_model(self):
         mock_msg = SimpleNamespace(

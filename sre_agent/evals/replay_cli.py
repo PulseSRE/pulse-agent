@@ -48,8 +48,8 @@ def _make_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--model",
-        default="claude-sonnet-4-20250514",
-        help="Model for the agent (default: claude-sonnet-4-20250514).",
+        default="claude-3-5-haiku@20241022",
+        help="Model for the agent (default: claude-3-5-haiku@20241022).",
     )
     p.add_argument(
         "--dry-run",

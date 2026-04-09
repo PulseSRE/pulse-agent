@@ -15,40 +15,74 @@ logger = logging.getLogger("pulse_agent.intelligence")
 _intelligence_cache: dict[str, tuple[str, float]] = {}
 _CACHE_TTL = 600  # 10 minutes
 
+# Section IDs for ablation testing via PULSE_PROMPT_EXCLUDE_SECTIONS env var
+_SECTION_REGISTRY = {
+    "intelligence_query_reliability": "_compute_query_reliability",
+    "intelligence_dashboard_patterns": "_compute_dashboard_patterns",
+    "intelligence_error_hotspots": "_compute_error_hotspots",
+    "intelligence_token_efficiency": "_compute_token_efficiency",
+    "intelligence_harness_effectiveness": "_compute_harness_effectiveness",
+    "intelligence_routing_accuracy": "_compute_routing_accuracy",
+    "intelligence_feedback_analysis": "_compute_feedback_analysis",
+    "intelligence_token_trending": "_compute_token_trending",
+}
+
+
+def _get_excluded_sections() -> set[str]:
+    """Return set of section IDs excluded via env var (for ablation testing)."""
+    import os
+
+    raw = os.environ.get("PULSE_PROMPT_EXCLUDE_SECTIONS", "")
+    if not raw:
+        return set()
+    return {s.strip() for s in raw.split(",") if s.strip()}
+
 
 def get_intelligence_context(mode: str = "sre", max_age_days: int = 7) -> str:
     """Compute intelligence summary from analytics data."""
     now = time.time()
-    cached = _intelligence_cache.get(mode)
-    if cached and now - cached[1] < _CACHE_TTL:
-        return cached[0]
+    excluded = _get_excluded_sections()
+
+    # Skip cache if ablation is active (env var changes between runs)
+    if not excluded:
+        cached = _intelligence_cache.get(mode)
+        if cached and now - cached[1] < _CACHE_TTL:
+            return cached[0]
 
     try:
         sections: list[str] = []
-        qr = _compute_query_reliability(max_age_days)
-        if qr:
-            sections.append(qr)
-        dp = _compute_dashboard_patterns(max_age_days)
-        if dp:
-            sections.append(dp)
-        eh = _compute_error_hotspots(max_age_days)
-        if eh:
-            sections.append(eh)
-        te = _compute_token_efficiency(max_age_days)
-        if te:
-            sections.append(te)
-        he = _compute_harness_effectiveness(max_age_days)
-        if he:
-            sections.append(he)
-        ra = _compute_routing_accuracy(max_age_days)
-        if ra:
-            sections.append(ra)
-        fa = _compute_feedback_analysis(max_age_days)
-        if fa:
-            sections.append(fa)
-        tt = _compute_token_trending(max_age_days)
-        if tt:
-            sections.append(tt)
+        if "intelligence_query_reliability" not in excluded:
+            qr = _compute_query_reliability(max_age_days)
+            if qr:
+                sections.append(qr)
+        if "intelligence_dashboard_patterns" not in excluded:
+            dp = _compute_dashboard_patterns(max_age_days)
+            if dp:
+                sections.append(dp)
+        if "intelligence_error_hotspots" not in excluded:
+            eh = _compute_error_hotspots(max_age_days)
+            if eh:
+                sections.append(eh)
+        if "intelligence_token_efficiency" not in excluded:
+            te = _compute_token_efficiency(max_age_days)
+            if te:
+                sections.append(te)
+        if "intelligence_harness_effectiveness" not in excluded:
+            he = _compute_harness_effectiveness(max_age_days)
+            if he:
+                sections.append(he)
+        if "intelligence_routing_accuracy" not in excluded:
+            ra = _compute_routing_accuracy(max_age_days)
+            if ra:
+                sections.append(ra)
+        if "intelligence_feedback_analysis" not in excluded:
+            fa = _compute_feedback_analysis(max_age_days)
+            if fa:
+                sections.append(fa)
+        if "intelligence_token_trending" not in excluded:
+            tt = _compute_token_trending(max_age_days)
+            if tt:
+                sections.append(tt)
 
         if not sections:
             result = ""

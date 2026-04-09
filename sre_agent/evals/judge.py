@@ -40,7 +40,7 @@ def judge_response(
     response: str,
     tool_calls: list[str],
     client=None,
-    model: str = "claude-sonnet-4-20250514",
+    model: str = "claude-3-5-haiku@20241022",
 ) -> dict | None:
     """Grade an agent response using an LLM judge.
 

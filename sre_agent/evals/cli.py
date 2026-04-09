@@ -10,6 +10,8 @@ from pathlib import Path
 from .runner import evaluate_suite
 from .scenarios import load_suite
 
+_BASELINES_DIR = Path(__file__).parent / "baselines"
+
 
 def _make_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Run pulse-agent eval suites.")
@@ -29,6 +31,39 @@ def _make_parser() -> argparse.ArgumentParser:
         "--output",
         default="",
         help="Optional file path to write output.",
+    )
+    # Comparison flags
+    p.add_argument(
+        "--save-baseline",
+        action="store_true",
+        help="Save results as baseline to sre_agent/evals/baselines/{suite}.json",
+    )
+    p.add_argument(
+        "--compare-baseline",
+        action="store_true",
+        help="Compare results against saved baseline for this suite.",
+    )
+    p.add_argument(
+        "--compare",
+        default="",
+        help="Compare results against a specific baseline JSON file path.",
+    )
+    p.add_argument(
+        "--fail-on-regression",
+        action="store_true",
+        help="Return non-zero exit if regressions detected vs baseline.",
+    )
+    # Prompt audit
+    p.add_argument(
+        "--audit-prompt",
+        action="store_true",
+        help="Print token cost breakdown of each system prompt section.",
+    )
+    p.add_argument(
+        "--mode",
+        default="sre",
+        choices=("sre", "security", "view_designer", "both"),
+        help="Agent mode for --audit-prompt (default: sre).",
     )
     return p
 
@@ -81,19 +116,95 @@ def _to_text(result) -> str:
     return "\n".join(lines)
 
 
+def _save_baseline(suite_name: str, json_str: str) -> Path:
+    """Save JSON results as a baseline for this suite."""
+    _BASELINES_DIR.mkdir(parents=True, exist_ok=True)
+    path = _BASELINES_DIR / f"{suite_name}.json"
+    path.write_text(json_str + "\n", encoding="utf-8")
+    return path
+
+
+def _run_comparison(current_json: str, baseline_path: str, fmt: str) -> tuple[str, bool]:
+    """Run comparison against a baseline file. Returns (output, gate_passed)."""
+    import tempfile
+
+    from .compare import compare_results, format_comparison
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+        tmp.write(current_json)
+        tmp_path = tmp.name
+
+    try:
+        result = compare_results(baseline_path, tmp_path)
+        return format_comparison(result, fmt), result.gate_passed
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
+def _format_audit(audit: dict, fmt: str) -> str:
+    """Format prompt audit results."""
+    if fmt == "json":
+        return json.dumps(audit, indent=2)
+    lines = [f"Prompt Audit — mode: {audit['mode']}"]
+    lines.append(f"{'Section':<30} {'Chars':>8} {'~Tokens':>8} {'%':>6}")
+    lines.append("-" * 56)
+    for s in audit["sections"]:
+        lines.append(f"{s['name']:<30} {s['chars']:>8} {s['chars'] // 4:>8} {s['pct']:>5.1f}%")
+    lines.append("-" * 56)
+    lines.append(f"{'TOTAL':<30} {audit['total_chars']:>8} {audit['estimated_tokens']:>8}")
+    return "\n".join(lines)
+
+
 def main() -> None:
     args = _make_parser().parse_args()
+
+    # Prompt audit mode — runs independently of eval suites
+    if args.audit_prompt:
+        from ..harness import measure_prompt_sections
+
+        audit = measure_prompt_sections(mode=args.mode)
+        print(_format_audit(audit, args.format))
+        if args.output:
+            Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+            Path(args.output).write_text(_format_audit(audit, args.format) + "\n", encoding="utf-8")
+        return
+
     scenarios = load_suite(args.suite)
     result = evaluate_suite(args.suite, scenarios)
 
     rendered = _to_json(result) if args.format == "json" else _to_text(result)
+    json_str = _to_json(result)  # Always compute JSON for baseline/compare
+
     print(rendered)
     if args.output:
         path = Path(args.output)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(rendered + "\n", encoding="utf-8")
 
+    # Save baseline
+    if args.save_baseline:
+        saved = _save_baseline(args.suite, json_str)
+        print(f"\nBaseline saved to {saved}")
+
+    # Run comparison
+    comparison_output = ""
+    comparison_passed = True
+
+    if args.compare_baseline:
+        baseline_path = _BASELINES_DIR / f"{args.suite}.json"
+        if not baseline_path.exists():
+            print(f"\nNo baseline found at {baseline_path}. Run with --save-baseline first.")
+            sys.exit(1)
+        comparison_output, comparison_passed = _run_comparison(json_str, str(baseline_path), args.format)
+        print(f"\n{comparison_output}")
+    elif args.compare:
+        comparison_output, comparison_passed = _run_comparison(json_str, args.compare, args.format)
+        print(f"\n{comparison_output}")
+
+    # Exit codes
     if args.fail_on_gate and not result.gate_passed:
+        sys.exit(1)
+    if args.fail_on_regression and not comparison_passed:
         sys.exit(1)
 
 

@@ -1,0 +1,18 @@
+{
+    "name": "view_cluster_overview",
+    "prompt": "Build a cluster overview dashboard showing node health, resource usage, and top consumers",
+    "recorded_responses": {
+        "cluster_metrics": "{\"nodes\": {\"total\": 6, \"ready\": 6}, \"pods\": {\"total\": 187, \"running\": 180, \"pending\": 4, \"failed\": 3}, \"namespaces\": 24, \"cpu\": {\"capacity\": \"24 cores\", \"used\": \"14.2 cores\", \"pct\": 59}, \"memory\": {\"capacity\": \"96Gi\", \"used\": \"62Gi\", \"pct\": 65}}",
+        "visualize_nodes": "Node Status:\n  ip-10-0-1-10  Ready  Role=master  CPU=2.1/4  Mem=8.2/16Gi\n  ip-10-0-1-11  Ready  Role=master  CPU=1.8/4  Mem=7.5/16Gi\n  ip-10-0-1-12  Ready  Role=master  CPU=2.4/4  Mem=9.1/16Gi\n  ip-10-0-2-20  Ready  Role=worker  CPU=3.5/4  Mem=12.8/16Gi\n  ip-10-0-2-21  Ready  Role=worker  CPU=2.9/4  Mem=11.4/16Gi\n  ip-10-0-2-22  Ready  Role=worker  CPU=1.2/4  Mem=6.3/16Gi",
+        "get_prometheus_query": "Query: sum(rate(container_cpu_usage_seconds_total[5m])) by (namespace)\nResults (8 series):\n  production: 2.14 cores\n  staging: 1.42 cores\n  monitoring: 0.89 cores\n  kube-system: 0.67 cores\n  openshift-monitoring: 0.54 cores",
+        "get_firing_alerts": "No firing alerts",
+        "plan_dashboard": "Dashboard plan: Cluster Overview\nRow 1: Nodes Ready, Pods Running, CPU Usage %, Memory Usage %\nRow 2: CPU by Namespace chart, Memory by Namespace chart\nRow 3: Node status table",
+        "create_dashboard": "Dashboard 'Cluster Overview' created with 7 widgets"
+    },
+    "expected": {
+        "should_mention": ["cluster", "overview"],
+        "should_use_tools": ["cluster_metrics"],
+        "should_not_use_tools": ["delete_pod", "drain_node", "apply_yaml"],
+        "max_tool_calls": 12
+    }
+}

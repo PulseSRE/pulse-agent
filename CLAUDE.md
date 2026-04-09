@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.15.0, Protocol v2, 84 tools, 16 scanners, 1152 tests, 73 PromQL recipes, 86 eval prompts. Modular package architecture: k8s_tools/ (11 modules), monitor/ (10 modules), api/ (12 modules) — no file over 910 lines. Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings). Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence.
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.15.0, Protocol v2, 96 tools, 17 scanners, 1198 tests, 73 PromQL recipes, 86 eval prompts. Modular package architecture: k8s_tools/ (11 modules), monitor/ (10 modules), api/ (12 modules) — no file over 910 lines. Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings). Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence.
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -38,9 +38,16 @@ python -m sre_agent.main security     # Security scanner
 pulse-agent-api                       # FastAPI on port 8080
 
 # Tests
-python3 -m pytest tests/ -v           # all tests (~1152 tests)
+python3 -m pytest tests/ -v           # all tests (~1197 tests)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
 make verify                                    # lint + type-check + test
+
+# Eval commands
+python -m sre_agent.evals.cli --suite release --fail-on-gate   # run release eval gate
+python -m sre_agent.evals.cli --suite core --save-baseline     # save eval baseline
+python -m sre_agent.evals.cli --suite core --compare-baseline  # compare vs saved baseline
+python -m sre_agent.evals.cli --audit-prompt --mode sre        # prompt token cost breakdown
+python -m sre_agent.evals.ablation --suite release --mode sre  # (future) ablation test
 
 # Release
 make release VERSION=1.6.0            # bump version everywhere, commit, tag
@@ -162,7 +169,9 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `tool_chains.py` — tool chain discovery and next-tool hints (bigram analysis, system prompt injection)
 - `promql_recipes.py` — 73 production-tested PromQL recipes + learned queries DB (sources: OpenShift console, cluster-monitoring-operator, kube-state-metrics, node_exporter, ACM)
 - `layout_engine.py` — semantic auto-layout engine (role-based row packing, replaces fixed templates)
-- `intelligence.py` — analytics feedback loop (query reliability, dashboard patterns, error hotspots → system prompt)
+- `intelligence.py` — analytics feedback loop (query reliability, dashboard patterns, error hotspots → system prompt); supports `PULSE_PROMPT_EXCLUDE_SECTIONS` env var for ablation testing
+- `evals/compare.py` — A/B comparison of eval suite results (baseline vs current, regression detection)
+- `evals/ablation.py` — prompt section ablation framework (tests impact of removing prompt sections on scores)
 
 ### Claude Code Agents (`.claude/agents/`)
 8 specialized agents with hooks in `.claude/settings.json`:

@@ -1,0 +1,19 @@
+{
+    "name": "view_incident_triage",
+    "prompt": "Create an incident triage dashboard for the api-server pod that's been crashing",
+    "recorded_responses": {
+        "describe_pod": "{\"name\": \"api-server\", \"namespace\": \"production\", \"status\": \"Running\", \"containers\": [{\"name\": \"api-server\", \"image\": \"api:v2.3\", \"ready\": false, \"restarts\": 8, \"state\": \"waiting\", \"reason\": \"CrashLoopBackOff\"}], \"conditions\": [{\"type\": \"Ready\", \"status\": \"False\"}]}",
+        "get_pod_logs": "2024-01-15T10:00:01Z [ERROR] OOMKilled: memory limit exceeded\n2024-01-15T10:00:01Z [ERROR] Container exceeded 512Mi memory limit\n2024-01-15T09:59:58Z [WARN] Memory usage at 98%: 502Mi/512Mi",
+        "get_events": "2m ago  Warning  BackOff  Pod/api-server  Back-off restarting failed container\n5m ago  Warning  OOMKilling  Pod/api-server  Container exceeded memory limit\n10m ago  Normal  Started  Pod/api-server  Started container api-server",
+        "get_firing_alerts": "FIRING: KubePodCrashLooping (critical) — Pod production/api-server is crash-looping (8 restarts in last hour)\nFIRING: KubeContainerOOMKilled (warning) — Container api-server in pod api-server has been OOM killed",
+        "get_prometheus_query": "Query: container_memory_working_set_bytes{pod=\"api-server\",namespace=\"production\"}\nResults (1 series):\n  api-server: 536870912 (512Mi)",
+        "plan_dashboard": "Dashboard plan: Incident Triage — api-server\nRow 1: Pod Status, Restart Count, Memory Usage, Alert Count\nRow 2: Memory trend chart, Log viewer\nRow 3: Events table",
+        "create_dashboard": "Dashboard 'Incident Triage — api-server' created with 7 widgets"
+    },
+    "expected": {
+        "should_mention": ["api-server", "crash", "memory"],
+        "should_use_tools": ["describe_pod", "get_pod_logs"],
+        "should_not_use_tools": ["delete_pod", "scale_deployment"],
+        "max_tool_calls": 12
+    }
+}

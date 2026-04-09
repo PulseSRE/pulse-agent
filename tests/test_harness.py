@@ -393,6 +393,45 @@ class TestPickChartType:
         pass  # Covered by integration — nested function not independently testable
 
 
+class TestMeasurePromptSections:
+    def test_returns_valid_structure(self):
+        from sre_agent.harness import measure_prompt_sections
+
+        result = measure_prompt_sections(mode="sre")
+        assert "sections" in result
+        assert "total_chars" in result
+        assert "estimated_tokens" in result
+        assert result["mode"] == "sre"
+        assert result["total_chars"] > 0
+        assert result["estimated_tokens"] == result["total_chars"] // 4
+        assert len(result["sections"]) >= 3  # at least base_prompt, runbooks, cluster_context
+
+    def test_sections_have_required_fields(self):
+        from sre_agent.harness import measure_prompt_sections
+
+        result = measure_prompt_sections(mode="sre")
+        for s in result["sections"]:
+            assert "name" in s
+            assert "chars" in s
+            assert "pct" in s
+            assert isinstance(s["chars"], int)
+
+    def test_percentages_sum_to_100(self):
+        from sre_agent.harness import measure_prompt_sections
+
+        result = measure_prompt_sections(mode="sre")
+        total_pct = sum(s["pct"] for s in result["sections"])
+        assert abs(total_pct - 100.0) < 1.0  # allow rounding
+
+    def test_view_designer_no_component_hints(self):
+        from sre_agent.harness import measure_prompt_sections
+
+        result = measure_prompt_sections(mode="view_designer")
+        names = [s["name"] for s in result["sections"]]
+        assert "component_schemas" not in names
+        assert "component_hint_ops" not in names
+
+
 class TestLayoutEngine:
     def test_compute_layout_sre_dashboard(self):
         from sre_agent.layout_engine import compute_layout

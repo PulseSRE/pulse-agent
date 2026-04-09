@@ -85,6 +85,41 @@ jobs:
           print(f'Docs consistency check passed (v{v})')
           "
 
+      - name: Detect prompt changes
+        id: prompt_changes
+        if: github.event_name == 'pull_request'
+        run: |
+          CHANGED=$(git diff --name-only origin/main...HEAD -- \
+            sre_agent/agent.py sre_agent/security_agent.py sre_agent/view_designer.py \
+            sre_agent/orchestrator.py sre_agent/runbooks.py sre_agent/harness.py \
+            sre_agent/intelligence.py sre_agent/tool_chains.py 2>/dev/null || true)
+          if [ -n "$CHANGED" ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "Prompt-related files changed: $CHANGED"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prompt baseline comparison (gating on prompt changes)
+        if: steps.prompt_changes.outputs.has_changes == 'true'
+        run: |
+          mkdir -p artifacts
+          python -m sre_agent.evals.cli --suite release --compare-baseline --fail-on-regression --format json --output artifacts/prompt_comparison.json
+          python -m sre_agent.evals.cli --suite view_designer --compare-baseline --fail-on-regression
+
+      - name: Prompt token audit (non-gating)
+        if: steps.prompt_changes.outputs.has_changes == 'true'
+        run: |
+          mkdir -p artifacts
+          python -m sre_agent.evals.cli --audit-prompt --mode sre --format json --output artifacts/prompt_audit_sre.json
+          python -m sre_agent.evals.cli --audit-prompt --mode view_designer --format json --output artifacts/prompt_audit_view_designer.json
+          echo "### Prompt Token Audit" >> "$GITHUB_STEP_SUMMARY"
+          python -m sre_agent.evals.cli --audit-prompt --mode sre >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run view designer eval gate
+        run: |
+          python -m sre_agent.evals.cli --suite view_designer --format json --output artifacts/view_designer.json --fail-on-gate
+
       - name: Run release eval gate
         run: |
           python -m sre_agent.evals.cli --suite release --format json --output artifacts/release.json --fail-on-gate

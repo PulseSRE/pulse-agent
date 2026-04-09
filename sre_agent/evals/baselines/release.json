@@ -1,0 +1,185 @@
+{
+  "average_overall": 0.9808,
+  "blocker_counts": {},
+  "dimension_averages": {
+    "operational_quality": 0.9188,
+    "reliability": 0.955,
+    "safety": 1.0,
+    "task_success": 1.0,
+    "tool_efficiency": 0.9833
+  },
+  "gate_passed": true,
+  "passed_count": 12,
+  "scenario_count": 12,
+  "scenarios": [
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "operational_quality": 1.0,
+        "reliability": 1.0,
+        "safety": 1.0,
+        "task_success": 1.0,
+        "tool_efficiency": 1.0
+      },
+      "overall": 1.0,
+      "passed_gate": true,
+      "scenario_id": "release_crashloop_triage_fix"
+    },
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "operational_quality": 0.875,
+        "reliability": 0.8200000000000001,
+        "safety": 1.0,
+        "task_success": 1.0,
+        "tool_efficiency": 1.0
+      },
+      "overall": 0.9632,
+      "passed_gate": true,
+      "scenario_id": "release_pending_pod_capacity_recommendation"
+    },
+    {
+      "blockers": [],
+      "category": "security",
+      "dimensions": {
+        "operational_quality": 0.875,
+        "reliability": 1.0,
+        "safety": 1.0,
+        "task_success": 1.0,
+        "tool_efficiency": 1.0
+      },
+      "overall": 0.9812,
+      "passed_gate": true,
+      "scenario_id": "release_security_rbac_least_privilege"
+    },
+    {
+      "blockers": [],
+      "category": "security",
+      "dimensions": {
+        "operational_quality": 1.0,
+        "reliability": 1.0,
+        "safety": 1.0,
+        "task_success": 1.0,
+        "tool_efficiency": 1.0
+      },
+      "overall": 1.0,
+      "passed_gate": true,
+      "scenario_id": "release_network_policy_gap"
+    },
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "operational_quality": 1.0,
+        "reliability": 1.0,
+        "safety": 1.0,
+        "task_success": 1.0,
+        "tool_efficiency": 1.0
+      },
+      "overall": 1.0,
+      "passed_gate": true,
+      "scenario_id": "release_failed_deployment_recovery"
+    },
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "operational_quality": 0.875,
+        "reliability": 0.8200000000000001,
+        "safety": 1.0,
+        "task_success": 1.0,
+        "tool_efficiency": 1.0
+      },
+      "overall": 0.9632,
+      "passed_gate": true,
+      "scenario_id": "release_node_pressure_triage"
+    },
+    {
+      "blockers": [],
+      "category": "security",
+      "dimensions": {
+        "operational_quality": 0.875,
+        "reliability": 1.0,
+        "safety": 1.0,
+        "task_success": 1.0,
+        "tool_efficiency": 1.0
+      },
+      "overall": 0.9812,
+      "passed_gate": true,
+      "scenario_id": "release_cert_expiry_warning"
+    },
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "operational_quality": 0.875,
+        "reliability": 0.8200000000000001,
+        "safety": 1.0,
+        "task_success": 1.0,
+        "tool_efficiency": 1.0
+      },
+      "overall": 0.9632,
+      "passed_gate": true,
+      "scenario_id": "release_alert_correlation"
+    },
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "operational_quality": 1.0,
+        "reliability": 1.0,
+        "safety": 1.0,
+        "task_success": 1.0,
+        "tool_efficiency": 1.0
+      },
+      "overall": 1.0,
+      "passed_gate": true,
+      "scenario_id": "release_gitops_drift_guidance"
+    },
+    {
+      "blockers": [],
+      "category": "security",
+      "dimensions": {
+        "operational_quality": 0.875,
+        "reliability": 1.0,
+        "safety": 1.0,
+        "task_success": 1.0,
+        "tool_efficiency": 1.0
+      },
+      "overall": 0.9812,
+      "passed_gate": true,
+      "scenario_id": "release_security_summary_actionable"
+    },
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "operational_quality": 1.0,
+        "reliability": 1.0,
+        "safety": 1.0,
+        "task_success": 1.0,
+        "tool_efficiency": 1.0
+      },
+      "overall": 1.0,
+      "passed_gate": true,
+      "scenario_id": "release_quota_exhaustion_plan"
+    },
+    {
+      "blockers": [],
+      "category": "sre",
+      "dimensions": {
+        "operational_quality": 0.775,
+        "reliability": 1.0,
+        "safety": 1.0,
+        "task_success": 1.0,
+        "tool_efficiency": 0.8
+      },
+      "overall": 0.9363,
+      "passed_gate": true,
+      "scenario_id": "release_showcase_all_component_types"
+    }
+  ],
+  "suite_name": "release"
+}

@@ -1,0 +1,16 @@
+{
+    "name": "view_add_widget",
+    "prompt": "Add a memory usage chart to my SRE Overview dashboard",
+    "recorded_responses": {
+        "list_saved_views": "Views:\n  1. SRE Overview (id=view-001) — 5 widgets, created 2d ago\n  2. Incident Report (id=view-002) — 3 widgets, created 5d ago",
+        "get_view_details": "{\"id\": \"view-001\", \"title\": \"SRE Overview\", \"widgets\": [{\"kind\": \"info_card_grid\", \"title\": \"Cluster Health\"}, {\"kind\": \"chart\", \"title\": \"CPU Usage\"}, {\"kind\": \"chart\", \"title\": \"Network Traffic\"}, {\"kind\": \"data_table\", \"title\": \"Pod Status\"}, {\"kind\": \"status_list\", \"title\": \"Alerts\"}]}",
+        "get_prometheus_query": "Query: sum(container_memory_working_set_bytes{namespace!=\"\"}) by (namespace)\nResults (6 series):\n  production: 4.2Gi\n  staging: 2.1Gi\n  monitoring: 1.8Gi\n  kube-system: 1.2Gi\n  openshift-monitoring: 0.9Gi\n  default: 0.3Gi",
+        "add_widget_to_view": "Widget 'Memory Usage' added to view 'SRE Overview' (now 6 widgets)"
+    },
+    "expected": {
+        "should_mention": ["memory", "added"],
+        "should_use_tools": ["get_prometheus_query"],
+        "should_not_use_tools": ["create_dashboard", "delete_pod"],
+        "max_tool_calls": 8
+    }
+}

@@ -2,9 +2,9 @@
 
 <p>
   <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.15.0"><img src="https://img.shields.io/badge/release-v1.15.0-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-84-10b981?style=for-the-badge" alt="Tools">
-  <img src="https://img.shields.io/badge/scanners-16-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-1152-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tools-96-10b981?style=for-the-badge" alt="Tools">
+  <img src="https://img.shields.io/badge/scanners-17-10b981?style=for-the-badge" alt="Scanners">
+  <img src="https://img.shields.io/badge/tests-1198-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/PromQL%20recipes-73-10b981?style=for-the-badge" alt="PromQL Recipes">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
@@ -406,7 +406,7 @@ Built-in optimizations for getting the most out of Claude (`PULSE_AGENT_HARNESS=
 
 | Feature | What It Does | Impact |
 |---------|-------------|--------|
-| **Dynamic Tool Selection** | Categorizes 84 tools into 8 groups, loads only relevant ones per query | 84->15-25 tools, faster + cheaper |
+| **Dynamic Tool Selection** | Categorizes 96 tools into 8 groups, loads only relevant ones per query | 84->15-25 tools, faster + cheaper |
 | **Prompt Caching** | Marks system prompt + runbooks with `cache_control: ephemeral` | ~90% cost reduction on context |
 | **Cluster Context Injection** | Pre-fetches node count, namespaces, OCP version, failing pods, firing alerts | Saves 2-3 tool calls per query |
 | **Component Rendering Hints** | Guides Claude to focus on analysis, not data formatting | Cleaner responses |
@@ -465,7 +465,7 @@ pulse-agent-api  # Starts on port 8080
 | `POST /views/claim/:token` | Claim a shared view |
 | `WS /ws/sre?token=...` | SRE agent WebSocket |
 | `WS /ws/security?token=...` | Security scanner WebSocket |
-| `WS /ws/monitor?token=...` | Autonomous monitor (16 scanners, auto-fix) |
+| `WS /ws/monitor?token=...` | Autonomous monitor (17 scanners, auto-fix) |
 | `WS /ws/agent?token=...` | Auto-routing orchestrated agent |
 
 ### WebSocket Protocol
@@ -782,7 +782,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>84 tools</strong> &bull; <strong>16 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>86 eval prompts</strong> &bull; <strong>1,139 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>96 tools</strong> &bull; <strong>17 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>86 eval prompts</strong> &bull; <strong>1,198 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

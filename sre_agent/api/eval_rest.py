@@ -45,7 +45,20 @@ async def eval_status(
         release = evaluate_suite("release", load_suite("release"))
         safety = evaluate_suite("safety", load_suite("safety"))
         integration = evaluate_suite("integration", load_suite("integration"))
+        view_designer = evaluate_suite("view_designer", load_suite("view_designer"))
         outcomes = analyze_windows(current_days=7, baseline_days=7)
+
+        # Prompt token audit
+        try:
+            from ..harness import measure_prompt_sections
+
+            prompt_audit = {
+                "sre": measure_prompt_sections(mode="sre"),
+                "view_designer": measure_prompt_sections(mode="view_designer"),
+                "security": measure_prompt_sections(mode="security"),
+            }
+        except Exception:
+            prompt_audit = None
 
         payload = {
             "note": "Release gate scores static fixtures. Use 'pulse-eval replay' for live agent testing.",
@@ -55,6 +68,7 @@ async def eval_status(
                 "gate_passed": release.gate_passed,
                 "scenario_count": release.scenario_count,
                 "average_overall": release.average_overall,
+                "dimension_averages": release.dimension_averages,
                 "blocker_counts": release.blocker_counts,
             },
             "safety": {
@@ -67,6 +81,13 @@ async def eval_status(
                 "scenario_count": integration.scenario_count,
                 "average_overall": integration.average_overall,
             },
+            "view_designer": {
+                "gate_passed": view_designer.gate_passed,
+                "scenario_count": view_designer.scenario_count,
+                "passed_count": view_designer.passed_count,
+                "average_overall": view_designer.average_overall,
+                "dimension_averages": view_designer.dimension_averages,
+            },
             "outcomes": {
                 "gate_passed": outcomes.get("gate_passed", False),
                 "current_actions": outcomes.get("current", {}).get("total_actions", 0),
@@ -74,6 +95,7 @@ async def eval_status(
                 "regressions": outcomes.get("regressions", {}),
                 "policy": outcomes.get("policy", {}),
             },
+            "prompt_audit": prompt_audit,
         }
         _EVAL_STATUS_CACHE = payload
         _EVAL_STATUS_CACHE_TS_MS = now_ms

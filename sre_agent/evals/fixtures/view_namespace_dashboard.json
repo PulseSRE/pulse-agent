@@ -1,0 +1,18 @@
+{
+    "name": "view_namespace_dashboard",
+    "prompt": "Create a dashboard for the production namespace",
+    "recorded_responses": {
+        "namespace_summary": "{\"namespace\": \"production\", \"pods\": {\"total\": 42, \"running\": 38, \"pending\": 2, \"failed\": 2}, \"deployments\": {\"total\": 12, \"available\": 10, \"progressing\": 2}, \"services\": 15, \"ingresses\": 3, \"resource_usage\": {\"cpu_request\": \"4200m\", \"cpu_limit\": \"8400m\", \"memory_request\": \"8Gi\", \"memory_limit\": \"16Gi\"}}",
+        "get_prometheus_query": "Query: sum(rate(container_cpu_usage_seconds_total{namespace=\"production\"}[5m])) by (pod)\nResults (5 series):\n  api-server: 0.45 cores\n  worker-1: 0.82 cores\n  worker-2: 0.67 cores\n  redis: 0.12 cores\n  nginx: 0.08 cores",
+        "list_pods": "production/api-server-6d4b8c9f7-x2k9p  Status=Running  Restarts=0  Age=5d\nproduction/worker-1-abc123  Status=Running  Restarts=0  Age=3d\nproduction/worker-2-def456  Status=Running  Restarts=1  Age=3d\nproduction/redis-789abc  Status=Running  Restarts=0  Age=10d\nproduction/nginx-xyz789  Status=Running  Restarts=0  Age=7d",
+        "get_events": "5m ago  Normal  Scheduled  Pod/worker-2-def456  Successfully assigned\n1h ago  Warning  Unhealthy  Pod/worker-2-def456  Readiness probe failed\n2h ago  Normal  Pulled  Pod/api-server-x2k9p  Container image pulled",
+        "plan_dashboard": "Dashboard plan: Production Overview\nLayout: automatic\nRow 1: Pod count, CPU usage, Memory usage, Deployment health\nRow 2: CPU trend chart, Memory trend chart\nRow 3: Pod status table",
+        "create_dashboard": "Dashboard 'Production Overview' created with 7 widgets"
+    },
+    "expected": {
+        "should_mention": ["production", "dashboard"],
+        "should_use_tools": ["namespace_summary"],
+        "should_not_use_tools": ["delete_pod", "scale_deployment", "drain_node"],
+        "max_tool_calls": 12
+    }
+}
