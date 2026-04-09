@@ -41,6 +41,22 @@ if [[ "$PY_VER" != "$VERSION" || "$CHART_VER" != "$VERSION" || "$APP_VER" != "$V
     exit 1
 fi
 
+# Update umbrella chart subchart dependency in OpenshiftPulse (if repo exists)
+UI_REPO="${REPO_ROOT}/../OpenshiftPulse"
+UMBRELLA_CHART="$UI_REPO/deploy/helm/pulse/Chart.yaml"
+if [[ -f "$UMBRELLA_CHART" ]]; then
+    sed -i.bak "/name: openshift-sre-agent/{n;s/version: \".*\"/version: \"$VERSION\"/;}" "$UMBRELLA_CHART"
+    rm -f "$UMBRELLA_CHART.bak"
+    UMBRELLA_VER=$(grep -A1 'name: openshift-sre-agent' "$UMBRELLA_CHART" | grep version | sed 's/.*"\(.*\)"/\1/')
+    if [[ "$UMBRELLA_VER" == "$VERSION" ]]; then
+        echo "  OpenshiftPulse umbrella chart subchart → $VERSION"
+    else
+        echo "  ⚠️ Failed to update umbrella chart (got $UMBRELLA_VER)"
+    fi
+else
+    echo "  ⚠️ OpenshiftPulse repo not found at $UI_REPO — update umbrella chart manually"
+fi
+
 echo "Version bumped to $VERSION in:"
 echo "  pyproject.toml"
 echo "  chart/Chart.yaml (version + appVersion)"
