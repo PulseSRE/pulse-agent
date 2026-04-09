@@ -41,6 +41,7 @@ from .agent import (
     create_client,
     run_agent_streaming,
 )
+from .config import get_settings
 from .orchestrator import build_orchestrated_config, classify_intent, fix_typos
 from .security_agent import (
     ALL_TOOLS as SEC_ALL_TOOLS,
@@ -155,7 +156,7 @@ def _build_context_prefix(data: dict) -> str:
 def _verify_ws_token(websocket) -> str:
     """Verify WebSocket token and return the client token. Closes with 4001 if invalid."""
     client_token = websocket.query_params.get("token", "")
-    expected = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
+    expected = get_settings().ws_token
     if not expected or not hmac.compare_digest(client_token, expected):
         return ""
     return client_token
@@ -170,7 +171,7 @@ async def lifespan(app: FastAPI):
     # Ensure pulse_agent loggers are at INFO so monitor scan output is visible
     logging.getLogger("pulse_agent").setLevel(logging.INFO)
 
-    if not os.environ.get("PULSE_AGENT_WS_TOKEN"):
+    if not get_settings().ws_token:
         logger.critical(
             "PULSE_AGENT_WS_TOKEN is not set. WebSocket endpoint is UNAUTHENTICATED. "
             "Set this variable or connections will be rejected."
@@ -183,7 +184,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Cannot connect to cluster — tools may fail")
     # Initialize memory system if enabled
-    if os.environ.get("PULSE_AGENT_MEMORY", "1") == "1":
+    if get_settings().memory:
         try:
             from .memory import MemoryManager, set_manager
 
@@ -475,7 +476,7 @@ async def _run_agent_ws(
     # Augment system prompt with memory context and start timing
     effective_system = system_prompt
     manager = None
-    if os.environ.get("PULSE_AGENT_MEMORY", "1") == "1":
+    if get_settings().memory:
         try:
             from .memory import get_manager
 
@@ -1324,7 +1325,7 @@ async def websocket_monitor(websocket: WebSocket):
 
     # Wait for subscribe_monitor message to get config
     # Server-side trust level cap: client cannot escalate beyond this
-    max_trust_level = int(os.environ.get("PULSE_AGENT_MAX_TRUST_LEVEL", "3"))
+    max_trust_level = get_settings().max_trust_level
     trust_level = 1
     auto_fix_categories: list[str] = []
 
@@ -1484,7 +1485,7 @@ def _sanitize_components(components: list[dict]) -> list[dict]:
 
 def _verify_rest_token(authorization: str | None = Header(None), token: str | None = Query(None)):
     """Verify token for REST endpoints — accepts Bearer header or query param."""
-    expected = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
+    expected = get_settings().ws_token
     if not expected:
         raise HTTPException(status_code=503, detail="Server not configured")
     client_token = ""
@@ -1646,7 +1647,7 @@ async def monitor_capabilities(
     _verify_rest_token(authorization, token)
     from .monitor import AUTO_FIX_HANDLERS
 
-    max_trust_level = int(os.environ.get("PULSE_AGENT_MAX_TRUST_LEVEL", "3"))
+    max_trust_level = get_settings().max_trust_level
     return {
         "max_trust_level": max(0, min(max_trust_level, 4)),
         "supported_auto_fix_categories": sorted(AUTO_FIX_HANDLERS.keys()),
@@ -2013,7 +2014,7 @@ def _get_current_user(
     The OAuth proxy sets X-Forwarded-User with the authenticated username — this is
     the most reliable source since OpenShift tokens are opaque (sha256~...), not JWTs.
     """
-    dev_user = os.environ.get("PULSE_AGENT_DEV_USER", "")
+    dev_user = get_settings().dev_user
     if dev_user:
         return dev_user
 
@@ -2268,7 +2269,7 @@ async def rest_share_view(
     if view is None:
         return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
 
-    secret = os.environ.get("PULSE_SHARE_TOKEN_KEY", "") or os.environ.get("PULSE_AGENT_WS_TOKEN", "")
+    secret = os.environ.get("PULSE_SHARE_TOKEN_KEY", "") or get_settings().ws_token
     if not secret:
         return JSONResponse(status_code=503, content={"error": "Server not configured for sharing"})
     expires = int(time.time()) + 86400  # 24 hours
@@ -2308,7 +2309,7 @@ async def rest_claim_shared_view(
     if int(time.time()) > expires:
         return JSONResponse(status_code=410, content={"error": "Share link has expired"})
 
-    secret = os.environ.get("PULSE_AGENT_WS_TOKEN", "")
+    secret = get_settings().ws_token
     if not secret:
         return JSONResponse(status_code=503, content={"error": "Server not configured"})
     expected_sig = hmac.new(secret.encode(), f"{view_id}:{expires_str}".encode(), hashlib.sha256).hexdigest()

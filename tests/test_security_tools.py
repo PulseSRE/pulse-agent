@@ -204,6 +204,9 @@ class TestListServiceAccountSecrets:
 class TestScanImagesCustomRegistries:
     def test_custom_trusted_registries(self, mock_security_k8s, monkeypatch):
         monkeypatch.setenv("PULSE_AGENT_TRUSTED_REGISTRIES", "gcr.io/my-project/,docker.io/library/")
+        from sre_agent.config import _reset_settings
+
+        _reset_settings()
         pod = _make_pod("gcr-pod", image="gcr.io/my-project/app:v1.0")
         mock_security_k8s["core"].list_pod_for_all_namespaces.return_value = _list_result([pod])
         result = scan_images.call({"namespace": "ALL"})

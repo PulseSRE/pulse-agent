@@ -5,7 +5,6 @@ from __future__ import annotations
 import functools
 import json
 import logging
-import os
 from datetime import UTC, datetime
 
 from .. import db_schema
@@ -43,8 +42,6 @@ def db_safe(default=None):
 
     return decorator
 
-
-DEFAULT_DB_PATH = os.environ.get("PULSE_AGENT_DATABASE_URL", "")
 
 _STORE_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_incidents_keywords ON incidents(query_keywords);

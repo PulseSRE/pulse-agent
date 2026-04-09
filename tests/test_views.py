@@ -257,15 +257,14 @@ class TestCloneView:
 
 
 class TestGetCurrentUser:
-    def test_dev_user_override(self):
+    def test_dev_user_override(self, monkeypatch):
         from sre_agent.api import _get_current_user
+        from sre_agent.config import _reset_settings
 
-        os.environ["PULSE_AGENT_DEV_USER"] = "testdev"
-        try:
-            user = _get_current_user()
-            assert user == "testdev"
-        finally:
-            del os.environ["PULSE_AGENT_DEV_USER"]
+        monkeypatch.setenv("PULSE_AGENT_DEV_USER", "testdev")
+        _reset_settings()
+        user = _get_current_user()
+        assert user == "testdev"
 
     def test_no_token_raises_401(self):
         from fastapi import HTTPException

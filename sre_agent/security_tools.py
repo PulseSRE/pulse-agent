@@ -7,7 +7,6 @@ SCCs, image policies, and secret hygiene.
 from __future__ import annotations
 
 import json
-import os
 from datetime import UTC, datetime
 
 from anthropic import beta_tool
@@ -108,12 +107,9 @@ def scan_images(namespace: str = "ALL") -> str:
     if isinstance(result, ToolError):
         return str(result)
 
-    default_trusted = (
-        "registry.redhat.io/,registry.access.redhat.com/,quay.io/,image-registry.openshift-image-registry.svc:"
-    )
-    trusted_prefixes = [
-        p.strip() for p in os.environ.get("PULSE_AGENT_TRUSTED_REGISTRIES", default_trusted).split(",") if p.strip()
-    ]
+    from .config import get_settings
+
+    trusted_prefixes = get_settings().get_trusted_registries()
 
     findings = []
     seen_images = set()

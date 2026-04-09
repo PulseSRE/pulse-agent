@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 import time
 
@@ -39,8 +38,9 @@ def set_manager(manager: MemoryManager | None) -> None:
 
 
 def is_memory_enabled() -> bool:
-    val = os.environ.get("PULSE_AGENT_MEMORY", "1").lower()
-    return val in ("1", "true", "yes")
+    from ..config import get_settings
+
+    return get_settings().memory
 
 
 class MemoryManager:

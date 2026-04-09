@@ -12,7 +12,6 @@ Queries use ``?`` placeholders which are auto-translated to ``%s`` for PostgreSQ
 from __future__ import annotations
 
 import logging
-import os
 import sys
 import threading
 from typing import Any
@@ -28,8 +27,11 @@ class Database:
 
     def __init__(self, url: str):
         self.url = url
-        minconn = int(os.environ.get("PULSE_AGENT_DB_POOL_MIN", "2"))
-        maxconn = int(os.environ.get("PULSE_AGENT_DB_POOL_MAX", "20"))
+        from .config import get_settings
+
+        _s = get_settings()
+        minconn = _s.db_pool_min
+        maxconn = _s.db_pool_max
         self._pool = psycopg2.pool.ThreadedConnectionPool(minconn, maxconn, dsn=url)
         self._local = threading.local()
 
@@ -177,7 +179,9 @@ def get_database() -> Database:
     with _db_lock:
         if _db is not None and _db.health_check():
             return _db
-        url = os.environ.get("PULSE_AGENT_DATABASE_URL", "")
+        from .config import get_settings
+
+        url = get_settings().database_url
         if not url:
             raise RuntimeError(
                 "PULSE_AGENT_DATABASE_URL is required. "

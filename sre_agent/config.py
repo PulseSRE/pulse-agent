@@ -26,6 +26,8 @@ class PulseAgentSettings(BaseSettings):
 
     # Database (PostgreSQL required)
     database_url: str = ""
+    db_pool_min: int = 2
+    db_pool_max: int = 20
 
     # Memory
     memory: bool = True
@@ -34,12 +36,19 @@ class PulseAgentSettings(BaseSettings):
     scan_interval: int = 60
     crashloop_threshold: int = 3
     max_daily_investigations: int = 20
+    investigations_max_per_scan: int = 2
     investigation_timeout: int = 20
+    investigation_cooldown: int = 300
     autofix_enabled: bool = True
     security_followup: bool = False
+    noise_threshold: float = 0.7
+    max_trust_level: int = 3
 
     # WebSocket
     ws_token: str = ""
+
+    # Dev
+    dev_user: str = ""
 
     # Circuit breaker
     cb_threshold: int = 3
@@ -52,13 +61,13 @@ class PulseAgentSettings(BaseSettings):
     webhook_url: str = ""
     webhook_secret: str = ""
 
-    # Trusted registries
-    trusted_registries: list[str] = [
-        "registry.redhat.io",
-        "registry.access.redhat.com",
-        "quay.io",
-        "image-registry.openshift-image-registry.svc",
-    ]
+    # Trusted registries (comma-separated string)
+    trusted_registries: str = (
+        "registry.redhat.io,registry.access.redhat.com,quay.io,image-registry.openshift-image-registry.svc"
+    )
+
+    def get_trusted_registries(self) -> list[str]:
+        return [s.strip() for s in self.trusted_registries.split(",") if s.strip()]
 
     # Tool chain intelligence
     chain_hints: bool = True

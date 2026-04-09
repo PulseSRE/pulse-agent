@@ -326,6 +326,9 @@ class TestSecurityFollowup:
         monkeypatch.setenv("PULSE_AGENT_SECURITY_FOLLOWUP", "1")
         monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "1")
         monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "10")
+        from sre_agent.config import _reset_settings
+
+        _reset_settings()
 
         sent_messages = []
 
@@ -426,6 +429,9 @@ class TestSecurityFollowup:
         monkeypatch.setenv("PULSE_AGENT_SECURITY_FOLLOWUP", "1")
         monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "5")
         monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "10")
+        from sre_agent.config import _reset_settings
+
+        _reset_settings()
 
         sent_messages = []
 
@@ -1069,18 +1075,14 @@ class TestNoiseTracking:
         session._transient_counts[key] += 1
         assert session._transient_counts[key] == 3
 
-    def test_noise_threshold_configurable(self):
-        import os
+    def test_noise_threshold_configurable(self, monkeypatch):
+        from sre_agent.config import _reset_settings
 
-        old = os.environ.get("PULSE_AGENT_NOISE_THRESHOLD")
-        os.environ["PULSE_AGENT_NOISE_THRESHOLD"] = "0.9"
+        monkeypatch.setenv("PULSE_AGENT_NOISE_THRESHOLD", "0.9")
+        _reset_settings()
         ws = MagicMock()
         session = MonitorSession(ws, trust_level=1)
         assert session._noise_threshold == 0.9
-        if old is not None:
-            os.environ["PULSE_AGENT_NOISE_THRESHOLD"] = old
-        else:
-            os.environ.pop("PULSE_AGENT_NOISE_THRESHOLD", None)
 
 
 class TestCreateDashboard:

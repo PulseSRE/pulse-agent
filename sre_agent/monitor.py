@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from . import db_schema
+from .config import get_settings
 from .db import get_database
 from .errors import ToolError
 from .k8s_client import get_apps_client, get_autoscaling_client, get_core_client, get_custom_client, safe
@@ -610,7 +611,7 @@ def _skip_namespace(ns: str) -> bool:
 
 def scan_crashlooping_pods(pods=None) -> list[dict]:
     """Find pods in CrashLoopBackOff or high restart counts."""
-    crashloop_threshold = int(os.environ.get("PULSE_AGENT_CRASHLOOP_THRESHOLD", "3"))
+    crashloop_threshold = get_settings().crashloop_threshold
     findings = []
     try:
         if pods is None:
@@ -1070,13 +1071,19 @@ def _get_all_scanners() -> list[tuple[str, Callable]]:
 
 # ── Webhook escalation ─────────────────────────────────────────────────────
 
-WEBHOOK_URL = os.environ.get("PULSE_AGENT_WEBHOOK_URL", "")
-WEBHOOK_SECRET = os.environ.get("PULSE_AGENT_WEBHOOK_SECRET", "")
+
+def _get_webhook_url() -> str:
+    return get_settings().webhook_url
+
+
+def _get_webhook_secret() -> str:
+    return get_settings().webhook_secret
 
 
 async def _send_webhook(finding: dict) -> None:
     """Send critical findings to a configured webhook URL for escalation."""
-    if not WEBHOOK_URL:
+    webhook_url = _get_webhook_url()
+    if not webhook_url:
         return
     try:
         import urllib.request
@@ -1091,11 +1098,12 @@ async def _send_webhook(finding: dict) -> None:
             }
         ).encode()
         headers: dict[str, str] = {"Content-Type": "application/json"}
-        if WEBHOOK_SECRET:
-            sig = hmac.new(WEBHOOK_SECRET.encode(), payload, hashlib.sha256).hexdigest()
+        webhook_secret = _get_webhook_secret()
+        if webhook_secret:
+            sig = hmac.new(webhook_secret.encode(), payload, hashlib.sha256).hexdigest()
             headers["X-Pulse-Signature"] = f"sha256={sig}"
         req = urllib.request.Request(
-            WEBHOOK_URL,
+            webhook_url,
             data=payload,
             headers=headers,
         )
@@ -1477,7 +1485,7 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
     )
 
     # Memory: inject past incident context into investigation prompt
-    if os.environ.get("PULSE_AGENT_MEMORY", "1") == "1":
+    if get_settings().memory:
         try:
             from .memory import get_manager
 
@@ -1570,7 +1578,7 @@ def _run_security_followup_sync(finding: dict) -> dict:
     )
 
     # Memory: inject past security findings into prompt
-    if os.environ.get("PULSE_AGENT_MEMORY", "1") == "1":
+    if get_settings().memory:
         try:
             from .memory import get_manager
 
@@ -1608,7 +1616,7 @@ class MonitorSession:
         self.trust_level = trust_level
         self.auto_fix_categories = set(auto_fix_categories or [])
         self.running = True
-        self.scan_interval = int(os.environ.get("PULSE_AGENT_SCAN_INTERVAL", "300"))  # 5 min default
+        self.scan_interval = get_settings().scan_interval
         self._last_findings: dict[str, dict] = {}  # deduplicate by title+category
         self._recent_fixes: dict[str, float] = {}  # resource_key -> timestamp for cooldown
         self._pending_action_approvals: dict[str, asyncio.Future] = {}
@@ -1622,7 +1630,7 @@ class MonitorSession:
         self._recent_fix_ids: set[str] = set()  # finding IDs that were auto-fixed (for resolution attribution)
         # Noise learning: track findings that appear then quickly disappear
         self._transient_counts: dict[str, int] = {}  # finding_key -> count of transient appearances
-        self._noise_threshold = float(os.environ.get("PULSE_AGENT_NOISE_THRESHOLD", "0.7"))
+        self._noise_threshold = get_settings().noise_threshold
         self._session_id = f"mon-{uuid.uuid4().hex[:12]}"  # Unique session ID for DB tracking
 
     def resolve_action_response(self, action_id: str, approved: bool) -> bool:
@@ -1655,7 +1663,7 @@ class MonitorSession:
             logger.info("Auto-fix paused — skipping")
             return
 
-        if os.environ.get("PULSE_AGENT_AUTOFIX_ENABLED", "true").lower() != "true":
+        if not get_settings().autofix_enabled:
             logger.info("Auto-fix disabled via PULSE_AGENT_AUTOFIX_ENABLED — skipping")
             return
 
@@ -1852,21 +1860,22 @@ class MonitorSession:
             return
 
         # Daily investigation budget
-        MAX_DAILY_INVESTIGATIONS = int(os.environ.get("PULSE_AGENT_MAX_DAILY_INVESTIGATIONS", "20"))
+        _settings = get_settings()
+        max_daily = _settings.max_daily_investigations
         if time.time() - self._daily_investigation_reset > 86400:
             self._daily_investigation_count = 0
             self._daily_investigation_reset = time.time()
-        if self._daily_investigation_count >= MAX_DAILY_INVESTIGATIONS:
+        if self._daily_investigation_count >= max_daily:
             logger.info(
                 "Daily investigation budget exhausted (%d/%d)",
                 self._daily_investigation_count,
-                MAX_DAILY_INVESTIGATIONS,
+                max_daily,
             )
             return
 
-        max_per_scan = int(os.environ.get("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "2"))
-        timeout_seconds = int(os.environ.get("PULSE_AGENT_INVESTIGATION_TIMEOUT", "20"))
-        cooldown_seconds = int(os.environ.get("PULSE_AGENT_INVESTIGATION_COOLDOWN", "300"))
+        max_per_scan = _settings.investigations_max_per_scan
+        timeout_seconds = _settings.investigation_timeout
+        cooldown_seconds = _settings.investigation_cooldown
         allowed_categories = {
             item.strip()
             for item in os.environ.get(
@@ -1876,7 +1885,7 @@ class MonitorSession:
             if item.strip()
         }
 
-        security_followup_enabled = os.environ.get("PULSE_AGENT_SECURITY_FOLLOWUP", "") == "1"
+        security_followup_enabled = _settings.security_followup
         security_followup_cooldown = 600  # 10 minutes
         security_followup_done_this_scan = False
 
@@ -1968,7 +1977,7 @@ class MonitorSession:
                         logger.warning("Security followup failed for finding %s: %s", finding.get("id", ""), e)
 
                 # Auto-learn from high-confidence investigations (Improvement #2)
-                if os.environ.get("PULSE_AGENT_MEMORY", "") == "1" and result.get("confidence", 0) >= 0.7:
+                if get_settings().memory and result.get("confidence", 0) >= 0.7:
                     try:
                         from .memory import get_manager
 
@@ -2105,7 +2114,7 @@ class MonitorSession:
             )
 
             # Auto-learn from verified fixes (Improvement #1)
-            if status == "verified" and os.environ.get("PULSE_AGENT_MEMORY", "") == "1":
+            if status == "verified" and get_settings().memory:
                 try:
                     from .memory import get_manager
 
@@ -2389,7 +2398,7 @@ class MonitorSession:
     async def process_handoffs(self) -> None:
         """Process agent-to-agent handoff requests from the context bus."""
         db = get_database()
-        timeout_seconds = int(os.environ.get("PULSE_AGENT_INVESTIGATION_TIMEOUT", "20"))
+        timeout_seconds = get_settings().investigation_timeout
 
         # Find recent handoff requests (last 5 minutes)
         cutoff = int(time.time() * 1000) - 300_000

@@ -20,6 +20,12 @@ _TEST_DB_URL = os.environ.get(
 def _set_test_db_url(monkeypatch):
     """Ensure all tests use the test PostgreSQL database."""
     monkeypatch.setenv("PULSE_AGENT_DATABASE_URL", _TEST_DB_URL)
+    # Reset settings singleton so env var changes take effect
+    from sre_agent.config import _reset_settings
+
+    _reset_settings()
+    yield
+    _reset_settings()
 
 
 def _text(result):

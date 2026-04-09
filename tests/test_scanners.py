@@ -239,6 +239,9 @@ class TestScanCrashloopingPods:
 
     def test_custom_threshold_via_env(self, monkeypatch):
         monkeypatch.setenv("PULSE_AGENT_CRASHLOOP_THRESHOLD", "10")
+        from sre_agent.config import _reset_settings
+
+        _reset_settings()
         pod = _make_pod(name="app", namespace="default", restart_count=7)
         findings = scan_crashlooping_pods(pods=_list_result([pod]))
         assert len(findings) == 0  # below threshold of 10
