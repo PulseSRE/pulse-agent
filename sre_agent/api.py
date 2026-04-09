@@ -1154,9 +1154,10 @@ async def websocket_auto_agent(websocket: WebSocket):
                 has_hard_sec = any(kw in q_lower for kw in _HARD_SWITCH_SEC)
                 if not has_hard_sre and not has_hard_sec:
                     intent = "view_designer"
-            elif last_mode != "sre" and not is_strong:
-                # For other non-default modes, keep on weak signals
-                intent = last_mode
+            elif last_mode == "security" and intent == "sre" and not is_strong:
+                # Only stay in security if the new query also looks like security
+                # Otherwise fall back to SRE (the default)
+                pass  # Let it switch to SRE
 
             config = build_orchestrated_config(intent)
             last_mode = intent
