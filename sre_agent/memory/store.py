@@ -113,14 +113,29 @@ _STOP_WORDS = frozenset(
 
 
 def extract_keywords(text: str) -> str:
-    """Extract searchable keywords from text."""
-    words = text.lower().split()
-    keywords = [
-        w.strip("?.,!\"'()[]{}:;")
-        for w in words
-        if w.strip("?.,!\"'()[]{}:;") not in _STOP_WORDS and len(w.strip("?.,!\"'()[]{}:;")) > 1
-    ]
-    return " ".join(keywords)
+    """Extract searchable keywords from text.
+
+    Filters out JSON/markdown artifacts, tool IDs, and non-word tokens.
+    """
+    import re
+
+    # Strip JSON-like content (tool_result blocks, UUIDs)
+    cleaned = re.sub(r"\{[^}]*\}", "", text)
+    cleaned = re.sub(r"toolu_[a-zA-Z0-9_]+", "", cleaned)
+    cleaned = re.sub(r"[*#`_\[\]|]+", " ", cleaned)  # strip markdown
+
+    words = cleaned.lower().split()
+    keywords = []
+    for w in words:
+        w = w.strip("?.,!\"'()[]{}:;/\\")
+        if not w or len(w) < 2 or len(w) > 40:
+            continue
+        if w in _STOP_WORDS:
+            continue
+        if not re.match(r"^[a-z0-9-]+$", w):
+            continue
+        keywords.append(w)
+    return " ".join(keywords[:20])
 
 
 class IncidentStore:
