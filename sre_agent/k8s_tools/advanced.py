@@ -13,8 +13,6 @@ from .. import k8s_client as _kc
 from ..errors import ToolError
 from .validators import _validate_k8s_name, _validate_k8s_namespace
 
-MAX_RESULTS = 200
-
 # Characters that indicate shell metacharacters (security risk)
 _DANGEROUS_CHARS = set(";|&$><`")
 

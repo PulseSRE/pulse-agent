@@ -169,6 +169,8 @@ from .pods import (
 from .validators import (
     _K8S_NAME_RE,
     _K8S_NAMESPACE_RE,
+    MAX_REPLICAS,
+    MAX_RESULTS,
     _validate_k8s_name,
     _validate_k8s_namespace,
 )
@@ -186,8 +188,6 @@ from .workloads import (
 )
 
 # --- Constants ---
-MAX_REPLICAS = 100
-MAX_RESULTS = 200
 
 # Write tools that require user confirmation before execution
 WRITE_TOOLS = {

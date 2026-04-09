@@ -9,12 +9,11 @@ from kubernetes.client.rest import ApiException
 
 from .. import k8s_client as _kc
 from ..errors import ToolError
+from .validators import MAX_RESULTS
 
 # Metrics API uses the CustomObjectsApi to query metrics.k8s.io
 _METRICS_GROUP = "metrics.k8s.io"
 _METRICS_VERSION = "v1beta1"
-
-MAX_RESULTS = 200
 
 
 @beta_tool

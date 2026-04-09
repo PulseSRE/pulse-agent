@@ -1,8 +1,12 @@
-"""Input validation helpers for Kubernetes resource names and namespaces."""
+"""Input validation helpers and shared constants for Kubernetes tools."""
 
 from __future__ import annotations
 
 import re
+
+# Shared constants
+MAX_RESULTS = 200
+MAX_REPLICAS = 100
 
 # RFC 1123 name validation for K8s resources
 _K8S_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9\-\.]{0,251}[a-z0-9])?$")

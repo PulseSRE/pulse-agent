@@ -7,8 +7,7 @@ from kubernetes.client.rest import ApiException
 
 from .. import k8s_client as _kc
 from ..errors import ToolError
-
-MAX_RESULTS = 200
+from .validators import MAX_RESULTS
 
 
 @beta_tool

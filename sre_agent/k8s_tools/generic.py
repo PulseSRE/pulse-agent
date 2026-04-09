@@ -10,9 +10,7 @@ from kubernetes.client.rest import ApiException
 
 from .. import k8s_client as _kc
 from ..errors import ToolError
-from .validators import _validate_k8s_name
-
-MAX_RESULTS = 200
+from .validators import MAX_RESULTS, _validate_k8s_name
 
 
 def _infer_column_type(col_id: str, sample_value=None) -> str:

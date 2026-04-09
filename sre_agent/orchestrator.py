@@ -31,7 +31,6 @@ _TYPO_MAP: dict[str, str] = {
     "namespacce": "namespace",
     "namespcae": "namespace",
     "confimap": "configmap",
-    "configmap": "configmap",
     "confgimap": "configmap",
     "cofigmap": "configmap",
     "serivce": "service",
@@ -409,38 +408,18 @@ def classify_intent(query: str) -> tuple[AgentMode, bool]:
 
 def build_orchestrated_config(mode: AgentMode) -> dict:
     """Return tool_defs, tool_map, system_prompt, write_tools for the given mode."""
-    from .agent import (
-        SYSTEM_PROMPT as SRE_PROMPT,
-    )
-    from .agent import (
-        TOOL_DEFS as SRE_TOOL_DEFS,
-    )
-    from .agent import (
-        TOOL_MAP as SRE_TOOL_MAP,
-    )
-    from .agent import (
-        WRITE_TOOLS as SRE_WRITE_TOOLS,
-    )
-    from .security_agent import (
-        SECURITY_SYSTEM_PROMPT,
-    )
-    from .security_agent import (
-        TOOL_DEFS as SEC_TOOL_DEFS,
-    )
-    from .security_agent import (
-        TOOL_MAP as SEC_TOOL_MAP,
-    )
+    from .agent import SYSTEM_PROMPT as SRE_PROMPT
+    from .agent import TOOL_DEFS as SRE_TOOL_DEFS
+    from .agent import TOOL_MAP as SRE_TOOL_MAP
+    from .agent import WRITE_TOOLS as SRE_WRITE_TOOLS
+    from .security_agent import SECURITY_SYSTEM_PROMPT
+    from .security_agent import TOOL_DEFS as SEC_TOOL_DEFS
+    from .security_agent import TOOL_MAP as SEC_TOOL_MAP
 
     if mode == "view_designer":
-        from .view_designer import (
-            TOOL_DEFS as VD_TOOL_DEFS,
-        )
-        from .view_designer import (
-            TOOL_MAP as VD_TOOL_MAP,
-        )
-        from .view_designer import (
-            VIEW_DESIGNER_SYSTEM_PROMPT,
-        )
+        from .view_designer import TOOL_DEFS as VD_TOOL_DEFS
+        from .view_designer import TOOL_MAP as VD_TOOL_MAP
+        from .view_designer import VIEW_DESIGNER_SYSTEM_PROMPT
 
         return {
             "system_prompt": VIEW_DESIGNER_SYSTEM_PROMPT,

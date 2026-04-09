@@ -9,9 +9,7 @@ from anthropic import beta_tool
 
 from .. import k8s_client as _kc
 from ..errors import ToolError
-from .validators import _validate_k8s_name, _validate_k8s_namespace
-
-MAX_RESULTS = 200
+from .validators import MAX_RESULTS, _validate_k8s_name, _validate_k8s_namespace
 
 
 @beta_tool
