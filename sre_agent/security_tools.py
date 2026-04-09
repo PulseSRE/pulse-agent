@@ -687,6 +687,7 @@ def get_security_summary() -> str:
 
 
 ALL_SECURITY_TOOLS = [
+    get_security_summary,  # MUST be first — comprehensive posture check
     scan_pod_security,
     scan_images,
     scan_rbac_risks,
@@ -695,7 +696,6 @@ ALL_SECURITY_TOOLS = [
     scan_sccs,
     scan_scc_usage,
     scan_secrets,
-    get_security_summary,
 ]
 
 # Register all security tools in the central registry (all read-only)
