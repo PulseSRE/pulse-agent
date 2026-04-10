@@ -128,7 +128,9 @@ def select_runbooks(query: str, max_runbooks: int | None = None) -> str:
     if max_runbooks is None:
         # Check experiment override: single_runbook uses 1, default is 3
         experiment = os.environ.get("PULSE_PROMPT_EXPERIMENT", "")
-        max_runbooks = 1 if experiment == "single_runbook" else 3
+        # Default: 1 runbook (optimized 2026-04-09, +2.2 judge pts vs 3)
+        # Legacy: 3 runbooks
+        max_runbooks = 3 if experiment == "legacy" else 1
 
     q = query.lower()
     scored: list[tuple[int, str]] = []

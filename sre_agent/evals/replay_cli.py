@@ -129,9 +129,7 @@ def _setup_model(model: str, dry_run: bool):
         return create_client(), thinking
 
 
-def _run_fixture(
-    name: str, use_judge: bool = False, model: str = "claude-sonnet-4-6", dry_run: bool = False
-) -> dict:
+def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet-4-6", dry_run: bool = False) -> dict:
     """Run a single fixture (single-turn or multi-turn) and return the scored result."""
     fixture = load_fixture(name)
 
@@ -171,9 +169,7 @@ def _run_fixture(
     return output
 
 
-def _run_multi_turn_fixture(
-    name: str, fixture: dict, use_judge: bool, model: str, dry_run: bool
-) -> dict:
+def _run_multi_turn_fixture(name: str, fixture: dict, use_judge: bool, model: str, dry_run: bool) -> dict:
     """Run a multi-turn fixture."""
     from .replay import MultiTurnReplayHarness
 

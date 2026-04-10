@@ -886,18 +886,22 @@ def get_component_hint(mode: str = "sre", tool_names: list[str] | None = None) -
     if mode in ("view_designer", "security"):
         return ""
 
-    # Check ablation exclusions
+    # Check ablation exclusions + optimized defaults (2026-04-09)
+    # component_hint_core and component_hint_ops removed by default (+0.6 pts each, saves ~639 tokens)
+    # See docs/superpowers/specs/2026-04-09-prompt-optimization-design.md
     import os as _os
 
     _excluded = {s.strip() for s in _os.environ.get("PULSE_PROMPT_EXCLUDE_SECTIONS", "").split(",") if s.strip()}
+    experiment = _os.environ.get("PULSE_PROMPT_EXPERIMENT", "")
+    is_legacy = experiment == "legacy"
 
     hint = ""
 
-    # Core guidance
-    if "component_hint_core" not in _excluded:
+    # Core guidance — excluded by default (ablation: +0.6 pts without it)
+    if is_legacy and "component_hint_core" not in _excluded:
         hint += COMPONENT_HINT_CORE
 
-    # Selected schemas only
+    # Selected schemas only — always included (ablation: -2.6 pts without it)
     if "component_schemas" not in _excluded:
         if tool_names:
             schemas = _select_relevant_schemas(tool_names)
@@ -905,8 +909,8 @@ def get_component_hint(mode: str = "sre", tool_names: list[str] | None = None) -
             schemas = list(COMPONENT_SCHEMAS.values())  # fallback: all
         hint += "\n## Component Catalog\n\n" + "\n\n".join(schemas)
 
-    # Essential operational guidance
-    if "component_hint_ops" not in _excluded:
+    # Operational guidance — excluded by default (ablation: +0.6 pts without it)
+    if is_legacy and "component_hint_ops" not in _excluded:
         hint += "\n\n" + COMPONENT_HINT_OPS
 
     return hint

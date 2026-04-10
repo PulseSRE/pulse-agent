@@ -237,13 +237,15 @@ class MultiTurnReplayHarness:
             messages.append({"role": "assistant", "content": response})
 
             self.all_tool_calls.append(turn_tool_calls)
-            turn_results.append({
-                "turn": i + 1,
-                "prompt": turn["prompt"],
-                "response": response,
-                "tool_calls": turn_tool_calls,
-                "duration_ms": elapsed_ms,
-            })
+            turn_results.append(
+                {
+                    "turn": i + 1,
+                    "prompt": turn["prompt"],
+                    "response": response,
+                    "tool_calls": turn_tool_calls,
+                    "duration_ms": elapsed_ms,
+                }
+            )
 
         total_elapsed = (time.monotonic() - total_start) * 1000
         return {
@@ -278,15 +280,15 @@ def score_multi_turn(result: dict, expected: dict) -> dict:
 
         for keyword in turn_expected.get("should_mention", []):
             found = keyword.lower() in turn_response
-            checks.append({"check": f"turn {i+1} mentions '{keyword}'", "passed": found, "weight": 1})
+            checks.append({"check": f"turn {i + 1} mentions '{keyword}'", "passed": found, "weight": 1})
 
         for tool in turn_expected.get("should_use_tools", []):
             found = tool in turn_tools
-            checks.append({"check": f"turn {i+1} used tool '{tool}'", "passed": found, "weight": 1})
+            checks.append({"check": f"turn {i + 1} used tool '{tool}'", "passed": found, "weight": 1})
 
         for tool in turn_expected.get("should_not_use_tools", []):
             found = tool in turn_tools
-            checks.append({"check": f"turn {i+1} avoided tool '{tool}'", "passed": not found, "weight": 1})
+            checks.append({"check": f"turn {i + 1} avoided tool '{tool}'", "passed": not found, "weight": 1})
 
     # Overall keyword checks
     for keyword in expected.get("overall_should_mention", []):
@@ -297,7 +299,9 @@ def score_multi_turn(result: dict, expected: dict) -> dict:
     max_calls = expected.get("max_total_tool_calls")
     if max_calls is not None:
         within = len(all_tool_calls) <= max_calls
-        checks.append({"check": f"total tool calls <= {max_calls} (actual: {len(all_tool_calls)})", "passed": within, "weight": 1})
+        checks.append(
+            {"check": f"total tool calls <= {max_calls} (actual: {len(all_tool_calls)})", "passed": within, "weight": 1}
+        )
 
     # Tool ordering
     ordered_tools = expected.get("should_use_tools_in_order", [])
