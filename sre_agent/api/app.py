@@ -24,6 +24,7 @@ from ..security_agent import (
     ALL_TOOLS as SEC_ALL_TOOLS,
 )
 from .auth import _verify_rest_token
+from .chat_rest import router as chat_router
 from .eval_rest import router as eval_router
 from .memory_rest import router as memory_router
 from .monitor_rest import router as monitor_router
@@ -85,6 +86,7 @@ app.include_router(monitor_router)
 app.include_router(memory_router)
 app.include_router(eval_router)
 app.include_router(views_router)
+app.include_router(chat_router)
 
 # Register WebSocket endpoints
 app.websocket("/ws/{mode}")(websocket_agent)

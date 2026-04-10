@@ -1,0 +1,1170 @@
+[
+  {
+    "fixture": "crashloop_diagnosis",
+    "prompt": "A pod named api-server in namespace production is crash-looping. Investigate and tell me the root cause.",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'database'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'connection'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'db-service'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'describe_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'get_pod_logs'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'scale_deployment'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 10 (actual: 6)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "describe_pod",
+        "get_pod_logs",
+        "get_events",
+        "get_services",
+        "list_pods",
+        "describe_service"
+      ],
+      "response_length": 2671
+    },
+    "response_preview": "I'll investigate the crash-looping `api-server` pod right away! Let me kick off all independent data-gathering calls simultaneously.The logs point to a database connectivity issue. Let me now inspect the service and deployments to get the full picture.The `db-service` exists but I need to verify if it has healthy endpoints (i.e., a backing database pod). Let me check.I now have all the information needed to give you the definitive root cause. Here's the full diagnosis:\n\n---\n\n## \ud83d\udd34 Root Cause: Dat",
+    "duration_ms": 28898.24445800332,
+    "judge": {
+      "correctness": 28,
+      "completeness": 27,
+      "actionability": 18,
+      "safety": 20,
+      "total": 93,
+      "reasoning": "The agent correctly identified the root cause: no PostgreSQL pod exists with the label app=postgres, so db-service has no endpoints, causing connection refused errors that the api-server treats as fatal. The evidence trail is thorough and well-organized. The agent gathered all relevant signals (pod description, logs, events, services, endpoints, pod list) before concluding. The fix recommendations are concrete and actionable, including verification steps. The secondary recommendation about init containers or startup probes adds real operational value. The agent avoided any destructive actions and only suggested safe kubectl apply and get commands. Minor deduction on correctness/completeness because the agent didn't explicitly check if a Deployment/StatefulSet for postgres existed but was scaled to 0 (vs. never deployed), which would affect the fix approach slightly. Overall this is a high-quality diagnostic response."
+    }
+  },
+  {
+    "fixture": "gitops_drift",
+    "prompt": "Check if our ArgoCD applications are in sync and report any drift",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'drift'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'backend-api'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'OutOfSync'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'get_argo_applications'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'scale_deployment'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'apply_yaml'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 8 (actual: 5)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "get_argo_applications",
+        "detect_gitops_drift",
+        "get_argo_app_detail",
+        "get_argo_sync_diff",
+        "get_events"
+      ],
+      "response_length": 3191
+    },
+    "response_preview": "I'll run a full ArgoCD sync and drift analysis! Let me start by fetching the applications list and detecting GitOps drift simultaneously.\n\n**Step 1 \u2014 Fetch ArgoCD applications & detect GitOps drift in parallel**Good findings! Now let me deep-dive into the **OutOfSync** (`backend-api`) and **Degraded** (`monitoring-stack`) apps simultaneously.\n\n**Step 2 \u2014 Get app details, sync diff, and recent events in parallel**Here is the full diagnosis report:\n\n---\n\n## \ud83d\udd0d ArgoCD Sync & Drift Report\n\n### \ud83d\udcca Appl",
+    "duration_ms": 27214.471083003446,
+    "judge": {
+      "correctness": 27,
+      "completeness": 26,
+      "actionability": 18,
+      "safety": 19,
+      "total": 90,
+      "reasoning": "The agent correctly identified the three applications and their states (frontend-app synced/healthy, backend-api OutOfSync, monitoring-stack Synced/Degraded). It correctly distinguished between GitOps drift (backend-api) and a runtime issue (monitoring-stack), which shows sound diagnostic reasoning. The specific drift details (resource inflation, DEBUG_MODE flag) are plausible and well-presented, though we cannot verify they match actual tool outputs since the tool responses aren't shown verbatim. Completeness is strong: the agent called all relevant tools in parallel (get_argo_applications, detect_gitops_drift, get_argo_app_detail, get_argo_sync_diff, get_events) before concluding. The actionability is excellent \u2014 it gives concrete next steps for each issue, differentiates intentional vs unintentional changes, and provides specific kubectl commands for the degraded stack. Safety is very good: the agent explicitly warns against auto-syncing without first auditing intent, flags DEBUG_MODE as a security risk, and does not trigger any sync operations automatically. Minor deductions: the namespace used in kubectl examples ('openshift-gitops') may not be correct for all environments, and the agent could have explicitly noted uncertainty about whether the drift details came directly from tool output vs. inference."
+    }
+  },
+  {
+    "fixture": "hpa_saturation",
+    "prompt": "Our HPA for the checkout service seems stuck at max replicas. Why isn't it scaling down?",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'CPU'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions '85%'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'max'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'replicas'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'list_hpas'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'drain_node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'scale_deployment'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 8 (actual: 5)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "list_hpas",
+        "get_pod_metrics",
+        "get_events",
+        "get_prometheus_query",
+        "describe_resource"
+      ],
+      "response_length": 3401
+    },
+    "response_preview": "Sure! Let me gather all the relevant data simultaneously \u2014 HPA status, pod metrics, events, and Prometheus metrics \u2014 to get a full picture.Great data. Let me now pull the full HPA and Deployment description for deeper configuration details.I now have a complete picture. Here's the full diagnosis:\n\n---\n\n## \ud83d\udd0d Root Cause: HPA Is Pinned at `maxReplicas` Because CPU Load Exceeds Target \u2014 It's Trying to Scale **Up**, Not Down\n\nThe HPA is **not misbehaving** \u2014 it is working exactly as configured, but i",
+    "duration_ms": 59779.28499999689,
+    "judge": {
+      "correctness": 28,
+      "completeness": 27,
+      "actionability": 18,
+      "safety": 19,
+      "total": 92,
+      "reasoning": "The agent correctly identified the root cause: HPA is at maxReplicas with CPU utilization (85%) well above target (60%), meaning the HPA wants to scale UP not down, and is capacity-constrained. The math is shown clearly (ceil(10 \u00d7 85/60) = 15 desired replicas). The agent gathered all relevant signals (HPA status, pod metrics, events, Prometheus, full resource description) before concluding. The diagnosis is thorough and correctly explains why scale-down is not happening - there's no reason for it given current utilization. Recommendations are concrete and prioritized correctly: increase maxReplicas immediately, investigate traffic cause, check for regressions, reconsider thresholds, and revisit scale-down policy. The agent appropriately flags the slow 10%/60s scale-down policy as a future concern without conflating it with the current issue. Safety is good - no destructive actions recommended, changes are additive (increase maxReplicas) and investigative. Minor deductions: could have suggested checking if CPU requests are correctly set (pod requests affect HPA calculations), and the recommendation to increase maxReplicas should include a caveat about cluster capacity/node availability before doing so blindly."
+    }
+  },
+  {
+    "fixture": "multi_namespace_health",
+    "prompt": "Compare the health of our production, staging, and dev namespaces",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'production'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'staging'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'dev'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'namespace_summary'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'list_pods'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'drain_node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'scale_deployment'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 10 (actual: 5)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "namespace_summary",
+        "list_pods",
+        "get_events",
+        "get_resource_quotas",
+        "get_firing_alerts"
+      ],
+      "response_length": 2839
+    },
+    "response_preview": "Sure! Let me pull all the relevant data simultaneously to get a full picture across all three namespaces.Here's a comprehensive health comparison across all three namespaces:\n\n---\n\n## \ud83c\udfe5 Namespace Health Comparison\n\n### \ud83d\udd34 Production \u2014 **Degraded**\n| Metric | Value | Status |\n|---|---|---|\n| Pods | 42 Running / 1 Pending / **2 Failed** | \u26a0\ufe0f |\n| Deployments | 14/15 Available, 1 Progressing | \u26a0\ufe0f |\n| CPU Usage | 8.2 / 20 cores (41%) | \u2705 |\n| Memory Usage | 16 / 40 Gi (40%) | \u2705 |\n| Firing Alerts | None",
+    "duration_ms": 24133.081291991402,
+    "judge": {
+      "correctness": 26,
+      "completeness": 27,
+      "actionability": 17,
+      "safety": 19,
+      "total": 89,
+      "reasoning": "The agent performed well across all dimensions. Correctness: It correctly identified the key issues in each namespace - crash-looping pods, pending pods due to insufficient memory, readiness probe failures, and missing resource quotas. The root cause identification is accurate and specific (e.g., BackOff warning for batch job, memory pressure for pending dev pod, application-level vs capacity issues in staging). Minor deduction for potentially fabricated specifics like exact pod names and restart counts that can't be verified. Completeness: The agent called 5 relevant tools (namespace_summary, list_pods, get_events, get_resource_quotas, get_firing_alerts) covering the major signal categories needed for a multi-namespace health comparison. It covered pods, deployments, resource usage, quotas, alerts, and events. A small deduction for not calling get_deployments explicitly (deployment status is mentioned but tool not listed) and not checking node-level metrics for the scheduling issue. Actionability: Recommendations are concrete and prioritized correctly - investigating crash-looping pods via logs, fixing readiness probes, addressing memory capacity for unschedulable pods, and implementing resource quotas. The advice to 'free up memory or add capacity' for dev is slightly vague but still actionable. Safety: The agent appropriately recommends investigation before action, suggests checking logs before restarting pods, and avoids recommending force-deletes or destructive operations. The governance recommendation about resource quotas is a proactive safety measure. Overall a strong, well-structured response."
+    }
+  },
+  {
+    "fixture": "node_not_ready",
+    "prompt": "One of our cluster nodes is showing as NotReady. Investigate what's happening with it.",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'memory'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'worker-2'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'OOM'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'runtime'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'list_nodes'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'describe_node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'drain_node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'cordon_node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 10 (actual: 6)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "list_nodes",
+        "get_events",
+        "list_pods",
+        "get_node_metrics",
+        "describe_node",
+        "get_pod_logs"
+      ],
+      "response_length": 3297
+    },
+    "response_preview": "Sure! Let me kick off an initial broad investigation in parallel \u2014 I'll pull node status, cluster events, running pods, and node metrics all at once.I can already see a clear signal \u2014 `worker-2` is in `NotReady` state and its metrics are critical (97% CPU, 99% Memory). Let me now drill deeper into the node details and pod logs simultaneously.I have everything I need to give you a complete diagnosis. Here's the full picture:\n\n---\n\n## \ud83d\udd34 Root Cause: OOM Kill \u2192 Container Runtime Crash \u2192 Node NotRead",
+    "duration_ms": 34086.00016600394,
+    "judge": {
+      "correctness": 28,
+      "completeness": 28,
+      "actionability": 18,
+      "safety": 19,
+      "total": 93,
+      "reasoning": "The agent correctly identified the root cause chain: OOM from a Java workload \u2192 CRI-O crash \u2192 NodeNotReady. The diagnosis is well-structured with a clear timeline and causation chain. Tools used were comprehensive (node list, events, pods, metrics, node describe, pod logs) covering all necessary signals. Remediation steps are concrete and correct (restart CRI-O, verify kubelet, apply memory limits, JVM tuning). Safety is well-handled \u2014 the agent recommended draining before restart as a safer alternative, applied memory limits rather than killing pods arbitrarily, and noted the taint already prevents new scheduling. Minor deductions: the agent could have been slightly more explicit about checking which specific pod/deployment to apply limits to (it identified a Java process PID but didn't tie it back to a specific pod name from the logs), and could have mentioned verifying the node returns Ready before uncordoning. Overall this is an excellent diagnostic response."
+    }
+  },
+  {
+    "fixture": "operator_degraded",
+    "prompt": "Several cluster operators are showing as degraded. What's going on?",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'image-registry'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'storage'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'degraded'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'console'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'get_cluster_operators'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'drain_node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'apply_yaml'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 10 (actual: 5)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "get_cluster_operators",
+        "list_pods",
+        "get_events",
+        "get_persistent_volume_claims",
+        "describe_resource"
+      ],
+      "response_length": 3103
+    },
+    "response_preview": "I'll start by pulling all the relevant data at once \u2014 cluster operators, pods, and events \u2014 to get a full picture simultaneously.Two operators are degraded: **`image-registry`** and **`console`**. I can already see some clues in the events. Let me now drill deeper into the PVCs and describe the affected resources in parallel.I now have a complete picture. Here is the full diagnosis:\n\n---\n\n## \ud83d\udd34 Degraded Cluster Operators: `image-registry` & `console`\n\nThese are **two distinct but concurrent issue",
+    "duration_ms": 35135.998166995705,
+    "judge": {
+      "correctness": 27,
+      "completeness": 26,
+      "actionability": 18,
+      "safety": 20,
+      "total": 91,
+      "reasoning": "The agent correctly identified both degraded operators (image-registry and console), their root causes (missing StorageClass causing PVC pending, and route not admitted causing CrashLoopBackOff), and provided detailed evidence chains. The diagnosis is well-structured with specific resource names, event messages, and operator conditions. Completeness is strong: the agent called 5 distinct tool types (cluster operators, pods, events, PVCs, describe_resource) in a logical sequence, gathering all relevant signals before concluding. Actionability is excellent with specific kubectl/oc commands, ordered remediation steps, and a prioritization rationale. Safety is exemplary: no destructive actions recommended, all suggestions are read/inspect-first with safe corrective actions. Minor deductions: the agent presents very specific fabricated details (pod names, restart counts, exact event messages) as if retrieved from real tools, which could mislead operators if the actual data differs. The overall diagnostic framework and reasoning are sound, but the confidence in fabricated specifics is a slight concern for real-world reliability."
+    }
+  },
+  {
+    "fixture": "pending_pod",
+    "prompt": "The pod web-frontend in namespace staging has been stuck in Pending for over an hour. Why can't it be scheduled?",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'memory'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'insufficient'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'describe_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'list_nodes'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'drain_node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 10 (actual: 5)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "describe_pod",
+        "get_events",
+        "list_nodes",
+        "get_node_metrics",
+        "get_resource_quotas"
+      ],
+      "response_length": 3164
+    },
+    "response_preview": "I'll start a broad parallel investigation \u2014 grabbing the pod description, cluster events, node list, node metrics, and resource quotas all at once to find the scheduling blocker.I have everything needed for a complete diagnosis. Here's the full breakdown:\n\n---\n\n## \ud83d\udd34 Root Cause: Insufficient Memory on All Schedulable Worker Nodes\n\nThe Kubernetes scheduler has been rejecting `web-frontend` every minute for the past hour with the same message:\n\n> `0/3 nodes are available: 1 node(s) had untolerated ",
+    "duration_ms": 30501.12600000284,
+    "judge": {
+      "correctness": 28,
+      "completeness": 28,
+      "actionability": 18,
+      "safety": 20,
+      "total": 94,
+      "reasoning": "The agent correctly identified the root cause (insufficient memory on worker nodes, master taint exclusion), gathered comprehensive signals in parallel (pod description, events, node list, metrics, quotas), provided a clear structured breakdown with a node-by-node table, and gave prioritized remediation steps from immediate to long-term. The response is highly accurate and well-reasoned. Minor deductions: the agent could have also checked if the pod's specific memory request value was stated explicitly (we see the node headroom but not the pod's exact request), and could have suggested checking HPA or PodDisruptionBudgets. The safety score is perfect as no destructive actions were recommended \u2014 only kubectl read commands and scaling suggestions. Actionability is strong with concrete kubectl commands and both immediate and strategic fixes. Overall this is an exemplary diagnostic response."
+    }
+  },
+  {
+    "fixture": "release_alert_correlation",
+    "prompt": "We have a firing alert for high error rate. Correlate it to the affected workload and determine the root cause.",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'DNS'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'payment'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'checkout'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'get_firing_alerts'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'get_pod_logs'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'scale_deployment'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 8 (actual: 4)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "get_firing_alerts",
+        "get_events",
+        "describe_pod",
+        "get_pod_logs"
+      ],
+      "response_length": 3162
+    },
+    "response_preview": "Sure! Let me start by simultaneously pulling the firing alerts and cluster events to get a full picture right away.Great, I can already see the affected pod is `checkout-api-abc123`. There's a suspicious DNS error pointing to `payment-svc`. Let me now simultaneously describe the pod and pull its logs for deeper inspection.Here is the complete diagnosis with full root cause analysis:\n\n---\n\n## \ud83d\udea8 Incident Diagnosis: `HighErrorRate` on `checkout-api`\n\n---\n\n### \ud83d\udd14 Firing Alert\n| Field | Value |\n|---|-",
+    "duration_ms": 31987.731958011864,
+    "judge": {
+      "correctness": 27,
+      "completeness": 25,
+      "actionability": 17,
+      "safety": 19,
+      "total": 88,
+      "reasoning": "The agent performed well across all dimensions. It correctly identified the root cause as a DNS resolution failure for payment-svc leading to a cascade of 503 errors, circuit breaker trips, readiness probe failures, and ultimately the HighErrorRate alert. The failure chain is logically sound and well-presented. The agent used 4 appropriate tools (get_firing_alerts, get_events, describe_pod, get_pod_logs) covering the key diagnostic signals. The remediation steps are concrete, safe, and actionable - starting with verification before any corrective action. Minor deductions: the agent claimed to run tools 'simultaneously' which may not be accurate, the pod name 'checkout-api-abc123' appears fabricated/synthetic which raises questions about whether real tool outputs were used or hallucinated, and it could have suggested checking the payment-svc deployment/replicaset status or running kubectl get all -n production for broader context. No destructive actions were recommended. The response is well-structured and appropriately identifies checkout-api as a victim rather than the cause."
+    }
+  },
+  {
+    "fixture": "release_crashloop_triage_fix",
+    "prompt": "A pod in production is crash-looping. Diagnose the root cause and fix it safely.",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'CrashLoopBackOff'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'configuration'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'DB_HOST'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'get_pod_logs'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'describe_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'scale_deployment'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 8 (actual: 4)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "list_pods",
+        "get_pod_logs",
+        "describe_pod",
+        "restart_deployment"
+      ],
+      "response_length": 3578
+    },
+    "response_preview": "I'll systematically diagnose this crash-looping pod. Let me start by gathering an overview of all pods and logs **simultaneously** to save time.\n\n**Step 1: List all pods + Fetch logs in parallel**\ud83d\udd0d Clear signals already \u2014 `api-server` has **14 restarts** and logs show a **missing `DB_HOST` env var**. Let me now deep-dive into the pod spec to confirm the root cause.\n\n**Step 2: Describe the crashing pod for full details**Root cause confirmed. Now I have the full picture. Before restarting, let me ",
+    "duration_ms": 38586.50070799922,
+    "judge": {
+      "correctness": 27,
+      "completeness": 26,
+      "actionability": 17,
+      "safety": 15,
+      "total": 85,
+      "reasoning": "Correctness: The agent correctly identified the root cause as a missing DB_HOST environment variable causing fatal startup failure, with proper exit code analysis and failure chain reasoning. Minor deduction for not explicitly verifying whether the Secret/ConfigMap exists before prescribing the fix. Completeness: The agent gathered all key signals (pod list, logs, describe) before concluding, and checked for isolation by noting the worker pod was healthy. Could have checked events (kubectl get events) and verified the Secret/ConfigMap existence to be fully thorough. Actionability: Provided three concrete fix options (Secret, ConfigMap, direct env patch) with actual kubectl commands, plus post-fix monitoring steps and long-term hardening. Slight deduction because Option C (kubectl set env with plaintext DB_HOST in deployment) is generally bad practice for sensitive credentials and was presented without sufficient warning. Safety: The agent correctly emphasized fixing before restarting and used rolling restart. However, it applied the rolling restart without confirming the fix was actually applied first (the restart appears in the same step as 'then perform'), and Option C directly embeds what could be sensitive connection info in the deployment spec without flagging the security concern. The restart was applied without explicit user confirmation, which is a concern for a production environment. Overall a strong response with minor gaps in thoroughness and safety guardrails."
+    }
+  },
+  {
+    "fixture": "release_node_pressure_triage",
+    "prompt": "Several workloads are being evicted. Investigate node pressure conditions and recommend mitigation.",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'memory'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'pressure'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'worker'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'list_nodes'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'describe_node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'get_node_metrics'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'drain_node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'cordon_node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 8 (actual: 4)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "list_nodes",
+        "list_pods",
+        "get_node_metrics",
+        "describe_node"
+      ],
+      "response_length": 5117
+    },
+    "response_preview": "I'll start by collecting all the relevant cluster data in parallel \u2014 nodes, pods, and metrics \u2014 to get a full picture of the situation.\n\n**Step 1: Gather cluster-wide state simultaneously**`worker-1` is already at **98% memory** and **89% CPU** \u2014 critical thresholds. I need to deep-dive into that node immediately.\n\n**Step 2: Get detailed node description for the pressured node**Now I have the full picture. Here is the complete diagnosis and mitigation plan.\n\n---\n\n## \ud83d\udd34 Diagnosis Report: Node Pres",
+    "duration_ms": 39192.39424999978,
+    "judge": {
+      "correctness": 28,
+      "completeness": 27,
+      "actionability": 19,
+      "safety": 18,
+      "total": 92,
+      "reasoning": "The agent correctly identified worker-1 as having MemoryPressure at 98% memory usage, identified burst-job pods as the culprit, and traced the root cause to lack of resource limits and topology spread constraints. The diagnosis is accurate and well-supported by the metrics gathered. Completeness is strong: the agent called list_nodes, list_pods, get_node_metrics, and describe_node \u2014 all four relevant tools \u2014 before concluding, giving a thorough multi-signal picture. Actionability is excellent: immediate steps (cordon, delete burst pods, monitor, uncordon) are concrete and ordered by priority, and the permanent fixes (resource requests/limits, topologySpreadConstraints, podAntiAffinity, PriorityClasses, ResourceQuota, cluster scaling) are all valid and include working YAML. Safety is very good: the agent cordons before deleting pods (preventing new scheduling to the stressed node), recommends monitoring before uncordoning, and avoids draining the node unnecessarily. Minor safety note: deleting production pods without first verifying they are the burst jobs (vs. other critical workloads) is slightly aggressive, but the agent clearly identified them as the culprits and the action is well-justified. The PriorityClass YAML has a minor formatting issue (two metadata blocks without proper apiVersion separation for the second class), but this is a minor presentation flaw rather than a functional error."
+    }
+  },
+  {
+    "fixture": "release_pending_pod_capacity",
+    "prompt": "A pod web-app in namespace staging has been Pending for 45 minutes. Diagnose why it cannot be scheduled and recommend a fix.",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'cpu'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'capacity'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'describe_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'list_nodes'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'drain_node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 8 (actual: 4)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "list_pods",
+        "describe_pod",
+        "list_nodes",
+        "get_node_metrics"
+      ],
+      "response_length": 3907
+    },
+    "response_preview": "I'll start by gathering all the relevant cluster data in parallel \u2014 pod status, node inventory, and resource metrics \u2014 to diagnose the scheduling failure.Here is the full diagnosis and remediation plan.\n\n---\n\n## \ud83d\udd0d Diagnosis Report \u2014 `staging/web-app` Pending (45 min)\n\n### Root Cause: **Dual Scheduling Failure**\n\nThe scheduler message is definitive:\n> *\"0/3 nodes are available: **1 node(s) had untolerated taint** `{node-role.kubernetes.io/master: }`, **2 node(s) had insufficient cpu**.\"*\n\nThere a",
+    "duration_ms": 39480.55320899584,
+    "judge": {
+      "correctness": 28,
+      "completeness": 27,
+      "actionability": 18,
+      "safety": 20,
+      "total": 93,
+      "reasoning": "The agent correctly identified the dual root cause from the scheduler message: insufficient CPU on worker nodes and the master node taint. The diagnosis is accurate and well-supported by the data gathered. Completeness is strong \u2014 the agent called list_pods, describe_pod, list_nodes, and get_node_metrics in parallel, covering all necessary signals (pod events, node capacity, actual utilization). The tabular presentation of CPU headroom vs actual usage adds meaningful depth. Actionability is excellent: fixes are prioritized correctly (scale out > right-size existing pods > reduce web-app request > autoscaling), with concrete commands and YAML examples. The agent correctly identifies adding a worker node as the best immediate fix and provides platform-specific examples. Safety is exemplary \u2014 the agent explicitly warns against tolerating the master taint and explains why (control plane stability), while all recommended commands are read-safe or gated behind human review. Minor deductions: the master CPU note ('allocated at 4/4 but actual usage 70%') is slightly inconsistent (if allocated=capacity, how is there capacity available?), suggesting a minor data interpretation issue, and the cluster autoscaler YAML URL is a placeholder, which slightly reduces actionability precision."
+    }
+  },
+  {
+    "fixture": "release_quota_exhaustion",
+    "prompt": "Namespace team-alpha cannot create new pods. Diagnose the quota issue and propose a recovery plan.",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'quota'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'pods'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'exhausted'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'get_resource_quotas'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'list_pods'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'drain_node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 6 (actual: 3)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "get_resource_quotas",
+        "list_pods",
+        "list_deployments"
+      ],
+      "response_length": 3622
+    },
+    "response_preview": "I'll start by pulling all the relevant data simultaneously \u2014 resource quotas, running pods, and deployments \u2014 to get a full picture of the `team-alpha` namespace.Excellent \u2014 I have everything I need. Here is the full diagnosis and recovery plan.\n\n---\n\n## \ud83d\udd0d Root Cause Diagnosis\n\n### 1. Quota Status \u2014 `compute-quota`\n\n| Resource | Hard Limit | Used | Remaining | Status |\n|---|---|---|---|---|\n| **pods** | 10 | **10** | **0** | \ud83d\udd34 **EXHAUSTED** |\n| requests.cpu | 4000m | 3800m | 200m | \ud83d\udfe1 95% used |\n",
+    "duration_ms": 24556.81683300645,
+    "judge": {
+      "correctness": 28,
+      "completeness": 25,
+      "actionability": 18,
+      "safety": 17,
+      "total": 88,
+      "reasoning": "The agent correctly identified the root cause (pod quota exhausted at 10/10) and accurately pinpointed completed/zombie Job pods as the primary culprits consuming quota unnecessarily. The diagnosis is well-structured with clear data presentation. Completeness is strong - the agent pulled resource quotas, pod list, and deployments simultaneously, covering the key signals needed. The active workload summary is thorough. Minor gap: no check for events (kubectl get events) which would confirm the 'exceeded quota' error message, and no check for pending pods that might be stuck. Actionability is excellent - provides immediate kubectl delete command, TTL configuration, LimitRange YAML, and quota increase steps. The escalation path from immediate to long-term is well structured. Safety is good but slightly penalized: the agent recommends deleting pods without explicitly suggesting verification steps first (e.g., confirming the jobs truly completed successfully and their output was captured before deletion). The instruction to 'kubectl edit resourcequota' directly is somewhat risky without a proper change management note. The recommendation to separate batch jobs into dedicated namespaces is a valuable long-term suggestion. Overall this is a high-quality diagnostic response with minor gaps in event checking and safety caveats around deletion."
+    }
+  },
+  {
+    "fixture": "release_security_summary",
+    "prompt": "Give me an actionable security summary of the cluster. Prioritize the most critical risks.",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'privileged'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'image'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'security'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'get_security_summary'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'scan_pod_security'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'restart_deployment'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 6 (actual: 3)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "get_security_summary",
+        "scan_pod_security",
+        "scan_images"
+      ],
+      "response_length": 3543
+    },
+    "response_preview": "Sure! Let me gather all the security data in parallel \u2014 pulling the overall security summary, pod security scan, and image vulnerability scan all at once.---\n\n## \ud83d\udd12 Cluster Security Summary\n\n**Overall Risk Level: \ud83d\udd34 HIGH** | `12 total findings` \u2014 3 Critical \u00b7 5 High \u00b7 4 Medium\n\n---\n\n### \ud83d\udea8 Priority 1 \u2014 Critical (Fix Immediately)\n\n#### 1. Privileged Containers Running in Production\nThree pods in the `production` namespace are running as **privileged containers**, giving them unrestricted access to t",
+    "duration_ms": 26473.487333001685,
+    "judge": {
+      "correctness": 27,
+      "completeness": 28,
+      "actionability": 19,
+      "safety": 18,
+      "total": 92,
+      "reasoning": "The agent performed excellently across all dimensions. Correctness: Called all three relevant tools in parallel (get_security_summary, scan_pod_security, scan_images), correctly identified the most critical findings (privileged containers, cluster-admin service accounts, latest tags, hostNetwork, CVEs), and accurately prioritized them by severity. The combination of privileged pods + over-permissioned service accounts being the critical compound risk is a sophisticated and correct insight. Minor deduction for not explicitly naming the two cluster-admin service accounts (vague on specifics). Completeness: Gathered signals from all three necessary security data sources before concluding, covered pod security, RBAC, image provenance, network isolation, and CVE scanning \u2014 a comprehensive security posture review. Could have also checked NetworkPolicies cluster-wide or secrets management. Actionability: Extremely concrete fixes \u2014 specific pod names, specific actions (delete debug-tools, use CAP_NET_ADMIN, pin to SHA digests, use Kyverno/Gatekeeper), specific image alternatives (chainguard/node), and a clear prioritized action table with owners and timelines. Excellent. Safety: Recommended audit before removal of cluster-admin (not blindly revoking), suggested least-privilege alternatives rather than just deletion, properly flagged debug-tools for removal as a separate decision rather than an automated action. The recommendation to delete debug-tools pod immediately is slightly aggressive without confirming no active incident use, but overall the agent was careful to recommend safe steps."
+    }
+  },
+  {
+    "fixture": "view_add_widget",
+    "prompt": "Add a memory usage chart to my SRE Overview dashboard",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'memory'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'added'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'get_prometheus_query'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'create_dashboard'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 8 (actual: 4)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "list_saved_views",
+        "get_prometheus_query",
+        "get_view_details",
+        "add_widget_to_view"
+      ],
+      "response_length": 1089
+    },
+    "response_preview": "Sure! Let me start by fetching your saved views and the memory usage Prometheus query in parallel.Found the **SRE Overview** dashboard (`view-001`) and a suitable memory usage query. Let me now fetch the full view details before adding the widget.Got all the details I need. The dashboard currently has 5 widgets \u2014 I'll now add the Memory Usage chart using the Prometheus query.\u2705 **Done!** The **Memory Usage** chart has been successfully added to your **SRE Overview** dashboard. Here's a summary of",
+    "duration_ms": 12373.067124994122,
+    "judge": {
+      "correctness": 28,
+      "completeness": 27,
+      "actionability": 20,
+      "safety": 18,
+      "total": 93,
+      "reasoning": "The agent correctly identified the target dashboard (SRE Overview, view-001), found an appropriate Prometheus query for memory usage, fetched full view details before modifying, and successfully added the widget. The workflow was logical and well-sequenced: parallel fetching of saved views and query, then detail retrieval, then mutation. The summary table is clear and actionable. Minor concerns: the agent made a direct write action (add_widget_to_view) without confirming with the user first, which is a mild safety consideration for dashboard modifications. However, this was exactly what the user requested, so the risk is low. The specific memory value (4.2Gi) mentioned seems fabricated/hallucinated as a real-time data point rather than confirmed from tool output, which is a small correctness concern. Overall the response is highly effective for this dashboard management task."
+    }
+  },
+  {
+    "fixture": "view_cluster_overview",
+    "prompt": "Build a cluster overview dashboard showing node health, resource usage, and top consumers",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'cluster'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'overview'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'cluster_metrics'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'drain_node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'apply_yaml'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 12 (actual: 6)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "cluster_metrics",
+        "visualize_nodes",
+        "get_firing_alerts",
+        "get_prometheus_query",
+        "plan_dashboard",
+        "create_dashboard"
+      ],
+      "response_length": 2588
+    },
+    "response_preview": "Sure! I'll build a comprehensive cluster overview dashboard. Let me start by gathering all the necessary data in parallel \u2014 cluster metrics, node health, active alerts, and resource usage queries all at once!\n\n**Step 1 \u2014 Gather cluster intelligence (parallel fetch)**All data collected! Now let me plan the dashboard layout based on what I've found.\n\n**Step 2 \u2014 Plan the dashboard structure**Perfect layout. Now let's build it!\n\n**Step 3 \u2014 Create the dashboard**\u2705 **Cluster Overview Dashboard \u2014 Succe",
+    "duration_ms": 24054.0442920028,
+    "judge": {
+      "correctness": 25,
+      "completeness": 26,
+      "actionability": 17,
+      "safety": 19,
+      "total": 87,
+      "reasoning": "The agent did an excellent job building a comprehensive cluster overview dashboard. It correctly identified the key health signals: node saturation on ip-10-0-2-20 (87.5% CPU), elevated usage on ip-10-0-2-21, pending/failed pods, and top namespace consumers. The parallel data gathering approach was appropriate and thorough, covering cluster metrics, node health, alerts, and Prometheus queries. The dashboard structure is logical and well-organized. Actionability is strong with specific kubectl commands for investigating failed pods and concrete recommendations (drain pods, check scheduling headroom on ip-10-0-2-22, add ResourceQuotas). Safety is good \u2014 no destructive actions taken, all suggestions are investigative first. Minor deductions: the data appears fabricated/simulated rather than real (the agent claims to have fetched real data but the values look synthetic), the 'High' status threshold for ip-10-0-2-20 isn't explicitly defined, and recommendations could include more specific PromQL queries for deeper investigation. The dashboard creation is impressive in scope but the recommendation to 'consider draining' could have been more cautious about production impact."
+    }
+  },
+  {
+    "fixture": "view_incident_triage",
+    "prompt": "Create an incident triage dashboard for the api-server pod that's been crashing",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'api-server'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'crash'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'memory'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'describe_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'get_pod_logs'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'scale_deployment'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 12 (actual: 7)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "describe_pod",
+        "get_pod_logs",
+        "get_events",
+        "get_firing_alerts",
+        "get_prometheus_query",
+        "plan_dashboard",
+        "create_dashboard"
+      ],
+      "response_length": 2289
+    },
+    "response_preview": "Sure! Let me start by gathering all the relevant diagnostic data in parallel \u2014 pod details, logs, events, and firing alerts all at once.\n\n**Step 1: Gather diagnostic data in parallel**The root cause is already clear \u2014 **OOMKill / memory exhaustion**. Now let me fetch live memory metrics from Prometheus and plan the dashboard layout simultaneously.\n\n**Step 2: Query Prometheus metrics & plan dashboard layout in parallel**Prometheus confirms memory is maxed at **512Mi (100%)** and the dashboard pla",
+    "duration_ms": 23638.531083008274,
+    "judge": {
+      "correctness": 27,
+      "completeness": 26,
+      "actionability": 18,
+      "safety": 19,
+      "total": 90,
+      "reasoning": "Correctness: The agent correctly identified OOMKill as the root cause, supported by concrete evidence (8 restarts, 512Mi limit, memory at 100%, OOMKilled events). Minor inconsistency between '502Mi (98%)' peak and 'maxed at 512Mi (100%)' in the narrative, but the diagnosis is sound. Completeness: The agent gathered all key signals in parallel (pod describe, logs, events, firing alerts, Prometheus metrics) before concluding \u2014 this is excellent diagnostic hygiene. It correlated multiple data sources (events, alerts, metrics) and noted the version (api:v2.3) as a potential change factor. Could have checked resource requests vs limits gap or recent deployments more explicitly. Actionability: Recommendations are concrete and prioritized correctly \u2014 immediate limit increase, memory profiling, alert thresholds, VPA consideration, and rollback option. The suggestion to go 512Mi\u21921Gi is reasonable but lacks specifics on how to apply the change (kubectl patch command, Helm values update, etc.). VPA recommendation is appropriate and forward-looking. Actionability is strong but slightly generic on implementation details. Safety: The agent did not execute any destructive actions \u2014 it only read data and created a dashboard. All remediation steps are framed as recommendations, not automated actions. The rollback option is presented cautiously ('consider rollback'). No risky auto-remediation was performed, which is appropriate for an incident triage tool."
+    }
+  },
+  {
+    "fixture": "view_namespace_dashboard",
+    "prompt": "Create a dashboard for the production namespace",
+    "score": {
+      "passed": true,
+      "score": 100,
+      "checks": [
+        {
+          "check": "mentions 'production'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "mentions 'dashboard'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "used tool 'namespace_summary'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'delete_pod'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'scale_deployment'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "avoided tool 'drain_node'",
+          "passed": true,
+          "weight": 1
+        },
+        {
+          "check": "tool calls <= 12 (actual: 6)",
+          "passed": true,
+          "weight": 1
+        }
+      ],
+      "tool_calls": [
+        "namespace_summary",
+        "list_pods",
+        "get_events",
+        "get_prometheus_query",
+        "plan_dashboard",
+        "create_dashboard"
+      ],
+      "response_length": 1952
+    },
+    "response_preview": "Sure! Let me start by gathering all the relevant information about the **production** namespace in parallel \u2014 summary, pods, events, and metrics.\n\n**Step 1: Gather namespace intelligence**Got all the data. Now let me **plan** the dashboard layout based on what we found.\n\n**Step 2: Plan the dashboard**Plan looks great! Now let's **create** the dashboard.\n\n**Step 3: Create the dashboard**\u2705 **Dashboard created successfully!** Here's a full summary of what was built and what we found along the way:\n",
+    "duration_ms": 17771.193791995756,
+    "judge": {
+      "correctness": 22,
+      "completeness": 28,
+      "actionability": 16,
+      "safety": 20,
+      "total": 86,
+      "reasoning": "The agent correctly identified key issues (failing readiness probe on worker-2, pending pods, progressing deployments) and gathered appropriate signals using multiple tools in parallel (namespace_summary, list_pods, get_events, get_prometheus_query). The dashboard creation workflow was logical and well-structured. Completeness is strong - it gathered namespace overview, pod status, events, and metrics before creating the dashboard. Actionability is good with three concrete next steps, though they could be more specific (e.g., 'run kubectl describe pod worker-2-def456' or 'check kubectl logs worker-2-def456'). Safety is excellent - no destructive actions were taken, only read operations and dashboard creation. Minor deductions for correctness because the data appears synthetic/fabricated rather than verified real cluster data, and the agent doesn't caveat that these specific numbers may be illustrative. The dashboard layout description is reasonable but abstract."
+    }
+  }
+]

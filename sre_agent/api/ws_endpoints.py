@@ -104,6 +104,14 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         logger.warning("WebSocket session %s: no valid user token, view operations will be unavailable", session_id)
         ws_user = "anonymous"
 
+    # Persist chat session
+    try:
+        from ..chat_history import create_session
+
+        create_session(session_id, ws_user, mode)
+    except Exception:
+        logger.debug("Failed to create chat session record", exc_info=True)
+
     if mode == "sre":
         system_prompt = SRE_SYSTEM_PROMPT
         tool_defs = SRE_TOOL_DEFS
@@ -206,6 +214,17 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                 )
                 messages.append({"role": "assistant", "content": full_response})
 
+                # Persist messages to chat history
+                try:
+                    from ..chat_history import auto_title, save_message
+
+                    save_message(session_id, "user", content)
+                    save_message(session_id, "assistant", full_response)
+                    if turn_counter == 1:
+                        auto_title(session_id, content)
+                except Exception:
+                    logger.debug("Failed to persist chat messages", exc_info=True)
+
                 # Publish agent response to shared context bus
                 if full_response:
                     bus.publish(
@@ -305,6 +324,14 @@ async def websocket_auto_agent(websocket: WebSocket):
     except HTTPException:
         logger.warning("WebSocket session %s: no valid user token, view operations will be unavailable", session_id)
         ws_user = "anonymous"
+
+    # Persist chat session
+    try:
+        from ..chat_history import create_session
+
+        create_session(session_id, ws_user, "auto")
+    except Exception:
+        logger.debug("Failed to create chat session record", exc_info=True)
 
     # Message queue for incoming messages while agent is running
     incoming: asyncio.Queue = asyncio.Queue()
@@ -436,6 +463,17 @@ async def websocket_auto_agent(websocket: WebSocket):
                     user_query=content,
                 )
                 messages.append({"role": "assistant", "content": full_response})
+
+                # Persist messages to chat history
+                try:
+                    from ..chat_history import auto_title, save_message
+
+                    save_message(session_id, "user", content)
+                    save_message(session_id, "assistant", full_response)
+                    if turn_counter == 1:
+                        auto_title(session_id, content)
+                except Exception:
+                    logger.debug("Failed to persist chat messages", exc_info=True)
 
                 # Publish agent response to shared context bus
                 if full_response:

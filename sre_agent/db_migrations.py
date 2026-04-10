@@ -90,6 +90,13 @@ def _migrate_006_eval_runs(db: Database) -> None:
     db.executescript(EVAL_RUNS_SCHEMA)
 
 
+def _migrate_007_chat_history(db: Database) -> None:
+    """Add chat_sessions and chat_messages tables for chat history persistence."""
+    from .db_schema import CHAT_MESSAGES_SCHEMA, CHAT_SESSIONS_SCHEMA
+
+    db.executescript(CHAT_SESSIONS_SCHEMA + CHAT_MESSAGES_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -97,4 +104,5 @@ MIGRATIONS = [
     (4, "token_tracking", _migrate_004_token_tracking),
     (5, "scan_runs", _migrate_005_scan_runs),
     (6, "eval_runs", _migrate_006_eval_runs),
+    (7, "chat_history", _migrate_007_chat_history),
 ]

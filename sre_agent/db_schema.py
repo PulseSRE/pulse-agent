@@ -273,6 +273,32 @@ CREATE INDEX IF NOT EXISTS idx_eval_runs_suite ON eval_runs(suite_name, timestam
 CREATE INDEX IF NOT EXISTS idx_eval_runs_ts ON eval_runs(timestamp DESC);
 """
 
+CHAT_SESSIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT 'New Chat',
+    agent_mode TEXT NOT NULL DEFAULT 'auto',
+    message_count INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_owner ON chat_sessions(owner);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated ON chat_sessions(updated_at DESC);
+"""
+
+CHAT_MESSAGES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id SERIAL PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    components_json TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
+"""
+
 ALL_SCHEMAS = (
     INCIDENTS_SCHEMA
     + RUNBOOKS_SCHEMA
@@ -291,4 +317,6 @@ ALL_SCHEMAS = (
     + PROMQL_QUERIES_SCHEMA
     + SCAN_RUNS_SCHEMA
     + EVAL_RUNS_SCHEMA
+    + CHAT_SESSIONS_SCHEMA
+    + CHAT_MESSAGES_SCHEMA
 )
