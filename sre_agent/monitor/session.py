@@ -57,6 +57,7 @@ class MonitorSession:
         self._transient_counts: dict[str, int] = {}  # finding_key -> count of transient appearances
         self._noise_threshold = get_settings().noise_threshold
         self._session_id = f"mon-{uuid.uuid4().hex[:12]}"  # Unique session ID for DB tracking
+        self.disabled_scanners: set[str] = set()  # Scanner IDs disabled by the client
 
     def resolve_action_response(self, action_id: str, approved: bool) -> bool:
         """Resolve an outstanding action approval request."""
@@ -596,8 +597,10 @@ class MonitorSession:
         except Exception as e:
             logger.error("Failed to fetch shared pod list: %s", e)
 
-        # Run all standard scanners with timing
+        # Run all standard scanners with timing (skip client-disabled scanners)
         for category, scanner in _get_all_scanners():
+            if category in self.disabled_scanners:
+                continue
             scanner_start = time.monotonic()
             try:
                 if category in _POD_SCANNERS and shared_pods is not None:

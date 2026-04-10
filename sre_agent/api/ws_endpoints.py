@@ -613,6 +613,15 @@ async def websocket_monitor(websocket: WebSocket):
                 handled = session.resolve_action_response(action_id, approved)
                 logger.info("Action response: id=%s approved=%s handled=%s", action_id, approved, handled)
 
+            elif msg_type == "set_disabled_scanners":
+                scanner_ids = data.get("scannerIds", [])
+                if isinstance(scanner_ids, list):
+                    session.disabled_scanners = {str(s) for s in scanner_ids if isinstance(s, str) and len(s) < 64}
+                    logger.info("Disabled scanners updated: %s", session.disabled_scanners)
+                    await websocket.send_json(
+                        {"type": "ack", "message": f"Disabled {len(session.disabled_scanners)} scanners"}
+                    )
+
             elif msg_type == "get_fix_history":
                 filters = data.get("filters")
                 try:
