@@ -100,6 +100,7 @@ mcp:
   image: "ghcr.io/containers/kubernetes-mcp-server:latest"
   toolsets:
     - core
+    - config
     - helm
 
 nodeSelector: {}
