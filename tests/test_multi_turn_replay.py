@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from sre_agent.evals.replay import (
-    MultiTurnReplayHarness,
     list_fixtures,
     load_fixture,
     score_multi_turn,

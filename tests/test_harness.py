@@ -313,13 +313,29 @@ class TestComponentHint:
                 f"Component kind '{kind}' has no JSON schema example in COMPONENT_SCHEMAS"
             )
 
-    def test_full_hint_mentions_dry_run(self):
+    def test_optimized_hint_has_schemas_only(self):
+        """Optimized prompt includes schemas but not ops/core hints."""
         hint = get_component_hint("sre")
-        assert "dry_run" in hint
+        assert "Component Catalog" in hint
+        # component_hint_ops and component_hint_core removed in optimization
+        assert "dry_run" not in hint
+        assert "Resource Listing Guidance" not in hint
 
-    def test_full_hint_mentions_dashboards(self):
-        hint = get_component_hint("sre")
-        assert "dashboard" in hint.lower()
+    def test_legacy_hint_includes_ops(self):
+        """Legacy mode includes full ops guidance."""
+        import os
+
+        old = os.environ.get("PULSE_PROMPT_EXPERIMENT", "")
+        os.environ["PULSE_PROMPT_EXPERIMENT"] = "legacy"
+        try:
+            hint = get_component_hint("sre")
+            assert "dry_run" in hint
+            assert "dashboard" in hint.lower()
+        finally:
+            if old:
+                os.environ["PULSE_PROMPT_EXPERIMENT"] = old
+            else:
+                os.environ.pop("PULSE_PROMPT_EXPERIMENT", None)
 
     def test_tool_based_selection_reduces_schemas(self):
         """Passing a small tool list should produce fewer schemas than all."""
