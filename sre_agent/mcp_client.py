@@ -1,0 +1,331 @@
+"""MCP Client — connects to MCP servers and registers tools.
+
+Loads mcp.yaml from skill packages, connects to MCP servers,
+discovers available tools, and registers them in the tool registry
+with UI rendering via mcp_renderer.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import subprocess
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+logger = logging.getLogger("pulse_agent.mcp_client")
+
+
+@dataclass
+class MCPConnection:
+    """A connection to an MCP server."""
+
+    name: str
+    url: str
+    transport: str  # stdio or sse
+    toolsets: list[str]
+    tool_renderers: dict[str, dict] = field(default_factory=dict)
+    connected: bool = False
+    tools: list[str] = field(default_factory=list)
+    process: Any = None  # subprocess for stdio transport
+    error: str = ""
+
+
+# Global MCP connections
+_connections: dict[str, MCPConnection] = {}
+
+
+def load_mcp_config(mcp_yaml_path: Path) -> dict | None:
+    """Load and parse an mcp.yaml file."""
+    if not mcp_yaml_path.exists():
+        return None
+    try:
+        return yaml.safe_load(mcp_yaml_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("Failed to load mcp.yaml at %s: %s", mcp_yaml_path, e)
+        return None
+
+
+def connect_mcp_server(name: str, config: dict) -> MCPConnection:
+    """Connect to an MCP server from config.
+
+    For stdio transport, spawns the server process.
+    For sse transport, connects via HTTP.
+    """
+    server = config.get("server", {})
+    url = server.get("url", "")
+    transport = server.get("transport", "stdio")
+    toolsets = config.get("toolsets", [])
+    tool_renderers = config.get("tool_renderers", {})
+
+    conn = MCPConnection(
+        name=name,
+        url=url,
+        transport=transport,
+        toolsets=toolsets,
+        tool_renderers=tool_renderers,
+    )
+
+    if not url:
+        conn.error = "No server URL configured"
+        return conn
+
+    try:
+        if transport == "stdio":
+            conn = _connect_stdio(conn)
+        elif transport == "sse":
+            conn = _connect_sse(conn)
+        else:
+            conn.error = f"Unknown transport: {transport}"
+    except Exception as e:
+        conn.error = str(e)
+        logger.warning("Failed to connect MCP server '%s': %s", name, e)
+
+    return conn
+
+
+def _connect_stdio(conn: MCPConnection) -> MCPConnection:
+    """Connect via stdio transport (spawn process)."""
+    # Parse command: "npx @openshift/openshift-mcp-server" → ["npx", "@openshift/openshift-mcp-server"]
+    parts = conn.url.split()
+    cmd = parts[0]
+    args = parts[1:] if len(parts) > 1 else []
+
+    # Add toolset flags
+    for ts in conn.toolsets:
+        args.extend(["--enable-toolset", ts])
+
+    try:
+        process = subprocess.Popen(
+            [cmd, *args],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        conn.process = process
+        conn.connected = True
+
+        # Discover tools via MCP initialize handshake
+        conn.tools = _discover_tools_stdio(process, conn.toolsets)
+        logger.info("MCP '%s' connected: %d tools from %s", conn.name, len(conn.tools), conn.toolsets)
+    except FileNotFoundError:
+        conn.error = f"Command not found: {cmd}. Install with: npm install -g {args[0] if args else cmd}"
+    except Exception as e:
+        conn.error = f"Failed to start: {e}"
+
+    return conn
+
+
+def _connect_sse(conn: MCPConnection) -> MCPConnection:
+    """Connect via SSE transport (HTTP)."""
+    # SSE connection would use httpx or similar
+    # For now, mark as not implemented
+    conn.error = "SSE transport not yet implemented"
+    return conn
+
+
+def _discover_tools_stdio(process: subprocess.Popen, toolsets: list[str]) -> list[str]:
+    """Send MCP initialize request and discover available tools.
+
+    MCP protocol: send JSON-RPC initialize → receive tools/list response.
+    """
+    try:
+        # Send initialize request
+        init_request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "pulse-agent", "version": "1.0"},
+            },
+        }
+        process.stdin.write(json.dumps(init_request) + "\n")
+        process.stdin.flush()
+
+        # Read response (with timeout)
+        import select
+
+        ready, _, _ = select.select([process.stdout], [], [], 10)
+        if not ready:
+            return []
+
+        line = process.stdout.readline()
+        if not line:
+            return []
+
+        # Send tools/list request
+        tools_request = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+        process.stdin.write(json.dumps(tools_request) + "\n")
+        process.stdin.flush()
+
+        ready, _, _ = select.select([process.stdout], [], [], 10)
+        if not ready:
+            return []
+
+        line = process.stdout.readline()
+        if not line:
+            return []
+
+        response = json.loads(line)
+        tools = response.get("result", {}).get("tools", [])
+        return [t.get("name", "") for t in tools if t.get("name")]
+    except Exception as e:
+        logger.debug("Tool discovery failed: %s", e)
+        return []
+
+
+def call_mcp_tool(conn: MCPConnection, tool_name: str, arguments: dict) -> str:
+    """Call a tool on an MCP server and return the text result."""
+    if not conn.connected or not conn.process:
+        return f"Error: MCP server '{conn.name}' is not connected"
+
+    try:
+        request = {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": tool_name, "arguments": arguments},
+        }
+        conn.process.stdin.write(json.dumps(request) + "\n")
+        conn.process.stdin.flush()
+
+        import select
+
+        ready, _, _ = select.select([conn.process.stdout], [], [], 30)
+        if not ready:
+            return "Error: MCP tool call timed out"
+
+        line = conn.process.stdout.readline()
+        if not line:
+            return "Error: No response from MCP server"
+
+        response = json.loads(line)
+        if "error" in response:
+            return f"Error: {response['error'].get('message', 'Unknown error')}"
+
+        # Extract text content from MCP response
+        result = response.get("result", {})
+        content = result.get("content", [])
+        texts = [c.get("text", "") for c in content if c.get("type") == "text"]
+        return "\n".join(texts) if texts else json.dumps(result)
+    except Exception as e:
+        return f"Error calling MCP tool '{tool_name}': {e}"
+
+
+def register_mcp_tools(conn: MCPConnection) -> int:
+    """Register MCP tools in the Pulse tool registry with UI rendering.
+
+    Returns the number of tools registered.
+    """
+    from .mcp_renderer import render_mcp_output
+    from .tool_registry import register_tool
+
+    count = 0
+    for tool_name in conn.tools:
+        renderer_config = conn.tool_renderers.get(tool_name)
+
+        # Create a wrapper that calls MCP and renders the output
+        def _make_tool_fn(tn, rc, cn):
+            def tool_fn(**kwargs):
+                raw_output = call_mcp_tool(cn, tn, kwargs)
+                text, component = render_mcp_output(tn, raw_output, renderer_config=rc)
+                return (text, component)
+
+            tool_fn.__name__ = tn
+            tool_fn.__doc__ = f"MCP tool: {tn} (from {cn.name})"
+            return tool_fn
+
+        fn = _make_tool_fn(tool_name, renderer_config, conn)
+
+        # Create a minimal tool-like object
+        class MCPTool:
+            def __init__(self, name, fn, description):
+                self.name = name
+                self._fn = fn
+                self.description = description
+
+            def call(self, input_data):
+                return self._fn(**input_data)
+
+            def to_dict(self):
+                return {
+                    "name": self.name,
+                    "description": self.description,
+                    "input_schema": {"type": "object", "properties": {}, "required": []},
+                }
+
+        tool = MCPTool(tool_name, fn, f"MCP tool from {conn.name}")
+        register_tool(tool)
+        count += 1
+
+    logger.info("Registered %d MCP tools from '%s'", count, conn.name)
+    return count
+
+
+def connect_skill_mcp(skill_name: str, skill_path: Path) -> MCPConnection | None:
+    """Connect to the MCP server defined in a skill's mcp.yaml."""
+    mcp_yaml = skill_path / "mcp.yaml"
+    config = load_mcp_config(mcp_yaml)
+    if not config:
+        return None
+
+    conn = connect_mcp_server(skill_name, config)
+    _connections[skill_name] = conn
+
+    if conn.connected:
+        register_mcp_tools(conn)
+
+    return conn
+
+
+def disconnect_all() -> None:
+    """Disconnect all MCP servers."""
+    for _name, conn in _connections.items():
+        if conn.process:
+            try:
+                conn.process.terminate()
+                conn.process.wait(timeout=5)
+            except Exception:
+                try:
+                    conn.process.kill()
+                except Exception:
+                    pass
+            conn.connected = False
+    _connections.clear()
+
+
+def list_mcp_connections() -> list[dict]:
+    """List all MCP connections with status."""
+    return [
+        {
+            "name": c.name,
+            "url": c.url,
+            "transport": c.transport,
+            "connected": c.connected,
+            "tools": c.tools,
+            "toolsets": c.toolsets,
+            "error": c.error,
+        }
+        for c in _connections.values()
+    ]
+
+
+def list_mcp_tools() -> list[dict]:
+    """List all tools from all connected MCP servers."""
+    tools = []
+    for conn in _connections.values():
+        for tool_name in conn.tools:
+            tools.append(
+                {
+                    "name": tool_name,
+                    "server": conn.name,
+                    "has_renderer": tool_name in conn.tool_renderers,
+                }
+            )
+    return tools
