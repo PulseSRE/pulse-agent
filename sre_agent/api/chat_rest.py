@@ -63,8 +63,8 @@ async def rest_create_session(
     body = await request.json()
 
     session_id = str(uuid.uuid4())
-    title = str(body.get("title", "New Chat"))[:200]
-    agent_mode = str(body.get("agent_mode", "auto"))[:20]
+    title = body.get("title", "New Chat")[:200]
+    agent_mode = body.get("agent_mode", "auto")[:20]
 
     create_chat_session(session_id, owner, mode=agent_mode, title=title)
     return {"id": session_id, "owner": owner}
