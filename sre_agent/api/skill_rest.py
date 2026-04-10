@@ -273,12 +273,127 @@ def _archive_version(skill_path: Path, version: int) -> None:
     shutil.copy2(skill_file, versions_dir / archive_name)
 
 
+# All known MCP server toolsets (from kubernetes-mcp-server --help)
+_MCP_AVAILABLE_TOOLSETS = ["core", "config", "helm", "tekton", "kiali", "kubevirt", "kcp"]
+
+
 @router.get("/admin/mcp")
 async def list_mcp_servers(_auth=Depends(verify_token)):
-    """List all MCP server connections with status."""
+    """List all MCP server connections with status + available toolsets."""
     from ..mcp_client import list_mcp_connections
 
-    return list_mcp_connections()
+    connections = list_mcp_connections()
+    return {
+        "connections": connections,
+        "available_toolsets": _MCP_AVAILABLE_TOOLSETS,
+    }
+
+
+@router.post("/admin/mcp/toolsets")
+async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
+    """Update MCP server toolsets by patching the deployment and reconnecting.
+
+    Expects: {"toolsets": ["core", "config", "helm", ...]}
+    """
+    import time
+
+    toolsets = body.get("toolsets", [])
+    if not toolsets or not isinstance(toolsets, list):
+        raise HTTPException(status_code=400, detail="toolsets must be a non-empty list")
+
+    invalid = [t for t in toolsets if t not in _MCP_AVAILABLE_TOOLSETS]
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid toolsets: {invalid}. Valid: {_MCP_AVAILABLE_TOOLSETS}",
+        )
+
+    # Patch the MCP deployment args
+    try:
+        from ..k8s_client import get_apps_client
+
+        apps = get_apps_client()
+
+        # Find the MCP deployment (name ends with -mcp)
+        ns = _detect_namespace()
+        deps = apps.list_namespaced_deployment(namespace=ns)
+        mcp_deploy = None
+        for d in deps.items:
+            if d.metadata.name.endswith("-mcp") and "mcp-server" in str(d.spec.template.metadata.labels):
+                mcp_deploy = d
+                break
+
+        if not mcp_deploy:
+            raise HTTPException(status_code=404, detail="MCP server deployment not found in cluster")
+
+        deploy_name = mcp_deploy.metadata.name
+
+        # Build new args with updated toolsets
+        new_args = [
+            "--port",
+            "8081",
+            "--toolsets",
+            ",".join(toolsets),
+            "--cluster-provider",
+            "in-cluster",
+            "--read-only",
+            "--stateless",
+        ]
+
+        # Patch container args
+        apps.patch_namespaced_deployment(
+            name=deploy_name,
+            namespace=ns,
+            body={"spec": {"template": {"spec": {"containers": [{"name": "mcp-server", "args": new_args}]}}}},
+        )
+
+        # Wait for rollout (poll for up to 30s)
+        for _ in range(15):
+            time.sleep(2)
+            dep = apps.read_namespaced_deployment(deploy_name, ns)
+            if (
+                dep.status.ready_replicas
+                and dep.status.ready_replicas >= 1
+                and dep.status.updated_replicas
+                and dep.status.updated_replicas >= 1
+            ):
+                break
+
+        # Reconnect MCP client to pick up new tools
+        from ..mcp_client import disconnect_all
+
+        disconnect_all()
+
+        # Re-connect MCP for skills that have mcp.yaml
+        from ..mcp_client import connect_skill_mcp
+        from ..skill_loader import list_skills as _list_skills
+
+        tool_count = 0
+        for skill in _list_skills():
+            if (skill.path / "mcp.yaml").exists():
+                conn = connect_skill_mcp(skill.name, skill.path)
+                if conn and conn.connected:
+                    tool_count = len(conn.tools)
+
+        return {
+            "toolsets": toolsets,
+            "deployment": deploy_name,
+            "tools_registered": tool_count,
+            "success": True,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update toolsets: {e}") from e
+
+
+def _detect_namespace() -> str:
+    """Detect the current namespace (in-cluster or default)."""
+    try:
+        return Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read_text().strip()
+    except Exception:
+        return "openshiftpulse"
 
 
 @router.get("/components")
