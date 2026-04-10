@@ -166,15 +166,46 @@ def _connect_stdio(conn: MCPConnection) -> MCPConnection:
     return conn
 
 
-def _connect_sse(conn: MCPConnection) -> MCPConnection:
-    """Connect via SSE transport (HTTP POST to MCP server)."""
-    import urllib.error
+def _parse_sse_response(raw: str) -> dict:
+    """Parse SSE response format: 'event: message\\ndata: {json}'."""
+    for line in raw.split("\n"):
+        line = line.strip()
+        if line.startswith("data: "):
+            return json.loads(line[6:])
+    # Try raw JSON parse as fallback
+    return json.loads(raw)
+
+
+def _mcp_post(base_url: str, payload: dict, session_id: str = "") -> tuple[dict, str]:
+    """POST to MCP /mcp endpoint with SSE headers. Returns (response_dict, session_id)."""
     import urllib.request
+
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    if session_id:
+        headers["Mcp-Session-Id"] = session_id
+
+    req = urllib.request.Request(
+        f"{base_url}/mcp",
+        data=json.dumps(payload).encode(),
+        headers=headers,
+    )
+    resp = urllib.request.urlopen(req, timeout=15)
+    sid = resp.headers.get("Mcp-Session-Id", session_id)
+    raw = resp.read().decode()
+    return _parse_sse_response(raw), sid
+
+
+def _connect_sse(conn: MCPConnection) -> MCPConnection:
+    """Connect via SSE/streamable HTTP transport to MCP server."""
+    import urllib.error
 
     base_url = conn.url.rstrip("/")
 
     try:
-        # MCP SSE: POST /sse with initialize, then POST /message for tools/list
+        # Initialize
         init_request = {
             "jsonrpc": "2.0",
             "id": next(_request_id_counter),
@@ -185,14 +216,7 @@ def _connect_sse(conn: MCPConnection) -> MCPConnection:
                 "clientInfo": {"name": "pulse-agent", "version": "1.0"},
             },
         }
-
-        req = urllib.request.Request(
-            f"{base_url}/message",
-            data=json.dumps(init_request).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        resp = urllib.request.urlopen(req, timeout=10)
-        resp.read()  # Consume initialize response
+        _init_resp, session_id = _mcp_post(base_url, init_request)
 
         # Discover tools
         tools_request = {
@@ -201,15 +225,9 @@ def _connect_sse(conn: MCPConnection) -> MCPConnection:
             "method": "tools/list",
             "params": {},
         }
-        req = urllib.request.Request(
-            f"{base_url}/message",
-            data=json.dumps(tools_request).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        resp = urllib.request.urlopen(req, timeout=10)
-        response = json.loads(resp.read())
+        tools_resp, session_id = _mcp_post(base_url, tools_request, session_id)
 
-        tools_raw = response.get("result", {}).get("tools", [])
+        tools_raw = tools_resp.get("result", {}).get("tools", [])
         tool_defs = [
             {
                 "name": t.get("name", ""),
@@ -224,6 +242,7 @@ def _connect_sse(conn: MCPConnection) -> MCPConnection:
         conn.tool_schemas = {t["name"]: t for t in tool_defs}
         conn.connected = True
         conn._sse_base_url = base_url
+        conn._sse_session_id = session_id
         logger.info("MCP SSE '%s' connected: %d tools", conn.name, len(conn.tools))
 
     except urllib.error.URLError as e:
@@ -336,10 +355,9 @@ def call_mcp_tool(conn: MCPConnection, tool_name: str, arguments: dict) -> str:
 
 
 def _call_mcp_tool_sse(conn: MCPConnection, tool_name: str, arguments: dict) -> str:
-    """Call an MCP tool via SSE/HTTP transport."""
-    import urllib.request
-
+    """Call an MCP tool via SSE/streamable HTTP transport."""
     base_url = getattr(conn, "_sse_base_url", conn.url.rstrip("/"))
+    session_id = getattr(conn, "_sse_session_id", "")
     try:
         request = {
             "jsonrpc": "2.0",
@@ -347,13 +365,7 @@ def _call_mcp_tool_sse(conn: MCPConnection, tool_name: str, arguments: dict) -> 
             "method": "tools/call",
             "params": {"name": tool_name, "arguments": arguments},
         }
-        req = urllib.request.Request(
-            f"{base_url}/message",
-            data=json.dumps(request).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        resp = urllib.request.urlopen(req, timeout=30)
-        response = json.loads(resp.read())
+        response, _ = _mcp_post(base_url, request, session_id)
 
         if "error" in response:
             return f"Error: {response['error'].get('message', 'Unknown error')}"
