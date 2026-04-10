@@ -106,6 +106,28 @@ async def reload_skills(_auth=Depends(verify_token)):
     return {"reloaded": len(skills), "skills": list(skills.keys())}
 
 
+@router.post("/admin/skills/test")
+async def test_skill_routing(
+    body: dict,
+    _auth=Depends(verify_token),
+):
+    """Test which skill would handle a given query."""
+    from ..skill_loader import classify_query
+
+    query = body.get("query", "")
+    if not query:
+        raise HTTPException(status_code=400, detail="Missing 'query' field")
+
+    skill = classify_query(query)
+    return {
+        "query": query,
+        "skill": skill.name,
+        "version": skill.version,
+        "description": skill.description,
+        "degraded": skill.degraded,
+    }
+
+
 @router.get("/admin/mcp")
 async def list_mcp_servers(_auth=Depends(verify_token)):
     """List all MCP server connections with status."""

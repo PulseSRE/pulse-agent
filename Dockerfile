@@ -1,12 +1,11 @@
-# Fast code-only build — deps are in the pre-built pulse-agent-deps:latest image.
-# If deps image is missing, use Dockerfile.full as fallback.
-ARG BASE_IMAGE=image-registry.openshift-image-registry.svc:5000/openshiftpulse/pulse-agent-deps:latest
-FROM $BASE_IMAGE
-
+# Default Dockerfile — single-stage build, always works.
+# For faster builds with pre-built deps image, use Dockerfile.fast.
+FROM registry.access.redhat.com/ubi9/python-312:latest
 WORKDIR /opt/app-root/src
-COPY sre_agent/ sre_agent/
+
 COPY pyproject.toml .
-RUN pip install --no-deps --force-reinstall .
+COPY sre_agent/ sre_agent/
+RUN pip install --no-cache-dir ".[postgres]"
 
 USER 1001
 EXPOSE 8080
