@@ -286,14 +286,13 @@ def list_resources(
             row["labels"] = labels
         annotations = meta.get("annotations")
         if annotations:
-            # Filter out long/noisy annotations
-            row["annotations"] = {
+            filtered = {
                 k: v
                 for k, v in annotations.items()
                 if not k.startswith("kubectl.kubernetes.io/") and not k.startswith("openshift.io/") and len(v) < 200
-            } or None
-            if not row["annotations"]:
-                del row["annotations"]
+            }
+            if filtered:
+                row["annotations"] = filtered
         owner_refs = meta.get("ownerReferences")
         if owner_refs:
             row["owner"] = "/".join(f"{o['kind']}/{o['name']}" for o in owner_refs)
