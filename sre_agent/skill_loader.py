@@ -103,6 +103,12 @@ def _parse_skill_md(path: Path) -> Skill | None:
 
     body = parts[2].strip()
 
+    # Validate schema
+    errors = _validate_schema(meta, path)
+    if errors:
+        for err in errors:
+            logger.warning("Skill '%s' validation: %s", name, err)
+
     return Skill(
         name=name,
         version=meta.get("version", 1),
@@ -117,6 +123,77 @@ def _parse_skill_md(path: Path) -> Skill | None:
         configurable=meta.get("configurable", []),
         path=path.parent,
     )
+
+
+_VALID_CATEGORIES = {
+    "diagnostics",
+    "workloads",
+    "networking",
+    "security",
+    "storage",
+    "monitoring",
+    "operations",
+    "gitops",
+    "fleet",
+}
+
+_VALID_CONFIGURABLE_TYPES = {"enum", "string", "boolean", "number"}
+
+
+def _validate_schema(meta: dict, path: Path) -> list[str]:
+    """Validate skill frontmatter schema. Returns list of warnings (non-fatal)."""
+    errors: list[str] = []
+
+    # Version must be a positive integer
+    version = meta.get("version")
+    if version is not None and (not isinstance(version, int) or version < 1):
+        errors.append(f"version must be a positive integer (got {version!r})")
+
+    # Description should be non-empty
+    if not meta.get("description"):
+        errors.append("missing 'description' field")
+
+    # Keywords should be non-empty list
+    keywords = meta.get("keywords", [])
+    if not keywords:
+        errors.append("no keywords defined — skill won't be routable")
+
+    # Categories should be valid names
+    categories = meta.get("categories", [])
+    for cat in categories:
+        if cat not in _VALID_CATEGORIES:
+            errors.append(f"unknown category '{cat}' — valid: {sorted(_VALID_CATEGORIES)}")
+
+    # Priority should be reasonable
+    priority = meta.get("priority", 10)
+    if not isinstance(priority, int) or priority < 0 or priority > 100:
+        errors.append(f"priority should be 0-100 (got {priority!r})")
+
+    # Handoff targets should be strings mapping to keyword lists
+    handoff_to = meta.get("handoff_to", {})
+    if handoff_to and not isinstance(handoff_to, dict):
+        errors.append("handoff_to must be a dict mapping skill names to keyword lists")
+    elif isinstance(handoff_to, dict):
+        for target, keywords_list in handoff_to.items():
+            if not isinstance(keywords_list, list):
+                errors.append(f"handoff_to.{target} must be a list of keywords")
+
+    # Configurable fields must have valid types
+    for cfg_field in meta.get("configurable", []):
+        if isinstance(cfg_field, dict):
+            for field_name, field_def in cfg_field.items():
+                if isinstance(field_def, dict):
+                    ftype = field_def.get("type", "")
+                    if ftype and ftype not in _VALID_CONFIGURABLE_TYPES:
+                        errors.append(f"configurable '{field_name}' has invalid type '{ftype}'")
+                    if ftype == "enum" and not field_def.get("options"):
+                        errors.append(f"configurable '{field_name}' is enum but has no options")
+                    if ftype == "number":
+                        mn, mx = field_def.get("min"), field_def.get("max")
+                        if mn is not None and mx is not None and mn > mx:
+                            errors.append(f"configurable '{field_name}' has min > max")
+
+    return errors
 
 
 def _build_keyword_index(skills: dict[str, Skill]) -> list[tuple[str, str, int]]:

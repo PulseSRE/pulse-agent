@@ -194,6 +194,139 @@ class TestSkillEvals:
         assert scenarios == []
 
 
+class TestSchemaValidation:
+    def test_valid_skill_no_warnings(self):
+        from sre_agent.skill_loader import _validate_schema
+
+        meta = {
+            "name": "test",
+            "version": 1,
+            "description": "Test skill",
+            "keywords": ["test"],
+            "categories": ["diagnostics"],
+            "priority": 5,
+        }
+        errors = _validate_schema(meta, Path("."))
+        assert errors == []
+
+    def test_invalid_version(self):
+        from sre_agent.skill_loader import _validate_schema
+
+        errors = _validate_schema({"name": "t", "version": -1, "description": "t", "keywords": ["x"]}, Path("."))
+        assert any("version" in e for e in errors)
+
+    def test_missing_description(self):
+        from sre_agent.skill_loader import _validate_schema
+
+        errors = _validate_schema({"name": "t", "version": 1, "keywords": ["x"]}, Path("."))
+        assert any("description" in e for e in errors)
+
+    def test_no_keywords_warning(self):
+        from sre_agent.skill_loader import _validate_schema
+
+        errors = _validate_schema({"name": "t", "version": 1, "description": "t"}, Path("."))
+        assert any("keywords" in e for e in errors)
+
+    def test_invalid_category(self):
+        from sre_agent.skill_loader import _validate_schema
+
+        errors = _validate_schema(
+            {"name": "t", "version": 1, "description": "t", "keywords": ["x"], "categories": ["invalid_xyz"]},
+            Path("."),
+        )
+        assert any("unknown category" in e for e in errors)
+
+    def test_valid_categories_accepted(self):
+        from sre_agent.skill_loader import _validate_schema
+
+        errors = _validate_schema(
+            {
+                "name": "t",
+                "version": 1,
+                "description": "t",
+                "keywords": ["x"],
+                "categories": ["diagnostics", "monitoring", "workloads"],
+            },
+            Path("."),
+        )
+        cat_errors = [e for e in errors if "category" in e]
+        assert cat_errors == []
+
+    def test_invalid_priority(self):
+        from sre_agent.skill_loader import _validate_schema
+
+        errors = _validate_schema(
+            {"name": "t", "version": 1, "description": "t", "keywords": ["x"], "priority": 999},
+            Path("."),
+        )
+        assert any("priority" in e for e in errors)
+
+    def test_invalid_handoff_type(self):
+        from sre_agent.skill_loader import _validate_schema
+
+        errors = _validate_schema(
+            {"name": "t", "version": 1, "description": "t", "keywords": ["x"], "handoff_to": {"sre": "not_a_list"}},
+            Path("."),
+        )
+        assert any("handoff_to" in e for e in errors)
+
+    def test_invalid_configurable_type(self):
+        from sre_agent.skill_loader import _validate_schema
+
+        errors = _validate_schema(
+            {
+                "name": "t",
+                "version": 1,
+                "description": "t",
+                "keywords": ["x"],
+                "configurable": [{"field1": {"type": "invalid_type"}}],
+            },
+            Path("."),
+        )
+        assert any("invalid type" in e for e in errors)
+
+    def test_enum_without_options(self):
+        from sre_agent.skill_loader import _validate_schema
+
+        errors = _validate_schema(
+            {
+                "name": "t",
+                "version": 1,
+                "description": "t",
+                "keywords": ["x"],
+                "configurable": [{"field1": {"type": "enum"}}],
+            },
+            Path("."),
+        )
+        assert any("no options" in e for e in errors)
+
+    def test_number_min_greater_than_max(self):
+        from sre_agent.skill_loader import _validate_schema
+
+        errors = _validate_schema(
+            {
+                "name": "t",
+                "version": 1,
+                "description": "t",
+                "keywords": ["x"],
+                "configurable": [{"field1": {"type": "number", "min": 100, "max": 10}}],
+            },
+            Path("."),
+        )
+        assert any("min > max" in e for e in errors)
+
+    def test_built_in_skills_pass_validation(self):
+        """All built-in skill packages should pass validation cleanly."""
+        from sre_agent.skill_loader import _parse_skill_md
+
+        skills_dir = Path(__file__).parent.parent / "sre_agent" / "skills"
+        for skill_dir in skills_dir.iterdir():
+            skill_file = skill_dir / "skill.md" if skill_dir.is_dir() else None
+            if skill_file and skill_file.exists():
+                skill = _parse_skill_md(skill_file)
+                assert skill is not None, f"Failed to parse {skill_file}"
+
+
 class TestSkillToDict:
     def test_serialization(self):
         skill = get_skill("sre")
