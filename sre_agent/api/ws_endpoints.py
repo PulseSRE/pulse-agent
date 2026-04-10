@@ -11,28 +11,9 @@ import uuid
 
 from fastapi import HTTPException, WebSocket
 
-from ..agent import (
-    SYSTEM_PROMPT as SRE_SYSTEM_PROMPT,
-)
-from ..agent import (
-    TOOL_DEFS as SRE_TOOL_DEFS,
-)
-from ..agent import (
-    TOOL_MAP as SRE_TOOL_MAP,
-)
-from ..agent import WRITE_TOOLS
 from ..config import get_settings
 from ..monitor import MonitorSession, get_fix_history
 from ..orchestrator import build_orchestrated_config, classify_intent, fix_typos
-from ..security_agent import (
-    SECURITY_SYSTEM_PROMPT,
-)
-from ..security_agent import (
-    TOOL_DEFS as SEC_TOOL_DEFS,
-)
-from ..security_agent import (
-    TOOL_MAP as SEC_TOOL_MAP,
-)
 from .agent_ws import (
     MAX_MESSAGE_SIZE,
     MAX_MESSAGES_PER_MINUTE,
@@ -112,16 +93,12 @@ async def websocket_agent(websocket: WebSocket, mode: str):
     except Exception:
         logger.debug("Failed to create chat session record", exc_info=True)
 
-    if mode == "sre":
-        system_prompt = SRE_SYSTEM_PROMPT
-        tool_defs = SRE_TOOL_DEFS
-        tool_map = SRE_TOOL_MAP
-        write_tools = WRITE_TOOLS
-    else:
-        system_prompt = SECURITY_SYSTEM_PROMPT
-        tool_defs = SEC_TOOL_DEFS
-        tool_map = SEC_TOOL_MAP
-        write_tools = set()
+    # Use skill-based config (delegates to build_orchestrated_config which tries skills first)
+    config = build_orchestrated_config(mode)
+    system_prompt = config["system_prompt"]
+    tool_defs = config["tool_defs"]
+    tool_map = config["tool_map"]
+    write_tools = config["write_tools"]
 
     # Message queue for incoming messages while agent is running
     incoming: asyncio.Queue = asyncio.Queue()
@@ -375,7 +352,16 @@ async def websocket_auto_agent(websocket: WebSocket):
                 )
 
             # --- Auto-classify intent with sticky mode ---
-            intent, is_strong = classify_intent(content)
+            # Try skill-based routing first (supports custom skills like capacity_planner)
+            # Fall back to legacy classify_intent for backward compat
+            try:
+                from ..skill_loader import classify_query
+
+                skill = classify_query(content)
+                intent = skill.name
+                is_strong = True
+            except Exception:
+                intent, is_strong = classify_intent(content)
 
             # Sticky view_designer: once in dashboard mode, stay there unless
             # the user clearly asks about something SRE/security-specific.
@@ -401,9 +387,20 @@ async def websocket_auto_agent(websocket: WebSocket):
                 if not has_hard_sre and not has_hard_sec:
                     intent = "view_designer"
             elif last_mode == "security" and intent == "sre" and not is_strong:
-                # Only stay in security if the new query also looks like security
-                # Otherwise fall back to SRE (the default)
                 pass  # Let it switch to SRE
+            elif last_mode and last_mode == intent:
+                pass  # Same skill — no switch needed
+            elif last_mode and last_mode not in ("sre", "security", "view_designer", "both"):
+                # Custom skill sticky mode — check if skill declares handoff
+                try:
+                    from ..skill_loader import check_handoff, get_skill
+
+                    current = get_skill(last_mode)
+                    if current and not check_handoff(current, content):
+                        # No handoff triggered — stay in current skill
+                        intent = last_mode
+                except Exception:
+                    pass
 
             config = build_orchestrated_config(intent)
             last_mode = intent

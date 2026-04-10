@@ -1,4 +1,11 @@
-"""Agent Orchestrator — classifies queries and routes to SRE or Security agent."""
+"""Agent Orchestrator — classifies queries and routes to the appropriate skill.
+
+Primary routing is via skill_loader.classify_query() (skill .md files).
+This module provides:
+  - fix_typos(): typo correction applied before classification
+  - classify_intent(): legacy keyword-based fallback classifier
+  - build_orchestrated_config(): config builder (delegates to skills first, falls back to legacy)
+"""
 
 import logging
 import re
