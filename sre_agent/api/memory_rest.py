@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Header, Query
+from fastapi import APIRouter, Depends, Query
 
-from .auth import _verify_rest_token
+from .auth import verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -14,12 +14,8 @@ router = APIRouter()
 
 
 @router.get("/memory/export")
-async def export_memory(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def export_memory(_auth=Depends(verify_token)):
     """Export learned runbooks and patterns for cross-pod sharing."""
-    _verify_rest_token(authorization, token)
     from ..memory import get_manager
 
     manager = get_manager()
@@ -32,13 +28,8 @@ async def export_memory(
 
 
 @router.post("/memory/import")
-async def import_memory(
-    body: dict,
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def import_memory(body: dict, _auth=Depends(verify_token)):
     """Import runbooks and patterns from another pod's export."""
-    _verify_rest_token(authorization, token)
     from ..memory import get_manager
 
     manager = get_manager()
@@ -52,12 +43,8 @@ async def import_memory(
 
 
 @router.get("/memory/stats")
-async def memory_stats(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def memory_stats(_auth=Depends(verify_token)):
     """Memory system stats: incident count, runbook count, pattern count, top metrics."""
-    _verify_rest_token(authorization, token)
     from ..memory import get_manager
 
     manager = get_manager()
@@ -73,13 +60,8 @@ async def memory_stats(
 
 
 @router.get("/memory/runbooks")
-async def memory_runbooks(
-    limit: int = Query(20, ge=1, le=100),
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def memory_runbooks(limit: int = Query(20, ge=1, le=100), _auth=Depends(verify_token)):
     """List learned runbooks sorted by success rate."""
-    _verify_rest_token(authorization, token)
     from ..memory import get_manager
 
     manager = get_manager()
@@ -93,11 +75,9 @@ async def memory_runbooks(
 async def memory_incidents(
     search: str = Query("", max_length=200),
     limit: int = Query(10, ge=1, le=50),
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
+    _auth=Depends(verify_token),
 ):
     """Search past incidents by query similarity."""
-    _verify_rest_token(authorization, token)
     from ..memory import get_manager
 
     manager = get_manager()
@@ -113,12 +93,8 @@ async def memory_incidents(
 
 
 @router.get("/memory/patterns")
-async def memory_patterns(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def memory_patterns(_auth=Depends(verify_token)):
     """List detected recurring patterns."""
-    _verify_rest_token(authorization, token)
     from ..memory import get_manager
 
     manager = get_manager()
@@ -133,12 +109,8 @@ async def memory_patterns(
 
 
 @router.get("/memory/summary")
-async def memory_summary(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def memory_summary(_auth=Depends(verify_token)):
     """Get summary stats for the agent intelligence page."""
-    _verify_rest_token(authorization, token)
     from ..memory import get_manager
 
     manager = get_manager()

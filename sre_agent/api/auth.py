@@ -120,6 +120,22 @@ def _get_current_user(
     return fallback_user
 
 
+def verify_token(authorization: str | None = Header(None), token: str | None = Query(None)):
+    """FastAPI dependency — verifies auth token. Use as Depends(verify_token)."""
+    _verify_rest_token(authorization, token)
+
+
+def get_owner(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
+) -> str:
+    """FastAPI dependency — verifies token and returns the authenticated user. Use as Depends(get_owner)."""
+    _verify_rest_token(authorization, token)
+    return _get_current_user(x_forwarded_access_token, x_forwarded_user)
+
+
 def _cache_user(token_hash: str, username: str) -> None:
     """Cache a user identity with O(1) LRU eviction."""
     _user_cache[token_hash] = (username, time.time())

@@ -13,7 +13,7 @@ import time
 from contextlib import asynccontextmanager
 from importlib.metadata import version as pkg_version
 
-from fastapi import FastAPI, Header, Query
+from fastapi import Depends, FastAPI
 
 from ..agent import (
     ALL_TOOLS as SRE_ALL_TOOLS,
@@ -23,7 +23,7 @@ from ..monitor import get_investigation_stats, is_autofix_paused
 from ..security_agent import (
     ALL_TOOLS as SEC_ALL_TOOLS,
 )
-from .auth import _verify_rest_token
+from .auth import verify_token
 from .chat_rest import router as chat_router
 from .eval_rest import router as eval_router
 from .memory_rest import router as memory_router
@@ -111,11 +111,7 @@ async def version():
 
 
 @app.get("/health")
-async def health(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
-    _verify_rest_token(authorization, token)
+async def health(_auth=Depends(verify_token)):
     from ..agent import _circuit_breaker
     from ..error_tracker import get_tracker
 
@@ -139,12 +135,8 @@ async def health(
 
 
 @app.get("/context")
-async def get_shared_context(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def get_shared_context(_auth=Depends(verify_token)):
     """View recent shared context entries across all agents."""
-    _verify_rest_token(authorization, token)
     from ..context_bus import get_context_bus
 
     bus = get_context_bus()

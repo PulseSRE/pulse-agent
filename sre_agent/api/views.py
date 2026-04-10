@@ -10,10 +10,10 @@ import re
 import time
 import uuid
 
-from fastapi import APIRouter, Header, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from ..config import get_settings
-from .auth import _get_current_user, _verify_rest_token
+from .auth import get_owner, verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -21,17 +21,10 @@ router = APIRouter()
 
 
 @router.get("/views")
-async def rest_list_views(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
-    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
-):
+async def rest_list_views(owner: str = Depends(get_owner)):
     """List all views for the current user."""
-    _verify_rest_token(authorization, token)
     from .. import db
 
-    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     views = db.list_views(owner)
     return {"views": views or [], "owner": owner}
 
@@ -39,18 +32,13 @@ async def rest_list_views(
 @router.get("/views/{view_id}")
 async def rest_get_view(
     view_id: str,
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
-    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
+    owner: str = Depends(get_owner),
 ):
     """Get a single view by ID."""
-    _verify_rest_token(authorization, token)
     from fastapi.responses import JSONResponse
 
     from .. import db
 
-    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     view = db.get_view(view_id, owner)
     if view is None:
         return JSONResponse(status_code=404, content={"error": "View not found"})
@@ -60,18 +48,13 @@ async def rest_get_view(
 @router.post("/views")
 async def rest_create_view(
     request: Request,
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
-    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
+    owner: str = Depends(get_owner),
 ):
     """Save a new view for the current user."""
-    _verify_rest_token(authorization, token)
     from fastapi.responses import JSONResponse
 
     from .. import db
 
-    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     body = await request.json()
 
     view_id = body.get("id", f"cv-{uuid.uuid4().hex[:12]}")
@@ -103,18 +86,13 @@ async def rest_create_view(
 async def rest_update_view(
     view_id: str,
     request: Request,
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
-    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
+    owner: str = Depends(get_owner),
 ):
     """Update a view (title, description, layout, positions). Owner only."""
-    _verify_rest_token(authorization, token)
     from fastapi.responses import JSONResponse
 
     from .. import db
 
-    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     body = await request.json()
 
     # Extract only allowed fields -- never pass raw body as **kwargs
@@ -137,18 +115,13 @@ async def rest_update_view(
 @router.delete("/views/{view_id}")
 async def rest_delete_view(
     view_id: str,
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
-    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
+    owner: str = Depends(get_owner),
 ):
     """Delete a view. Owner only."""
-    _verify_rest_token(authorization, token)
     from fastapi.responses import JSONResponse
 
     from .. import db
 
-    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     deleted = db.delete_view(view_id, owner)
     if not deleted:
         return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
@@ -159,18 +132,13 @@ async def rest_delete_view(
 async def rest_clone_view(
     view_id: str,
     request: Request,
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
-    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
+    owner: str = Depends(get_owner),
 ):
     """Clone a view to the current user's account. Only the owner can clone their own views."""
-    _verify_rest_token(authorization, token)
     from fastapi.responses import JSONResponse
 
     from .. import db
 
-    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     # Verify the caller owns the source view
     source = db.get_view(view_id, owner)
     if source is None:
@@ -184,18 +152,13 @@ async def rest_clone_view(
 @router.post("/views/{view_id}/share")
 async def rest_share_view(
     view_id: str,
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
-    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
+    owner: str = Depends(get_owner),
 ):
     """Generate a share link for a view. The link allows others to clone it."""
-    _verify_rest_token(authorization, token)
     from fastapi.responses import JSONResponse
 
     from .. import db
 
-    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     view = db.get_view(view_id, owner)
     if view is None:
         return JSONResponse(status_code=404, content={"error": "View not found or not owned by you"})
@@ -214,13 +177,9 @@ async def rest_share_view(
 @router.post("/views/claim/{share_token:path}")
 async def rest_claim_shared_view(
     share_token: str,
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
-    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
+    owner: str = Depends(get_owner),
 ):
     """Claim a shared view using a share token. Clones the view to your account."""
-    _verify_rest_token(authorization, token)
     from fastapi.responses import JSONResponse
 
     from .. import db
@@ -246,8 +205,6 @@ async def rest_claim_shared_view(
     expected_sig = hmac.new(secret.encode(), f"{view_id}:{expires_str}".encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(signature, expected_sig):
         return JSONResponse(status_code=400, content={"error": "Invalid share token"})
-
-    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     new_id = db.clone_view(view_id, owner)
     if new_id is None:
         return JSONResponse(status_code=404, content={"error": "Source view not found"})
@@ -262,16 +219,11 @@ async def rest_claim_shared_view(
 @router.get("/views/{view_id}/versions")
 async def rest_view_versions(
     view_id: str,
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
-    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
+    owner: str = Depends(get_owner),
 ):
     """List version history for a view."""
-    _verify_rest_token(authorization, token)
     from .. import db
 
-    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     # Verify ownership
     view = db.get_view(view_id, owner)
     if not view:
@@ -286,18 +238,13 @@ async def rest_view_versions(
 async def rest_undo_view(
     view_id: str,
     request: Request,
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
-    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
+    owner: str = Depends(get_owner),
 ):
     """Undo the last change to a view (restore previous version)."""
-    _verify_rest_token(authorization, token)
     from fastapi.responses import JSONResponse
 
     from .. import db
 
-    owner = _get_current_user(x_forwarded_access_token, x_forwarded_user)
     body = await request.json()
     version = body.get("version")
 
@@ -325,14 +272,12 @@ async def rest_undo_view(
 async def rest_query(
     q: str = Query(..., description="PromQL query string"),
     time_range: str = Query("", alias="range", description="Time range, e.g. '1h', '24h'"),
-    authorization: str | None = Header(None),
-    _token: str | None = Query(None, alias="token"),
+    _auth=Depends(verify_token),
 ):
     """Execute a PromQL query and return a ComponentSpec for live widget refresh.
 
     No Claude/LLM involved -- direct Prometheus proxy.
     """
-    _verify_rest_token(authorization, _token)
 
     from ..k8s_tools import get_prometheus_query
 

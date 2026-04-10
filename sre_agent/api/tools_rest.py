@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Header, Query
+from fastapi import APIRouter, Depends, Query
 
 from ..agent import (
     ALL_TOOLS as SRE_ALL_TOOLS,
@@ -13,7 +13,7 @@ from ..agent import WRITE_TOOLS
 from ..security_agent import (
     ALL_TOOLS as SEC_ALL_TOOLS,
 )
-from .auth import _verify_rest_token
+from .auth import verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -21,12 +21,8 @@ router = APIRouter()
 
 
 @router.get("/tools")
-async def list_tools(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def list_tools(_auth=Depends(verify_token)):
     """List all available tools grouped by mode, with write-op flags."""
-    _verify_rest_token(authorization, token)
     from ..harness import get_tool_category
 
     return {
@@ -53,12 +49,8 @@ async def list_tools(
 
 
 @router.get("/agents")
-async def list_agents(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def list_agents(_auth=Depends(verify_token)):
     """List all agent modes with metadata."""
-    _verify_rest_token(authorization, token)
     from ..tool_usage import get_agents_metadata
 
     return get_agents_metadata()
@@ -68,23 +60,17 @@ async def list_agents(
 async def get_tools_usage_stats(
     time_from: str | None = Query(None, alias="from"),
     time_to: str | None = Query(None, alias="to"),
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
+    _auth=Depends(verify_token),
 ):
     """Aggregated tool usage statistics."""
-    _verify_rest_token(authorization, token)
     from ..tool_usage import get_usage_stats
 
     return get_usage_stats(time_from=time_from, time_to=time_to)
 
 
 @router.get("/tools/usage/chains")
-async def get_tools_usage_chains(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def get_tools_usage_chains(_auth=Depends(verify_token)):
     """Discovered tool call chains (common sequences)."""
-    _verify_rest_token(authorization, token)
     from ..tool_chains import discover_chains
 
     return discover_chains()
@@ -100,11 +86,9 @@ async def get_tools_usage(
     time_to: str | None = Query(None, alias="to"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
+    _auth=Depends(verify_token),
 ):
     """Paginated audit log of tool invocations."""
-    _verify_rest_token(authorization, token)
     from ..tool_usage import query_usage
 
     return query_usage(

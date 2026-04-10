@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ..config import get_settings
 from ..monitor import (
@@ -13,7 +13,7 @@ from ..monitor import (
     get_action_detail,
     get_fix_history,
 )
-from .auth import _verify_rest_token
+from .auth import verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -28,11 +28,9 @@ async def rest_fix_history(
     category: str | None = Query(None),
     since: int | None = Query(None),
     search: str | None = Query(None),
-    authorization: str | None = Header(None),
-    _token: str | None = Query(None, alias="token"),
+    _auth=Depends(verify_token),
 ):
     """Paginated fix history (Protocol v2). Requires token auth."""
-    _verify_rest_token(authorization, _token)
     filters = {}
     if status:
         filters["status"] = status
@@ -46,13 +44,8 @@ async def rest_fix_history(
 
 
 @router.get("/fix-history/{action_id}")
-async def rest_action_detail(
-    action_id: str,
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def rest_action_detail(action_id: str, _auth=Depends(verify_token)):
     """Single action detail with before/after state (Protocol v2). Requires token auth."""
-    _verify_rest_token(authorization, token)
     result = get_action_detail(action_id)
     if result is None:
         from fastapi.responses import JSONResponse
@@ -62,13 +55,8 @@ async def rest_action_detail(
 
 
 @router.post("/fix-history/{action_id}/rollback")
-async def rollback_action(
-    action_id: str,
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def rollback_action(action_id: str, _auth=Depends(verify_token)):
     """Rollback a completed action (Protocol v2). Requires token auth."""
-    _verify_rest_token(authorization, token)
     result = execute_rollback(action_id)
     if "error" in result:
         from fastapi.responses import JSONResponse
@@ -78,25 +66,16 @@ async def rollback_action(
 
 
 @router.get("/briefing")
-async def rest_briefing(
-    hours: int = Query(12, ge=1, le=72),
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def rest_briefing(hours: int = Query(12, ge=1, le=72), _auth=Depends(verify_token)):
     """Cluster activity briefing for the last N hours. Requires token auth."""
-    _verify_rest_token(authorization, token)
     from ..monitor import get_briefing
 
     return get_briefing(hours)
 
 
 @router.get("/monitor/scanners")
-async def rest_list_scanners(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def rest_list_scanners(_auth=Depends(verify_token)):
     """List all scanners with metadata and current configuration."""
-    _verify_rest_token(authorization, token)
     from ..monitor import SCANNER_REGISTRY
 
     return {"scanners": [{"id": k, **v} for k, v in SCANNER_REGISTRY.items()]}
@@ -104,13 +83,11 @@ async def rest_list_scanners(
 
 @router.get("/monitor/history")
 async def rest_scan_history(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    _auth=Depends(verify_token),
 ):
     """Get paginated scan run history."""
-    _verify_rest_token(authorization, token)
     from .. import db
 
     database = db.get_database()
@@ -133,23 +110,14 @@ async def rest_scan_history(
 
 
 @router.get("/predictions")
-async def rest_predictions(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def rest_predictions(_auth=Depends(verify_token)):
     """Active predictions -- currently only available via /ws/monitor WebSocket stream."""
-    _verify_rest_token(authorization, token)
     raise HTTPException(status_code=501, detail="Predictions are only available via the /ws/monitor WebSocket stream.")
 
 
 @router.post("/simulate")
-async def rest_simulate(
-    request: Request,
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def rest_simulate(request: Request, _auth=Depends(verify_token)):
     """Predict the impact of a tool action without executing it. Requires token auth."""
-    _verify_rest_token(authorization, token)
     body = await request.json()
     tool = body.get("tool", "")
     inp = body.get("input", {})
@@ -160,12 +128,8 @@ async def rest_simulate(
 
 
 @router.get("/monitor/capabilities")
-async def monitor_capabilities(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def monitor_capabilities(_auth=Depends(verify_token)):
     """Expose monitor trust/capability limits so UI can align controls."""
-    _verify_rest_token(authorization, token)
     from ..monitor import AUTO_FIX_HANDLERS
 
     max_trust_level = get_settings().max_trust_level
@@ -176,12 +140,8 @@ async def monitor_capabilities(
 
 
 @router.post("/monitor/pause")
-async def pause_autofix(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def pause_autofix(_auth=Depends(verify_token)):
     """Emergency kill switch -- pause all auto-fix actions."""
-    _verify_rest_token(authorization, token)
     from ..monitor import set_autofix_paused
 
     set_autofix_paused(True)
@@ -190,12 +150,8 @@ async def pause_autofix(
 
 
 @router.post("/monitor/resume")
-async def resume_autofix(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def resume_autofix(_auth=Depends(verify_token)):
     """Resume auto-fix actions after a pause."""
-    _verify_rest_token(authorization, token)
     from ..monitor import set_autofix_paused
 
     set_autofix_paused(False)

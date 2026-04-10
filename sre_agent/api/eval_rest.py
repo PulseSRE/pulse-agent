@@ -6,9 +6,9 @@ import asyncio
 import logging
 import time
 
-from fastapi import APIRouter, Header, Query
+from fastapi import APIRouter, Depends, Query
 
-from .auth import _verify_rest_token
+from .auth import verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -21,12 +21,8 @@ _EVAL_STATUS_LOCK = asyncio.Lock()
 
 
 @router.get("/eval/status")
-async def eval_status(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def eval_status(_auth=Depends(verify_token)):
     """Current eval gate status snapshot for UI surfaces."""
-    _verify_rest_token(authorization, token)
     global _EVAL_STATUS_CACHE, _EVAL_STATUS_CACHE_TS_MS
     from ..evals.outcomes import analyze_windows
     from ..evals.runner import evaluate_suite
@@ -125,11 +121,9 @@ async def eval_history(
     suite: str | None = Query(None),
     days: int = Query(30, ge=1, le=365),
     limit: int = Query(100, ge=1, le=500),
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
+    _auth=Depends(verify_token),
 ):
     """Eval run history for trend charts."""
-    _verify_rest_token(authorization, token)
     from ..evals.history import get_eval_history
 
     return get_eval_history(suite_name=suite, days=days, limit=limit)
@@ -139,23 +133,17 @@ async def eval_history(
 async def eval_trend(
     suite: str = Query("release"),
     days: int = Query(30, ge=1, le=365),
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
+    _auth=Depends(verify_token),
 ):
     """Eval score trend summary with sparkline data."""
-    _verify_rest_token(authorization, token)
     from ..evals.history import get_eval_trend
 
     return get_eval_trend(suite_name=suite, days=days)
 
 
 @router.get("/eval/score")
-async def eval_tool_selection_score(
-    authorization: str | None = Header(None),
-    token: str | None = Query(None),
-):
+async def eval_tool_selection_score(_auth=Depends(verify_token)):
     """Score tool selection accuracy for static + learned eval prompts."""
-    _verify_rest_token(authorization, token)
 
     from ..harness import score_eval_prompts
     from ..tool_usage import get_learned_eval_prompts
