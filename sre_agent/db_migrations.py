@@ -97,6 +97,13 @@ def _migrate_007_chat_history(db: Database) -> None:
     db.executescript(CHAT_SESSIONS_SCHEMA + CHAT_MESSAGES_SCHEMA)
 
 
+def _migrate_008_skill_usage(db: Database) -> None:
+    """Add skill_usage table for skill analytics and transparency."""
+    from .db_schema import SKILL_USAGE_SCHEMA
+
+    db.executescript(SKILL_USAGE_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -105,4 +112,5 @@ MIGRATIONS = [
     (5, "scan_runs", _migrate_005_scan_runs),
     (6, "eval_runs", _migrate_006_eval_runs),
     (7, "chat_history", _migrate_007_chat_history),
+    (8, "skill_usage", _migrate_008_skill_usage),
 ]
