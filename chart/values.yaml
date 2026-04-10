@@ -94,6 +94,15 @@ database:
       existingSecret: ""
       secretKey: "password"
 
+# MCP Server — optional OpenShift MCP server deployment
+mcp:
+  enabled: false
+  image: "ghcr.io/openshift/openshift-mcp-server:latest"
+  toolsets:
+    - core
+    - helm
+    - observability
+
 nodeSelector: {}
 tolerations: []
 affinity: {}

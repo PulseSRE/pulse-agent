@@ -72,13 +72,29 @@ async def skill_usage_trend(
 # Parameterized route AFTER specific routes
 @router.get("/skills/{name}")
 async def get_skill(name: str, _auth=Depends(verify_token)):
-    """Get a specific skill's details."""
+    """Get a specific skill's full details including prompt and file contents."""
     from ..skill_loader import get_skill as _get
 
     skill = _get(name)
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
-    return skill.to_dict()
+
+    result = skill.to_dict()
+    result["system_prompt"] = skill.system_prompt
+
+    # Include raw file contents for viewing/editing
+    for filename, key in [
+        ("skill.md", "raw_content"),
+        ("evals.yaml", "evals_content"),
+        ("mcp.yaml", "mcp_content"),
+        ("layouts.yaml", "layouts_content"),
+        ("components.yaml", "components_content"),
+    ]:
+        filepath = skill.path / filename
+        if filepath.exists():
+            result[key] = filepath.read_text(encoding="utf-8")
+
+    return result
 
 
 @router.post("/admin/skills/reload")

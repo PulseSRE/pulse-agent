@@ -1,0 +1,61 @@
+{{- if .Values.mcp.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "openshift-sre-agent.fullname" . }}-mcp
+  labels:
+    {{- include "openshift-sre-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "openshift-sre-agent.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mcp-server
+  template:
+    metadata:
+      labels:
+        {{- include "openshift-sre-agent.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mcp-server
+    spec:
+      containers:
+        - name: mcp-server
+          image: {{ .Values.mcp.image | default "ghcr.io/openshift/openshift-mcp-server:latest" }}
+          args:
+            - --transport
+            - sse
+            - --sse-port
+            - "8081"
+            {{- range .Values.mcp.toolsets }}
+            - --enable-toolset
+            - {{ . }}
+            {{- end }}
+          ports:
+            - containerPort: 8081
+              name: sse
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "openshift-sre-agent.fullname" . }}-mcp
+  labels:
+    {{- include "openshift-sre-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-server
+spec:
+  selector:
+    {{- include "openshift-sre-agent.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-server
+  ports:
+    - port: 8081
+      targetPort: sse
+      name: sse
+{{- end }}
