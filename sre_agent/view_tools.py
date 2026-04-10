@@ -621,15 +621,26 @@ def update_view_widgets(
     widget_index: int = -1,
     new_title: str = "",
     new_description: str = "",
+    params_json: str = "",
 ) -> str:
-    """Modify an existing view — rename widgets, change chart types, remove/reorder widgets, rename view. The UI auto-refreshes.
+    """Modify an existing view — rename widgets, change chart types, update columns, sort, filter, convert widget types. The UI auto-refreshes.
 
     Args:
         view_id: The view ID (e.g. 'cv-abc123').
-        action: One of: 'rename_widget', 'update_widget_description', 'change_chart_type', 'remove_widget', 'move_widget', 'rename', 'update_description'.
+        action: One of: 'rename_widget', 'update_widget_description', 'change_chart_type',
+                'remove_widget', 'move_widget', 'rename', 'update_description',
+                'update_columns', 'sort_by', 'filter_by', 'change_kind', 'update_query',
+                'set_render_override'.
         widget_index: Widget index for widget actions. Use get_view_details to see indices.
-        new_title: New title for rename/rename_widget, or new position for move_widget, or chart type for change_chart_type ('line', 'bar', 'area').
+        new_title: New title for rename/rename_widget, or chart type for change_chart_type.
         new_description: New description for update_description/update_widget_description.
+        params_json: JSON string with action-specific parameters. Used by:
+                     update_columns: {"columns": ["name", "status", "age"]}
+                     sort_by: {"column": "restarts", "direction": "desc"}
+                     filter_by: {"column": "status", "operator": "!=", "value": "Running"}
+                     change_kind: {"new_kind": "chart"}
+                     update_query: {"query": "sum(rate(...))"}
+                     set_render_override: {"render_as": "bar_list", "render_options": {"label_column": "name"}}
     """
     from . import db
 
@@ -715,8 +726,156 @@ def update_view_widgets(
         db.update_view(view_id, owner, description=new_description)
         return _signal("view_updated", "Updated view description.", view_id=view_id)
 
+    elif action == "update_columns":
+        layout = view.get("layout", [])
+        if widget_index < 0 or widget_index >= len(layout):
+            return f"Invalid widget index {widget_index}."
+        widget = layout[widget_index]
+        if widget.get("kind") != "data_table":
+            return f"Widget [{widget_index}] is not a data_table (it's a {widget.get('kind')})."
+        try:
+            params = json.loads(params_json) if params_json else {}
+        except json.JSONDecodeError:
+            return "Error: params_json must be valid JSON."
+        columns = params.get("columns", [])
+        if not columns:
+            return "Error: params_json must include 'columns' list."
+        # Filter existing columns to only include requested ones
+        existing_cols = {c["id"]: c for c in widget.get("columns", [])}
+        new_cols = [existing_cols[cid] for cid in columns if cid in existing_cols]
+        if not new_cols:
+            return f"No matching columns found. Available: {list(existing_cols.keys())}"
+        widget["columns"] = new_cols
+        # Filter rows to only include requested columns
+        if widget.get("rows"):
+            col_ids = {c["id"] for c in new_cols}
+            widget["rows"] = [
+                {k: v for k, v in row.items() if k in col_ids or k.startswith("_")} for row in widget["rows"]
+            ]
+        db.update_view(view_id, owner, layout=layout)
+        return _signal("view_updated", f"Updated columns on widget [{widget_index}] to {columns}.", view_id=view_id)
+
+    elif action == "sort_by":
+        layout = view.get("layout", [])
+        if widget_index < 0 or widget_index >= len(layout):
+            return f"Invalid widget index {widget_index}."
+        widget = layout[widget_index]
+        if widget.get("kind") != "data_table":
+            return f"Widget [{widget_index}] is not a data_table."
+        try:
+            params = json.loads(params_json) if params_json else {}
+        except json.JSONDecodeError:
+            return "Error: params_json must be valid JSON."
+        column = params.get("column", "")
+        direction = params.get("direction", "asc")
+        if not column:
+            return "Error: params_json must include 'column'."
+        # Sort rows in place
+        rows = widget.get("rows", [])
+        reverse = direction.lower() == "desc"
+        try:
+            rows.sort(key=lambda r: r.get(column, ""), reverse=reverse)
+        except TypeError:
+            pass  # Mixed types — leave unsorted
+        widget["rows"] = rows
+        widget["_sort"] = {"column": column, "direction": direction}
+        db.update_view(view_id, owner, layout=layout)
+        return _signal("view_updated", f"Sorted widget [{widget_index}] by {column} {direction}.", view_id=view_id)
+
+    elif action == "filter_by":
+        layout = view.get("layout", [])
+        if widget_index < 0 or widget_index >= len(layout):
+            return f"Invalid widget index {widget_index}."
+        widget = layout[widget_index]
+        if widget.get("kind") != "data_table":
+            return f"Widget [{widget_index}] is not a data_table."
+        try:
+            params = json.loads(params_json) if params_json else {}
+        except json.JSONDecodeError:
+            return "Error: params_json must be valid JSON."
+        column = params.get("column", "")
+        operator = params.get("operator", "==")
+        value = params.get("value", "")
+        if not column:
+            return "Error: params_json must include 'column'."
+        # Store filter metadata (frontend applies it)
+        filters = widget.get("_filters", [])
+        filters.append({"column": column, "operator": operator, "value": value})
+        widget["_filters"] = filters
+        db.update_view(view_id, owner, layout=layout)
+        return _signal(
+            "view_updated", f"Added filter on widget [{widget_index}]: {column} {operator} {value}.", view_id=view_id
+        )
+
+    elif action == "change_kind":
+        layout = view.get("layout", [])
+        if widget_index < 0 or widget_index >= len(layout):
+            return f"Invalid widget index {widget_index}."
+        try:
+            params = json.loads(params_json) if params_json else {}
+        except json.JSONDecodeError:
+            return "Error: params_json must be valid JSON."
+        new_kind = params.get("new_kind", "")
+        if not new_kind:
+            return "Error: params_json must include 'new_kind'."
+        from .component_registry import get_valid_kinds
+
+        if new_kind not in get_valid_kinds():
+            return f"Invalid kind '{new_kind}'. Valid: {sorted(get_valid_kinds())}"
+        widget = layout[widget_index]
+        old_kind = widget.get("kind", "unknown")
+        widget["kind"] = new_kind
+        # Preserve data fields — the frontend renderer handles interpretation
+        db.update_view(view_id, owner, layout=layout)
+        return _signal(
+            "view_updated", f"Changed widget [{widget_index}] from {old_kind} to {new_kind}.", view_id=view_id
+        )
+
+    elif action == "update_query":
+        layout = view.get("layout", [])
+        if widget_index < 0 or widget_index >= len(layout):
+            return f"Invalid widget index {widget_index}."
+        try:
+            params = json.loads(params_json) if params_json else {}
+        except json.JSONDecodeError:
+            return "Error: params_json must be valid JSON."
+        query = params.get("query", "")
+        if not query:
+            return "Error: params_json must include 'query'."
+        widget = layout[widget_index]
+        widget["query"] = query
+        db.update_view(view_id, owner, layout=layout)
+        return _signal("view_updated", f"Updated query on widget [{widget_index}].", view_id=view_id)
+
+    elif action == "set_render_override":
+        layout = view.get("layout", [])
+        if widget_index < 0 or widget_index >= len(layout):
+            return f"Invalid widget index {widget_index}."
+        try:
+            params = json.loads(params_json) if params_json else {}
+        except json.JSONDecodeError:
+            return "Error: params_json must be valid JSON."
+        render_as = params.get("render_as", "")
+        if not render_as:
+            return "Error: params_json must include 'render_as'."
+        from .component_registry import get_valid_kinds
+
+        if render_as not in get_valid_kinds():
+            return f"Invalid render_as '{render_as}'. Valid: {sorted(get_valid_kinds())}"
+        widget = layout[widget_index]
+        widget["render_as"] = render_as
+        widget["render_options"] = params.get("render_options", {})
+        db.update_view(view_id, owner, layout=layout)
+        return _signal(
+            "view_updated", f"Set render override on widget [{widget_index}] to {render_as}.", view_id=view_id
+        )
+
     else:
-        return f"Unknown action '{action}'. Use: rename_widget, update_widget_description, change_chart_type, remove_widget, move_widget, rename, update_description."
+        return (
+            f"Unknown action '{action}'. Use: rename_widget, update_widget_description, "
+            "change_chart_type, remove_widget, move_widget, rename, update_description, "
+            "update_columns, sort_by, filter_by, change_kind, update_query, set_render_override."
+        )
 
 
 @beta_tool
