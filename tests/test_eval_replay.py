@@ -114,9 +114,16 @@ class TestFixtureLoading:
         for name in list_fixtures():
             fixture = load_fixture(name)
             assert "name" in fixture, f"{name} missing 'name'"
-            assert "prompt" in fixture, f"{name} missing 'prompt'"
-            assert "recorded_responses" in fixture, f"{name} missing 'recorded_responses'"
-            assert "expected" in fixture, f"{name} missing 'expected'"
+            if fixture.get("multi_turn"):
+                # Multi-turn fixtures have turns instead of prompt/recorded_responses
+                assert "turns" in fixture, f"{name} missing 'turns'"
+                for i, turn in enumerate(fixture["turns"]):
+                    assert "prompt" in turn, f"{name} turn {i} missing 'prompt'"
+                    assert "recorded_responses" in turn, f"{name} turn {i} missing 'recorded_responses'"
+            else:
+                assert "prompt" in fixture, f"{name} missing 'prompt'"
+                assert "recorded_responses" in fixture, f"{name} missing 'recorded_responses'"
+                assert "expected" in fixture, f"{name} missing 'expected'"
 
 
 # ---------------------------------------------------------------------------

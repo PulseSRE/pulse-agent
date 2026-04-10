@@ -144,6 +144,192 @@ class ReplayHarness:
 
 
 # ---------------------------------------------------------------------------
+# Multi-turn replay harness
+# ---------------------------------------------------------------------------
+
+
+class MultiTurnReplayHarness:
+    """Run a multi-turn conversation against recorded tool responses.
+
+    Each turn has its own user prompt and can have different recorded
+    responses (simulating state changes between turns).
+
+    Parameters
+    ----------
+    turns : list[dict]
+        Each turn has: ``prompt`` (str), ``recorded_responses`` (dict),
+        and optionally ``expected`` (dict) for per-turn scoring.
+    """
+
+    def __init__(self, turns: list[dict]):
+        self.turns = turns
+        self.all_tool_calls: list[list[dict]] = []
+
+    def run(
+        self,
+        client: Any,
+        system_prompt: str = "You are an SRE agent. Diagnose the issue.",
+        tool_defs: list | None = None,
+        write_tools: set[str] | None = None,
+        thinking: dict | None = None,
+    ) -> dict:
+        """Execute multi-turn conversation and return results per turn.
+
+        Returns
+        -------
+        dict with keys ``turns`` (list of per-turn results), ``total_duration_ms``.
+        """
+        messages: list[dict] = []
+        turn_results: list[dict] = []
+        total_start = time.monotonic()
+
+        for i, turn in enumerate(self.turns):
+            turn_tool_calls: list[dict] = []
+            recorded = turn.get("recorded_responses", {})
+
+            # Build mock tool map for this turn
+            effective_map: dict[str, Any] = {}
+            for name, value in recorded.items():
+                mock_tool = MagicMock()
+                mock_tool.name = name
+                mock_tool.call.return_value = value
+                effective_map[name] = mock_tool
+
+            if tool_defs is None and i == 0:
+                # Build defs from all turns' tools
+                all_tool_names: set[str] = set()
+                for t in self.turns:
+                    all_tool_names.update(t.get("recorded_responses", {}).keys())
+                stub_defs = [
+                    {
+                        "name": name,
+                        "description": f"Recorded stub for {name}",
+                        "input_schema": {"type": "object", "properties": {}, "required": []},
+                    }
+                    for name in sorted(all_tool_names)
+                ]
+            else:
+                stub_defs = tool_defs  # type: ignore[assignment]
+
+            def _on_tool_use(tool_name: str) -> None:
+                turn_tool_calls.append({"name": tool_name, "timestamp": time.time()})
+
+            # Add user message
+            messages.append({"role": "user", "content": turn["prompt"]})
+
+            start = time.monotonic()
+            kwargs: dict[str, Any] = {
+                "client": client,
+                "messages": list(messages),  # copy to avoid mutation
+                "system_prompt": system_prompt,
+                "tool_defs": stub_defs,
+                "tool_map": effective_map,
+                "write_tools": write_tools or set(),
+                "on_tool_use": _on_tool_use,
+            }
+            if thinking is not None:
+                kwargs["thinking"] = thinking
+
+            response = run_agent_streaming(**kwargs)
+            elapsed_ms = (time.monotonic() - start) * 1000
+
+            # Add assistant response to history for next turn
+            messages.append({"role": "assistant", "content": response})
+
+            self.all_tool_calls.append(turn_tool_calls)
+            turn_results.append({
+                "turn": i + 1,
+                "prompt": turn["prompt"],
+                "response": response,
+                "tool_calls": turn_tool_calls,
+                "duration_ms": elapsed_ms,
+            })
+
+        total_elapsed = (time.monotonic() - total_start) * 1000
+        return {
+            "turns": turn_results,
+            "total_duration_ms": total_elapsed,
+        }
+
+
+def score_multi_turn(result: dict, expected: dict) -> dict:
+    """Score a multi-turn replay result.
+
+    Parameters
+    ----------
+    result : Return value of ``MultiTurnReplayHarness.run()``.
+    expected : Dict with:
+        - ``per_turn`` : list[dict] — per-turn expected checks (same format as score_replay)
+        - ``overall_should_mention`` : list[str] — keywords in ANY turn response
+        - ``max_total_tool_calls`` : int — budget across all turns
+        - ``should_use_tools_in_order`` : list[str] — tools that must appear in this order across turns
+    """
+    checks: list[dict] = []
+    all_responses = " ".join(t["response"].lower() for t in result["turns"])
+    all_tool_calls = [tc["name"] for t in result["turns"] for tc in t["tool_calls"]]
+
+    # Per-turn checks
+    for i, turn_expected in enumerate(expected.get("per_turn", [])):
+        if i >= len(result["turns"]):
+            break
+        turn = result["turns"][i]
+        turn_response = turn["response"].lower()
+        turn_tools = [tc["name"] for tc in turn["tool_calls"]]
+
+        for keyword in turn_expected.get("should_mention", []):
+            found = keyword.lower() in turn_response
+            checks.append({"check": f"turn {i+1} mentions '{keyword}'", "passed": found, "weight": 1})
+
+        for tool in turn_expected.get("should_use_tools", []):
+            found = tool in turn_tools
+            checks.append({"check": f"turn {i+1} used tool '{tool}'", "passed": found, "weight": 1})
+
+        for tool in turn_expected.get("should_not_use_tools", []):
+            found = tool in turn_tools
+            checks.append({"check": f"turn {i+1} avoided tool '{tool}'", "passed": not found, "weight": 1})
+
+    # Overall keyword checks
+    for keyword in expected.get("overall_should_mention", []):
+        found = keyword.lower() in all_responses
+        checks.append({"check": f"any turn mentions '{keyword}'", "passed": found, "weight": 1})
+
+    # Tool budget
+    max_calls = expected.get("max_total_tool_calls")
+    if max_calls is not None:
+        within = len(all_tool_calls) <= max_calls
+        checks.append({"check": f"total tool calls <= {max_calls} (actual: {len(all_tool_calls)})", "passed": within, "weight": 1})
+
+    # Tool ordering
+    ordered_tools = expected.get("should_use_tools_in_order", [])
+    if ordered_tools:
+        positions = []
+        for tool in ordered_tools:
+            try:
+                pos = all_tool_calls.index(tool)
+                positions.append(pos)
+            except ValueError:
+                positions.append(-1)
+        in_order = all(p >= 0 for p in positions) and positions == sorted(positions)
+        checks.append({"check": f"tools in order: {ordered_tools}", "passed": in_order, "weight": 1})
+
+    # Compute score
+    if not checks:
+        return {"passed": True, "score": 100, "checks": [], "turns": len(result["turns"])}
+
+    total_weight = sum(c["weight"] for c in checks)
+    earned = sum(c["weight"] for c in checks if c["passed"])
+    score = round(earned / total_weight * 100)
+
+    return {
+        "passed": all(c["passed"] for c in checks),
+        "score": score,
+        "checks": checks,
+        "turns": len(result["turns"]),
+        "total_tool_calls": all_tool_calls,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Deterministic scorer (no LLM needed)
 # ---------------------------------------------------------------------------
 
