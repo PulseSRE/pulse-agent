@@ -1,0 +1,48 @@
+# Default MCP server — OpenShift MCP Server
+# https://github.com/openshift/openshift-mcp-server
+#
+# Provides raw K8s CRUD tools that complement Pulse's native domain tools.
+# Disabled by default — enable by setting PULSE_AGENT_MCP_ENABLED=true
+
+server:
+  url: "npx @openshift/openshift-mcp-server@latest"
+  transport: stdio
+  auth:
+    type: kubeconfig
+
+# Only enable toolsets that ADD capabilities beyond native Pulse tools.
+# Core/observability are already covered natively (and better, with UI rendering).
+toolsets:
+  # - core          # SKIP — Pulse has better pod/node/resource tools with UI
+  # - observability # SKIP — Pulse has discover_metrics, verify_query, PromQL recipes
+  - helm            # NEW — Helm chart install/upgrade/uninstall/list
+  - tekton          # NEW — Pipeline run, TaskRun operations
+  # - kubevirt      # SKIP — enable if cluster has KubeVirt
+  # - kiali         # SKIP — enable if cluster has service mesh
+
+# Map MCP tool output to Pulse UI components
+tool_renderers:
+  helm_list:
+    kind: data_table
+    parser: json
+    columns: [name, namespace, revision, status, chart, app_version]
+  helm_install:
+    kind: status_list
+    parser: key_value
+  helm_uninstall:
+    kind: key_value
+    parser: key_value
+  tekton_pipeline_run:
+    kind: status_list
+    parser: json
+    item_mapping:
+      label: "{{name}}"
+      status: "{{status}}"
+      detail: "{{pipeline}} — {{duration}}"
+  tekton_task_run:
+    kind: status_list
+    parser: json
+    item_mapping:
+      label: "{{name}}"
+      status: "{{status}}"
+      detail: "{{task}}"
