@@ -214,14 +214,11 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                 )
                 messages.append({"role": "assistant", "content": full_response})
 
-                # Persist messages to chat history
+                # Persist messages to chat history (single commit)
                 try:
-                    from ..chat_history import auto_title, save_message
+                    from ..chat_history import save_turn
 
-                    save_message(session_id, "user", content)
-                    save_message(session_id, "assistant", full_response)
-                    if turn_counter == 1:
-                        auto_title(session_id, content)
+                    save_turn(session_id, content, full_response, is_first_turn=(turn_counter == 1))
                 except Exception:
                     logger.debug("Failed to persist chat messages", exc_info=True)
 
@@ -464,14 +461,11 @@ async def websocket_auto_agent(websocket: WebSocket):
                 )
                 messages.append({"role": "assistant", "content": full_response})
 
-                # Persist messages to chat history
+                # Persist messages to chat history (single commit)
                 try:
-                    from ..chat_history import auto_title, save_message
+                    from ..chat_history import save_turn
 
-                    save_message(session_id, "user", content)
-                    save_message(session_id, "assistant", full_response)
-                    if turn_counter == 1:
-                        auto_title(session_id, content)
+                    save_turn(session_id, content, full_response, is_first_turn=(turn_counter == 1))
                 except Exception:
                     logger.debug("Failed to persist chat messages", exc_info=True)
 

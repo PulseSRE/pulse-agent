@@ -41,6 +41,41 @@ def save_message(session_id: str, role: str, content: str, components: list | No
         logger.debug("Failed to save chat message", exc_info=True)
 
 
+def save_turn(
+    session_id: str,
+    user_content: str,
+    assistant_content: str,
+    components: list | None = None,
+    is_first_turn: bool = False,
+) -> None:
+    """Save both user and assistant messages in a single commit."""
+    try:
+        db = get_database()
+        db.execute(
+            "INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'user', ?)",
+            (session_id, user_content[:50000]),
+        )
+        components_json = json.dumps(components) if components else None
+        db.execute(
+            "INSERT INTO chat_messages (session_id, role, content, components_json) VALUES (?, 'assistant', ?, ?)",
+            (session_id, assistant_content[:50000], components_json),
+        )
+        db.execute(
+            "UPDATE chat_sessions SET message_count = message_count + 2, updated_at = NOW() WHERE id = ?",
+            (session_id,),
+        )
+        if is_first_turn:
+            title = user_content.strip()[:80]
+            if title:
+                db.execute(
+                    "UPDATE chat_sessions SET title = ? WHERE id = ? AND title = 'New Chat'",
+                    (title, session_id),
+                )
+        db.commit()
+    except Exception:
+        logger.debug("Failed to save chat turn", exc_info=True)
+
+
 def auto_title(session_id: str, first_query: str) -> None:
     """Auto-generate a title from the first user message."""
     try:
