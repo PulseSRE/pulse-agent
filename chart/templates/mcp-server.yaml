@@ -2,20 +2,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "openshift-sre-agent.fullname" . }}-mcp
+  name: {{ include "sre-agent.fullname" . }}-mcp
   labels:
-    {{- include "openshift-sre-agent.labels" . | nindent 4 }}
+    {{- include "sre-agent.labels" . | nindent 4 }}
     app.kubernetes.io/component: mcp-server
 spec:
   replicas: 1
   selector:
     matchLabels:
-      {{- include "openshift-sre-agent.selectorLabels" . | nindent 6 }}
+      {{- include "sre-agent.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: mcp-server
   template:
     metadata:
       labels:
-        {{- include "openshift-sre-agent.selectorLabels" . | nindent 8 }}
+        {{- include "sre-agent.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: mcp-server
     spec:
       containers:
@@ -46,13 +46,13 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "openshift-sre-agent.fullname" . }}-mcp
+  name: {{ include "sre-agent.fullname" . }}-mcp
   labels:
-    {{- include "openshift-sre-agent.labels" . | nindent 4 }}
+    {{- include "sre-agent.labels" . | nindent 4 }}
     app.kubernetes.io/component: mcp-server
 spec:
   selector:
-    {{- include "openshift-sre-agent.selectorLabels" . | nindent 4 }}
+    {{- include "sre-agent.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: mcp-server
   ports:
     - port: 8081
