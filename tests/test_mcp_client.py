@@ -30,10 +30,10 @@ class TestLoadMCPConfig:
         config = load_mcp_config(path)
         assert "helm" in config["toolsets"]
 
-    def test_sre_mcp_has_tekton(self):
+    def test_sre_mcp_has_observability(self):
         path = Path(__file__).parent.parent / "sre_agent" / "skills" / "sre" / "mcp.yaml"
         config = load_mcp_config(path)
-        assert "tekton" in config["toolsets"]
+        assert "observability" in config["toolsets"]
 
     def test_sre_mcp_has_renderers(self):
         path = Path(__file__).parent.parent / "sre_agent" / "skills" / "sre" / "mcp.yaml"
@@ -65,11 +65,11 @@ class TestConnectMCPServer:
         assert not conn.connected
         assert "Unknown transport" in conn.error
 
-    def test_sse_not_implemented(self):
-        config = {"server": {"url": "https://example.com", "transport": "sse"}, "toolsets": []}
+    def test_sse_connection_failure(self):
+        config = {"server": {"url": "http://localhost:99999", "transport": "sse"}, "toolsets": []}
         conn = connect_mcp_server("test", config)
         assert not conn.connected
-        assert "not yet implemented" in conn.error
+        assert conn.error  # Should have an error (connection refused)
 
     def test_missing_command_returns_error(self):
         config = {"server": {"url": "nonexistent_binary_xyz_12345", "transport": "stdio"}, "toolsets": []}

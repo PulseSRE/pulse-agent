@@ -62,12 +62,27 @@ class MCPTool:
         }
 
 
+def _resolve_env_vars(text: str) -> str:
+    """Resolve ${VAR:-default} patterns in config strings."""
+    import os
+    import re
+
+    def _replace(match):
+        var = match.group(1)
+        default = match.group(3) or ""
+        return os.environ.get(var, default)
+
+    return re.sub(r"\$\{(\w+)(:-([^}]*))?\}", _replace, text)
+
+
 def load_mcp_config(mcp_yaml_path: Path) -> dict | None:
-    """Load and parse an mcp.yaml file."""
+    """Load and parse an mcp.yaml file. Resolves ${ENV:-default} in values."""
     if not mcp_yaml_path.exists():
         return None
     try:
-        return yaml.safe_load(mcp_yaml_path.read_text(encoding="utf-8"))
+        raw = mcp_yaml_path.read_text(encoding="utf-8")
+        resolved = _resolve_env_vars(raw)
+        return yaml.safe_load(resolved)
     except Exception as e:
         logger.warning("Failed to load mcp.yaml at %s: %s", mcp_yaml_path, e)
         return None
@@ -151,10 +166,70 @@ def _connect_stdio(conn: MCPConnection) -> MCPConnection:
 
 
 def _connect_sse(conn: MCPConnection) -> MCPConnection:
-    """Connect via SSE transport (HTTP)."""
-    # SSE connection would use httpx or similar
-    # For now, mark as not implemented
-    conn.error = "SSE transport not yet implemented"
+    """Connect via SSE transport (HTTP POST to MCP server)."""
+    import urllib.error
+    import urllib.request
+
+    base_url = conn.url.rstrip("/")
+
+    try:
+        # MCP SSE: POST /sse with initialize, then POST /message for tools/list
+        init_request = {
+            "jsonrpc": "2.0",
+            "id": next(_request_id_counter),
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "pulse-agent", "version": "1.0"},
+            },
+        }
+
+        req = urllib.request.Request(
+            f"{base_url}/message",
+            data=json.dumps(init_request).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = urllib.request.urlopen(req, timeout=10)
+        resp.read()  # Consume initialize response
+
+        # Discover tools
+        tools_request = {
+            "jsonrpc": "2.0",
+            "id": next(_request_id_counter),
+            "method": "tools/list",
+            "params": {},
+        }
+        req = urllib.request.Request(
+            f"{base_url}/message",
+            data=json.dumps(tools_request).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = urllib.request.urlopen(req, timeout=10)
+        response = json.loads(resp.read())
+
+        tools_raw = response.get("result", {}).get("tools", [])
+        tool_defs = [
+            {
+                "name": t.get("name", ""),
+                "description": t.get("description", ""),
+                "inputSchema": t.get("inputSchema", {"type": "object", "properties": {}, "required": []}),
+            }
+            for t in tools_raw
+            if t.get("name")
+        ]
+
+        conn.tools = [t["name"] for t in tool_defs]
+        conn.tool_schemas = {t["name"]: t for t in tool_defs}
+        conn.connected = True
+        conn._sse_base_url = base_url
+        logger.info("MCP SSE '%s' connected: %d tools", conn.name, len(conn.tools))
+
+    except urllib.error.URLError as e:
+        conn.error = f"Cannot connect to MCP server at {base_url}: {e.reason}"
+    except Exception as e:
+        conn.error = f"SSE connection failed: {e}"
+
     return conn
 
 
@@ -217,8 +292,16 @@ def _discover_tools_stdio(process: subprocess.Popen, toolsets: list[str]) -> lis
 
 def call_mcp_tool(conn: MCPConnection, tool_name: str, arguments: dict) -> str:
     """Call a tool on an MCP server and return the text result."""
-    if not conn.connected or not conn.process:
+    if not conn.connected:
         return f"Error: MCP server '{conn.name}' is not connected"
+
+    # SSE transport — HTTP POST
+    if conn.transport == "sse":
+        return _call_mcp_tool_sse(conn, tool_name, arguments)
+
+    # Stdio transport — pipe to process
+    if not conn.process:
+        return f"Error: MCP server '{conn.name}' has no process"
 
     try:
         request = {
@@ -249,6 +332,37 @@ def call_mcp_tool(conn: MCPConnection, tool_name: str, arguments: dict) -> str:
         return "\n".join(texts) if texts else json.dumps(result)
     except Exception as e:
         return f"Error calling MCP tool '{tool_name}': {e}"
+
+
+def _call_mcp_tool_sse(conn: MCPConnection, tool_name: str, arguments: dict) -> str:
+    """Call an MCP tool via SSE/HTTP transport."""
+    import urllib.request
+
+    base_url = getattr(conn, "_sse_base_url", conn.url.rstrip("/"))
+    try:
+        request = {
+            "jsonrpc": "2.0",
+            "id": next(_request_id_counter),
+            "method": "tools/call",
+            "params": {"name": tool_name, "arguments": arguments},
+        }
+        req = urllib.request.Request(
+            f"{base_url}/message",
+            data=json.dumps(request).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = urllib.request.urlopen(req, timeout=30)
+        response = json.loads(resp.read())
+
+        if "error" in response:
+            return f"Error: {response['error'].get('message', 'Unknown error')}"
+
+        result = response.get("result", {})
+        content = result.get("content", [])
+        texts = [c.get("text", "") for c in content if c.get("type") == "text"]
+        return "\n".join(texts) if texts else json.dumps(result)
+    except Exception as e:
+        return f"Error calling MCP tool '{tool_name}' via SSE: {e}"
 
 
 def register_mcp_tools(conn: MCPConnection) -> int:
