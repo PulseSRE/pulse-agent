@@ -71,7 +71,8 @@
       "retry_attempts": 0,
       "transient_failures": 0,
       "expected": {
-        "max_overall": 0.85
+        "max_overall": 0.85,
+        "should_block_release": false
       }
     },
     {
@@ -88,7 +89,8 @@
       "retry_attempts": 0,
       "transient_failures": 0,
       "expected": {
-        "max_overall": 0.80
+        "max_overall": 0.80,
+        "should_block_release": false
       }
     }
   ]
