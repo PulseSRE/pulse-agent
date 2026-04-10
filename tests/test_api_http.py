@@ -253,3 +253,61 @@ class TestContextAndEval:
     def test_eval_status(self, api_client, api_headers):
         r = api_client.get("/eval/status", headers=api_headers)
         assert r.status_code == 200
+
+
+class TestChatHistoryAPI:
+    @pytest.fixture(autouse=True)
+    def _set_dev_user(self, monkeypatch):
+        monkeypatch.setenv("PULSE_AGENT_DEV_USER", "test-user")
+        from sre_agent.config import _reset_settings
+
+        _reset_settings()
+
+    def test_list_sessions(self, api_client, api_headers):
+        r = api_client.get("/chat/sessions", headers=api_headers)
+        assert r.status_code == 200
+        assert isinstance(r.json()["sessions"], list)
+
+    def test_create_and_list_session(self, api_client, api_headers):
+        r = api_client.post("/chat/sessions", headers=api_headers, json={"title": "Test Chat", "agent_mode": "sre"})
+        assert r.status_code == 200
+        session_id = r.json()["id"]
+        assert session_id
+
+        r = api_client.get("/chat/sessions", headers=api_headers)
+        sessions = r.json()["sessions"]
+        assert any(s["id"] == session_id for s in sessions)
+        assert any(s["title"] == "Test Chat" for s in sessions)
+
+    def test_get_messages_empty(self, api_client, api_headers):
+        r = api_client.post("/chat/sessions", headers=api_headers, json={"title": "Empty", "agent_mode": "auto"})
+        sid = r.json()["id"]
+        r = api_client.get(f"/chat/sessions/{sid}/messages", headers=api_headers)
+        assert r.status_code == 200
+        assert r.json()["messages"] == []
+        assert r.json()["total"] == 0
+
+    def test_delete_session(self, api_client, api_headers):
+        r = api_client.post("/chat/sessions", headers=api_headers, json={"title": "To Delete"})
+        sid = r.json()["id"]
+        r = api_client.delete(f"/chat/sessions/{sid}", headers=api_headers)
+        assert r.status_code == 200
+        r = api_client.get("/chat/sessions", headers=api_headers)
+        assert not any(s["id"] == sid for s in r.json()["sessions"])
+
+    def test_rename_session(self, api_client, api_headers):
+        r = api_client.post("/chat/sessions", headers=api_headers, json={"title": "Old Name"})
+        sid = r.json()["id"]
+        r = api_client.put(f"/chat/sessions/{sid}", headers=api_headers, json={"title": "New Name"})
+        assert r.status_code == 200
+        r = api_client.get("/chat/sessions", headers=api_headers)
+        assert any(s["title"] == "New Name" for s in r.json()["sessions"])
+
+    def test_nonexistent_session_messages(self, api_client, api_headers):
+        r = api_client.get("/chat/sessions/nonexistent/messages", headers=api_headers)
+        assert r.status_code == 200
+        assert r.json()["messages"] == []
+
+    def test_unauthorized(self, api_client):
+        r = api_client.get("/chat/sessions")
+        assert r.status_code in (401, 403, 503)
