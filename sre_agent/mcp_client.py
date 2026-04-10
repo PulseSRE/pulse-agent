@@ -7,8 +7,10 @@ with UI rendering via mcp_renderer.
 
 from __future__ import annotations
 
+import itertools
 import json
 import logging
+import select
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,6 +38,26 @@ class MCPConnection:
 
 # Global MCP connections
 _connections: dict[str, MCPConnection] = {}
+_request_id_counter = itertools.count(1)
+
+
+class MCPTool:
+    """Tool wrapper that calls an MCP server and renders the output."""
+
+    def __init__(self, name: str, fn: Any, description: str):
+        self.name = name
+        self._fn = fn
+        self.description = description
+
+    def call(self, input_data: dict) -> tuple[str, dict]:
+        return self._fn(**input_data)
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "input_schema": {"type": "object", "properties": {}, "required": []},
+        }
 
 
 def load_mcp_config(mcp_yaml_path: Path) -> dict | None:
@@ -107,10 +129,14 @@ def _connect_stdio(conn: MCPConnection) -> MCPConnection:
             text=True,
         )
         conn.process = process
-        conn.connected = True
 
         # Discover tools via MCP initialize handshake
-        conn.tools = _discover_tools_stdio(process, conn.toolsets)
+        try:
+            conn.tools = _discover_tools_stdio(process, conn.toolsets)
+        except Exception:
+            process.terminate()
+            raise
+        conn.connected = True
         logger.info("MCP '%s' connected: %d tools from %s", conn.name, len(conn.tools), conn.toolsets)
     except FileNotFoundError:
         conn.error = f"Command not found: {cmd}. Install with: npm install -g {args[0] if args else cmd}"
@@ -137,7 +163,7 @@ def _discover_tools_stdio(process: subprocess.Popen, toolsets: list[str]) -> lis
         # Send initialize request
         init_request = {
             "jsonrpc": "2.0",
-            "id": 1,
+            "id": next(_request_id_counter),
             "method": "initialize",
             "params": {
                 "protocolVersion": "2024-11-05",
@@ -148,9 +174,6 @@ def _discover_tools_stdio(process: subprocess.Popen, toolsets: list[str]) -> lis
         process.stdin.write(json.dumps(init_request) + "\n")
         process.stdin.flush()
 
-        # Read response (with timeout)
-        import select
-
         ready, _, _ = select.select([process.stdout], [], [], 10)
         if not ready:
             return []
@@ -160,7 +183,7 @@ def _discover_tools_stdio(process: subprocess.Popen, toolsets: list[str]) -> lis
             return []
 
         # Send tools/list request
-        tools_request = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+        tools_request = {"jsonrpc": "2.0", "id": next(_request_id_counter), "method": "tools/list", "params": {}}
         process.stdin.write(json.dumps(tools_request) + "\n")
         process.stdin.flush()
 
@@ -188,14 +211,12 @@ def call_mcp_tool(conn: MCPConnection, tool_name: str, arguments: dict) -> str:
     try:
         request = {
             "jsonrpc": "2.0",
-            "id": 3,
+            "id": next(_request_id_counter),
             "method": "tools/call",
             "params": {"name": tool_name, "arguments": arguments},
         }
         conn.process.stdin.write(json.dumps(request) + "\n")
         conn.process.stdin.flush()
-
-        import select
 
         ready, _, _ = select.select([conn.process.stdout], [], [], 30)
         if not ready:
@@ -242,24 +263,6 @@ def register_mcp_tools(conn: MCPConnection) -> int:
             return tool_fn
 
         fn = _make_tool_fn(tool_name, renderer_config, conn)
-
-        # Create a minimal tool-like object
-        class MCPTool:
-            def __init__(self, name, fn, description):
-                self.name = name
-                self._fn = fn
-                self.description = description
-
-            def call(self, input_data):
-                return self._fn(**input_data)
-
-            def to_dict(self):
-                return {
-                    "name": self.name,
-                    "description": self.description,
-                    "input_schema": {"type": "object", "properties": {}, "required": []},
-                }
-
         tool = MCPTool(tool_name, fn, f"MCP tool from {conn.name}")
         register_tool(tool)
         count += 1

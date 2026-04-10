@@ -223,14 +223,14 @@ def _parse_csv(text: str) -> list[dict] | None:
 
 
 def _parse_key_value(text: str) -> dict | None:
-    """Parse key: value or key=value lines."""
+    """Parse key: value or key=value lines. Skips URLs."""
     result: dict[str, str] = {}
     for line in text.strip().split("\n"):
         line = line.strip()
-        if not line:
+        if not line or re.match(r"^https?://", line):
             continue
-        # Try key: value
-        match = re.match(r"^([^:=]+?)\s*[:=]\s*(.+)$", line)
+        # Match key: value but not URLs (value starting with //)
+        match = re.match(r"^([^:=]+?)\s*[:=]\s*(?!//)(.+)$", line)
         if match:
             result[match.group(1).strip()] = match.group(2).strip()
     return result if len(result) >= 2 else None

@@ -8,11 +8,12 @@ intelligently. Used by widget mutations (change_kind) and live chat
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 logger = logging.getLogger("pulse_agent.component_transform")
 
 # Transformation matrix: {(from_kind, to_kind): transform_function}
-_TRANSFORMS: dict[tuple[str, str], callable] = {}
+_TRANSFORMS: dict[tuple[str, str], Callable] = {}
 
 
 def _register(from_kind: str, to_kind: str):

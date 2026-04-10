@@ -82,16 +82,25 @@ def get_skill_stats(days: int = 30) -> dict:
             (days,),
         )
 
+        # Top tools per skill in a single query (avoids N+1)
+        all_tool_rows = db.fetchall(
+            "SELECT skill_name, unnest(tools_called) as tool_name, COUNT(*) as cnt "
+            "FROM skill_usage "
+            "WHERE timestamp > NOW() - INTERVAL '1 day' * %s AND tools_called IS NOT NULL "
+            "GROUP BY skill_name, tool_name ORDER BY skill_name, cnt DESC",
+            (days,),
+        )
+        # Partition top 5 tools per skill
+        top_tools_by_skill: dict[str, list[dict]] = {}
+        for t in all_tool_rows or []:
+            sn = t["skill_name"]
+            if sn not in top_tools_by_skill:
+                top_tools_by_skill[sn] = []
+            if len(top_tools_by_skill[sn]) < 5:
+                top_tools_by_skill[sn].append({"name": t["tool_name"], "count": t["cnt"]})
+
         skills = []
         for row in skill_rows or []:
-            # Top tools for this skill
-            tool_rows = db.fetchall(
-                "SELECT unnest(tools_called) as tool_name, COUNT(*) as cnt "
-                "FROM skill_usage "
-                "WHERE skill_name = %s AND timestamp > NOW() - INTERVAL '1 day' * %s "
-                "GROUP BY 1 ORDER BY cnt DESC LIMIT 5",
-                (row["skill_name"], days),
-            )
             skills.append(
                 {
                     "name": row["skill_name"],
@@ -104,7 +113,7 @@ def get_skill_stats(days: int = 30) -> dict:
                     },
                     "feedback_positive": row["feedback_positive"],
                     "feedback_negative": row["feedback_negative"],
-                    "top_tools": [{"name": t["tool_name"], "count": t["cnt"]} for t in (tool_rows or [])],
+                    "top_tools": top_tools_by_skill.get(row["skill_name"], []),
                 }
             )
 
