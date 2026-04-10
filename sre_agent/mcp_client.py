@@ -32,6 +32,7 @@ class MCPConnection:
     tool_renderers: dict[str, dict] = field(default_factory=dict)
     connected: bool = False
     tools: list[str] = field(default_factory=list)
+    tool_schemas: dict[str, dict] = field(default_factory=dict)  # name → {description, inputSchema}
     process: Any = None  # subprocess for stdio transport
     error: str = ""
 
@@ -44,10 +45,11 @@ _request_id_counter = itertools.count(1)
 class MCPTool:
     """Tool wrapper that calls an MCP server and renders the output."""
 
-    def __init__(self, name: str, fn: Any, description: str):
+    def __init__(self, name: str, fn: Any, description: str, input_schema: dict | None = None):
         self.name = name
         self._fn = fn
         self.description = description
+        self._input_schema = input_schema or {"type": "object", "properties": {}, "required": []}
 
     def call(self, input_data: dict) -> tuple[str, dict]:
         return self._fn(**input_data)
@@ -56,7 +58,7 @@ class MCPTool:
         return {
             "name": self.name,
             "description": self.description,
-            "input_schema": {"type": "object", "properties": {}, "required": []},
+            "input_schema": self._input_schema,
         }
 
 
@@ -132,10 +134,12 @@ def _connect_stdio(conn: MCPConnection) -> MCPConnection:
 
         # Discover tools via MCP initialize handshake
         try:
-            conn.tools = _discover_tools_stdio(process, conn.toolsets)
+            tool_defs = _discover_tools_stdio(process, conn.toolsets)
         except Exception:
             process.terminate()
             raise
+        conn.tools = [t["name"] for t in tool_defs]
+        conn.tool_schemas = {t["name"]: t for t in tool_defs}
         conn.connected = True
         logger.info("MCP '%s' connected: %d tools from %s", conn.name, len(conn.tools), conn.toolsets)
     except FileNotFoundError:
@@ -196,8 +200,16 @@ def _discover_tools_stdio(process: subprocess.Popen, toolsets: list[str]) -> lis
             return []
 
         response = json.loads(line)
-        tools = response.get("result", {}).get("tools", [])
-        return [t.get("name", "") for t in tools if t.get("name")]
+        tools_raw = response.get("result", {}).get("tools", [])
+        return [
+            {
+                "name": t.get("name", ""),
+                "description": t.get("description", ""),
+                "inputSchema": t.get("inputSchema", {"type": "object", "properties": {}, "required": []}),
+            }
+            for t in tools_raw
+            if t.get("name")
+        ]
     except Exception as e:
         logger.debug("Tool discovery failed: %s", e)
         return []
@@ -263,7 +275,10 @@ def register_mcp_tools(conn: MCPConnection) -> int:
             return tool_fn
 
         fn = _make_tool_fn(tool_name, renderer_config, conn)
-        tool = MCPTool(tool_name, fn, f"MCP tool from {conn.name}")
+        schema_def = conn.tool_schemas.get(tool_name, {})
+        description = schema_def.get("description", f"MCP tool from {conn.name}")
+        input_schema = schema_def.get("inputSchema", {"type": "object", "properties": {}, "required": []})
+        tool = MCPTool(tool_name, fn, description, input_schema=input_schema)
         register_tool(tool)
         count += 1
 

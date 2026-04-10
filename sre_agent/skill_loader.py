@@ -188,8 +188,26 @@ def load_skills(skills_dir: Path | None = None) -> dict[str, Skill]:
 
 
 def reload_skills() -> dict[str, Skill]:
-    """Hot reload all skills."""
-    return load_skills()
+    """Hot reload all skills. Logs added/removed/changed skills."""
+    old_names = set(_skills.keys())
+    old_versions = {n: s.version for n, s in _skills.items()}
+    new_skills = load_skills()
+    new_names = set(new_skills.keys())
+
+    added = new_names - old_names
+    removed = old_names - new_names
+    changed = [n for n in old_names & new_names if old_versions.get(n) != new_skills[n].version]
+
+    if added:
+        logger.info("Skills added: %s", ", ".join(sorted(added)))
+    if removed:
+        logger.info("Skills removed: %s", ", ".join(sorted(removed)))
+    if changed:
+        logger.info("Skills updated: %s", ", ".join(sorted(changed)))
+    if not added and not removed and not changed:
+        logger.info("No skill changes detected")
+
+    return new_skills
 
 
 def list_skills() -> list[Skill]:
@@ -209,17 +227,31 @@ def get_skill(name: str) -> Skill | None:
 def classify_query(query: str) -> Skill:
     """Route a query to the best matching skill based on keyword scoring.
 
-    Returns the highest-scoring skill (by keyword match length sum).
+    Applies typo correction before matching. Uses word-boundary matching
+    for short keywords (< 4 chars) to avoid false positives like "pod" in "tripod".
     Falls back to 'sre' if no skill matches.
     """
     if not _skills:
         load_skills()
 
-    q = query.lower()
+    # Apply typo correction if available
+    try:
+        from .orchestrator import fix_typos
+
+        q = fix_typos(query).lower()
+    except ImportError:
+        q = query.lower()
+
     scores: dict[str, int] = {}
 
     for kw, skill_name, kw_len in _keyword_index:
-        if kw in q:
+        if kw_len < 4:
+            # Short keywords: word boundary match to avoid "pod" matching "tripod"
+            import re
+
+            if re.search(r"\b" + re.escape(kw) + r"\b", q):
+                scores[skill_name] = scores.get(skill_name, 0) + kw_len
+        elif kw in q:
             scores[skill_name] = scores.get(skill_name, 0) + kw_len
 
     if not scores:
