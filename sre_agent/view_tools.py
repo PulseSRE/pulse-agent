@@ -653,6 +653,13 @@ def update_view_widgets(
     # Use the view's actual owner for updates (identity may differ across sessions)
     owner = view.get("owner", owner)
 
+    # Helper for params_json parsing (used by mutation actions below)
+    def _parse_params() -> dict | str:
+        try:
+            return json.loads(params_json) if params_json else {}
+        except json.JSONDecodeError:
+            return "Error: params_json must be valid JSON."
+
     if action == "remove_widget":
         layout = view.get("layout", [])
         if widget_index < 0 or widget_index >= len(layout):
@@ -733,10 +740,9 @@ def update_view_widgets(
         widget = layout[widget_index]
         if widget.get("kind") != "data_table":
             return f"Widget [{widget_index}] is not a data_table (it's a {widget.get('kind')})."
-        try:
-            params = json.loads(params_json) if params_json else {}
-        except json.JSONDecodeError:
-            return "Error: params_json must be valid JSON."
+        params = _parse_params()
+        if isinstance(params, str):
+            return params
         columns = params.get("columns", [])
         if not columns:
             return "Error: params_json must include 'columns' list."
@@ -762,10 +768,9 @@ def update_view_widgets(
         widget = layout[widget_index]
         if widget.get("kind") != "data_table":
             return f"Widget [{widget_index}] is not a data_table."
-        try:
-            params = json.loads(params_json) if params_json else {}
-        except json.JSONDecodeError:
-            return "Error: params_json must be valid JSON."
+        params = _parse_params()
+        if isinstance(params, str):
+            return params
         column = params.get("column", "")
         direction = params.get("direction", "asc")
         if not column:
@@ -789,10 +794,9 @@ def update_view_widgets(
         widget = layout[widget_index]
         if widget.get("kind") != "data_table":
             return f"Widget [{widget_index}] is not a data_table."
-        try:
-            params = json.loads(params_json) if params_json else {}
-        except json.JSONDecodeError:
-            return "Error: params_json must be valid JSON."
+        params = _parse_params()
+        if isinstance(params, str):
+            return params
         column = params.get("column", "")
         operator = params.get("operator", "==")
         value = params.get("value", "")
@@ -811,10 +815,9 @@ def update_view_widgets(
         layout = view.get("layout", [])
         if widget_index < 0 or widget_index >= len(layout):
             return f"Invalid widget index {widget_index}."
-        try:
-            params = json.loads(params_json) if params_json else {}
-        except json.JSONDecodeError:
-            return "Error: params_json must be valid JSON."
+        params = _parse_params()
+        if isinstance(params, str):
+            return params
         new_kind = params.get("new_kind", "")
         if not new_kind:
             return "Error: params_json must include 'new_kind'."
@@ -824,8 +827,13 @@ def update_view_widgets(
             return f"Invalid kind '{new_kind}'. Valid: {sorted(get_valid_kinds())}"
         widget = layout[widget_index]
         old_kind = widget.get("kind", "unknown")
-        widget["kind"] = new_kind
-        # Preserve data fields — the frontend renderer handles interpretation
+        # Use component_transform for intelligent data mapping when available
+        from .component_transform import can_transform, transform
+
+        if can_transform(old_kind, new_kind):
+            layout[widget_index] = transform(widget, new_kind)
+        else:
+            widget["kind"] = new_kind
         db.update_view(view_id, owner, layout=layout)
         return _signal(
             "view_updated", f"Changed widget [{widget_index}] from {old_kind} to {new_kind}.", view_id=view_id
@@ -835,10 +843,9 @@ def update_view_widgets(
         layout = view.get("layout", [])
         if widget_index < 0 or widget_index >= len(layout):
             return f"Invalid widget index {widget_index}."
-        try:
-            params = json.loads(params_json) if params_json else {}
-        except json.JSONDecodeError:
-            return "Error: params_json must be valid JSON."
+        params = _parse_params()
+        if isinstance(params, str):
+            return params
         query = params.get("query", "")
         if not query:
             return "Error: params_json must include 'query'."
@@ -851,10 +858,9 @@ def update_view_widgets(
         layout = view.get("layout", [])
         if widget_index < 0 or widget_index >= len(layout):
             return f"Invalid widget index {widget_index}."
-        try:
-            params = json.loads(params_json) if params_json else {}
-        except json.JSONDecodeError:
-            return "Error: params_json must be valid JSON."
+        params = _parse_params()
+        if isinstance(params, str):
+            return params
         render_as = params.get("render_as", "")
         if not render_as:
             return "Error: params_json must include 'render_as'."

@@ -14,10 +14,11 @@ from dataclasses import dataclass, field
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-# Import from component registry (single source of truth)
+# Component registry is the source of truth for valid kinds.
+# Call _get_valid_kinds() at validation time (not import time) to support late-registered kinds.
 from .component_registry import get_valid_kinds as _get_valid_kinds
 
-VALID_KINDS = _get_valid_kinds()
+VALID_KINDS = _get_valid_kinds()  # Backward-compat export; internal validators use _get_valid_kinds()
 
 METRIC_SOURCE_KINDS = frozenset({"metric_card", "info_card_grid", "grid"})
 
@@ -333,8 +334,9 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
     if not kind:
         result.errors.append("Component missing required 'kind' field.")
         return
-    if kind not in VALID_KINDS:
-        result.errors.append(f"Invalid kind '{kind}' — must be one of: {', '.join(sorted(VALID_KINDS))}.")
+    valid = _get_valid_kinds()
+    if kind not in valid:
+        result.errors.append(f"Invalid kind '{kind}' — must be one of: {', '.join(sorted(valid))}.")
         return
 
     title_required = kind not in ("grid", "tabs", "section", "bar_list", "progress_list", "timeline")

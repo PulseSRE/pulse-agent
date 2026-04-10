@@ -17,6 +17,11 @@ import re
 logger = logging.getLogger("pulse_agent.mcp_renderer")
 
 
+def _humanize(snake_case: str) -> str:
+    """Convert snake_case tool name to Title Case."""
+    return snake_case.replace("_", " ").title()
+
+
 def render_mcp_output(
     tool_name: str,
     output: str,
@@ -66,11 +71,11 @@ def _apply_renderer(tool_name: str, output: str, config: dict) -> dict | None:
             col_defs = [{"id": k, "header": k.replace("_", " ").title()} for k in parsed[0]]
         else:
             return None
-        return {"kind": "data_table", "title": tool_name.replace("_", " ").title(), "columns": col_defs, "rows": parsed}
+        return {"kind": "data_table", "title": _humanize(tool_name), "columns": col_defs, "rows": parsed}
 
     elif kind == "key_value" and isinstance(parsed, dict):
         pairs = [{"key": k, "value": str(v)} for k, v in parsed.items()]
-        return {"kind": "key_value", "title": tool_name.replace("_", " ").title(), "pairs": pairs}
+        return {"kind": "key_value", "title": _humanize(tool_name), "pairs": pairs}
 
     elif kind == "status_list" and isinstance(parsed, list):
         items = []
@@ -88,12 +93,12 @@ def _apply_renderer(tool_name: str, output: str, config: dict) -> dict | None:
                 )
             else:
                 items.append({"label": str(item), "status": "info"})
-        return {"kind": "status_list", "title": tool_name.replace("_", " ").title(), "items": items}
+        return {"kind": "status_list", "title": _humanize(tool_name), "items": items}
 
     elif kind == "metric_card" and isinstance(parsed, dict):
         return {
             "kind": "metric_card",
-            "title": tool_name.replace("_", " ").title(),
+            "title": _humanize(tool_name),
             "value": str(parsed.get("value", parsed.get(next(iter(parsed.keys())), ""))),
         }
 
@@ -128,7 +133,7 @@ def _template(template: str, data: dict) -> str:
 
 def _auto_detect(tool_name: str, output: str) -> dict:
     """Auto-detect output format and return best component spec."""
-    title = tool_name.replace("_", " ").title()
+    title = _humanize(tool_name)
 
     if not output or not output.strip():
         return {"kind": "metric_card", "title": title, "value": "empty", "status": "warning"}

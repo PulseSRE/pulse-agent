@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .auth import verify_token
 
@@ -24,7 +24,7 @@ async def get_skill(name: str, _auth=Depends(verify_token)):
 
     skill = _get(name)
     if not skill:
-        return {"error": f"Skill '{name}' not found"}
+        raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
     return skill.to_dict()
 
 
