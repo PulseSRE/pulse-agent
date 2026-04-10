@@ -535,6 +535,38 @@ class TestNamespaceSummary:
         assert len(component["items"][0]["items"]) == 7  # pods, deps, sts, ds, svc, cm, events
         assert component["items"][1]["kind"] == "metric_card"
 
+    def test_grid_layout_columns(self, mock_k8s):
+        """Grid should use 2 columns so metric cards render side-by-side, not stacked."""
+        from tests.conftest import _make_pod
+
+        mock_k8s["core"].list_namespaced_pod.return_value = SimpleNamespace(
+            items=[_make_pod(name="p1", phase="Running")]
+        )
+        mock_k8s["apps"].list_namespaced_deployment.return_value = SimpleNamespace(items=[])
+        mock_k8s["apps"].list_namespaced_stateful_set.return_value = SimpleNamespace(items=[])
+        mock_k8s["apps"].list_namespaced_daemon_set.return_value = SimpleNamespace(items=[])
+        mock_k8s["core"].list_namespaced_service.return_value = SimpleNamespace(items=[])
+        mock_k8s["core"].list_namespaced_config_map.return_value = SimpleNamespace(items=[])
+        mock_k8s["core"].list_namespaced_event.return_value = SimpleNamespace(items=[])
+
+        from sre_agent.view_tools import namespace_summary
+
+        _, component = namespace_summary.call({"namespace": "default"})
+        assert component["columns"] >= 2, "Grid must use 2+ columns to avoid full-width card stacking"
+        # Should have resource_counts + 4 metric cards
+        metric_cards = [i for i in component["items"] if i["kind"] == "metric_card"]
+        assert len(metric_cards) == 4
+
+    def test_cluster_metrics_columns_capped(self):
+        """cluster_metrics grid should cap columns at 4 to avoid cramped cards."""
+        from sre_agent.view_tools import cluster_metrics
+
+        result = cluster_metrics.call({"category": "overview"})
+        if isinstance(result, tuple):
+            _, component = result
+            if component and component.get("kind") == "grid":
+                assert component["columns"] <= 4, "Grid columns should be capped at 4"
+
 
 # Need SimpleNamespace for mock
 from types import SimpleNamespace

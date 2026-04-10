@@ -210,7 +210,7 @@ def namespace_summary(namespace: str) -> str:
         "kind": "grid",
         "title": f"{namespace} Overview",
         "description": f"Key health indicators for the {namespace} namespace",
-        "columns": 1,
+        "columns": 2,
         "items": [resource_counts] + cards,
     }
     return (text, component)
@@ -534,7 +534,7 @@ def cluster_metrics(category: str = "overview") -> str:
     component = {
         "kind": "grid",
         "title": f"Cluster {category.replace('_', ' ').title()}",
-        "columns": len(cards),
+        "columns": min(len(cards), 4),
         "items": cards,
     }
     return (text, component)
