@@ -5,7 +5,7 @@ description: Cluster capacity analysis, resource forecasting, and scaling recomm
 keywords:
   - capacity, forecast, headroom, exhaustion, scale plan, grow
   - resource budget, overcommit, right-size, bin-pack
-  - how much room, running out, when will, enough resources
+  - how much room, running out, run out, when will, enough resources
 categories:
   - diagnostics
   - monitoring
