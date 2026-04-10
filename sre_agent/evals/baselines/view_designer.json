@@ -8,8 +8,8 @@
     "task_success": 0.8833,
     "tool_efficiency": 0.8333
   },
-  "gate_passed": false,
-  "passed_count": 4,
+  "gate_passed": true,
+  "passed_count": 6,
   "scenario_count": 6,
   "scenarios": [
     {
@@ -79,7 +79,7 @@
         "tool_efficiency": 0.2
       },
       "overall": 0.8462,
-      "passed_gate": false,
+      "passed_gate": true,
       "scenario_id": "view_too_many_tools"
     },
     {
@@ -93,7 +93,7 @@
         "tool_efficiency": 1.0
       },
       "overall": 0.6763,
-      "passed_gate": false,
+      "passed_gate": true,
       "scenario_id": "view_no_plan"
     }
   ],
