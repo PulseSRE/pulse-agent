@@ -12,7 +12,7 @@ import argparse
 import json
 import sys
 
-from .replay import ReplayHarness, list_fixtures, load_fixture, score_replay
+from .replay import ReplayHarness, list_fixtures, load_fixture, score_multi_turn, score_replay
 
 
 def _make_parser() -> argparse.ArgumentParser:
@@ -105,38 +105,47 @@ def _make_mock_client(
     return client
 
 
-def _run_fixture(
-    name: str, use_judge: bool = False, model: str = "claude-sonnet-4-20250514", dry_run: bool = False
-) -> dict:
-    """Run a single fixture and return the scored result."""
-    fixture = load_fixture(name)
-    harness = ReplayHarness(fixture["recorded_responses"])
-
+def _setup_model(model: str, dry_run: bool):
+    """Configure model settings and return (client, thinking)."""
     import os
 
-    os.environ["PULSE_AGENT_HARNESS"] = "0"  # Disable harness for replay
-    os.environ["PULSE_AGENT_MODEL"] = model  # Force model (override cached settings)
+    os.environ["PULSE_AGENT_HARNESS"] = "0"
+    os.environ["PULSE_AGENT_MODEL"] = model
 
-    # Reset settings singleton so model change takes effect
     import sre_agent.config as _cfg
 
     _cfg._settings = None
 
-    # Detect if model supports extended thinking
     thinking = {"type": "adaptive"}
     if "haiku" in model.lower() or "claude-3-opus" in model.lower() or "claude-3-sonnet" in model.lower():
         thinking = {"type": "disabled"}
-        # Haiku has lower max_tokens limit
         os.environ["PULSE_AGENT_MAX_TOKENS"] = "8192"
 
     if dry_run:
-        # Use mock client — no API key needed
-        expected_tools = fixture.get("expected", {}).get("should_use_tools", list(fixture["recorded_responses"].keys()))
-        client = _make_mock_client(expected_tools)
+        return None, thinking  # caller builds mock client per fixture
     else:
         from ..agent import create_client
 
-        client = create_client()
+        return create_client(), thinking
+
+
+def _run_fixture(
+    name: str, use_judge: bool = False, model: str = "claude-sonnet-4-6", dry_run: bool = False
+) -> dict:
+    """Run a single fixture (single-turn or multi-turn) and return the scored result."""
+    fixture = load_fixture(name)
+
+    # Multi-turn fixture
+    if fixture.get("multi_turn"):
+        return _run_multi_turn_fixture(name, fixture, use_judge, model, dry_run)
+
+    harness = ReplayHarness(fixture["recorded_responses"])
+    client, thinking = _setup_model(model, dry_run)
+
+    if dry_run:
+        expected_tools = fixture.get("expected", {}).get("should_use_tools", list(fixture["recorded_responses"].keys()))
+        client = _make_mock_client(expected_tools)
+
     result = harness.run(client=client, prompt=fixture["prompt"], thinking=thinking)
     score = score_replay(result, fixture["expected"])
 
@@ -162,15 +171,62 @@ def _run_fixture(
     return output
 
 
+def _run_multi_turn_fixture(
+    name: str, fixture: dict, use_judge: bool, model: str, dry_run: bool
+) -> dict:
+    """Run a multi-turn fixture."""
+    from .replay import MultiTurnReplayHarness
+
+    harness = MultiTurnReplayHarness(fixture["turns"])
+    client, thinking = _setup_model(model, dry_run)
+
+    if dry_run:
+        # Build mock client from first turn's tools
+        all_tools = list(fixture["turns"][0].get("recorded_responses", {}).keys())
+        client = _make_mock_client(all_tools)
+
+    result = harness.run(client=client, thinking=thinking)
+    score = score_multi_turn(result, fixture.get("expected", {}))
+
+    output = {
+        "fixture": name,
+        "multi_turn": True,
+        "prompt": " → ".join(t["prompt"][:50] for t in fixture["turns"]),
+        "score": score,
+        "response_preview": result["turns"][-1]["response"][:500] if result["turns"] else "",
+        "duration_ms": result["total_duration_ms"],
+        "turn_count": len(result["turns"]),
+    }
+
+    if use_judge and result["turns"]:
+        from .judge import judge_response
+
+        # Judge the final turn (most comprehensive answer)
+        last = result["turns"][-1]
+        all_tools = [tc["name"] for t in result["turns"] for tc in t["tool_calls"]]
+        full_prompt = " → ".join(t["prompt"] for t in fixture["turns"])
+        judge_result = judge_response(
+            prompt=full_prompt,
+            response=last["response"],
+            tool_calls=all_tools,
+            client=client if not dry_run else None,
+        )
+        output["judge"] = judge_result
+
+    return output
+
+
 def _format_text(results: list[dict]) -> str:
     lines = []
     for r in results:
         score = r["score"]
         status = "PASS" if score["passed"] else "FAIL"
         lines.append(f"\n{'=' * 60}")
-        lines.append(f"Fixture: {r['fixture']}  [{status}]  Score: {score['score']}/100")
+        turn_info = f"  ({r['turn_count']} turns)" if r.get("multi_turn") else ""
+        lines.append(f"Fixture: {r['fixture']}{turn_info}  [{status}]  Score: {score['score']}/100")
         lines.append(f"Duration: {r['duration_ms']:.0f}ms")
-        lines.append(f"Tools called: {', '.join(score['tool_calls']) or '(none)'}")
+        tool_calls = score.get("total_tool_calls", score.get("tool_calls", []))
+        lines.append(f"Tools called: {', '.join(tool_calls) or '(none)'}")
         lines.append("Checks:")
         for check in score["checks"]:
             mark = "  [x]" if check["passed"] else "  [ ]"

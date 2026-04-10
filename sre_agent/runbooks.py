@@ -121,8 +121,15 @@ _RUNBOOK_KEYWORDS: dict[str, list[str]] = {
 }
 
 
-def select_runbooks(query: str, max_runbooks: int = 3) -> str:
+def select_runbooks(query: str, max_runbooks: int | None = None) -> str:
     """Select relevant runbooks based on query keywords. Returns formatted text."""
+    import os
+
+    if max_runbooks is None:
+        # Check experiment override: single_runbook uses 1, default is 3
+        experiment = os.environ.get("PULSE_PROMPT_EXPERIMENT", "")
+        max_runbooks = 1 if experiment == "single_runbook" else 3
+
     q = query.lower()
     scored: list[tuple[int, str]] = []
     for name, keywords in _RUNBOOK_KEYWORDS.items():

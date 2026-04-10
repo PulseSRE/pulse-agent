@@ -1,0 +1,45 @@
+{
+    "name": "multi_scale_and_verify",
+    "multi_turn": true,
+    "turns": [
+        {
+            "prompt": "Scale the checkout deployment in production to 5 replicas",
+            "recorded_responses": {
+                "scale_deployment": "Deployment production/checkout scaled to 5 replicas",
+                "record_audit_entry": "Audit entry recorded: scaled checkout to 5 replicas"
+            },
+            "expected": {
+                "should_mention": ["scaled", "5"],
+                "should_use_tools": ["scale_deployment"]
+            }
+        },
+        {
+            "prompt": "Did it work? Are all pods running?",
+            "recorded_responses": {
+                "list_pods": "production/checkout-7f8d9-a1b2c  Status=Running  Restarts=0  Age=30s\nproduction/checkout-7f8d9-d3e4f  Status=Running  Restarts=0  Age=30s\nproduction/checkout-7f8d9-g5h6i  Status=Running  Restarts=0  Age=30s\nproduction/checkout-7f8d9-j7k8l  Status=Running  Restarts=0  Age=30s\nproduction/checkout-7f8d9-m9n0o  Status=Pending  Restarts=0  Age=25s",
+                "describe_pod": "{\"name\": \"checkout-7f8d9-m9n0o\", \"status\": \"Pending\", \"conditions\": [{\"type\": \"PodScheduled\", \"status\": \"False\", \"reason\": \"Unschedulable\", \"message\": \"0/3 nodes are available: insufficient cpu\"}]}"
+            },
+            "expected": {
+                "should_mention": ["4", "running", "pending", "cpu"],
+                "should_use_tools": ["list_pods"]
+            }
+        },
+        {
+            "prompt": "Scale it back to 3 then, we don't have the capacity",
+            "recorded_responses": {
+                "scale_deployment": "Deployment production/checkout scaled to 3 replicas",
+                "record_audit_entry": "Audit entry recorded: scaled checkout to 3 replicas",
+                "list_pods": "production/checkout-7f8d9-a1b2c  Status=Running  Restarts=0  Age=2m\nproduction/checkout-7f8d9-d3e4f  Status=Running  Restarts=0  Age=2m\nproduction/checkout-7f8d9-g5h6i  Status=Running  Restarts=0  Age=2m"
+            },
+            "expected": {
+                "should_mention": ["3", "scaled"],
+                "should_use_tools": ["scale_deployment"]
+            }
+        }
+    ],
+    "expected": {
+        "overall_should_mention": ["scaled", "pending", "cpu"],
+        "max_total_tool_calls": 12,
+        "should_use_tools_in_order": ["scale_deployment", "list_pods", "scale_deployment"]
+    }
+}

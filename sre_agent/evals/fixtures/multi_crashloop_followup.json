@@ -1,0 +1,46 @@
+{
+    "name": "multi_crashloop_followup",
+    "multi_turn": true,
+    "turns": [
+        {
+            "prompt": "A pod named api-server in production is crash-looping. What's going on?",
+            "recorded_responses": {
+                "list_pods": "production/api-server-6d4b8c9f7-x2k9p  Status=Running  Restarts=12  Age=2h",
+                "describe_pod": "{\"name\": \"api-server\", \"namespace\": \"production\", \"containers\": [{\"name\": \"api-server\", \"image\": \"api:v2.3\", \"ready\": false, \"restarts\": 12, \"state\": \"waiting\", \"reason\": \"CrashLoopBackOff\"}]}",
+                "get_pod_logs": "2024-01-15T10:00:01Z [ERROR] Failed to connect to database: connection refused to db-service:5432\n2024-01-15T10:00:06Z [FATAL] Cannot start without database connection. Exiting.",
+                "get_events": "2m ago  Warning  BackOff  Pod/api-server  Back-off restarting failed container"
+            },
+            "expected": {
+                "should_mention": ["database", "connection"],
+                "should_use_tools": ["get_pod_logs"]
+            }
+        },
+        {
+            "prompt": "Can you check if the database service is actually running?",
+            "recorded_responses": {
+                "describe_service": "{\"name\": \"db-service\", \"namespace\": \"production\", \"type\": \"ClusterIP\", \"clusterIP\": \"10.96.45.12\", \"selector\": {\"app\": \"postgres\"}, \"ports\": [{\"port\": 5432}], \"endpoints\": [{\"ready\": [], \"notReady\": []}], \"matchingPods\": 0, \"readyPods\": 0}",
+                "list_pods": "production/api-server-6d4b8c9f7-x2k9p  Status=Running  Restarts=12  Age=2h\n(no postgres pods found)"
+            },
+            "expected": {
+                "should_mention": ["no", "pods", "postgres"],
+                "should_use_tools": ["describe_service"]
+            }
+        },
+        {
+            "prompt": "That explains it. Can you show me the deployment for the database?",
+            "recorded_responses": {
+                "describe_deployment": "{\"name\": \"postgres\", \"namespace\": \"production\", \"replicas\": 1, \"availableReplicas\": 0, \"unavailableReplicas\": 1, \"conditions\": [{\"type\": \"Available\", \"status\": \"False\", \"reason\": \"MinimumReplicasUnavailable\"}]}",
+                "get_events": "15m ago  Warning  FailedCreate  Deployment/postgres  Error creating: pods \"postgres-\" is forbidden: exceeded quota"
+            },
+            "expected": {
+                "should_mention": ["quota", "exceeded"],
+                "should_use_tools": ["describe_deployment"]
+            }
+        }
+    ],
+    "expected": {
+        "overall_should_mention": ["database", "quota", "postgres"],
+        "max_total_tool_calls": 15,
+        "should_use_tools_in_order": ["get_pod_logs", "describe_service", "describe_deployment"]
+    }
+}

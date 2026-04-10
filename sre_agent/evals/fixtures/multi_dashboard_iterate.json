@@ -1,0 +1,51 @@
+{
+    "name": "multi_dashboard_iterate",
+    "multi_turn": true,
+    "turns": [
+        {
+            "prompt": "Create a dashboard for the production namespace",
+            "recorded_responses": {
+                "namespace_summary": "{\"namespace\": \"production\", \"pods\": {\"total\": 42, \"running\": 38, \"pending\": 2, \"failed\": 2}, \"deployments\": {\"total\": 12, \"available\": 10}}",
+                "get_prometheus_query": "Query: sum(rate(container_cpu_usage_seconds_total{namespace=\"production\"}[5m])) by (pod)\nResults (5 series):\n  api-server: 0.45\n  worker-1: 0.82",
+                "list_pods": "production/api-server-x2k9p  Status=Running  Restarts=0  Age=5d\nproduction/worker-1-abc123  Status=Running  Restarts=0  Age=3d",
+                "plan_dashboard": "Dashboard plan: Production Overview",
+                "create_dashboard": "Dashboard 'Production Overview' created with 5 widgets (id=view-42)"
+            },
+            "expected": {
+                "should_mention": ["production", "dashboard"],
+                "should_use_tools": ["namespace_summary"]
+            }
+        },
+        {
+            "prompt": "Add a memory chart to it",
+            "recorded_responses": {
+                "get_prometheus_query": "Query: sum(container_memory_working_set_bytes{namespace=\"production\"}) by (pod)\nResults (5 series):\n  api-server: 256Mi\n  worker-1: 512Mi",
+                "get_view_details": "{\"id\": \"view-42\", \"title\": \"Production Overview\", \"widgets\": [{\"kind\": \"info_card_grid\"}, {\"kind\": \"chart\", \"title\": \"CPU\"}, {\"kind\": \"data_table\"}]}",
+                "add_widget_to_view": "Widget 'Memory Usage' added to 'Production Overview' (now 6 widgets)"
+            },
+            "expected": {
+                "should_mention": ["memory", "added"],
+                "should_use_tools": ["get_prometheus_query"],
+                "should_not_use_tools": ["create_dashboard"]
+            }
+        },
+        {
+            "prompt": "Actually, remove the CPU chart and replace it with a network chart",
+            "recorded_responses": {
+                "get_view_details": "{\"id\": \"view-42\", \"title\": \"Production Overview\", \"widgets\": [{\"kind\": \"info_card_grid\"}, {\"kind\": \"chart\", \"title\": \"CPU Usage\"}, {\"kind\": \"data_table\"}, {\"kind\": \"chart\", \"title\": \"Memory Usage\"}]}",
+                "update_view_widgets": "Removed widget 'CPU Usage' from 'Production Overview'",
+                "remove_widget_from_view": "Removed widget 'CPU Usage' from 'Production Overview'",
+                "get_prometheus_query": "Query: sum(rate(container_network_receive_bytes_total{namespace=\"production\"}[5m])) by (pod)\nResults (3 series):\n  api-server: 1.2MB/s\n  worker-1: 0.8MB/s",
+                "add_widget_to_view": "Widget 'Network Traffic' added to 'Production Overview'"
+            },
+            "expected": {
+                "should_mention": ["network", "removed"],
+                "should_not_use_tools": ["create_dashboard"]
+            }
+        }
+    ],
+    "expected": {
+        "overall_should_mention": ["production", "memory", "network"],
+        "max_total_tool_calls": 20
+    }
+}
