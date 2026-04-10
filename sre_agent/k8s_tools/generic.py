@@ -280,6 +280,25 @@ def list_resources(
                 val = cells[idx]
                 row[col_defs[j]["id"]] = val if val is not None else ""
 
+        # Pass through metadata fields not already in printer columns
+        labels = meta.get("labels")
+        if labels:
+            row["labels"] = labels
+        annotations = meta.get("annotations")
+        if annotations:
+            # Filter out long/noisy annotations
+            row["annotations"] = {
+                k: v
+                for k, v in annotations.items()
+                if not k.startswith("kubectl.kubernetes.io/") and not k.startswith("openshift.io/") and len(v) < 200
+            } or None
+            if not row["annotations"]:
+                del row["annotations"]
+        owner_refs = meta.get("ownerReferences")
+        if owner_refs:
+            row["owner"] = "/".join(f"{o['kind']}/{o['name']}" for o in owner_refs)
+        row["_uid"] = meta.get("uid", "")
+
         rows.append(row)
 
     # Add namespace column only for namespaced resources listed across namespaces
@@ -293,6 +312,17 @@ def list_resources(
     # Remove namespace column from cluster-scoped resources
     if is_cluster_scoped:
         col_defs = [c for c in col_defs if c["id"] != "namespace"]
+
+    # Add metadata columns — always present, UI can toggle visibility
+    has_labels = any(r.get("labels") for r in rows[:5])
+    has_annotations = any(r.get("annotations") for r in rows[:5])
+    has_owner = any(r.get("owner") for r in rows[:5])
+    if has_labels:
+        col_defs.append({"id": "labels", "header": "Labels", "type": "labels"})
+    if has_annotations:
+        col_defs.append({"id": "annotations", "header": "Annotations", "type": "labels"})
+    if has_owner:
+        col_defs.append({"id": "owner", "header": "Owner", "type": "text"})
 
     # Sort if requested
     if sort_by:
