@@ -101,7 +101,6 @@ mcp:
   toolsets:
     - core
     - helm
-    - observability
 
 nodeSelector: {}
 tolerations: []
