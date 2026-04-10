@@ -165,7 +165,7 @@ def namespace_summary(namespace: str) -> str:
         ],
     }
 
-    # Build metric cards with PromQL sparklines
+    # Build metric cards with PromQL sparklines (clickable)
     cards = [
         {
             "kind": "metric_card",
@@ -175,6 +175,7 @@ def namespace_summary(namespace: str) -> str:
             "description": f"of {total_pods} total",
             "query": f"count(kube_pod_status_phase{{namespace=\"{namespace}\",phase='Running'}})",
             "color": "#10b981",
+            "link": f"/r/v1~pods?ns={namespace}",
         },
         {
             "kind": "metric_card",
@@ -184,6 +185,7 @@ def namespace_summary(namespace: str) -> str:
             "description": f"{failed} failed",
             "query": f'sum(rate(kube_pod_container_status_restarts_total{{namespace="{namespace}"}}[5m]))',
             "color": "#ef4444" if crashloop > 0 else "#10b981",
+            "link": f"/r/v1~pods?ns={namespace}",
         },
         {
             "kind": "metric_card",
@@ -191,6 +193,7 @@ def namespace_summary(namespace: str) -> str:
             "value": f"{healthy_deps}/{total_deps}",
             "status": "healthy" if degraded_deps == 0 else "warning",
             "description": "healthy",
+            "link": f"/r/apps~v1~deployments?ns={namespace}",
         },
         {
             "kind": "metric_card",
@@ -200,6 +203,7 @@ def namespace_summary(namespace: str) -> str:
             "description": "active events",
             "query": f"count(kube_event_count{{namespace=\"{namespace}\",type='Warning'}}) or vector(0)",
             "color": "#f59e0b" if warning_count > 0 else "#10b981",
+            "link": f"/r/v1~events?ns={namespace}",
         },
     ]
     component = {
@@ -241,6 +245,7 @@ def cluster_metrics(category: str = "overview") -> str:
                 "description": "Healthy cluster nodes",
                 "color": "#10b981",
                 "thresholds": {"warning": 2, "critical": 1},
+                "link": "/compute",
             },
             {
                 "kind": "metric_card",
@@ -249,6 +254,7 @@ def cluster_metrics(category: str = "overview") -> str:
                 "query": "count(kube_pod_status_phase{phase='Running'})",
                 "description": "Active workload pods",
                 "color": "#3b82f6",
+                "link": "/workloads",
             },
             {
                 "kind": "metric_card",
