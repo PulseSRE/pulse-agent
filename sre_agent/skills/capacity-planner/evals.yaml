@@ -1,0 +1,58 @@
+scenarios:
+  - id: capacity_forecast_cpu
+    prompt: "will we run out of CPU in the next week?"
+    should_use_tools: [get_node_metrics, get_prometheus_query]
+    should_mention: [capacity, forecast, cpu]
+    max_tool_calls: 8
+
+  - id: capacity_headroom
+    prompt: "how much headroom do we have on the cluster?"
+    should_use_tools: [list_nodes, get_node_metrics]
+    should_mention: [headroom, available]
+    max_tool_calls: 6
+
+  - id: capacity_hotspot
+    prompt: "which namespaces are using the most resources?"
+    should_use_tools: [get_prometheus_query]
+    should_mention: [namespace, cpu, memory]
+    max_tool_calls: 6
+
+  - id: capacity_overcommit
+    prompt: "are we overcommitting resources on the cluster?"
+    should_use_tools: [get_resource_quotas, get_node_metrics]
+    should_mention: [overcommit, request, limit]
+    max_tool_calls: 8
+
+  - id: capacity_node_pressure
+    prompt: "which nodes are running hot?"
+    should_use_tools: [get_node_metrics]
+    should_mention: [node, cpu, memory]
+    max_tool_calls: 6
+
+  - id: capacity_negative_not_sre
+    prompt: "why is my pod crashlooping?"
+    should_not_route_to: capacity_planner
+    description: "This is an SRE query, not capacity planning — should NOT route here"
+
+replay_fixtures:
+  - name: capacity_check
+    prompt: "check our cluster capacity"
+    recorded_responses:
+      list_nodes: "worker-1  Ready  CPU=8/7.6  Mem=32Gi/31Gi  Pods=45/110  Age=30d\nworker-2  Ready  CPU=8/7.6  Mem=32Gi/31Gi  Pods=52/110  Age=30d\nworker-3  Ready  CPU=8/7.6  Mem=32Gi/31Gi  Pods=38/110  Age=30d"
+      get_node_metrics: "worker-1  CPU=5200m  Mem=22Gi  CPU%=68%  Mem%=71%\nworker-2  CPU=6100m  Mem=26Gi  CPU%=80%  Mem%=84%\nworker-3  CPU=3800m  Mem=18Gi  CPU%=50%  Mem%=58%"
+      get_prometheus_query: "Query: sum by (namespace) (rate(container_cpu_usage_seconds_total{container!=''}[5m]))\nResults (5 series):\n  production: 8.2 cores\n  staging: 3.1 cores\n  monitoring: 1.4 cores\n  kube-system: 0.8 cores\n  openshift-monitoring: 0.6 cores"
+    expected:
+      should_mention: [capacity, headroom, worker-2]
+      should_use_tools: [list_nodes, get_node_metrics]
+      max_tool_calls: 8
+
+  - name: capacity_forecast_memory
+    prompt: "when will we run out of memory at this rate?"
+    recorded_responses:
+      get_node_metrics: "worker-1  Mem=22Gi/31Gi  Mem%=71%\nworker-2  Mem=26Gi/31Gi  Mem%=84%\nworker-3  Mem=18Gi/31Gi  Mem%=58%"
+      get_prometheus_query: "Query: predict_linear(node_memory_MemAvailable_bytes[7d], 86400*7)\nResults (3 series):\n  worker-1: 4.2Gi remaining in 7d\n  worker-2: -1.8Gi (exhausted in ~4 days)\n  worker-3: 9.1Gi remaining in 7d"
+      list_nodes: "worker-1  Ready  Mem=32Gi  Age=30d\nworker-2  Ready  Mem=32Gi  Age=30d\nworker-3  Ready  Mem=32Gi  Age=30d"
+    expected:
+      should_mention: [worker-2, exhaust, days]
+      should_use_tools: [get_node_metrics, get_prometheus_query]
+      max_tool_calls: 8
