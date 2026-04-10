@@ -90,6 +90,14 @@ async def reload_skills(_auth=Depends(verify_token)):
     return {"reloaded": len(skills), "skills": list(skills.keys())}
 
 
+@router.get("/admin/mcp")
+async def list_mcp_servers(_auth=Depends(verify_token)):
+    """List all MCP server connections with status."""
+    from ..mcp_client import list_mcp_connections
+
+    return list_mcp_connections()
+
+
 @router.get("/components")
 async def list_components(_auth=Depends(verify_token)):
     """List all registered component kinds with schemas."""
