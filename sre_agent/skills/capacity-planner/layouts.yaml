@@ -1,0 +1,38 @@
+layouts:
+  default:
+    description: "Standard capacity planning dashboard"
+    rows:
+      - components: [resource_counts]
+        height: 2
+      - components: [cpu_usage_trend, memory_usage_trend]
+        height: 5
+      - components: [node_capacity_table]
+        height: 6
+
+  compact:
+    description: "Quick capacity check — one glance"
+    rows:
+      - components: [cpu_metric, memory_metric, pod_count_metric, headroom_metric]
+        height: 3
+
+  forecast:
+    description: "Capacity forecasting with prediction charts"
+    rows:
+      - components: [resource_counts]
+        height: 2
+      - components: [cpu_forecast_chart, memory_forecast_chart]
+        height: 5
+      - components: [top_consumers_table]
+        height: 6
+      - components: [recommendations]
+        height: 4
+
+  incident:
+    description: "Capacity incident triage — node under pressure"
+    rows:
+      - components: [resource_counts]
+        height: 2
+      - components: [node_memory_chart, node_cpu_chart]
+        height: 5
+      - components: [affected_pods_table]
+        height: 6

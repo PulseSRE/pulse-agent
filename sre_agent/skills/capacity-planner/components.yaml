@@ -1,0 +1,48 @@
+components:
+  capacity_gauge:
+    description: "Circular gauge showing resource utilization percentage with thresholds"
+    category: metrics
+    schema:
+      required: [title, value, max]
+      properties:
+        title: { type: string }
+        value: { type: number, description: "Current usage" }
+        max: { type: number, description: "Total capacity" }
+        unit: { type: string, default: "%" }
+        thresholds:
+          type: object
+          properties:
+            warning: { type: number, default: 70 }
+            critical: { type: number, default: 90 }
+    layout:
+      type: stat_card
+      label: "{{title}}"
+      value: "{{(value / max * 100) | round}}%"
+      unit: ""
+      status: "{{value / max > thresholds.critical / 100 ? 'error' : value / max > thresholds.warning / 100 ? 'warning' : 'healthy'}}"
+      description: "{{value}} / {{max}} {{unit}}"
+
+  headroom_bar:
+    description: "Horizontal bar showing used vs available capacity per node"
+    category: data
+    schema:
+      required: [title, items]
+      properties:
+        title: { type: string }
+        items:
+          type: array
+          items:
+            required: [label, used, total]
+            properties:
+              label: { type: string, description: "Node name" }
+              used: { type: number }
+              total: { type: number }
+              unit: { type: string, default: "" }
+    layout:
+      type: progress_list
+      items: "{{items}}"
+      item_template:
+        label: "{{item.label}}"
+        value: "{{item.used}}"
+        max: "{{item.total}}"
+        unit: "{{item.unit}}"
