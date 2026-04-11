@@ -692,6 +692,8 @@ ALWAYS_INCLUDE = {
     "get_events",
     "get_firing_alerts",
     "request_sre_investigation",
+    "list_my_skills",
+    "list_my_tools",
 }
 
 

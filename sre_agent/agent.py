@@ -26,6 +26,7 @@ from .k8s_tools import ALL_TOOLS as _K8S_TOOLS
 from .k8s_tools import WRITE_TOOLS
 from .predict_tools import PREDICT_TOOLS
 from .runbooks import ALERT_TRIAGE_CONTEXT, RUNBOOKS  # noqa: F401 — RUNBOOKS re-exported for backward compat
+from .self_tools import list_my_skills, list_my_tools
 from .skill_loader import select_tools
 from .timeline_tools import TIMELINE_TOOLS
 from .view_tools import (
@@ -44,6 +45,8 @@ ALL_TOOLS = (
         request_security_scan,
         namespace_summary,
         cluster_metrics,
+        list_my_skills,
+        list_my_tools,
     ]
 )
 

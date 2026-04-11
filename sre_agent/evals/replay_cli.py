@@ -177,9 +177,17 @@ def _run_multi_turn_fixture(name: str, fixture: dict, use_judge: bool, model: st
     client, thinking = _setup_model(model, dry_run)
 
     if dry_run:
-        # Build mock client from first turn's tools
-        all_tools = list(fixture["turns"][0].get("recorded_responses", {}).keys())
-        client = _make_mock_client(all_tools)
+        # Build mock client from ALL turns' tools with expected keywords in response
+        all_turn_tools: list[str] = []
+        for t in fixture["turns"]:
+            all_turn_tools.extend(t.get("recorded_responses", {}).keys())
+        all_turn_tools = list(dict.fromkeys(all_turn_tools))  # dedupe, preserve order
+        expected_keywords = fixture.get("expected", {}).get("overall_should_mention", [])
+        mock_text = (
+            f"Based on my investigation, I found issues related to: {', '.join(expected_keywords)}. "
+            "I recommend checking the affected resources and taking corrective action."
+        )
+        client = _make_mock_client(all_turn_tools, final_text=mock_text)
 
     result = harness.run(client=client, thinking=thinking)
     score = score_multi_turn(result, fixture.get("expected", {}))
