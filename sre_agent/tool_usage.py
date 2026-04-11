@@ -499,11 +499,11 @@ _AGENT_DESCRIPTIONS = {
 
 def get_agents_metadata() -> list[dict]:
     """Return metadata for all agent modes."""
-    from .harness import MODE_CATEGORIES
     from .orchestrator import build_orchestrated_config
+    from .skill_loader import get_mode_categories
 
     agents = []
-    for mode, categories in MODE_CATEGORIES.items():
+    for mode, categories in get_mode_categories().items():
         if mode == "both":
             continue
 

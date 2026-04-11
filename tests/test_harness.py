@@ -7,13 +7,15 @@ from typing import ClassVar
 from unittest.mock import patch
 
 from sre_agent.harness import (
-    ALWAYS_INCLUDE,
     COMPONENT_SCHEMAS,
-    TOOL_CATEGORIES,
     build_cached_system_prompt,
     get_cluster_context,
     get_component_hint,
     get_tool_category,
+)
+from sre_agent.skill_loader import (
+    ALWAYS_INCLUDE,
+    TOOL_CATEGORIES,
     select_tools,
 )
 
@@ -245,7 +247,7 @@ class TestCategoryCoverage:
             timeline_tools,  # noqa: F401
             view_tools,  # noqa: F401
         )
-        from sre_agent.harness import ALWAYS_INCLUDE, TOOL_CATEGORIES
+        from sre_agent.skill_loader import ALWAYS_INCLUDE, TOOL_CATEGORIES
         from sre_agent.tool_registry import TOOL_REGISTRY
 
         all_categorized = set(ALWAYS_INCLUDE)

@@ -23,7 +23,7 @@ router = APIRouter()
 @router.get("/tools")
 async def list_tools(_auth=Depends(verify_token)):
     """List all available tools grouped by mode, with write-op flags and source."""
-    from ..harness import get_tool_category
+    from ..skill_loader import get_tool_category
 
     result = {
         "sre": [

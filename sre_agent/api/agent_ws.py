@@ -56,7 +56,7 @@ def _build_tool_result_handler(session_id: str, agent_mode: str, write_tools: se
 
     def on_tool_result(info: dict):
         try:
-            from ..harness import get_tool_category
+            from ..skill_loader import get_tool_category
             from ..tool_usage import record_tool_call
 
             tool_name = info["tool_name"]
