@@ -2,7 +2,7 @@
 
 Deterministic and LLM-judged eval framework for scoring agent quality and gating releases.
 
-> **See also:** [`docs/TESTING.md`](../../docs/TESTING.md) for the full testing strategy including CI pipeline and release process, and [`EVAL_PROMPTS.md`](../../EVAL_PROMPTS.md) for the complete list of 86 eval prompts.
+> **See also:** [`TESTING.md`](../../TESTING.md) for the full testing strategy, all 93 eval prompts, CI pipeline, and release process.
 
 ## Scenario Suites
 

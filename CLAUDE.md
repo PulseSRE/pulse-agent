@@ -179,7 +179,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 
 **Frontend:** `/toolbox` consolidates tools, skills, MCP, components, usage, analytics into single page.
 
-**Testing:** See [`docs/TESTING.md`](docs/TESTING.md) for test conventions, fixtures, and coverage targets.
+**Testing:** See [`TESTING.md`](TESTING.md) for full testing strategy, eval prompts, CI pipeline, and release process.
 
 ### Claude Code Agents (`.claude/agents/`)
 8 specialized agents with hooks in `.claude/settings.json`:
