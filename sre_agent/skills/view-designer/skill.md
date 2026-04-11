@@ -5,9 +5,14 @@ description: Dashboard creation and component design
 keywords:
   - dashboard, widget, create view, build view, overview
   - create dashboard, build dashboard, design, layout
+  - build me a view, create me a view, make me a view
+  - build me a dashboard, create me a dashboard, make me a dashboard
+  - show me a dashboard, new view, customize the view
+  - edit view, update view, modify the view, redesign
   - add chart, add table, add widget, remove widget
   - show as chart, show as table, convert to
   - metric card, sparkline, bar chart, donut
+  - monitoring dashboard, monitoring view, clone dashboard
 categories: []
 write_tools: false
 priority: 10
