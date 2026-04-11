@@ -409,6 +409,9 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
                 detail="MCP server did not become ready within 40 seconds. Check pod logs.",
             )
 
+        # Give MCP server time to fully initialize after becoming ready
+        time.sleep(3)
+
         # Reconnect MCP client to pick up new tools
         from ..mcp_client import disconnect_all
 
@@ -419,6 +422,7 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
         from ..skill_loader import list_skills as _list_skills
 
         tool_count = 0
+        tool_names: list[str] = []
         for skill in _list_skills():
             if (skill.path / "mcp.yaml").exists():
                 conn = connect_skill_mcp(skill.name, skill.path)
@@ -426,11 +430,13 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
                     # Override toolsets to match what the deployment is actually running
                     conn.toolsets = toolsets
                     tool_count = len(conn.tools)
+                    tool_names = list(conn.tools)
 
         return {
             "toolsets": toolsets,
             "deployment": deploy_name,
             "tools_registered": tool_count,
+            "tools": tool_names,
             "success": True,
         }
 
