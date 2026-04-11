@@ -418,9 +418,10 @@ async def websocket_auto_agent(websocket: WebSocket):
 
             messages.append({"role": "user", "content": content})
 
+            # Gather context inputs for prompt builder
             style_hint = _apply_style_hint(data)
+            fleet_mode = data.get("fleet", False)
 
-            # Inject shared context from context bus
             from ..context_bus import ContextEntry, get_context_bus
 
             namespace_from_context = ""
@@ -429,18 +430,43 @@ async def websocket_auto_agent(websocket: WebSocket):
                 namespace_from_context = ns_match.group(1)
             bus = get_context_bus()
             shared_context = bus.build_context_prompt(namespace=namespace_from_context)
-            effective_system = system_prompt + style_hint
-            if shared_context:
-                effective_system = effective_system + "\n\n" + shared_context
 
-            # Inject relevant runbooks based on the user query
-            if intent in ("sre", "both"):
-                try:
-                    from ..runbooks import select_runbooks
+            # Use prompt builder for unified assembly
+            try:
+                from ..prompt_builder import assemble_prompt as _assemble
+                from ..skill_loader import get_skill as _get_skill_for_ws
 
-                    effective_system += "\n\n" + select_runbooks(content)
-                except Exception:
-                    pass
+                _ws_skill = _get_skill_for_ws(intent)
+                if _ws_skill:
+                    from ..harness import build_cached_system_prompt
+
+                    static, dynamic = _assemble(
+                        _ws_skill,
+                        content,
+                        intent,
+                        list(tool_map.keys()),
+                        fleet_mode=fleet_mode,
+                        style_hint=style_hint,
+                        shared_context=shared_context,
+                    )
+                    effective_system = build_cached_system_prompt(static, dynamic)
+                else:
+                    # Fallback: manual assembly for legacy modes
+                    effective_system = system_prompt + style_hint
+                    if shared_context:
+                        effective_system += "\n\n" + shared_context
+                    if intent in ("sre", "both"):
+                        try:
+                            from ..runbooks import select_runbooks
+
+                            effective_system += "\n\n" + select_runbooks(content)
+                        except Exception:
+                            pass
+            except Exception:
+                # Safe fallback
+                effective_system = system_prompt + style_hint
+                if shared_context:
+                    effective_system += "\n\n" + shared_context
 
             try:
                 full_response = await _run_agent_ws(

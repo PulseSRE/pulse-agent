@@ -304,12 +304,22 @@ def get_skill(name: str) -> Skill | None:
     return _skills.get(name)
 
 
+_LLM_CLASSIFY_THRESHOLD = 4  # minimum keyword score to skip LLM fallback
+_llm_cache: dict[str, tuple[str, float]] = {}  # query_hash → (skill_name, timestamp)
+_LLM_CACHE_TTL = 300  # 5 minutes
+_LLM_CACHE_MAX = 100
+
+
 def classify_query(query: str) -> Skill:
-    """Route a query to the best matching skill based on keyword scoring.
+    """Route a query to the best matching skill.
+
+    Two-tier classification:
+    1. Fast keyword scoring (free, instant) — handles obvious queries
+    2. LLM fallback (haiku, ~$0.001) — handles ambiguous queries when keyword
+       confidence is below threshold
 
     Applies typo correction before matching. Uses word-boundary matching
-    for short keywords (< 4 chars) to avoid false positives like "pod" in "tripod".
-    Falls back to 'sre' if no skill matches.
+    for short keywords (< 4 chars) to avoid false positives.
     """
     if not _skills:
         load_skills()
@@ -334,13 +344,86 @@ def classify_query(query: str) -> Skill:
         elif kw in q:
             scores[skill_name] = scores.get(skill_name, 0) + kw_len
 
-    if not scores:
-        # Default to SRE (highest priority general-purpose skill)
-        return _skills.get("sre") or next(iter(_skills.values()))
+    # High confidence: use keyword result
+    if scores:
+        best_name = max(scores, key=lambda n: (scores[n], _skills[n].priority))
+        best_score = scores[best_name]
+        if best_score >= _LLM_CLASSIFY_THRESHOLD:
+            return _skills[best_name]
 
-    # Apply priority weighting
-    best_name = max(scores, key=lambda n: (scores[n], _skills[n].priority))
-    return _skills[best_name]
+    # Low confidence or no matches: try LLM fallback
+    llm_result = _llm_classify(query)
+    if llm_result:
+        return llm_result
+
+    # If we had some keyword scores, use the best one
+    if scores:
+        best_name = max(scores, key=lambda n: (scores[n], _skills[n].priority))
+        return _skills[best_name]
+
+    # Default to SRE (highest priority general-purpose skill)
+    return _skills.get("sre") or next(iter(_skills.values()))
+
+
+def _llm_classify(query: str) -> Skill | None:
+    """Use a lightweight LLM call to classify ambiguous queries.
+
+    Caches results (LRU, 100 entries, 5min TTL) to avoid repeat API calls.
+    Returns None on any error (caller falls back to keyword/default).
+    """
+    import hashlib
+
+    query_hash = hashlib.md5(query.lower().strip().encode()).hexdigest()[:16]
+
+    # Check cache
+    cached = _llm_cache.get(query_hash)
+    if cached:
+        name, ts = cached
+        if time.time() - ts < _LLM_CACHE_TTL:
+            skill = _skills.get(name)
+            if skill:
+                logger.debug("LLM classify cache hit: '%s' → %s", query[:50], name)
+                return skill
+
+    try:
+        from .agent import create_client
+
+        client = create_client()
+
+        skill_options = "\n".join(f"- {s.name}: {s.description}" for s in _skills.values())
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=20,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Classify this user query into exactly one skill.\n\n"
+                        f"Available skills:\n{skill_options}\n\n"
+                        f"Query: {query}\n\n"
+                        f"Reply with ONLY the skill name, nothing else."
+                    ),
+                }
+            ],
+        )
+
+        name = response.content[0].text.strip().lower().replace(" ", "_")
+        skill = _skills.get(name)
+        if skill:
+            # Cache the result
+            _llm_cache[query_hash] = (name, time.time())
+            # Evict oldest entries if cache is full
+            while len(_llm_cache) > _LLM_CACHE_MAX:
+                oldest_key = next(iter(_llm_cache))
+                del _llm_cache[oldest_key]
+            logger.info("LLM classify: '%s' → %s", query[:50], name)
+            return skill
+
+        logger.debug("LLM classify returned unknown skill: '%s'", name)
+        return None
+    except Exception as e:
+        logger.debug("LLM classify failed: %s", e)
+        return None
 
 
 def check_handoff(current_skill: Skill, query: str) -> Skill | None:

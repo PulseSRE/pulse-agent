@@ -425,12 +425,30 @@ def run_agent_streaming(
 
     # --- Harness: Cached system prompt with cluster context ---
     if use_harness:
-        cluster_ctx = get_cluster_context(mode=mode)
-        hint = get_component_hint(mode, tool_names=list(tool_map.keys()))
-        effective_system = build_cached_system_prompt(
-            system_prompt + hint,
-            cluster_ctx,
-        )
+        # Use prompt builder for unified assembly (intent prefix + components + context)
+        try:
+            from .prompt_builder import assemble_prompt as _assemble
+            from .skill_loader import get_skill as _get_skill_for_prompt
+
+            _skill = _get_skill_for_prompt(mode)
+            if _skill:
+                last_query = ""
+                if messages:
+                    last_query = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+                    if not isinstance(last_query, str):
+                        last_query = ""
+                static, dynamic = _assemble(_skill, last_query, mode, list(tool_map.keys()))
+                effective_system = build_cached_system_prompt(static, dynamic)
+            else:
+                # Fallback for modes without a skill
+                cluster_ctx = get_cluster_context(mode=mode)
+                hint = get_component_hint(mode, tool_names=list(tool_map.keys()))
+                effective_system = build_cached_system_prompt(system_prompt + hint, cluster_ctx)
+        except Exception:
+            # Safe fallback
+            cluster_ctx = get_cluster_context(mode=mode)
+            hint = get_component_hint(mode, tool_names=list(tool_map.keys()))
+            effective_system = build_cached_system_prompt(system_prompt + hint, cluster_ctx)
     else:
         effective_system = system_prompt
 
