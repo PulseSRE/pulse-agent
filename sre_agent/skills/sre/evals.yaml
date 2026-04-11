@@ -53,6 +53,30 @@ scenarios:
     should_mention: [cpu, metric]
     max_tool_calls: 4
 
+  - id: sre_explain_deployment
+    prompt: "explain what fields a Deployment spec has"
+    should_use_tools: [explain_resource]
+    should_mention: [deployment, spec]
+    max_tool_calls: 4
+
+  - id: sre_list_apis
+    prompt: "what API resources are available on this cluster?"
+    should_use_tools: [list_api_resources]
+    should_mention: [api, group]
+    max_tool_calls: 4
+
+  - id: sre_deprecated_apis
+    prompt: "are there any deprecated APIs on this cluster?"
+    should_use_tools: [list_deprecated_apis]
+    should_mention: [deprecated]
+    max_tool_calls: 4
+
+  - id: sre_explain_pod_spec_containers
+    prompt: "explain the containers field in a pod spec"
+    should_use_tools: [explain_resource]
+    should_mention: [container]
+    max_tool_calls: 4
+
   - id: sre_negative_not_security
     prompt: "scan for RBAC vulnerabilities"
     should_not_route_to: sre

@@ -26,7 +26,16 @@ from .k8s_tools import ALL_TOOLS as _K8S_TOOLS
 from .k8s_tools import WRITE_TOOLS
 from .predict_tools import PREDICT_TOOLS
 from .runbooks import ALERT_TRIAGE_CONTEXT, RUNBOOKS  # noqa: F401 — RUNBOOKS re-exported for backward compat
-from .self_tools import list_my_skills, list_my_tools, list_promql_recipes, list_runbooks, list_ui_components
+from .self_tools import (
+    explain_resource,
+    list_api_resources,
+    list_deprecated_apis,
+    list_my_skills,
+    list_my_tools,
+    list_promql_recipes,
+    list_runbooks,
+    list_ui_components,
+)
 from .skill_loader import select_tools
 from .timeline_tools import TIMELINE_TOOLS
 from .view_tools import (
@@ -50,6 +59,9 @@ ALL_TOOLS = (
         list_ui_components,
         list_promql_recipes,
         list_runbooks,
+        explain_resource,
+        list_api_resources,
+        list_deprecated_apis,
     ]
 )
 

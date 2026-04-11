@@ -697,6 +697,9 @@ ALWAYS_INCLUDE = {
     "list_ui_components",
     "list_promql_recipes",
     "list_runbooks",
+    "explain_resource",
+    "list_api_resources",
+    "list_deprecated_apis",
 }
 
 
