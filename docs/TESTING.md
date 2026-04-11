@@ -673,3 +673,15 @@ The LLM judge requires a valid API key. In CI, it needs `VERTEX_PROJECT_ID`, `VE
 2. If it is a write tool, add it to the `WRITE_TOOLS` set
 3. Update `tests/test_tool_registry.py` expected tool count
 4. Update `CLAUDE.md` tool count
+
+---
+
+## Related Documentation
+
+| Document | What it covers |
+|----------|---------------|
+| [`EVAL_PROMPTS.md`](../EVAL_PROMPTS.md) | All 86 eval prompts mapped to expected tool calls |
+| [`sre_agent/evals/README.md`](../sre_agent/evals/README.md) | Eval framework internals — suites, rubric, CLI commands, replay fixtures |
+| [`docs/SKILL_DEVELOPER_GUIDE.md`](SKILL_DEVELOPER_GUIDE.md) | How to write skill-bundled evals (evals.yaml format) |
+| [`.github/workflows/evals.yml`](../.github/workflows/evals.yml) | CI pipeline definition |
+| [`.github/workflows/build-push.yml`](../.github/workflows/build-push.yml) | Release build pipeline |

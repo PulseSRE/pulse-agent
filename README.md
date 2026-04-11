@@ -13,7 +13,7 @@ AI-powered OpenShift/Kubernetes SRE and Security Agent built on Claude.
 
 Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude Opus to diagnose issues, triage incidents, manage resources, execute runbooks, and perform security audits — all through a conversational interface. Integrates with [OpenShift Pulse](https://github.com/alimobrem/OpenshiftPulse) for rich UI rendering, or runs standalone as a CLI. Includes 73 production-tested PromQL recipes, a semantic layout engine for dashboard generation, and an intelligence loop that feeds analytics back into the system prompt.
 
-**Docs:** [API Contract](API_CONTRACT.md) · [Security](SECURITY.md) · [Design Principles](DESIGN_PRINCIPLES.md) · [Eval Prompts](EVAL_PROMPTS.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
+**Docs:** [API Contract](API_CONTRACT.md) · [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Design Principles](DESIGN_PRINCIPLES.md) · [Testing Strategy](docs/TESTING.md) · [Eval Prompts](EVAL_PROMPTS.md) · [Skill Developer Guide](docs/SKILL_DEVELOPER_GUIDE.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
 ## Features
 
