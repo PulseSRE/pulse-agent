@@ -1,8 +1,8 @@
 # Pulse Agent Architecture
 
-Comprehensive architecture reference for Pulse Agent v1.13.x, Protocol v2.
+Comprehensive architecture reference for Pulse Agent v1.16.x, Protocol v2.
 
-**Last updated:** 2026-04-03
+**Last updated:** 2026-04-10
 
 ---
 
@@ -75,9 +75,9 @@ React/TypeScript frontend (OpenShift Pulse) providing the user interface.
 
 | Metric | Value |
 |--------|-------|
-| Tools | 82 across 9 modules |
+| Tools | 106 (75 native + 31 MCP) across 9 modules + MCP servers |
 | Scanners | 16 (11 core + 5 audit) |
-| Tests | 1,078 |
+| Tests | 1,433 |
 | PromQL Recipes | 73 across 16 categories |
 | Eval Prompts | 84 |
 | Protocol Version | 2 |
@@ -1553,6 +1553,53 @@ Key decisions made during development and the reasoning behind them.
 
 **Trade-off:** OAuth identity can differ across sessions (different token resolution), causing "view not found" errors for the same user. Mitigated by owner fallback — all view CRUD operations try without owner filter when the first lookup fails. The view's actual owner (from DB) is used for writes.
 
+### ADR-11: Skill Packages Architecture
+
+**Decision:** Introduce `skill_loader.py` as the owner of tool selection and query routing, consolidating logic previously spread across `harness.py` and `orchestrator.py`.
+
+**Why:** As the tool count grew beyond 82 (native) and MCP added 31 more, the harness's keyword-based category matching became brittle. Skill packages provide a composable unit: each skill directory contains `skill.md` (system prompt fragment), `evals.yaml` (test cases), and optional `mcp.yaml` (MCP server config). The skill loader resolves which tools, prompts, and MCP connections a query needs.
+
+**Result:** `harness.py` is now prompt utilities only (caching, cluster context injection, component hints). Tool selection lives in `skill_loader.py`. New capabilities can be added as drop-in skill packages without modifying core agent code.
+
+**Trade-off:** Another abstraction layer. Mitigated by keeping the skill package format minimal (3 files max) and supporting hot reload without restart.
+
+### ADR-12: MCP Integration (SSE Transport, 3-Tier Rendering)
+
+**Decision:** Connect external MCP servers via `mcp_client.py` using SSE transport. MCP tools are registered alongside native `@beta_tool` functions in the tool registry.
+
+**Why:** The OpenShift MCP server provides 31 tools across 11 toolsets that complement native tools. Rather than reimplementing these capabilities, MCP integration lets us consume community-maintained servers. SSE transport was chosen over stdio for production reliability (restart tolerance, health checks).
+
+**3-tier rendering model:**
+- **Tier 1 (native tools):** Return `(text, component_spec)` tuples for rich UI rendering
+- **Tier 2 (MCP tools with transform):** MCP tool results pass through a transformation engine that converts structured output into component specs
+- **Tier 3 (MCP tools raw):** Plain text results rendered inline in chat
+
+**Trade-off:** MCP tools lack the confirmation gate and tool_usage recording that native tools have. Mitigated by wrapping MCP tool calls in the same audit and confirmation infrastructure.
+
+### ADR-13: Harness Consolidation
+
+**Decision:** Move tool selection out of `harness.py` into `skill_loader.py`. Harness retains only prompt caching, cluster context injection, and component hints.
+
+**Why:** Tool selection was the most frequently modified part of the harness, and it needed to account for MCP tools, skill packages, and dynamic tool counts. Separating concerns makes each module easier to test and reason about. The harness's prompt caching and cluster context injection are stable and rarely change.
+
+**Result:** `harness.py` went from ~400 lines of mixed concerns to a focused prompt utilities module. `skill_loader.py` owns the full tool selection pipeline: skill matching, category resolution, MCP inclusion, and tool count budgeting.
+
+### ADR-14: Toolbox UI Consolidation
+
+**Decision:** Replace the separate `/tools` and `/extensions` frontend pages with a unified `/toolbox` page.
+
+**Why:** Users had to navigate between three different pages to understand available capabilities: `/tools` for native tools, `/extensions` for MCP servers, and `/analytics` for usage data. The Toolbox consolidates tools, skills, MCP servers, components, usage analytics, and chain patterns into a single page with tab navigation.
+
+**Result:** Single source of truth for "what can the agent do?" Skill packages, MCP tools, and native tools appear in the same catalog with unified search and filtering.
+
+### ADR-15: Component Registry and Transformation Engine
+
+**Decision:** Introduce a component registry that maps MCP tool output schemas to Pulse UI component specs, enabling MCP tools to produce rich visual output.
+
+**Why:** Native tools return `(text, component_spec)` tuples, but MCP tools return plain text or structured JSON. Without transformation, MCP tool results would render as raw text in chat. The transformation engine inspects MCP tool output and converts recognized patterns (tables, lists, key-value pairs) into the appropriate component kind (data_table, status_list, key_value).
+
+**Trade-off:** Transformation is best-effort -- not all MCP tool outputs map cleanly to component specs. Mitigated by falling back to inline text rendering for unrecognized output shapes.
+
 ---
 
 ## File Reference
@@ -1564,7 +1611,9 @@ Key decisions made during development and the reasoning behind them.
 | `sre_agent/api.py` | API routes, WebSocket handlers, view management |
 | `sre_agent/agent.py` | Shared agent loop, circuit breaker, tool execution |
 | `sre_agent/orchestrator.py` | Intent classification and agent routing |
-| `sre_agent/harness.py` | Tool selection, prompt caching, cluster context, component hints |
+| `sre_agent/harness.py` | Prompt caching, cluster context injection, component hints |
+| `sre_agent/skill_loader.py` | Skill package loader, tool selection, query routing, MCP inclusion |
+| `sre_agent/mcp_client.py` | MCP server connections (SSE transport), tool/prompt discovery |
 | `sre_agent/monitor.py` | Autonomous scanning, auto-fix, investigations |
 | `sre_agent/view_designer.py` | View designer agent mode |
 | `sre_agent/config.py` | Pydantic v2 Settings (`PulseAgentSettings`) |
@@ -1606,4 +1655,4 @@ Key decisions made during development and the reasoning behind them.
 
 ---
 
-*82 tools -- 16 scanners -- 10 runbooks -- 73 PromQL recipes -- 84 eval prompts -- 1,078 tests -- Protocol v2*
+*106 tools (75 native + 31 MCP) -- 16 scanners -- 10 runbooks -- 73 PromQL recipes -- 84 eval prompts -- 1,433 tests -- Protocol v2*
