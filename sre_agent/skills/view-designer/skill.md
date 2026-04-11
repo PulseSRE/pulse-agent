@@ -66,32 +66,35 @@ Present the plan with your investigation findings. Wait for user approval before
 Skip planning only when: user says "just build it" or you're using `add_widget_to_view`.
 
 ### Step 2: BUILD
-Execute plan by calling data tools in this order:
+Execute plan by calling the tools that match **the dashboard topic**:
 
-1. **Metrics first** — Choose metrics RELEVANT to the dashboard topic:
-   - Cluster overview → `cluster_metrics()`
-   - Namespace focus → `namespace_summary(ns)`
-   - Topic-specific → use `get_prometheus_query()` with instant queries
+- **Helm dashboard** → `helm_list()` for releases, `get_prometheus_query()` for app metrics
+- **Namespace overview** → `namespace_summary(ns)`, `get_prometheus_query()` for CPU/memory, `list_pods(ns)`
+- **Cluster overview** → `cluster_metrics()`, `get_node_metrics()`, `get_firing_alerts()`
+- **Incident triage** → `get_firing_alerts()`, `get_pod_logs()`, `get_events()`
+- **Security** → `get_security_summary()`, `scan_pod_security()` results
 
-2. **Charts second** — Call 2-3 times with DIFFERENT queries:
-   - `get_prometheus_query(query, time_range="1h")` → line/area chart
-   - For donut/pie: use instant query (no time_range) with `count by` or `sum by`
-   - Call `discover_metrics(category)` first if unsure what metrics exist
+Call data tools in sequence, then `create_dashboard(title="...")` to save.
 
-3. **Table third** — `list_pods(ns)`, `list_nodes()`, or `list_resources(resource="...")`
-
-4. **Save:** `create_dashboard(title="...")`
-
-**How it works:** Every tool call that returns a component AUTOMATICALLY adds it to the dashboard. Your job is calling the right tools in sequence.
+**How it works:** Every tool call that returns a component AUTOMATICALLY adds it to the dashboard. Your job is calling the right tools in the right order for the topic.
 
 ### Step 3: PRESENT
 After `create_dashboard`, tell the user: "Here's your dashboard. Would you like any changes?"
 
 ## Dashboard Structure
 
-**Row 1 — Metrics:** KPI cards with sparklines
-**Row 2 — Charts:** Trends over time
-**Row 3 — Table:** Resource list for drill-down
+Adapt the layout to the **topic**, not a fixed template. Different topics need different structures:
+
+| Topic | Row 1 | Row 2 | Row 3 |
+|-------|-------|-------|-------|
+| Namespace overview | resource_counts + metric_cards | CPU/memory charts | pod table |
+| Helm releases | release summary card | revision history table | status details |
+| Node health | node_map or metric_cards | CPU/memory/disk charts | node table |
+| Incident triage | firing alerts status_list | error rate charts | pod logs |
+| Security scan | finding summary cards | severity breakdown chart | findings table |
+| Capacity planning | headroom metric_cards | forecast charts | top consumers table |
+
+**Do NOT default to namespace_summary + cluster_metrics for every dashboard.** Use tools that match the user's request.
 
 Minimum: 3 widgets. Maximum: 8.
 
@@ -104,7 +107,10 @@ Minimum: 3 widgets. Maximum: 8.
 | Time-series chart | `get_prometheus_query(q, "1h")` | chart |
 | Node health map | `visualize_nodes()` | node_map |
 | Pod/node list | `list_pods(ns)` / `list_nodes()` | data_table |
+| Helm releases | `helm_list(allNamespaces)` | data_table |
 | Firing alerts | `get_firing_alerts()` | status_list |
+| Alertmanager | `alertmanager_alerts()` | status_list |
+| Prometheus query | `prometheus_query(query)` | chart or metric_card |
 | Pod logs | `get_pod_logs(ns, pod)` | log_viewer |
 | Resource details | `describe_pod(ns, pod)` | key_value |
 | Ranked bars | `emit_component("bar_list", ...)` | bar_list |
@@ -112,13 +118,11 @@ Minimum: 3 widgets. Maximum: 8.
 
 ## Validation Rules
 
-1. MUST have metric cards (or grid/info_card_grid) — 2 pts
-2. MUST have 2+ charts — 2 pts
-3. MUST have 1+ data_table — 1 pt
-4. Every widget MUST have a descriptive title
-5. NO duplicate PromQL queries
-6. NO duplicate titles
-7. Max 8 widgets
+1. Every widget MUST have a descriptive title
+2. NO duplicate PromQL queries
+3. NO duplicate titles
+4. Max 8 widgets
+5. Widgets should be relevant to the dashboard topic — don't add generic cluster metrics to a Helm dashboard
 
 ## Chart Type Selection
 
