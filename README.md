@@ -721,7 +721,7 @@ pip install -e '.[test]'
 python -m pytest tests/ -v
 ```
 
-See [docs/TESTING.md](docs/TESTING.md) for test conventions, fixtures, and coverage targets.
+See [TESTING.md](TESTING.md) for test conventions, fixtures, and coverage targets.
 
 1,433 tests covering all tools, all 16 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, PromQL recipes, view validation, layout engine, intelligence loop, token tracking, and the memory system. All tests run without a cluster or API key (fully mocked).
 
@@ -792,7 +792,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>106 tools (75 native + 31 MCP)</strong> &bull; <strong>17 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>86 eval prompts</strong> &bull; <strong>1,433 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>106 tools (75 native + 31 MCP)</strong> &bull; <strong>17 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>93 eval prompts</strong> &bull; <strong>1,433 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">
