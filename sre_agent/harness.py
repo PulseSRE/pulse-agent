@@ -335,6 +335,14 @@ def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "s
         cat = TOOL_CATEGORIES.get(cat_name, {})
         mode_tool_names.update(cat.get("tools", []))
 
+    # Always include MCP tools — they're general-purpose and extend native capabilities
+    try:
+        from .mcp_client import list_mcp_tools
+
+        mode_tool_names.update(t["name"] for t in list_mcp_tools())
+    except Exception:
+        pass
+
     filtered = [t for t in all_tools if t.name in mode_tool_names]
 
     # Safety: if filtering removed too many, return all
