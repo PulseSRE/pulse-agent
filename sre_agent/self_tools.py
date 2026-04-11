@@ -18,6 +18,7 @@ def list_my_skills() -> str:
 
     skills = list_skills()
     lines = [f"I have {len(skills)} skills:\n"]
+    cards = []
     for skill in sorted(skills, key=lambda s: -s.priority):
         status = " (degraded)" if skill.degraded else ""
         lines.append(f"**{skill.name}** v{skill.version}{status} — {skill.description}")
@@ -26,8 +27,29 @@ def list_my_skills() -> str:
         if skill.handoff_to:
             targets = ", ".join(skill.handoff_to.keys())
             lines.append(f"  Can hand off to: {targets}")
+        cards.append(
+            {
+                "label": skill.name,
+                "sub": skill.description,
+                "value": f"v{skill.version}",
+                "status": "degraded" if skill.degraded else "healthy",
+            }
+        )
 
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    component = {
+        "kind": "grid",
+        "title": f"Agent Skills ({len(skills)})",
+        "columns": min(len(cards), 4),
+        "items": [
+            {
+                "kind": "info_card_grid",
+                "title": f"Agent Skills ({len(skills)})",
+                "cards": cards,
+            }
+        ],
+    }
+    return (text, component)
 
 
 @beta_tool
@@ -43,13 +65,17 @@ def list_my_tools() -> str:
 
     native = []
     mcp = []
+    rows = []
     for name in sorted(TOOL_REGISTRY):
         tool = TOOL_REGISTRY[name]
         desc = getattr(tool, "description", "")[:80]
+        source = "mcp" if name in mcp_names else "native"
         if name in mcp_names:
             mcp.append(f"- `{name}` — {desc}")
         else:
             native.append(f"- `{name}` — {desc}")
+        if len(rows) < 50:
+            rows.append({"name": name, "source": source, "description": desc})
 
     lines = [f"I have {len(TOOL_REGISTRY)} tools:\n"]
     lines.append(f"**Native ({len(native)}):**")
@@ -60,7 +86,18 @@ def list_my_tools() -> str:
         lines.append(f"\n**MCP ({len(mcp)}):**")
         lines.extend(mcp)
 
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    component = {
+        "kind": "data_table",
+        "title": f"Agent Tools ({len(TOOL_REGISTRY)})",
+        "columns": [
+            {"id": "name", "header": "Name"},
+            {"id": "source", "header": "Source"},
+            {"id": "description", "header": "Description"},
+        ],
+        "rows": rows,
+    }
+    return (text, component)
 
 
 @beta_tool
@@ -86,7 +123,34 @@ def list_ui_components() -> str:
         for name, desc in sorted(by_category[cat]):
             lines.append(f"- `{name}` — {desc}")
 
-    return "\n".join(lines)
+    text = "\n".join(lines)
+
+    tabs = []
+    for cat in sorted(by_category):
+        rows = [{"name": n, "description": d} for n, d in sorted(by_category[cat])]
+        tabs.append(
+            {
+                "label": cat.title(),
+                "components": [
+                    {
+                        "kind": "data_table",
+                        "title": f"{cat.title()} Components",
+                        "columns": [
+                            {"id": "name", "header": "Name"},
+                            {"id": "description", "header": "Description"},
+                        ],
+                        "rows": rows,
+                    }
+                ],
+            }
+        )
+
+    component = {
+        "kind": "tabs",
+        "title": f"UI Components ({len(COMPONENT_REGISTRY)})",
+        "tabs": tabs,
+    }
+    return (text, component)
 
 
 @beta_tool
@@ -106,23 +170,53 @@ def list_promql_recipes(category: str = "") -> str:
     if not category:
         total = sum(len(v) for v in RECIPES.values())
         lines = [f"I have {total} PromQL recipes across {len(RECIPES)} categories:\n"]
+        cards = []
         for cat in sorted(RECIPES):
-            lines.append(f"- **{cat}** ({len(RECIPES[cat])} recipes)")
+            count = len(RECIPES[cat])
+            lines.append(f"- **{cat}** ({count} recipes)")
+            cards.append({"label": cat, "value": str(count), "sub": "recipes"})
         lines.append("\nAsk for a specific category to see the queries (e.g., 'show me cpu recipes').")
-        return "\n".join(lines)
+        text = "\n".join(lines)
+        component = {
+            "kind": "info_card_grid",
+            "title": f"PromQL Recipes ({total})",
+            "cards": cards,
+        }
+        return (text, component)
 
     recipes = RECIPES.get(category, [])
     if not recipes:
         return f"No recipes for category '{category}'. Available: {', '.join(sorted(RECIPES.keys()))}"
 
     lines = [f"**{category}** — {len(recipes)} recipes:\n"]
+    rows = []
     for r in recipes:
         lines.append(f"**{r.name}** ({r.scope})")
         lines.append(f"  `{r.query}`")
         lines.append(f"  {r.description} — renders as {r.chart_type}")
         lines.append("")
+        rows.append(
+            {
+                "name": r.name,
+                "query": r.query,
+                "chart_type": r.chart_type,
+                "scope": r.scope,
+            }
+        )
 
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    component = {
+        "kind": "data_table",
+        "title": f"{category} Recipes ({len(recipes)})",
+        "columns": [
+            {"id": "name", "header": "Name"},
+            {"id": "query", "header": "Query"},
+            {"id": "chart_type", "header": "Chart Type"},
+            {"id": "scope", "header": "Scope"},
+        ],
+        "rows": rows,
+    }
+    return (text, component)
 
 
 @beta_tool
@@ -148,11 +242,19 @@ def list_runbooks() -> str:
         "quota": "Resource quota exceeded — check namespace quotas, limit ranges, usage",
     }
 
+    items = []
     for name, keywords in sorted(_RUNBOOK_KEYWORDS.items()):
         desc = descriptions.get(name, f"Triggers on: {', '.join(keywords[:3])}")
         lines.append(f"- **{name}** — {desc}")
+        items.append({"name": name, "status": "info", "detail": desc})
 
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    component = {
+        "kind": "status_list",
+        "title": f"Diagnostic Runbooks ({len(_RUNBOOK_KEYWORDS)})",
+        "items": items,
+    }
+    return (text, component)
 
 
 # ---------------------------------------------------------------------------

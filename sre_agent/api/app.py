@@ -135,10 +135,13 @@ async def healthz():
 @app.get("/version")
 async def version():
     """API protocol version. UI checks this on connect to detect mismatches."""
+    from ..skill_loader import list_skills
+
     return {
         "protocol": PROTOCOL_VERSION,
         "agent": _get_agent_version(),
         "tools": len(SRE_ALL_TOOLS) + len(SEC_ALL_TOOLS),
+        "skills": len(list_skills()),
         "features": ["component_specs", "ws_token_auth", "rate_limiting", "monitor", "fix_history", "predictions"],
     }
 
