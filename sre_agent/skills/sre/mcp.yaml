@@ -26,7 +26,7 @@ toolsets:
 tool_renderers:
   helm_list:
     kind: data_table
-    parser: json
+    parser: table
     columns: [name, namespace, revision, status, chart, app_version]
   helm_install:
     kind: status_list

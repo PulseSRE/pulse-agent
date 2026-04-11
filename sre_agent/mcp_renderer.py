@@ -108,11 +108,18 @@ def _apply_renderer(tool_name: str, output: str, config: dict) -> dict | None:
 def _parse(output: str, parser: str) -> list | dict | None:
     """Parse output using the specified parser."""
     if parser == "json":
-        return _parse_json(output)
+        result = _parse_json(output)
+        if result is not None:
+            return result
+        # JSON parse failed — try table format as fallback (MCP servers
+        # often return whitespace-aligned tables, not JSON)
+        return _parse_table(output)
     elif parser == "csv":
         return _parse_csv(output)
     elif parser == "key_value":
         return _parse_key_value(output)
+    elif parser == "table":
+        return _parse_table(output)
     elif parser == "lines":
         return _parse_lines(output)
     return None
@@ -239,6 +246,51 @@ def _parse_key_value(text: str) -> dict | None:
         if match:
             result[match.group(1).strip()] = match.group(2).strip()
     return result if len(result) >= 2 else None
+
+
+def _parse_table(text: str) -> list[dict] | None:
+    """Parse whitespace-aligned table output (like kubectl/helm table format).
+
+    Handles output like:
+        NAME    NAMESPACE    REVISION    STATUS      CHART           APP VERSION
+        pulse   openshiftpulse    12     deployed    pulse-2.0.0     5.19.1
+    """
+    lines = [ln for ln in text.strip().split("\n") if ln.strip()]
+    if len(lines) < 2:
+        return None
+
+    # Detect header line — should have multiple whitespace-separated words
+    header_line = lines[0]
+    # Split header by 2+ spaces (table columns are separated by multiple spaces)
+    headers = re.split(r"\s{2,}", header_line.strip())
+    if len(headers) < 2:
+        # Try tab-separated
+        headers = header_line.strip().split("\t")
+    if len(headers) < 2:
+        return None
+
+    # Normalize header names to lowercase with underscores
+    header_keys = [h.strip().lower().replace(" ", "_") for h in headers]
+
+    # Find column positions from the header
+    col_positions = []
+    for h in headers:
+        pos = header_line.index(h)
+        col_positions.append(pos)
+
+    rows = []
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        row: dict[str, str] = {}
+        for i, key in enumerate(header_keys):
+            start = col_positions[i]
+            end = col_positions[i + 1] if i + 1 < len(col_positions) else len(line)
+            value = line[start:end].strip() if start < len(line) else ""
+            row[key] = value
+        rows.append(row)
+
+    return rows if rows else None
 
 
 def _parse_lines(text: str) -> list[str]:
