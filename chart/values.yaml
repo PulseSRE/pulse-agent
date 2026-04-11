@@ -97,11 +97,12 @@ database:
 # MCP Server — optional OpenShift MCP server deployment
 mcp:
   enabled: true
-  image: "ghcr.io/containers/kubernetes-mcp-server:latest"
+  image: "quay.io/amobrem/pulse-agent:mcp-server"
   toolsets:
     - core
     - config
     - helm
+    - observability
 
 nodeSelector: {}
 tolerations: []

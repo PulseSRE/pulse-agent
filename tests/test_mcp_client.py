@@ -35,6 +35,11 @@ class TestLoadMCPConfig:
         config = load_mcp_config(path)
         assert "config" in config["toolsets"]
 
+    def test_sre_mcp_has_observability(self):
+        path = Path(__file__).parent.parent / "sre_agent" / "skills" / "sre" / "mcp.yaml"
+        config = load_mcp_config(path)
+        assert "observability" in config["toolsets"]
+
     def test_sre_mcp_has_renderers(self):
         path = Path(__file__).parent.parent / "sre_agent" / "skills" / "sre" / "mcp.yaml"
         config = load_mcp_config(path)

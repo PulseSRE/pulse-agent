@@ -16,6 +16,8 @@ toolsets:
   - core
   - config
   - helm
+  - observability
+  # - ossm          # enable if cluster has OpenShift Service Mesh
   # - tekton        # enable if cluster has Tekton
   # - kubevirt      # enable if cluster has KubeVirt
   # - kiali         # enable if cluster has Kiali

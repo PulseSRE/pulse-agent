@@ -274,7 +274,7 @@ def _archive_version(skill_path: Path, version: int) -> None:
 
 
 # All known MCP server toolsets (from kubernetes-mcp-server --help)
-_MCP_AVAILABLE_TOOLSETS = ["core", "config", "helm", "tekton", "kiali", "kubevirt", "kcp"]
+_MCP_AVAILABLE_TOOLSETS = ["core", "config", "helm", "observability", "ossm", "tekton", "kiali", "kubevirt", "kcp"]
 
 
 @router.get("/admin/mcp")
