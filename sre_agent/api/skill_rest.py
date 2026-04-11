@@ -343,11 +343,13 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
             "--stateless",
         ]
 
-        # Patch container args
+        # Patch container args (use force=True to avoid field manager conflicts with Helm)
         apps.patch_namespaced_deployment(
             name=deploy_name,
             namespace=ns,
             body={"spec": {"template": {"spec": {"containers": [{"name": "mcp-server", "args": new_args}]}}}},
+            force=True,
+            field_manager="helm",
         )
 
         # Wait for rollout — detect crashloop and revert if needed
@@ -388,6 +390,8 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
                                         "template": {"spec": {"containers": [{"name": "mcp-server", "args": old_args}]}}
                                     }
                                 },
+                                force=True,
+                                field_manager="helm",
                             )
                             # Extract which toolsets were added
                             old_toolset_str = ""
