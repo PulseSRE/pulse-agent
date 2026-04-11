@@ -622,14 +622,12 @@ cp -r my-skill/ /path/to/sre_agent/skills/
 curl -X POST http://localhost:8080/admin/skills/reload
 ```
 
-### Method 2: Admin UI
+### Method 2: Toolbox UI
 
-1. Navigate to Agent Settings → Extensions → Skills
-2. Click "Add Skill"
-3. Upload or paste your skill.md content
-4. Add optional files (evals.yaml, mcp.yaml, etc.)
-5. Click "Test" to verify routing
-6. Click "Install" to activate
+1. Navigate to `/toolbox` → Skills tab
+2. Click "Reload Skills" after adding files to disk
+3. Use "Test Routing" to verify your skill handles the right queries
+4. Click a skill card to view/edit its contents, see version history, and compare diffs
 
 ### Versioning
 
@@ -649,5 +647,7 @@ When you update a skill:
 | Skill marked as degraded | Required tool not found | Check `requires_tools` against tool registry |
 | Low eval scores | Prompt too long or too vague | Compress prompt, add worked example |
 | MCP tools showing as text | No tool_renderer defined | Add renderer in mcp.yaml or rely on auto-detect |
+| MCP tools not called | Tools not in agent's offered set | MCP tools are auto-included — check Toolbox → Connections for connection status |
+| MCP prompts not available | Prompts discovered but not registered | Enable the toolset that provides the prompt (e.g., `openshift` for `plan_mustgather`) |
 | Handoff not triggering | Keyword not in handoff_to | Add trigger keywords to handoff_to map |
 | User preferences not applied | Field not in configurable list | Add field to configurable in frontmatter |
