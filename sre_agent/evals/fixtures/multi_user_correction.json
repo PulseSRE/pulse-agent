@@ -1,0 +1,41 @@
+{
+    "name": "multi_user_correction",
+    "multi_turn": true,
+    "turns": [
+        {
+            "prompt": "check pods in production",
+            "recorded_responses": {
+                "list_pods": "production/api-gateway-8b3c7d2e1-mn9op  Status=Running  Restarts=0  Age=3d\nproduction/payment-svc-5f1a9e4c6-qr1st  Status=Running  Restarts=0  Age=3d\nproduction/order-svc-3d7b6f8a2-uv2wx  Status=Running  Restarts=1  Age=1d"
+            },
+            "expected": {
+                "should_mention": ["production", "api-gateway", "payment", "order"],
+                "should_use_tools": ["list_pods"]
+            }
+        },
+        {
+            "prompt": "no wait, I meant the staging namespace",
+            "recorded_responses": {
+                "list_pods": "staging/api-gateway-6a2d5e9f3-ab1cd  Status=Running  Restarts=0  Age=5h\nstaging/payment-svc-4c8b1f7d2-ef2gh  Status=Running  Restarts=2  Age=5h\nstaging/order-svc-9e3a7c5b1-ij3kl  Status=CrashLoopBackOff  Restarts=22  Age=2h\nstaging/api-server-2f6d8a4e7-mn4op  Status=Running  Restarts=0  Age=1d"
+            },
+            "expected": {
+                "should_mention": ["staging"],
+                "should_use_tools": ["list_pods"]
+            }
+        },
+        {
+            "prompt": "what's the restart count for the api-server pod there?",
+            "recorded_responses": {
+                "describe_pod": "{\"name\": \"api-server-2f6d8a4e7-mn4op\", \"namespace\": \"staging\", \"status\": \"Running\", \"containers\": [{\"name\": \"api-server\", \"image\": \"api-server:v3.1.2\", \"ready\": true, \"restarts\": 0, \"state\": \"running\", \"started\": \"2024-01-14T10:00:00Z\"}], \"conditions\": [{\"type\": \"Ready\", \"status\": \"True\"}]}"
+            },
+            "expected": {
+                "should_mention": ["staging", "api-server", "0", "restart"],
+                "should_use_tools": ["describe_pod"]
+            }
+        }
+    ],
+    "expected": {
+        "overall_should_mention": ["staging", "api-server"],
+        "max_total_tool_calls": 12,
+        "should_use_tools_in_order": ["list_pods", "list_pods", "describe_pod"]
+    }
+}

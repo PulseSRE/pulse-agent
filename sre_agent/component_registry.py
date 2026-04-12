@@ -63,6 +63,53 @@ def generate_prompt_hints(categories: list[str] | None = None) -> str:
     return "\n\n".join(lines) if lines else ""
 
 
+def get_prompt_hints(kinds: list[str] | None = None) -> str:
+    """Generate component hint text from registry (replaces hardcoded COMPONENT_SCHEMAS).
+
+    Produces output in the same format as COMPONENT_SCHEMAS in harness.py:
+    each component kind gets a block with its name, description, example JSON,
+    and field guidance derived from the registry's prompt_hint and example.
+
+    Args:
+        kinds: Optional list of component kind names to include.
+               If None, includes all registered kinds.
+
+    Returns:
+        Formatted string suitable for injection into the system prompt.
+    """
+    import json as _json
+
+    blocks: list[str] = []
+    for name, comp in COMPONENT_REGISTRY.items():
+        if kinds is not None and name not in kinds:
+            continue
+
+        # Build a block similar to COMPONENT_SCHEMAS entries
+        lines: list[str] = []
+        lines.append(f"{comp.name} -- {comp.description}")
+
+        # Include the example as a compact JSON line
+        if comp.example:
+            lines.append(_json.dumps(comp.example, separators=(",", ": ")))
+
+        # Append the prompt hint (contains field guidance)
+        if comp.prompt_hint:
+            # Strip the "name — " prefix since we already have the header
+            hint = comp.prompt_hint
+            prefix = f"{comp.name} — "
+            if hint.startswith(prefix):
+                hint = hint[len(prefix) :]
+            # Also try with --
+            prefix2 = f"{comp.name} -- "
+            if hint.startswith(prefix2):
+                hint = hint[len(prefix2) :]
+            lines.append(hint)
+
+        blocks.append("\n".join(lines))
+
+    return "\n\n".join(blocks)
+
+
 # ---------------------------------------------------------------------------
 # Built-in component kinds
 # ---------------------------------------------------------------------------

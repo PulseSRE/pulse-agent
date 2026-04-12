@@ -1,0 +1,31 @@
+{
+    "name": "multi_context_retention",
+    "multi_turn": true,
+    "turns": [
+        {
+            "prompt": "list pods in the staging namespace",
+            "recorded_responses": {
+                "list_pods": "staging/frontend-7d8c5b4f2-a1b2c  Status=Running  Restarts=0  Age=12h\nstaging/backend-api-6f9e3d1c8-d3e4f  Status=Running  Restarts=3  Age=6h\nstaging/redis-cache-5a7b2e9f1-g5h6i  Status=Running  Restarts=0  Age=2d\nstaging/worker-job-4c8d1f3e7-j7k8l  Status=CrashLoopBackOff  Restarts=15  Age=1h"
+            },
+            "expected": {
+                "should_mention": ["frontend", "backend", "redis", "worker"],
+                "should_use_tools": ["list_pods"]
+            }
+        },
+        {
+            "prompt": "show me the logs for the first one",
+            "recorded_responses": {
+                "get_pod_logs": "2024-01-15T08:00:01Z [INFO] Frontend server starting on port 3000\n2024-01-15T08:00:02Z [INFO] Connected to backend-api:8080\n2024-01-15T08:00:03Z [WARN] Static asset cache miss rate: 45%\n2024-01-15T08:00:10Z [INFO] Serving 23 active connections\n2024-01-15T08:01:00Z [WARN] Slow render detected: /dashboard took 2.3s\n2024-01-15T08:01:30Z [INFO] Health check passed"
+            },
+            "expected": {
+                "should_mention": ["frontend", "staging"],
+                "should_use_tools": ["get_pod_logs"]
+            }
+        }
+    ],
+    "expected": {
+        "overall_should_mention": ["staging", "frontend"],
+        "max_total_tool_calls": 8,
+        "should_use_tools_in_order": ["list_pods", "get_pod_logs"]
+    }
+}

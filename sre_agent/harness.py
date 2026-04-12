@@ -508,6 +508,26 @@ def _select_relevant_schemas(tool_names: list[str]) -> list[str]:
     return [COMPONENT_SCHEMAS[k] for k in sorted(relevant) if k in COMPONENT_SCHEMAS]
 
 
+def _select_relevant_schemas_from_registry(tool_names: list[str]) -> str:
+    """Select component schemas from the component registry (data-driven alternative).
+
+    Uses get_prompt_hints() from component_registry instead of the hardcoded
+    COMPONENT_SCHEMAS dict. Returns formatted text ready for prompt injection.
+    """
+    from .component_registry import get_prompt_hints
+
+    relevant: set[str] = set()
+
+    for tool in tool_names:
+        if tool in _TOOL_COMPONENTS:
+            relevant.update(_TOOL_COMPONENTS[tool])
+
+    # Always include data_table (most common)
+    relevant.add("data_table")
+
+    return get_prompt_hints(kinds=sorted(relevant)) if relevant else get_prompt_hints()
+
+
 COMPONENT_HINT_CORE = """
 ## Resource Listing Guidance
 

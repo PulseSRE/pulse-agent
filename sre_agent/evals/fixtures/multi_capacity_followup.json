@@ -1,0 +1,44 @@
+{
+    "name": "multi_capacity_followup",
+    "multi_turn": true,
+    "turns": [
+        {
+            "prompt": "how much CPU headroom do we have?",
+            "recorded_responses": {
+                "get_node_metrics": "NAME          CPU_REQ   CPU_LIM   CPU_USED   CPU_ALLOC   CPU_FREE\nworker-1      3200m     6400m     2100m      8000m       4800m\nworker-2      2800m     5600m     1950m      8000m       5200m\nworker-3      4100m     8200m     3400m      8000m       3900m\nTotal         10100m    20200m    7450m      24000m      13900m",
+                "get_prometheus_query": "{\"kind\": \"chart\", \"chartType\": \"line\", \"title\": \"Cluster CPU Usage Trend\", \"series\": [{\"label\": \"CPU Used\", \"data\": [[1700000000, 31.0], [1700003600, 33.5], [1700007200, 29.8], [1700010800, 35.2]]}]}"
+            },
+            "expected": {
+                "should_mention": ["CPU", "headroom"],
+                "should_use_tools": ["get_node_metrics"]
+            }
+        },
+        {
+            "prompt": "what about memory?",
+            "recorded_responses": {
+                "get_node_metrics": "NAME          MEM_REQ    MEM_LIM    MEM_USED   MEM_ALLOC   MEM_FREE\nworker-1      12Gi       24Gi       10.5Gi     32Gi        21.5Gi\nworker-2      10Gi       20Gi       9.2Gi      32Gi        22.8Gi\nworker-3      18Gi       36Gi       16.1Gi     32Gi        15.9Gi\nTotal         40Gi       80Gi       35.8Gi     96Gi        60.2Gi",
+                "get_prometheus_query": "{\"kind\": \"chart\", \"chartType\": \"line\", \"title\": \"Cluster Memory Usage Trend\", \"series\": [{\"label\": \"Memory Used\", \"data\": [[1700000000, 37.2], [1700003600, 36.8], [1700007200, 38.1], [1700010800, 35.5]]}]}"
+            },
+            "expected": {
+                "should_mention": ["memory"],
+                "should_use_tools": ["get_node_metrics"]
+            }
+        },
+        {
+            "prompt": "which namespace is using the most?",
+            "recorded_responses": {
+                "get_prometheus_query": "{\"kind\": \"chart\", \"chartType\": \"bar\", \"title\": \"Top Namespaces by Resource Usage\", \"series\": [{\"label\": \"CPU (cores)\", \"data\": [[\"production\", 3.2], [\"monitoring\", 1.8], [\"staging\", 1.1], [\"logging\", 0.9], [\"kube-system\", 0.5]]}, {\"label\": \"Memory (Gi)\", \"data\": [[\"production\", 18.4], [\"monitoring\", 8.2], [\"staging\", 4.6], [\"logging\", 3.1], [\"kube-system\", 1.5]]}]}",
+                "list_pods": "production: 45 pods\nmonitoring: 18 pods\nstaging: 12 pods\nlogging: 8 pods\nkube-system: 6 pods"
+            },
+            "expected": {
+                "should_mention": ["production", "namespace"],
+                "should_use_tools": ["get_prometheus_query"]
+            }
+        }
+    ],
+    "expected": {
+        "overall_should_mention": ["CPU", "memory", "production"],
+        "max_total_tool_calls": 15,
+        "should_use_tools": ["get_node_metrics", "get_prometheus_query"]
+    }
+}

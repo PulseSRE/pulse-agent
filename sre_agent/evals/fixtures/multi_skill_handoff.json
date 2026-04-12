@@ -1,0 +1,36 @@
+{
+    "name": "multi_skill_handoff",
+    "multi_turn": true,
+    "turns": [
+        {
+            "prompt": "scan security in the production namespace",
+            "recorded_responses": {
+                "get_security_summary": "{\"namespace\": \"production\", \"totalFindings\": 8, \"critical\": 2, \"high\": 3, \"medium\": 2, \"low\": 1, \"findings\": [{\"severity\": \"critical\", \"type\": \"privileged_container\", \"resource\": \"Pod/debug-tools\", \"description\": \"Container running as privileged\"}, {\"severity\": \"critical\", \"type\": \"host_network\", \"resource\": \"Pod/monitoring-agent\", \"description\": \"Pod using host network\"}, {\"severity\": \"high\", \"type\": \"no_security_context\", \"resource\": \"Deployment/api-server\", \"description\": \"No securityContext defined\"}, {\"severity\": \"high\", \"type\": \"writable_root_fs\", \"resource\": \"Deployment/worker\", \"description\": \"Root filesystem is writable\"}, {\"severity\": \"high\", \"type\": \"no_resource_limits\", \"resource\": \"Deployment/cache\", \"description\": \"No CPU/memory limits set\"}]}",
+                "scan_pod_security": "{\"namespace\": \"production\", \"pods_scanned\": 12, \"violations\": [{\"pod\": \"debug-tools\", \"level\": \"restricted\", \"checks_failed\": [\"privileged\", \"runAsNonRoot\", \"allowPrivilegeEscalation\"]}, {\"pod\": \"monitoring-agent\", \"level\": \"restricted\", \"checks_failed\": [\"hostNetwork\", \"hostPorts\"]}]}",
+                "scan_rbac_risks": "{\"namespace\": \"production\", \"risks\": [{\"severity\": \"high\", \"subject\": \"ServiceAccount/default\", \"description\": \"Default SA has cluster-admin binding\"}, {\"severity\": \"medium\", \"subject\": \"ServiceAccount/ci-deployer\", \"description\": \"SA can create pods and exec into them\"}]}"
+            },
+            "expected": {
+                "should_mention": ["privileged", "critical", "security"],
+                "should_use_tools": ["get_security_summary"]
+            }
+        },
+        {
+            "prompt": "build me a dashboard of these findings",
+            "recorded_responses": {
+                "plan_dashboard": "{\"title\": \"Production Security Posture\", \"rows\": [[\"Findings Summary\", \"Pod Security Violations\"], [\"RBAC Risks\", \"Security Trend\"]]}",
+                "namespace_summary": "{\"namespace\": \"production\", \"pods\": 12, \"deployments\": 6, \"services\": 4}",
+                "get_prometheus_query": "{\"kind\": \"chart\", \"chartType\": \"donut\", \"title\": \"Findings by Severity\", \"series\": [{\"label\": \"Critical\", \"data\": 2}, {\"label\": \"High\", \"data\": 3}, {\"label\": \"Medium\", \"data\": 2}, {\"label\": \"Low\", \"data\": 1}]}",
+                "create_dashboard": "{\"view_id\": \"sec-dash-001\", \"title\": \"Production Security Posture\", \"widgets\": 4}"
+            },
+            "expected": {
+                "should_mention": ["dashboard", "security"],
+                "should_use_tools": ["plan_dashboard", "create_dashboard"]
+            }
+        }
+    ],
+    "expected": {
+        "overall_should_mention": ["security", "findings", "dashboard"],
+        "max_total_tool_calls": 15,
+        "should_use_tools": ["get_security_summary", "create_dashboard"]
+    }
+}

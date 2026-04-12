@@ -1,0 +1,42 @@
+{
+    "name": "multi_followup_question",
+    "multi_turn": true,
+    "turns": [
+        {
+            "prompt": "what's wrong with the nginx deployment in production?",
+            "recorded_responses": {
+                "describe_deployment": "{\"name\": \"nginx\", \"namespace\": \"production\", \"replicas\": 3, \"availableReplicas\": 1, \"unavailableReplicas\": 2, \"conditions\": [{\"type\": \"Available\", \"status\": \"False\", \"reason\": \"MinimumReplicasUnavailable\"}, {\"type\": \"Progressing\", \"status\": \"False\", \"reason\": \"ProgressDeadlineExceeded\"}]}",
+                "list_pods": "production/nginx-7c5b9d6f4-abc12  Status=Running  Restarts=0  Age=4h\nproduction/nginx-7c5b9d6f4-def34  Status=ImagePullBackOff  Restarts=0  Age=15m\nproduction/nginx-7c5b9d6f4-ghi56  Status=ImagePullBackOff  Restarts=0  Age=15m",
+                "get_events": "15m ago  Warning  Failed  Pod/nginx-7c5b9d6f4-def34  Failed to pull image \"nginx:2.0-latest\": rpc error: code = NotFound desc = failed to pull and unpack image: not found\n15m ago  Warning  Failed  Pod/nginx-7c5b9d6f4-ghi56  Failed to pull image \"nginx:2.0-latest\": rpc error: code = NotFound desc = failed to pull and unpack image: not found"
+            },
+            "expected": {
+                "should_mention": ["image", "pull", "nginx:2.0"],
+                "should_use_tools": ["describe_deployment"]
+            }
+        },
+        {
+            "prompt": "what caused this?",
+            "recorded_responses": {
+                "describe_deployment": "{\"name\": \"nginx\", \"namespace\": \"production\", \"replicas\": 3, \"availableReplicas\": 1, \"unavailableReplicas\": 2, \"annotations\": {\"kubernetes.io/change-cause\": \"image updated to nginx:2.0-latest by user admin at 2024-01-15T09:45:00Z\"}, \"revisionHistory\": [{\"revision\": 1, \"image\": \"nginx:1.25\"}, {\"revision\": 2, \"image\": \"nginx:2.0-latest\"}]}",
+                "get_events": "20m ago  Normal  ScalingReplicaSet  Deployment/nginx  Scaled up replica set nginx-7c5b9d6f4 to 3\n15m ago  Warning  Failed  Pod/nginx-7c5b9d6f4-def34  Failed to pull image \"nginx:2.0-latest\""
+            },
+            "expected": {
+                "should_mention": ["image", "update", "nginx:2.0"],
+                "should_use_tools": ["describe_deployment"]
+            }
+        },
+        {
+            "prompt": "how do I prevent it from happening again?",
+            "recorded_responses": {},
+            "expected": {
+                "should_mention": ["image", "tag"],
+                "should_use_tools": []
+            }
+        }
+    ],
+    "expected": {
+        "overall_should_mention": ["image", "ImagePullBackOff", "nginx:2.0"],
+        "max_total_tool_calls": 12,
+        "should_use_tools_in_order": ["describe_deployment", "describe_deployment"]
+    }
+}
