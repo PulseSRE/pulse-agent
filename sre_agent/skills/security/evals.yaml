@@ -23,6 +23,66 @@ scenarios:
     should_mention: [network, policy]
     max_tool_calls: 6
 
+  - id: sec_rbac_overpermission
+    prompt: "find service accounts with cluster-admin access"
+    should_use_tools: [scan_rbac_risks]
+    should_mention: [cluster-admin, service account]
+    max_tool_calls: 6
+
+  - id: sec_secret_exposure
+    prompt: "check for secrets exposed as environment variables in production"
+    should_use_tools: [scan_secrets]
+    should_mention: [secret, environment]
+    max_tool_calls: 6
+
+  - id: sec_network_policy_gaps
+    prompt: "which namespaces have no network policies?"
+    should_use_tools: [scan_network_policies]
+    should_mention: [network policy, namespace]
+    max_tool_calls: 6
+
+  - id: sec_scc_violations
+    prompt: "find pods running with privileged SCC"
+    should_use_tools: [scan_scc_usage]
+    should_mention: [privileged, scc]
+    max_tool_calls: 6
+
+  - id: sec_cert_expiry
+    prompt: "check for certificates expiring in the next 30 days"
+    should_use_tools: [get_tls_certificates]
+    should_mention: [certificate, expir]
+    max_tool_calls: 4
+
+  - id: sec_image_vulnerabilities
+    prompt: "scan images in staging namespace for known CVEs"
+    should_use_tools: [scan_images]
+    should_mention: [image, vulnerab]
+    max_tool_calls: 6
+
+  - id: sec_sa_secrets
+    prompt: "list all service account tokens in kube-system"
+    should_use_tools: [list_service_account_secrets]
+    should_mention: [service account, secret]
+    max_tool_calls: 4
+
+  - id: sec_full_audit
+    prompt: "run a complete security audit of the production namespace"
+    should_use_tools: [scan_pod_security, scan_rbac_risks, scan_network_policies]
+    should_mention: [security, audit]
+    max_tool_calls: 10
+
+  - id: sec_pod_security_ns
+    prompt: "check pod security standards in the default namespace"
+    should_use_tools: [scan_pod_security]
+    should_mention: [pod, security]
+    max_tool_calls: 6
+
+  - id: sec_compliance_check
+    prompt: "is this cluster compliant with our security baseline?"
+    should_use_tools: [get_security_summary]
+    should_mention: [security, compliance]
+    max_tool_calls: 6
+
   - id: security_negative_not_sre
     prompt: "why is my pod crashlooping?"
     should_not_route_to: security

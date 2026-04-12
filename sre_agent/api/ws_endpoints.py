@@ -520,6 +520,10 @@ async def websocket_auto_agent(websocket: WebSocket):
                             "type": "done",
                             "full_response": full_response,
                             "skill_name": last_mode,
+                            "tool_count": turn_meta.get("tool_count", 0),
+                            "duration_ms": turn_meta.get("duration_ms", 0),
+                            "input_tokens": turn_meta.get("input_tokens", 0),
+                            "output_tokens": turn_meta.get("output_tokens", 0),
                         }
                     )
                 except Exception:

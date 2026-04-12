@@ -337,6 +337,9 @@ _llm_cache: dict[str, tuple[str, float]] = {}  # query_hash → (skill_name, tim
 _LLM_CACHE_TTL = 300  # 5 minutes
 _LLM_CACHE_MAX = 100
 
+# Last routing decision — stores confidence info for analytics/debugging
+_last_routing_decision: dict = {}
+
 
 def classify_query(query: str) -> Skill:
     """Route a query to the best matching skill.
@@ -384,20 +387,77 @@ def classify_query(query: str) -> Skill:
         best_name = max(scores, key=lambda n: (scores[n], _skills[n].priority))
         best_score = scores[best_name]
         if best_score >= _LLM_CLASSIFY_THRESHOLD:
+            _last_routing_decision.clear()
+            _last_routing_decision.update(
+                {
+                    "skill_name": best_name,
+                    "keyword_score": best_score,
+                    "used_llm_fallback": False,
+                    "competing_scores": dict(scores),
+                }
+            )
+            logger.debug(
+                "classify_query: '%s' → %s (score=%d, competing=%s)",
+                query[:60],
+                best_name,
+                best_score,
+                scores,
+            )
             return _skills[best_name]
 
     # Low confidence or no matches: try LLM fallback
     llm_result = _llm_classify(query)
     if llm_result:
+        _last_routing_decision.clear()
+        _last_routing_decision.update(
+            {
+                "skill_name": llm_result.name,
+                "keyword_score": scores.get(llm_result.name, 0),
+                "used_llm_fallback": True,
+                "competing_scores": dict(scores),
+            }
+        )
+        logger.debug(
+            "classify_query: '%s' → %s (LLM fallback, keyword_scores=%s)",
+            query[:60],
+            llm_result.name,
+            scores,
+        )
         return llm_result
 
     # If we had some keyword scores, use the best one
     if scores:
         best_name = max(scores, key=lambda n: (scores[n], _skills[n].priority))
+        _last_routing_decision.clear()
+        _last_routing_decision.update(
+            {
+                "skill_name": best_name,
+                "keyword_score": scores[best_name],
+                "used_llm_fallback": False,
+                "competing_scores": dict(scores),
+            }
+        )
+        logger.debug(
+            "classify_query: '%s' → %s (low-confidence fallback, score=%d)",
+            query[:60],
+            best_name,
+            scores[best_name],
+        )
         return _skills[best_name]
 
     # Default to SRE (highest priority general-purpose skill)
-    return _skills.get("sre") or next(iter(_skills.values()))
+    fallback = _skills.get("sre") or next(iter(_skills.values()))
+    _last_routing_decision.clear()
+    _last_routing_decision.update(
+        {
+            "skill_name": fallback.name,
+            "keyword_score": 0,
+            "used_llm_fallback": False,
+            "competing_scores": {},
+        }
+    )
+    logger.debug("classify_query: '%s' → %s (default fallback)", query[:60], fallback.name)
+    return fallback
 
 
 def _llm_classify(query: str) -> Skill | None:

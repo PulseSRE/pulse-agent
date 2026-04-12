@@ -22,6 +22,9 @@ logger = logging.getLogger("pulse_agent.api")
 # WebSocket connection liveness tracking
 _ws_alive: dict[str, bool] = {}
 
+# Hallucination detection counter — tracks suspected tool hallucinations
+_hallucination_count: int = 0
+
 # Pending confirmation requests keyed by session ID (uuid4, NOT id(websocket))
 _pending_confirms: dict[str, asyncio.Future] = {}
 # JIT nonces for confirmation -- prevents replay/forgery
@@ -55,6 +58,7 @@ def _build_tool_result_handler(session_id: str, agent_mode: str, write_tools: se
         return _mcp_names
 
     def on_tool_result(info: dict):
+        global _hallucination_count
         try:
             from ..skill_loader import get_tool_category
             from ..tool_usage import record_tool_call
@@ -78,6 +82,27 @@ def _build_tool_result_handler(session_id: str, agent_mode: str, write_tools: se
                 was_confirmed=info.get("was_confirmed"),
                 tool_source=tool_source,
             )
+
+            # Hallucination detection: unknown tools or empty results
+            if info.get("status") == "error":
+                err_msg = (info.get("error_message") or "").lower()
+                if "unknown tool" in err_msg or "not found" in err_msg or "no such tool" in err_msg:
+                    _hallucination_count += 1
+                    logger.warning(
+                        "Suspected tool hallucination (#%d): tool=%s error=%s session=%s",
+                        _hallucination_count,
+                        tool_name,
+                        info.get("error_message", "")[:200],
+                        session_id,
+                    )
+
+            result_bytes = info.get("result_bytes", 0)
+            if info.get("status") == "success" and result_bytes == 0:
+                logger.warning(
+                    "Tool returned empty result: tool=%s session=%s",
+                    tool_name,
+                    session_id,
+                )
         except Exception:
             logger.debug("Tool result recording failed", exc_info=True)
 
