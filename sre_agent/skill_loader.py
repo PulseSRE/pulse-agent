@@ -338,6 +338,15 @@ def classify_query(query: str) -> Skill:
 
     scores: dict[str, int] = {}
 
+    # Direct skill name match (e.g., "run openshiftpulse_app_monitor")
+    for skill_name in _skills:
+        # Match skill name with underscores or hyphens or spaces
+        variants = [skill_name, skill_name.replace("_", " "), skill_name.replace("_", "-")]
+        for variant in variants:
+            if variant in q:
+                scores[skill_name] = scores.get(skill_name, 0) + len(variant) * 2  # high weight
+                break
+
     for kw, skill_name, kw_len in _keyword_index:
         if kw_len < 4:
             # Short keywords: word boundary match to avoid "pod" matching "tripod"
