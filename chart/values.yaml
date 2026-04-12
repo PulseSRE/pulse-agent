@@ -95,9 +95,14 @@ database:
       secretKey: "password"
 
 # MCP Server — optional OpenShift MCP server deployment
+# Built from https://github.com/openshift/openshift-mcp-server
+# Build: podman build -t quay.io/amobrem/openshift-mcp-server:latest /tmp/openshift-mcp-server
 mcp:
   enabled: true
-  image: "quay.io/amobrem/pulse-agent:mcp-server"
+  image:
+    repository: "quay.io/amobrem/pulse-agent"
+    tag: "mcp-server"
+    pullPolicy: Always
   toolsets:
     - core
     - config

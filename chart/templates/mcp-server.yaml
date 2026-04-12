@@ -21,7 +21,8 @@ spec:
       serviceAccountName: {{ include "sre-agent.fullname" . }}
       containers:
         - name: mcp-server
-          image: {{ .Values.mcp.image | default "ghcr.io/containers/kubernetes-mcp-server:latest" }}
+          image: "{{ .Values.mcp.image.repository }}:{{ .Values.mcp.image.tag }}"
+          imagePullPolicy: {{ .Values.mcp.image.pullPolicy | default "Always" }}
           args:
             - --port
             - "8081"
@@ -33,6 +34,18 @@ spec:
           ports:
             - containerPort: 8081
               name: sse
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: sse
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: sse
+            initialDelaySeconds: 10
+            periodSeconds: 30
           resources:
             requests:
               cpu: 50m
