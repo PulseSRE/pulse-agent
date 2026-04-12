@@ -183,6 +183,22 @@ class MultiTurnReplayHarness:
         turn_results: list[dict] = []
         total_start = time.monotonic()
 
+        # Build tool defs once from all turns' tools (reused across turns)
+        if tool_defs is None:
+            all_tool_names: set[str] = set()
+            for t in self.turns:
+                all_tool_names.update(t.get("recorded_responses", {}).keys())
+            stub_defs = [
+                {
+                    "name": name,
+                    "description": f"Recorded stub for {name}",
+                    "input_schema": {"type": "object", "properties": {}, "required": []},
+                }
+                for name in sorted(all_tool_names)
+            ]
+        else:
+            stub_defs = tool_defs
+
         for i, turn in enumerate(self.turns):
             turn_tool_calls: list[dict] = []
             recorded = turn.get("recorded_responses", {})
@@ -194,22 +210,6 @@ class MultiTurnReplayHarness:
                 mock_tool.name = name
                 mock_tool.call.return_value = value
                 effective_map[name] = mock_tool
-
-            if tool_defs is None and i == 0:
-                # Build defs from all turns' tools
-                all_tool_names: set[str] = set()
-                for t in self.turns:
-                    all_tool_names.update(t.get("recorded_responses", {}).keys())
-                stub_defs = [
-                    {
-                        "name": name,
-                        "description": f"Recorded stub for {name}",
-                        "input_schema": {"type": "object", "properties": {}, "required": []},
-                    }
-                    for name in sorted(all_tool_names)
-                ]
-            else:
-                stub_defs = tool_defs  # type: ignore[assignment]
 
             def _on_tool_use(tool_name: str) -> None:
                 turn_tool_calls.append({"name": tool_name, "timestamp": time.time()})
