@@ -377,10 +377,13 @@ def create_skill(
         f"{prompt}\n"
     )
 
-    # Write to disk
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    skill_file = skill_dir / "skill.md"
-    skill_file.write_text(content, encoding="utf-8")
+    # Write to disk (user skills go to writable PVC directory)
+    try:
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        skill_file = skill_dir / "skill.md"
+        skill_file.write_text(content, encoding="utf-8")
+    except OSError as e:
+        return f"Error: failed to write skill to {skill_dir}: {e}. The filesystem may be read-only."
 
     # Hot-reload
     skills = reload_skills()
@@ -391,11 +394,12 @@ def create_skill(
             f"- Keywords: {keyword_lines}\n"
             f"- Categories: {', '.join(cat_list)}\n"
             f"- Priority: {priority}\n"
-            f"- Write tools: {write_tools}\n\n"
+            f"- Write tools: {write_tools}\n"
+            f"- Location: {skill_file}\n\n"
             f"The skill is active now. Test it by asking a question with one of the keywords."
         )
 
-    return f"Skill file written to {skill_file} but failed to load. Check the logs."
+    return f"Error: skill file written to {skill_file} but failed to load. Check the agent logs for parsing errors."
 
 
 @beta_tool
