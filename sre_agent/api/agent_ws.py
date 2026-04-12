@@ -389,6 +389,25 @@ async def _run_agent_ws(
     except Exception:
         logger.debug("Failed to record turn", exc_info=True)
 
+    # Record prompt log (what system prompt was sent, with token costs)
+    try:
+        from ..prompt_builder import _last_assembled
+        from ..prompt_log import record_prompt
+
+        if _last_assembled:
+            record_prompt(
+                session_id=ws_id,
+                turn_number=turn_number,
+                token_usage=turn_token_usage,
+                **{
+                    k: v
+                    for k, v in _last_assembled.items()
+                    if k in ("static", "dynamic", "skill_name", "skill_version")
+                },
+            )
+    except Exception:
+        logger.debug("Failed to record prompt log", exc_info=True)
+
     # Record interaction for memory scoring (start_turn was called before agent ran)
     if manager and hasattr(manager, "finish_turn") and user_query:
         try:

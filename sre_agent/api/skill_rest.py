@@ -352,6 +352,40 @@ def _archive_version(skill_path: Path, version: int) -> None:
     shutil.copy2(skill_file, versions_dir / archive_name)
 
 
+@router.get("/prompt/stats")
+async def prompt_stats(
+    days: int = Query(30, ge=1, le=365),
+    _auth=Depends(verify_token),
+):
+    """Aggregated prompt stats: avg tokens by skill, cache hit rate, section breakdown."""
+    from ..prompt_log import get_prompt_stats
+
+    return get_prompt_stats(days=days)
+
+
+@router.get("/prompt/versions/{skill}")
+async def prompt_versions(
+    skill: str,
+    days: int = Query(30, ge=1, le=365),
+    _auth=Depends(verify_token),
+):
+    """Track prompt hash changes over time for a skill."""
+    from ..prompt_log import get_prompt_versions
+
+    return {"skill": skill, "versions": get_prompt_versions(skill, days=days), "days": days}
+
+
+@router.get("/prompt/log")
+async def prompt_log(
+    session_id: str = Query(..., description="Session ID to retrieve prompt logs for"),
+    _auth=Depends(verify_token),
+):
+    """Get prompt log entries for a session."""
+    from ..prompt_log import get_prompt_log
+
+    return {"session_id": session_id, "entries": get_prompt_log(session_id)}
+
+
 # All known MCP server toolsets (from kubernetes-mcp-server --help)
 _MCP_AVAILABLE_TOOLSETS = [
     "core",

@@ -24,6 +24,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("pulse_agent.prompt_builder")
 
+# Stores the latest assembly data for prompt logging (consumed by agent_ws)
+_last_assembled: dict = {}
+
 
 # ---------------------------------------------------------------------------
 # Intent Analysis Prefix — injected into every prompt (~100 tokens)
@@ -158,6 +161,15 @@ def assemble_prompt(
         logger.debug("Cluster context gathering failed", exc_info=True)
 
     dynamic_context = "\n\n".join(p for p in dynamic_parts if p)
+
+    _last_assembled.update(
+        {
+            "static": static_prompt,
+            "dynamic": dynamic_context,
+            "skill_name": skill.name,
+            "skill_version": skill.version,
+        }
+    )
 
     logger.debug(
         "Prompt assembled: static=%d chars, dynamic=%d chars, skill=%s, tools=%d",

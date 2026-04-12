@@ -324,6 +324,29 @@ CREATE INDEX IF NOT EXISTS idx_skill_usage_user ON skill_usage(user_id, timestam
 CREATE INDEX IF NOT EXISTS idx_skill_usage_session ON skill_usage(session_id);
 """
 
+PROMPT_LOG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS prompt_log (
+    id              SERIAL PRIMARY KEY,
+    timestamp       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    session_id      TEXT NOT NULL,
+    turn_number     INTEGER NOT NULL,
+    skill_name      TEXT NOT NULL,
+    skill_version   INTEGER NOT NULL,
+    prompt_hash     TEXT NOT NULL,
+    static_chars    INTEGER NOT NULL,
+    dynamic_chars   INTEGER NOT NULL,
+    total_tokens    INTEGER NOT NULL,
+    sections        JSONB,
+    input_tokens    INTEGER,
+    output_tokens   INTEGER,
+    cache_read_tokens INTEGER,
+    cache_creation_tokens INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_prompt_log_session ON prompt_log(session_id);
+CREATE INDEX IF NOT EXISTS idx_prompt_log_hash ON prompt_log(prompt_hash);
+CREATE INDEX IF NOT EXISTS idx_prompt_log_skill ON prompt_log(skill_name, timestamp DESC);
+"""
+
 ALL_SCHEMAS = (
     INCIDENTS_SCHEMA
     + RUNBOOKS_SCHEMA
@@ -345,4 +368,5 @@ ALL_SCHEMAS = (
     + CHAT_SESSIONS_SCHEMA
     + CHAT_MESSAGES_SCHEMA
     + SKILL_USAGE_SCHEMA
+    + PROMPT_LOG_SCHEMA
 )

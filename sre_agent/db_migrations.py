@@ -112,6 +112,13 @@ def _migrate_009_tool_source(db: Database) -> None:
     """)
 
 
+def _migrate_010_prompt_log(db: Database) -> None:
+    """Add prompt_log table for tracking system prompts sent to Claude."""
+    from .db_schema import PROMPT_LOG_SCHEMA
+
+    db.executescript(PROMPT_LOG_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -122,4 +129,5 @@ MIGRATIONS = [
     (7, "chat_history", _migrate_007_chat_history),
     (8, "skill_usage", _migrate_008_skill_usage),
     (9, "tool_source", _migrate_009_tool_source),
+    (10, "prompt_log", _migrate_010_prompt_log),
 ]
