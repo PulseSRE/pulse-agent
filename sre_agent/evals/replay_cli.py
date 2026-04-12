@@ -59,49 +59,80 @@ def _make_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _make_mock_client(
-    tool_names: list[str],
-    final_text: str = "Based on my investigation, the issue is likely caused by a dependency failure. I recommend checking the logs and restarting the affected deployment because the root cause appears to be a transient error.",
-):
-    """Build a mock client that calls the given tools then responds with text."""
+def _make_mock_stream(tool_names: list[str], text: str, stop_reason: str = "end_turn"):
+    """Build one mock stream cycle (tool calls → text response)."""
     from types import SimpleNamespace
     from unittest.mock import MagicMock
 
-    tool_blocks = [
-        SimpleNamespace(type="tool_use", id=f"t{i}", name=name, input={}) for i, name in enumerate(tool_names)
-    ]
-    text_block = SimpleNamespace(type="text", text=final_text)
+    streams = []
 
-    # First response: call tools
-    tool_events = []
-    for block in tool_blocks:
-        tool_events.append(SimpleNamespace(type="content_block_start", content_block=block))
-    tool_msg = SimpleNamespace(
-        content=tool_blocks,
-        stop_reason="tool_use",
-    )
-    tool_stream = MagicMock()
-    tool_stream.__enter__ = MagicMock(return_value=tool_stream)
-    tool_stream.__exit__ = MagicMock(return_value=False)
-    tool_stream.__iter__ = MagicMock(return_value=iter(tool_events))
-    tool_stream.get_final_message.return_value = tool_msg
+    if tool_names:
+        # Tool call stream
+        tool_blocks = [
+            SimpleNamespace(type="tool_use", id=f"t{i}", name=name, input={}) for i, name in enumerate(tool_names)
+        ]
+        tool_events = [SimpleNamespace(type="content_block_start", content_block=b) for b in tool_blocks]
+        tool_msg = SimpleNamespace(content=tool_blocks, stop_reason="tool_use")
+        tool_stream = MagicMock()
+        tool_stream.__enter__ = MagicMock(return_value=tool_stream)
+        tool_stream.__exit__ = MagicMock(return_value=False)
+        tool_stream.__iter__ = MagicMock(return_value=iter(tool_events))
+        tool_stream.get_final_message.return_value = tool_msg
+        streams.append(tool_stream)
 
-    # Second response: final text
+    # Text response stream
+    text_block = SimpleNamespace(type="text", text=text)
     text_events = [
-        SimpleNamespace(type="content_block_delta", delta=SimpleNamespace(type="text_delta", text=final_text)),
+        SimpleNamespace(type="content_block_delta", delta=SimpleNamespace(type="text_delta", text=text)),
     ]
-    text_msg = SimpleNamespace(
-        content=[text_block],
-        stop_reason="end_turn",
-    )
+    text_msg = SimpleNamespace(content=[text_block], stop_reason=stop_reason)
     text_stream = MagicMock()
     text_stream.__enter__ = MagicMock(return_value=text_stream)
     text_stream.__exit__ = MagicMock(return_value=False)
     text_stream.__iter__ = MagicMock(return_value=iter(text_events))
     text_stream.get_final_message.return_value = text_msg
+    streams.append(text_stream)
+
+    return streams
+
+
+def _make_mock_client(
+    tool_names: list[str],
+    final_text: str = "Based on my investigation, the issue is likely caused by a dependency failure. I recommend checking the logs and restarting the affected deployment because the root cause appears to be a transient error.",
+):
+    """Build a mock client that calls the given tools then responds with text (single-turn)."""
+    from unittest.mock import MagicMock
+
+    streams = _make_mock_stream(tool_names, final_text)
+    client = MagicMock()
+    client.messages.stream.side_effect = streams
+    return client
+
+
+def _make_multi_turn_mock_client(turns: list[dict], expected_keywords: list[str]):
+    """Build a mock client for multi-turn conversations.
+
+    Each turn gets its own tool call + text response cycle.
+    The text response includes expected keywords and references to the turn's data.
+    """
+    from unittest.mock import MagicMock
+
+    all_streams = []
+    keyword_text = ", ".join(expected_keywords) if expected_keywords else "the affected resources"
+
+    for i, turn in enumerate(turns):
+        turn_tools = list(turn.get("recorded_responses", {}).keys())
+        # Build a response that mentions expected keywords and the turn's context
+        turn_text = (
+            f"Based on turn {i + 1} investigation using {', '.join(turn_tools)}, "
+            f"I found issues related to: {keyword_text}. "
+            f"The {turn.get('prompt', '')[:30]} analysis shows the root cause."
+        )
+        streams = _make_mock_stream(turn_tools, turn_text)
+        all_streams.extend(streams)
 
     client = MagicMock()
-    client.messages.stream.side_effect = [tool_stream, text_stream]
+    client.messages.stream.side_effect = all_streams
     return client
 
 
@@ -177,9 +208,9 @@ def _run_multi_turn_fixture(name: str, fixture: dict, use_judge: bool, model: st
     client, thinking = _setup_model(model, dry_run)
 
     if dry_run:
-        # Build mock client from first turn's tools
-        all_tools = list(fixture["turns"][0].get("recorded_responses", {}).keys())
-        client = _make_mock_client(all_tools)
+        # Build a multi-turn mock client with per-turn tool call + text cycles
+        expected_keywords = fixture.get("expected", {}).get("overall_should_mention", [])
+        client = _make_multi_turn_mock_client(fixture["turns"], expected_keywords)
 
     result = harness.run(client=client, thinking=thinking)
     score = score_multi_turn(result, fixture.get("expected", {}))

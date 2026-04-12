@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.16.0, Protocol v2, 96 tools, 17 scanners, 1216 tests, 73 PromQL recipes, 86 eval prompts. Modular package architecture: k8s_tools/ (11 modules), monitor/ (10 modules), api/ (12 modules) — no file over 910 lines. Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings). Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence.
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v1.16.0, Protocol v2, 106 tools (75 native + 31 MCP), 17 scanners, 1433 tests, 73 PromQL recipes, 93 eval prompts. Modular package architecture: k8s_tools/ (11 modules), monitor/ (10 modules), api/ (12 modules) — no file over 910 lines. Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings). Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence.
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -38,7 +38,7 @@ python -m sre_agent.main security     # Security scanner
 pulse-agent-api                       # FastAPI on port 8080
 
 # Tests
-python3 -m pytest tests/ -v           # all tests (~1216 tests)
+python3 -m pytest tests/ -v           # all tests (~1433 tests)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
 make verify                                    # lint + type-check + test
 
@@ -57,6 +57,7 @@ make release VERSION=1.6.0            # bump version everywhere, commit, tag
 cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh   # builds UI + Agent, pushes to Quay, Helm upgrade
 cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --dry-run  # preview without applying
 cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --skip-build  # redeploy with existing images
+cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --set agent.mcp.enabled=true  # deploy with MCP enabled
 ```
 
 ## Architecture
@@ -133,9 +134,9 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - All config accessed via settings instance, not raw `os.environ`
 
 ### Harness (`harness.py`)
-- Dynamic tool selection: 8 categories, loads 15-25 of 84 tools per query
 - Prompt caching: `cache_control: ephemeral` on system prompt
 - Cluster context injection: pre-fetches node count, namespaces, OCP version
+- Component hints for selected tools (tool selection moved to skill_loader)
 
 ### Security
 - Non-root container (UID 1001) on UBI9
@@ -173,6 +174,12 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `evals/compare.py` — A/B comparison of eval suite results (baseline vs current, regression detection)
 - `evals/ablation.py` — prompt section ablation framework (tests impact of removing prompt sections on scores)
 - `evals/history.py` — eval history DB (eval_runs table, trend queries, migration 006)
+- `skill_loader.py` — skill package loader, tool selection, query routing, MCP inclusion (consolidates harness tool selection)
+- `mcp_client.py` — MCP server connections (SSE transport), tool/prompt discovery, registration
+
+**Frontend:** `/toolbox` consolidates tools, skills, MCP, components, usage, analytics into single page.
+
+**Testing:** See [`TESTING.md`](TESTING.md) for full testing strategy, eval prompts, CI pipeline, and release process.
 
 ### Claude Code Agents (`.claude/agents/`)
 8 specialized agents with hooks in `.claude/settings.json`:

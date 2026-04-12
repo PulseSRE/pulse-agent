@@ -30,6 +30,9 @@ include = ["sre_agent*"]
 
 [tool.setuptools.package-data]
 "sre_agent.evals.scenarios_data" = ["*.json"]
+"sre_agent.evals.fixtures" = ["*.json"]
+"sre_agent.evals.baselines" = ["*.json"]
+"sre_agent.skills" = ["**/*.md", "**/*.yaml", "**/*.yml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

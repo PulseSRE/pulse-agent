@@ -1,0 +1,29 @@
+scenarios:
+  - id: security_full_scan
+    prompt: "Run a full security scan of the cluster"
+    should_use_tools: [get_security_summary]
+    should_mention: [security, scan]
+    max_tool_calls: 8
+
+  - id: security_rbac_audit
+    prompt: "Audit RBAC for overly permissive roles"
+    should_use_tools: [get_security_summary, scan_rbac_risks]
+    should_mention: [rbac, role, permission]
+    max_tool_calls: 6
+
+  - id: security_pod_security
+    prompt: "Check pod security in the production namespace"
+    should_use_tools: [get_security_summary, scan_pod_security]
+    should_mention: [pod, security, privileged]
+    max_tool_calls: 6
+
+  - id: security_network_policies
+    prompt: "Are there namespaces without network policies?"
+    should_use_tools: [get_security_summary]
+    should_mention: [network, policy]
+    max_tool_calls: 6
+
+  - id: security_negative_not_sre
+    prompt: "why is my pod crashlooping?"
+    should_not_route_to: security
+    description: "SRE query should NOT route to security"

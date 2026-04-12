@@ -97,6 +97,21 @@ def _migrate_007_chat_history(db: Database) -> None:
     db.executescript(CHAT_SESSIONS_SCHEMA + CHAT_MESSAGES_SCHEMA)
 
 
+def _migrate_008_skill_usage(db: Database) -> None:
+    """Add skill_usage table for skill analytics and transparency."""
+    from .db_schema import SKILL_USAGE_SCHEMA
+
+    db.executescript(SKILL_USAGE_SCHEMA)
+
+
+def _migrate_009_tool_source(db: Database) -> None:
+    """Add tool_source column to track native vs MCP tool calls."""
+    db.executescript("""
+        ALTER TABLE tool_usage ADD COLUMN IF NOT EXISTS tool_source TEXT DEFAULT 'native';
+        CREATE INDEX IF NOT EXISTS idx_tool_usage_source ON tool_usage(tool_source);
+    """)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -105,4 +120,6 @@ MIGRATIONS = [
     (5, "scan_runs", _migrate_005_scan_runs),
     (6, "eval_runs", _migrate_006_eval_runs),
     (7, "chat_history", _migrate_007_chat_history),
+    (8, "skill_usage", _migrate_008_skill_usage),
+    (9, "tool_source", _migrate_009_tool_source),
 ]

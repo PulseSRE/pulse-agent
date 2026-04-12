@@ -22,16 +22,17 @@ router = APIRouter()
 
 @router.get("/tools")
 async def list_tools(_auth=Depends(verify_token)):
-    """List all available tools grouped by mode, with write-op flags."""
-    from ..harness import get_tool_category
+    """List all available tools grouped by mode, with write-op flags and source."""
+    from ..skill_loader import get_tool_category
 
-    return {
+    result = {
         "sre": [
             {
                 "name": t.name,
                 "description": t.description,
                 "requires_confirmation": t.name in WRITE_TOOLS,
                 "category": get_tool_category(t.name),
+                "source": "native",
             }
             for t in SRE_ALL_TOOLS
         ],
@@ -41,11 +42,34 @@ async def list_tools(_auth=Depends(verify_token)):
                 "description": t.description,
                 "requires_confirmation": False,
                 "category": get_tool_category(t.name),
+                "source": "native",
             }
             for t in SEC_ALL_TOOLS
         ],
         "write_tools": sorted(WRITE_TOOLS),
     }
+
+    # Merge MCP tools (available to all modes)
+    try:
+        from ..mcp_client import list_mcp_tools
+
+        mcp_tools_list = []
+        for tool in list_mcp_tools():
+            mcp_tools_list.append(
+                {
+                    "name": tool["name"],
+                    "description": f"MCP tool from {tool['server']}",
+                    "requires_confirmation": False,
+                    "category": "mcp",
+                    "source": "mcp",
+                    "mcp_server": tool["server"],
+                }
+            )
+        result["mcp"] = mcp_tools_list
+    except Exception:
+        result["mcp"] = []
+
+    return result
 
 
 @router.get("/agents")
@@ -82,6 +106,7 @@ async def get_tools_usage(
     agent_mode: str | None = Query(None),
     status: str | None = Query(None),
     session_id: str | None = Query(None),
+    source: str | None = Query(None),
     time_from: str | None = Query(None, alias="from"),
     time_to: str | None = Query(None, alias="to"),
     page: int = Query(1, ge=1),
@@ -96,6 +121,7 @@ async def get_tools_usage(
         agent_mode=agent_mode,
         status=status,
         session_id=session_id,
+        tool_source=source,
         time_from=time_from,
         time_to=time_to,
         page=page,

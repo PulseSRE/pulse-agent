@@ -7,13 +7,15 @@ from typing import ClassVar
 from unittest.mock import patch
 
 from sre_agent.harness import (
-    ALWAYS_INCLUDE,
     COMPONENT_SCHEMAS,
-    TOOL_CATEGORIES,
     build_cached_system_prompt,
     get_cluster_context,
     get_component_hint,
     get_tool_category,
+)
+from sre_agent.skill_loader import (
+    ALWAYS_INCLUDE,
+    TOOL_CATEGORIES,
     select_tools,
 )
 
@@ -245,7 +247,7 @@ class TestCategoryCoverage:
             timeline_tools,  # noqa: F401
             view_tools,  # noqa: F401
         )
-        from sre_agent.harness import ALWAYS_INCLUDE, TOOL_CATEGORIES
+        from sre_agent.skill_loader import ALWAYS_INCLUDE, TOOL_CATEGORIES
         from sre_agent.tool_registry import TOOL_REGISTRY
 
         all_categorized = set(ALWAYS_INCLUDE)
@@ -321,27 +323,27 @@ class TestComponentHint:
         assert "dry_run" not in hint
         assert "Resource Listing Guidance" not in hint
 
-    def test_legacy_hint_includes_ops(self):
-        """Legacy mode includes full ops guidance."""
-        import os
+    def test_tool_based_selection_includes_chart_for_prometheus(self):
+        """Passing prometheus tool should include chart schema."""
+        hint = get_component_hint("sre", tool_names=["get_prometheus_query"])
+        assert "chart" in hint
+        assert "data_table" in hint  # always included
 
-        old = os.environ.get("PULSE_PROMPT_EXPERIMENT", "")
-        os.environ["PULSE_PROMPT_EXPERIMENT"] = "legacy"
-        try:
-            hint = get_component_hint("sre")
-            assert "dry_run" in hint
-            assert "dashboard" in hint.lower()
-        finally:
-            if old:
-                os.environ["PULSE_PROMPT_EXPERIMENT"] = old
-            else:
-                os.environ.pop("PULSE_PROMPT_EXPERIMENT", None)
-
-    def test_tool_based_selection_reduces_schemas(self):
-        """Passing a small tool list should produce fewer schemas than all."""
-        full_hint = get_component_hint("sre")
-        filtered_hint = get_component_hint("sre", tool_names=["list_pods"])
-        assert len(filtered_hint) < len(full_hint)
+    def test_tool_based_selection_includes_more_for_diverse_tools(self):
+        """More tools should produce more component schemas."""
+        small_hint = get_component_hint("sre", tool_names=["list_pods"])
+        large_hint = get_component_hint(
+            "sre",
+            tool_names=[
+                "list_pods",
+                "get_prometheus_query",
+                "get_firing_alerts",
+                "visualize_nodes",
+                "get_pod_logs",
+                "get_resource_relationships",
+            ],
+        )
+        assert len(large_hint) > len(small_hint)
 
     def test_view_designer_returns_empty(self):
         assert get_component_hint("view_designer") == ""

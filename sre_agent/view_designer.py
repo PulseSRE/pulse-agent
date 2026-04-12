@@ -74,17 +74,6 @@ for t in _combined:
 TOOL_DEFS = [t.to_dict() for t in ALL_TOOLS]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 
-_DASHBOARD_QUALITY_CHECKLIST = """
-## Pre-Save Checklist
-
-Before calling create_dashboard, verify:
-- [ ] Has metric cards or info_card_grid (KPI row)
-- [ ] Has 2+ charts with DIFFERENT queries
-- [ ] Has 1+ data_table for drill-down
-- [ ] Every widget has a descriptive title (not "Chart" or "Table")
-- [ ] No duplicate PromQL queries across widgets
-- [ ] Total widgets between 3 and 8
-"""
 
 _VIEW_DESIGNER_BASE = """\
 You are an OpenShift Pulse View Designer. You create professional dashboards by \
@@ -266,28 +255,4 @@ When presenting dashboards, follow these rules:
 """
 
 
-def _build_view_designer_prompt() -> str:
-    """Build view designer prompt with experiment overrides."""
-    import os
-
-    experiment = os.environ.get("PULSE_PROMPT_EXPERIMENT", "")
-    prompt = _VIEW_DESIGNER_BASE
-
-    if experiment == "no_chart_table":
-        # Remove chart type selection table (experiment 8)
-        # Find and strip the chart type section
-        marker = "## Chart Type Selection"
-        end_marker = "## Color Semantics"
-        start = prompt.find(marker)
-        end = prompt.find(end_marker)
-        if start > 0 and end > start:
-            prompt = prompt[:start] + prompt[end:]
-
-    if experiment == "dashboard_checklist":
-        # Add quality checklist (experiment 9)
-        prompt += _DASHBOARD_QUALITY_CHECKLIST
-
-    return prompt
-
-
-VIEW_DESIGNER_SYSTEM_PROMPT = _build_view_designer_prompt()
+VIEW_DESIGNER_SYSTEM_PROMPT = _VIEW_DESIGNER_BASE

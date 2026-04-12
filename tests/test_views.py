@@ -557,9 +557,12 @@ class TestNamespaceSummary:
         metric_cards = [i for i in component["items"] if i["kind"] == "metric_card"]
         assert len(metric_cards) == 4
 
-    def test_cluster_metrics_columns_capped(self):
+    def test_cluster_metrics_columns_capped(self, mock_k8s):
         """cluster_metrics grid should cap columns at 4 to avoid cramped cards."""
         from sre_agent.view_tools import cluster_metrics
+
+        mock_k8s["core"].list_node.return_value = SimpleNamespace(items=[])
+        mock_k8s["core"].list_namespaced_pod.return_value = SimpleNamespace(items=[])
 
         result = cluster_metrics.call({"category": "overview"})
         if isinstance(result, tuple):

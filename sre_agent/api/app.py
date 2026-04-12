@@ -28,6 +28,7 @@ from .chat_rest import router as chat_router
 from .eval_rest import router as eval_router
 from .memory_rest import router as memory_router
 from .monitor_rest import router as monitor_router
+from .skill_rest import router as skill_router
 from .tools_rest import router as tools_router
 from .views import router as views_router
 from .ws_endpoints import websocket_agent, websocket_auto_agent, websocket_monitor
@@ -56,6 +57,29 @@ async def lifespan(app: FastAPI):
         logger.info("Connected to cluster")
     except Exception:
         logger.warning("Cannot connect to cluster -- tools may fail")
+    # Load skill packages
+    try:
+        from ..skill_loader import load_skills
+
+        skills = load_skills()
+        logger.info("Loaded %d skill packages", len(skills))
+
+        # Connect MCP servers for skills that have mcp.yaml
+        from ..mcp_client import connect_skill_mcp
+
+        for skill in skills.values():
+            if (skill.path / "mcp.yaml").exists():
+                try:
+                    conn = connect_skill_mcp(skill.name, skill.path)
+                    if conn and conn.connected:
+                        logger.info("MCP connected for skill '%s': %d tools", skill.name, len(conn.tools))
+                    elif conn:
+                        logger.warning("MCP failed for skill '%s': %s", skill.name, conn.error)
+                except Exception as e:
+                    logger.warning("MCP init failed for skill '%s': %s", skill.name, e)
+    except Exception as e:
+        logger.warning("Skill loading failed: %s", e)
+
     # Initialize memory system if enabled
     if get_settings().memory:
         try:
@@ -67,6 +91,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("Memory system init failed: %s", e)
     yield
+
+    # Cleanup MCP connections on shutdown
+    try:
+        from ..mcp_client import disconnect_all
+
+        disconnect_all()
+    except Exception:
+        pass
 
 
 def _get_agent_version() -> str:
@@ -87,6 +119,7 @@ app.include_router(memory_router)
 app.include_router(eval_router)
 app.include_router(views_router)
 app.include_router(chat_router)
+app.include_router(skill_router)
 
 # Register WebSocket endpoints
 app.websocket("/ws/{mode}")(websocket_agent)
@@ -102,10 +135,13 @@ async def healthz():
 @app.get("/version")
 async def version():
     """API protocol version. UI checks this on connect to detect mismatches."""
+    from ..skill_loader import list_skills
+
     return {
         "protocol": PROTOCOL_VERSION,
         "agent": _get_agent_version(),
         "tools": len(SRE_ALL_TOOLS) + len(SEC_ALL_TOOLS),
+        "skills": len(list_skills()),
         "features": ["component_specs", "ws_token_auth", "rate_limiting", "monitor", "fix_history", "predictions"],
     }
 

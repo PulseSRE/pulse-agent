@@ -117,7 +117,8 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
         create_client,
         run_agent_streaming,
     )
-    from ..harness import build_cached_system_prompt, get_cluster_context, get_component_hint, select_tools
+    from ..harness import build_cached_system_prompt, get_cluster_context, get_component_hint
+    from ..skill_loader import select_tools
 
     readonly_defs = [tool_def for tool_def in SRE_TOOL_DEFS if tool_def.get("name") not in SRE_WRITE_TOOLS]
     readonly_map = {name: tool for name, tool in SRE_TOOL_MAP.items() if name not in SRE_WRITE_TOOLS}
@@ -193,7 +194,7 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
 def _run_security_followup_sync(finding: dict) -> dict:
     """Run a lightweight security check on the namespace of a critical finding."""
     from ..agent import create_client, run_agent_streaming
-    from ..harness import build_cached_system_prompt, get_cluster_context, get_component_hint, select_tools
+    from ..harness import build_cached_system_prompt, get_cluster_context, get_component_hint
     from ..security_agent import (
         SECURITY_SYSTEM_PROMPT,
     )
@@ -203,6 +204,7 @@ def _run_security_followup_sync(finding: dict) -> dict:
     from ..security_agent import (
         TOOL_MAP as SEC_TOOL_MAP,
     )
+    from ..skill_loader import select_tools
 
     client = create_client()
     resources = finding.get("resources", [])

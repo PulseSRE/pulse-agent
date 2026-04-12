@@ -1,0 +1,52 @@
+# Default MCP server — OpenShift MCP Server
+# https://github.com/openshift/openshift-mcp-server
+#
+# In-cluster: connects via SSE to the MCP server pod (deployed via Helm)
+# Local dev: uses npx stdio (requires Node.js installed)
+#
+# Set PULSE_MCP_URL env var to override the server URL.
+
+server:
+  url: "${PULSE_MCP_URL:-http://pulse-openshift-sre-agent-mcp:8081}"
+  transport: sse
+  auth:
+    type: service_account
+
+toolsets:
+  - core
+  - config
+  - helm
+  - observability
+  # - ossm          # enable if cluster has OpenShift Service Mesh
+  # - tekton        # enable if cluster has Tekton
+  # - kubevirt      # enable if cluster has KubeVirt
+  # - kiali         # enable if cluster has Kiali
+
+# Map MCP tool output to Pulse UI components
+tool_renderers:
+  helm_list:
+    kind: data_table
+    parser: table
+    columns: [name, namespace, revision, status, chart, app_version]
+  helm_install:
+    kind: status_list
+    parser: key_value
+  helm_uninstall:
+    kind: key_value
+    parser: key_value
+  alertmanager_alerts:
+    kind: status_list
+    parser: json
+    item_mapping:
+      label: "{{alertname}}"
+      status: "{{state}}"
+      detail: "{{description}}"
+  prometheus_query:
+    kind: key_value
+    parser: json
+  resources_list:
+    kind: data_table
+    parser: json
+  pods_list:
+    kind: data_table
+    parser: json

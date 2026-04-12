@@ -1,0 +1,36 @@
+scenarios:
+  - id: view_namespace_dashboard
+    prompt: "Create a dashboard for the production namespace"
+    should_use_tools: [namespace_summary]
+    should_mention: [dashboard, production]
+    max_tool_calls: 12
+
+  - id: view_cluster_overview
+    prompt: "Build a cluster overview dashboard"
+    should_use_tools: [cluster_metrics]
+    should_mention: [cluster, overview]
+    max_tool_calls: 12
+
+  - id: view_add_widget
+    prompt: "Add a memory chart to my SRE dashboard"
+    should_use_tools: [get_prometheus_query]
+    should_mention: [memory, added]
+    should_not_use_tools: [create_dashboard]
+    max_tool_calls: 8
+
+  - id: view_incident_triage
+    prompt: "Create an incident triage dashboard for pod api-server"
+    should_use_tools: [describe_pod, get_pod_logs]
+    should_mention: [incident, api-server]
+    max_tool_calls: 12
+
+  - id: view_manage_openshiftpulse
+    prompt: "Create a view to manage the openshiftpulse namespace"
+    should_use_tools: [namespace_summary]
+    should_mention: [openshiftpulse, dashboard]
+    max_tool_calls: 12
+
+  - id: view_negative_not_sre
+    prompt: "why is my pod crashlooping?"
+    should_not_route_to: view_designer
+    description: "SRE query should NOT route to view_designer"

@@ -173,7 +173,8 @@ CREATE TABLE IF NOT EXISTS tool_usage (
     duration_ms     INTEGER,
     result_bytes    INTEGER,
     requires_confirmation BOOLEAN DEFAULT FALSE,
-    was_confirmed   BOOLEAN
+    was_confirmed   BOOLEAN,
+    tool_source     TEXT DEFAULT 'native'
 );
 """
 
@@ -299,6 +300,30 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
 """
 
+SKILL_USAGE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS skill_usage (
+    id              SERIAL PRIMARY KEY,
+    timestamp       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    session_id      TEXT NOT NULL,
+    user_id         TEXT NOT NULL,
+    skill_name      TEXT NOT NULL,
+    skill_version   INTEGER NOT NULL DEFAULT 1,
+    query_summary   TEXT,
+    tools_called    TEXT[],
+    tool_count      INTEGER DEFAULT 0,
+    handoff_from    TEXT,
+    handoff_to      TEXT,
+    duration_ms     INTEGER,
+    input_tokens    INTEGER,
+    output_tokens   INTEGER,
+    feedback        TEXT,
+    eval_score      REAL
+);
+CREATE INDEX IF NOT EXISTS idx_skill_usage_skill ON skill_usage(skill_name, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_usage_user ON skill_usage(user_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_usage_session ON skill_usage(session_id);
+"""
+
 ALL_SCHEMAS = (
     INCIDENTS_SCHEMA
     + RUNBOOKS_SCHEMA
@@ -319,4 +344,5 @@ ALL_SCHEMAS = (
     + EVAL_RUNS_SCHEMA
     + CHAT_SESSIONS_SCHEMA
     + CHAT_MESSAGES_SCHEMA
+    + SKILL_USAGE_SCHEMA
 )

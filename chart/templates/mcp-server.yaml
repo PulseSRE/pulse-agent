@@ -1,0 +1,61 @@
+{{- if .Values.mcp.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sre-agent.fullname" . }}-mcp
+  labels:
+    {{- include "sre-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "sre-agent.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mcp-server
+  template:
+    metadata:
+      labels:
+        {{- include "sre-agent.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mcp-server
+    spec:
+      serviceAccountName: {{ include "sre-agent.fullname" . }}
+      containers:
+        - name: mcp-server
+          image: {{ .Values.mcp.image | default "ghcr.io/containers/kubernetes-mcp-server:latest" }}
+          args:
+            - --port
+            - "8081"
+            - --toolsets
+            - {{ join "," .Values.mcp.toolsets }}
+            - --cluster-provider
+            - in-cluster
+            - --stateless
+          ports:
+            - containerPort: 8081
+              name: sse
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sre-agent.fullname" . }}-mcp
+  labels:
+    {{- include "sre-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-server
+spec:
+  selector:
+    {{- include "sre-agent.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-server
+  ports:
+    - port: 8081
+      targetPort: sse
+      name: sse
+{{- end }}

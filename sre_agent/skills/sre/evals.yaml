@@ -1,0 +1,83 @@
+scenarios:
+  - id: sre_crashloop
+    prompt: "A pod named api-server in production is crash-looping"
+    should_use_tools: [list_pods, describe_pod, get_pod_logs]
+    should_mention: [crash, pod, log]
+    max_tool_calls: 10
+
+  - id: sre_node_pressure
+    prompt: "One of our nodes is showing memory pressure"
+    should_use_tools: [list_nodes, get_node_metrics, describe_node]
+    should_mention: [memory, pressure, node]
+    max_tool_calls: 10
+
+  - id: sre_pending_pod
+    prompt: "Pod stuck in Pending for over an hour"
+    should_use_tools: [describe_pod, list_nodes]
+    should_mention: [pending, schedule, node]
+    max_tool_calls: 8
+
+  - id: sre_quota_exhaustion
+    prompt: "Can't create new pods in team-alpha namespace"
+    should_use_tools: [get_resource_quotas, list_pods]
+    should_mention: [quota, pods]
+    max_tool_calls: 8
+
+  - id: sre_deployment_stuck
+    prompt: "Deployment nginx is not progressing"
+    should_use_tools: [describe_deployment, get_events]
+    should_mention: [deployment, progress]
+    max_tool_calls: 8
+
+  - id: sre_what_can_you_do
+    prompt: "what can you do?"
+    should_use_tools: [list_my_skills]
+    should_mention: [skill, sre, security]
+    max_tool_calls: 4
+
+  - id: sre_how_can_you_help
+    prompt: "how can you help me?"
+    should_use_tools: [list_my_skills]
+    should_mention: [skill]
+    max_tool_calls: 4
+
+  - id: sre_what_tools
+    prompt: "what tools do you have?"
+    should_use_tools: [list_my_tools]
+    should_mention: [tool]
+    max_tool_calls: 4
+
+  - id: sre_what_metrics
+    prompt: "what prometheus metrics are available for CPU?"
+    should_use_tools: [discover_metrics]
+    should_mention: [cpu, metric]
+    max_tool_calls: 4
+
+  - id: sre_explain_deployment
+    prompt: "explain what fields a Deployment spec has"
+    should_use_tools: [explain_resource]
+    should_mention: [deployment, spec]
+    max_tool_calls: 4
+
+  - id: sre_list_apis
+    prompt: "what API resources are available on this cluster?"
+    should_use_tools: [list_api_resources]
+    should_mention: [api, group]
+    max_tool_calls: 4
+
+  - id: sre_deprecated_apis
+    prompt: "are there any deprecated APIs on this cluster?"
+    should_use_tools: [list_deprecated_apis]
+    should_mention: [deprecated]
+    max_tool_calls: 4
+
+  - id: sre_explain_pod_spec_containers
+    prompt: "explain the containers field in a pod spec"
+    should_use_tools: [explain_resource]
+    should_mention: [container]
+    max_tool_calls: 4
+
+  - id: sre_negative_not_security
+    prompt: "scan for RBAC vulnerabilities"
+    should_not_route_to: sre
+    description: "Security query should NOT route to SRE"

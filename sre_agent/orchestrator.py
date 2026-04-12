@@ -1,4 +1,11 @@
-"""Agent Orchestrator — classifies queries and routes to SRE or Security agent."""
+"""Agent Orchestrator — classifies queries and routes to the appropriate skill.
+
+Primary routing is via skill_loader.classify_query() (skill .md files).
+This module provides:
+  - fix_typos(): typo correction applied before classification
+  - classify_intent(): legacy keyword-based fallback classifier
+  - build_orchestrated_config(): config builder (delegates to skills first, falls back to legacy)
+"""
 
 import logging
 import re
@@ -407,7 +414,22 @@ def classify_intent(query: str) -> tuple[AgentMode, bool]:
 
 
 def build_orchestrated_config(mode: AgentMode) -> dict:
-    """Return tool_defs, tool_map, system_prompt, write_tools for the given mode."""
+    """Return tool_defs, tool_map, system_prompt, write_tools for the given mode.
+
+    Tries skill-based config first (from skill .md files). Falls back to
+    hardcoded config for backward compatibility.
+    """
+    # Try skill-based config first
+    try:
+        from .skill_loader import build_config_from_skill, get_skill
+
+        skill = get_skill(mode)
+        if skill:
+            return build_config_from_skill(skill)
+    except Exception:
+        logger.debug("Skill-based config failed for mode=%s, using legacy", mode)
+
+    # Legacy fallback
     from .agent import SYSTEM_PROMPT as SRE_PROMPT
     from .agent import TOOL_DEFS as SRE_TOOL_DEFS
     from .agent import TOOL_MAP as SRE_TOOL_MAP
@@ -425,7 +447,7 @@ def build_orchestrated_config(mode: AgentMode) -> dict:
             "system_prompt": VIEW_DESIGNER_SYSTEM_PROMPT,
             "tool_defs": VD_TOOL_DEFS,
             "tool_map": VD_TOOL_MAP,
-            "write_tools": set(),  # View designer never modifies cluster state
+            "write_tools": set(),
         }
     elif mode == "security":
         return {
@@ -435,16 +457,11 @@ def build_orchestrated_config(mode: AgentMode) -> dict:
             "write_tools": set(),
         }
     elif mode == "both":
-        # Merge both tool sets, use SRE prompt with security addendum
         merged_map = {**SRE_TOOL_MAP, **SEC_TOOL_MAP}
         merged_defs = SRE_TOOL_DEFS + [d for d in SEC_TOOL_DEFS if d.get("name") not in SRE_TOOL_MAP]
         combined_prompt = (
-            SRE_PROMPT
-            + "\n\n"
-            + (
-                "You also have security scanning tools available. "
-                "After diagnosing operational issues, check for related security concerns."
-            )
+            SRE_PROMPT + "\n\nYou also have security scanning tools available. "
+            "After diagnosing operational issues, check for related security concerns."
         )
         return {
             "system_prompt": combined_prompt,

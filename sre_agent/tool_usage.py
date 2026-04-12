@@ -85,11 +85,13 @@ def record_tool_call(
     result_bytes: int,
     requires_confirmation: bool,
     was_confirmed: bool | None,
+    tool_source: str = "native",
 ) -> None:
     """Record a tool call to the tool_usage table.
 
     Fire-and-forget: swallows all exceptions, logs at debug level.
     Uses %s placeholders for PostgreSQL.
+    tool_source is 'native' for built-in Pulse tools or 'mcp' for MCP server tools.
     """
     try:
         from .db import get_database
@@ -101,8 +103,8 @@ def record_tool_call(
             "INSERT INTO tool_usage "
             "(session_id, turn_number, agent_mode, tool_name, tool_category, "
             "input_summary, status, error_message, error_category, "
-            "duration_ms, result_bytes, requires_confirmation, was_confirmed) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            "duration_ms, result_bytes, requires_confirmation, was_confirmed, tool_source) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (
                 session_id,
                 turn_number,
@@ -117,10 +119,13 @@ def record_tool_call(
                 result_bytes,
                 requires_confirmation,
                 was_confirmed,
+                tool_source,
             ),
         )
         db.commit()
-        logger.debug(f"Recorded tool call: {tool_name} (session={session_id}, turn={turn_number}, status={status})")
+        logger.debug(
+            f"Recorded tool call: {tool_name} (session={session_id}, turn={turn_number}, status={status}, source={tool_source})"
+        )
     except Exception as e:
         logger.debug(f"Failed to record tool call: {e}")
 
@@ -217,6 +222,7 @@ def query_usage(
     agent_mode: str | None = None,
     status: str | None = None,
     session_id: str | None = None,
+    tool_source: str | None = None,
     time_from: str | None = None,
     time_to: str | None = None,
     page: int = 1,
@@ -270,6 +276,10 @@ def query_usage(
         where_clauses.append("u.session_id = %s")
         params.append(session_id)
 
+    if tool_source is not None:
+        where_clauses.append("u.tool_source = %s")
+        params.append(tool_source)
+
     if time_from is not None:
         where_clauses.append("u.timestamp >= %s")
         params.append(time_from)
@@ -293,7 +303,7 @@ def query_usage(
             u.id, u.timestamp, u.session_id, u.turn_number, u.agent_mode,
             u.tool_name, u.tool_category, u.input_summary, u.status,
             u.error_message, u.error_category, u.duration_ms, u.result_bytes,
-            u.requires_confirmation, u.was_confirmed,
+            u.requires_confirmation, u.was_confirmed, u.tool_source,
             t.query_summary
         FROM tool_usage u
         LEFT JOIN tool_turns t ON u.session_id = t.session_id AND u.turn_number = t.turn_number
@@ -430,6 +440,16 @@ def get_usage_stats(
     by_status_rows = db.fetchall(by_status_sql, tuple(params))
     by_status = {row["status"]: row["count"] for row in by_status_rows}
 
+    # By source (native vs mcp)
+    by_source_sql = f"""
+        SELECT COALESCE(tool_source, 'native') AS source, COUNT(*) AS count
+        FROM tool_usage
+        {where_sql}
+        GROUP BY COALESCE(tool_source, 'native')
+    """
+    by_source_rows = db.fetchall(by_source_sql, tuple(params))
+    by_source = {row["source"]: row["count"] for row in by_source_rows}
+
     # Token usage averages from tool_turns
     token_avg = {}
     try:
@@ -463,6 +483,7 @@ def get_usage_stats(
         "by_mode": [dict(row) for row in by_mode],
         "by_category": [dict(row) for row in by_category],
         "by_status": by_status,
+        "by_source": by_source,
     }
     if token_avg:
         stats["token_avg"] = token_avg
@@ -478,11 +499,11 @@ _AGENT_DESCRIPTIONS = {
 
 def get_agents_metadata() -> list[dict]:
     """Return metadata for all agent modes."""
-    from .harness import MODE_CATEGORIES
     from .orchestrator import build_orchestrated_config
+    from .skill_loader import get_mode_categories
 
     agents = []
-    for mode, categories in MODE_CATEGORIES.items():
+    for mode, categories in get_mode_categories().items():
         if mode == "both":
             continue
 

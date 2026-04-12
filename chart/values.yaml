@@ -94,6 +94,16 @@ database:
       existingSecret: ""
       secretKey: "password"
 
+# MCP Server — optional OpenShift MCP server deployment
+mcp:
+  enabled: true
+  image: "quay.io/amobrem/pulse-agent:mcp-server"
+  toolsets:
+    - core
+    - config
+    - helm
+    - observability
+
 nodeSelector: {}
 tolerations: []
 affinity: {}

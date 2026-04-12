@@ -21,12 +21,26 @@ from .harness import (
     build_cached_system_prompt,
     get_cluster_context,
     get_component_hint,
-    select_tools,
 )
 from .k8s_tools import ALL_TOOLS as _K8S_TOOLS
 from .k8s_tools import WRITE_TOOLS
 from .predict_tools import PREDICT_TOOLS
 from .runbooks import ALERT_TRIAGE_CONTEXT, RUNBOOKS  # noqa: F401 — RUNBOOKS re-exported for backward compat
+from .self_tools import (
+    create_skill,
+    create_skill_from_template,
+    delete_skill,
+    edit_skill,
+    explain_resource,
+    list_api_resources,
+    list_deprecated_apis,
+    list_my_skills,
+    list_my_tools,
+    list_promql_recipes,
+    list_runbooks,
+    list_ui_components,
+)
+from .skill_loader import select_tools
 from .timeline_tools import TIMELINE_TOOLS
 from .view_tools import (
     cluster_metrics,
@@ -44,6 +58,18 @@ ALL_TOOLS = (
         request_security_scan,
         namespace_summary,
         cluster_metrics,
+        list_my_skills,
+        list_my_tools,
+        list_ui_components,
+        list_promql_recipes,
+        list_runbooks,
+        explain_resource,
+        list_api_resources,
+        list_deprecated_apis,
+        create_skill,
+        edit_skill,
+        delete_skill,
+        create_skill_from_template,
     ]
 )
 
@@ -425,12 +451,30 @@ def run_agent_streaming(
 
     # --- Harness: Cached system prompt with cluster context ---
     if use_harness:
-        cluster_ctx = get_cluster_context(mode=mode)
-        hint = get_component_hint(mode, tool_names=list(tool_map.keys()))
-        effective_system = build_cached_system_prompt(
-            system_prompt + hint,
-            cluster_ctx,
-        )
+        # Use prompt builder for unified assembly (intent prefix + components + context)
+        try:
+            from .prompt_builder import assemble_prompt as _assemble
+            from .skill_loader import get_skill as _get_skill_for_prompt
+
+            _skill = _get_skill_for_prompt(mode)
+            if _skill:
+                last_query = ""
+                if messages:
+                    last_query = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+                    if not isinstance(last_query, str):
+                        last_query = ""
+                static, dynamic = _assemble(_skill, last_query, mode, list(tool_map.keys()))
+                effective_system = build_cached_system_prompt(static, dynamic)
+            else:
+                # Fallback for modes without a skill
+                cluster_ctx = get_cluster_context(mode=mode)
+                hint = get_component_hint(mode, tool_names=list(tool_map.keys()))
+                effective_system = build_cached_system_prompt(system_prompt + hint, cluster_ctx)
+        except Exception:
+            # Safe fallback
+            cluster_ctx = get_cluster_context(mode=mode)
+            hint = get_component_hint(mode, tool_names=list(tool_map.keys()))
+            effective_system = build_cached_system_prompt(system_prompt + hint, cluster_ctx)
     else:
         effective_system = system_prompt
 

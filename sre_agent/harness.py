@@ -1,7 +1,7 @@
 """
 Claude Harness — optimizations for getting the most out of the agent.
 
-1. Dynamic Tool Selection — categorize tools, only load relevant ones per query
+1. Dynamic Tool Selection — delegated to skill_loader.py (canonical owner)
 2. Prompt Caching — cache system prompt + runbooks across turns
 3. Cluster Context Injection — pre-fetch cluster state into system prompt
 4. Structured Output Hints — guide Claude to return component specs
@@ -11,343 +11,27 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 
 logger = logging.getLogger("pulse_agent.harness")
 
-# Cache for deprioritized tools (refreshed every 10 minutes)
-_deprioritized_cache: tuple[set[str], float] | None = None
-_DEPRIORITIZE_TTL = 600  # 10 minutes
-
-
 # ---------------------------------------------------------------------------
-# 1. Dynamic Tool Selection — categorize tools and select by query intent
+# 1. Dynamic Tool Selection — delegated to skill_loader.py
 # ---------------------------------------------------------------------------
 
-TOOL_CATEGORIES = {
-    "diagnostics": {
-        "keywords": [
-            "health",
-            "check",
-            "status",
-            "diagnose",
-            "what's wrong",
-            "what's happening",
-            "show me",
-            "overview",
-            "summary",
-            "dashboard",
-            "view",
-            "issues",
-            "problems",
-            "failing",
-            "not running",
-            "crash",
-            "error",
-            "oom",
-            "restart",
-            "events",
-            "warning",
-        ],
-        "tools": [
-            "list_resources",
-            "list_pods",
-            "describe_pod",
-            "get_pod_logs",
-            "list_nodes",
-            "get_events",
-            "describe_deployment",
-            "list_deployments",
-            "get_cluster_operators",
-            "get_cluster_version",
-            "top_pods_by_restarts",
-            "get_recent_changes",
-            "get_firing_alerts",
-            "get_node_metrics",
-            "get_pod_metrics",
-            "correlate_incident",
-            "namespace_summary",
-            "cluster_metrics",
-            "visualize_nodes",
-            "describe_resource",
-            "search_logs",
-            "get_resource_relationships",
-        ],
-    },
-    "workloads": {
-        "keywords": [
-            "deploy",
-            "pod",
-            "replica",
-            "stateful",
-            "daemon",
-            "job",
-            "cron",
-            "scale",
-            "rollback",
-            "restart",
-            "workload",
-        ],
-        "tools": [
-            "list_resources",
-            "list_pods",
-            "describe_pod",
-            "get_pod_logs",
-            "describe_deployment",
-            "list_deployments",
-            "list_jobs",
-            "list_cronjobs",
-            "list_hpas",
-            "scale_deployment",
-            "restart_deployment",
-            "rollback_deployment",
-            "delete_pod",
-        ],
-    },
-    "networking": {
-        "keywords": [
-            "service",
-            "endpoint",
-            "ingress",
-            "route",
-            "network",
-            "policy",
-            "dns",
-            "connectivity",
-            "port",
-            "traffic",
-        ],
-        "tools": [
-            "list_resources",
-            "describe_service",
-            "get_endpoint_slices",
-            "list_ingresses",
-            "list_routes",
-            "create_network_policy",
-            "scan_network_policies",
-            "test_connectivity",
-        ],
-    },
-    "security": {
-        "keywords": [
-            "security",
-            "audit",
-            "rbac",
-            "scc",
-            "privilege",
-            "secret",
-            "vulnerability",
-            "compliance",
-            "policy",
-            "scan",
-        ],
-        "tools": [
-            "scan_pod_security",
-            "scan_images",
-            "scan_rbac_risks",
-            "list_service_account_secrets",
-            "scan_network_policies",
-            "scan_sccs",
-            "scan_scc_usage",
-            "scan_secrets",
-            "get_security_summary",
-            "get_tls_certificates",
-            "request_security_scan",
-        ],
-    },
-    "storage": {
-        "keywords": ["pvc", "storage", "volume", "persistent", "disk", "capacity"],
-        "tools": [
-            "list_resources",
-        ],
-    },
-    "monitoring": {
-        "keywords": [
-            "metric",
-            "prometheus",
-            "alert",
-            "monitor",
-            "cpu",
-            "memory",
-            "usage",
-            "performance",
-            "latency",
-            "grafana",
-        ],
-        "tools": [
-            "discover_metrics",
-            "get_prometheus_query",
-            "get_firing_alerts",
-            "get_node_metrics",
-            "get_pod_metrics",
-            "forecast_quota_exhaustion",
-            "get_resource_recommendations",
-            "analyze_hpa_thrashing",
-        ],
-    },
-    "operations": {
-        "keywords": ["drain", "cordon", "uncordon", "apply", "yaml", "maintenance", "upgrade", "update", "config"],
-        "tools": [
-            "cordon_node",
-            "uncordon_node",
-            "drain_node",
-            "apply_yaml",
-            "get_configmap",
-            "list_operator_subscriptions",
-            "exec_command",
-        ],
-    },
-    "gitops": {
-        "keywords": ["git", "argo", "gitops", "pr", "pull request", "drift", "sync"],
-        "tools": [
-            "detect_gitops_drift",
-            "propose_git_change",
-            "get_argo_applications",
-            "get_argo_app_detail",
-            "get_argo_app_source",
-            "get_argo_sync_diff",
-            "install_gitops_operator",
-            "create_argo_application",
-        ],
-    },
-    "fleet": {
-        "keywords": [
-            "fleet",
-            "all clusters",
-            "cross-cluster",
-            "everywhere",
-            "managed cluster",
-            "multi-cluster",
-            "compare across",
-            "drift across",
-            "acm",
-        ],
-        "tools": [
-            "fleet_list_clusters",
-            "fleet_list_pods",
-            "fleet_list_deployments",
-            "fleet_get_alerts",
-            "fleet_compare_resource",
-        ],
-    },
-}
-
-# Tools always included regardless of category — these are lightweight and
-# broadly useful. Better to include a few extra tools than to miss one the
-# user needs.
-ALWAYS_INCLUDE = {
-    "list_resources",
-    "get_cluster_version",
-    "record_audit_entry",
-    "suggest_remediation",
-    "namespace_summary",
-    "cluster_metrics",
-    "visualize_nodes",
-    "list_pods",
-    "get_events",
-    "get_firing_alerts",
-    "request_sre_investigation",
-}
-
-
-# Reverse lookup: tool_name -> first matching category
-_TOOL_CATEGORY_MAP: dict[str, str] = {}
-for _cat_name, _cat_config in TOOL_CATEGORIES.items():
-    for _tool_name in _cat_config["tools"]:
-        if _tool_name not in _TOOL_CATEGORY_MAP:
-            _TOOL_CATEGORY_MAP[_tool_name] = _cat_name
+# Re-export from skill_loader for backward compatibility
+from .skill_loader import (  # noqa: F401
+    ALWAYS_INCLUDE,
+    MODE_CATEGORIES,
+    TOOL_CATEGORIES,
+    select_tools,
+)
 
 
 def get_tool_category(tool_name: str) -> str | None:
     """Return the primary category for a tool, or None if uncategorized."""
-    return _TOOL_CATEGORY_MAP.get(tool_name)
+    from .skill_loader import get_tool_category as _get
 
-
-# Map orchestrator modes to relevant tool categories
-MODE_CATEGORIES: dict[str, list[str] | None] = {
-    "sre": ["diagnostics", "workloads", "networking", "storage", "monitoring", "operations", "gitops"],
-    "security": ["security", "networking"],
-    "view_designer": None,  # all tools — view_designer has its own curated list
-    "both": None,  # all categories
-}
-
-
-def _reorder_deprioritized(tools: list, deprioritized: set[str]) -> list:
-    """Move deprioritized tools to the end of the list (still offered, just lower priority)."""
-    if not deprioritized:
-        return tools
-    priority = [t for t in tools if t.name not in deprioritized]
-    low_priority = [t for t in tools if t.name in deprioritized]
-    return priority + low_priority
-
-
-def _get_deprioritized_tools() -> set[str]:
-    """Return tools that should be deprioritized (moved to end of list).
-
-    Queries the intelligence module for tools with <2% usage rate.
-    Cached for 10 minutes to avoid repeated DB hits.
-    """
-    global _deprioritized_cache
-    now = time.time()
-    if _deprioritized_cache and now - _deprioritized_cache[1] < _DEPRIORITIZE_TTL:
-        return _deprioritized_cache[0]
-
-    try:
-        from .intelligence import get_wasted_tools
-
-        wasted = set(get_wasted_tools())
-        _deprioritized_cache = (wasted, now)
-        if wasted:
-            logger.info("Auto-deprioritized %d tools: %s", len(wasted), ", ".join(sorted(wasted)))
-        return wasted
-    except Exception:
-        logger.debug("Failed to get deprioritized tools", exc_info=True)
-        return set()
-
-
-def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "sre") -> tuple[list, dict, list[str]]:
-    """Select tools based on agent mode.
-
-    Mode-aware: each orchestrator mode maps to a set of tool categories.
-    Tools in ALWAYS_INCLUDE are always returned regardless of mode.
-    If mode is 'both' or unknown, all tools are returned.
-
-    Returns:
-        tuple[list, dict, list[str]]: (tool_defs, tool_map, offered_names)
-            - tool_defs: list of tool definition dicts
-            - tool_map: dict mapping tool names to tool objects
-            - offered_names: list of tool names that were offered
-    """
-    categories = MODE_CATEGORIES.get(mode)
-
-    deprioritized = _get_deprioritized_tools()
-
-    # Fallback: return all tools for 'both' or unknown modes
-    if categories is None:
-        logger.info("Tool selection: returning all %d tools for mode=%s", len(all_tools), mode)
-        ordered = _reorder_deprioritized(all_tools, deprioritized)
-        tool_map = {t.name: t for t in ordered}
-        return [t.to_dict() for t in ordered], tool_map, list(tool_map.keys())
-
-    # Collect tool names from the mode's categories
-    mode_tool_names = set(ALWAYS_INCLUDE)
-    for cat_name in categories:
-        cat = TOOL_CATEGORIES.get(cat_name, {})
-        mode_tool_names.update(cat.get("tools", []))
-
-    filtered = [t for t in all_tools if t.name in mode_tool_names]
-
-    # Safety: if filtering removed too many, return all
-    if len(filtered) < 5:
-        logger.warning("Tool selection: mode=%s matched only %d tools, returning all", mode, len(filtered))
-        ordered = _reorder_deprioritized(all_tools, deprioritized)
-        tool_map = {t.name: t for t in ordered}
-        return [t.to_dict() for t in ordered], tool_map, list(tool_map.keys())
-
-    ordered = _reorder_deprioritized(filtered, deprioritized)
-    logger.info("Tool selection: %d/%d tools for mode=%s", len(ordered), len(all_tools), mode)
-    tool_map = {t.name: t for t in ordered}
-    return [t.to_dict() for t in ordered], tool_map, list(tool_map.keys())
+    return _get(tool_name)
 
 
 def score_eval_prompts(
@@ -885,38 +569,34 @@ Generate complete, production-ready YAML -- not placeholder values.
 def get_component_hint(mode: str = "sre", tool_names: list[str] | None = None) -> str:
     """Return relevant component hint for the agent mode and selected tools.
 
-    - view_designer: returns empty (has its own comprehensive guide in system prompt)
-    - security: returns empty (no component rendering needed)
-    - sre/both: returns core hint + relevant schemas + ops guidance
+    Delegates to skill-aware _build_component_hint when a skill is loaded for the mode.
+    Falls back to tool-based schema selection for legacy modes.
     """
     if mode in ("view_designer", "security"):
         return ""
 
-    # Check ablation exclusions + optimized defaults (2026-04-09)
-    # component_hint_core and component_hint_ops removed by default (+0.6 pts each, saves ~639 tokens)
-    # See docs/superpowers/specs/2026-04-09-prompt-optimization-design.md
+    # Try skill-aware component hint first
+    try:
+        from .skill_loader import get_skill
+
+        skill = get_skill(mode)
+        if skill:
+            from .skill_loader import _build_component_hint
+
+            return _build_component_hint(skill, tool_names or [])
+    except Exception:
+        pass
+
+    # Fallback: tool-based schema selection (legacy path)
     import os as _os
 
     _excluded = {s.strip() for s in _os.environ.get("PULSE_PROMPT_EXCLUDE_SECTIONS", "").split(",") if s.strip()}
-    experiment = _os.environ.get("PULSE_PROMPT_EXPERIMENT", "")
-    is_legacy = experiment == "legacy"
 
-    hint = ""
+    if "component_schemas" in _excluded:
+        return ""
 
-    # Core guidance — excluded by default (ablation: +0.6 pts without it)
-    if is_legacy and "component_hint_core" not in _excluded:
-        hint += COMPONENT_HINT_CORE
-
-    # Selected schemas only — always included (ablation: -2.6 pts without it)
-    if "component_schemas" not in _excluded:
-        if tool_names:
-            schemas = _select_relevant_schemas(tool_names)
-        else:
-            schemas = list(COMPONENT_SCHEMAS.values())  # fallback: all
-        hint += "\n## Component Catalog\n\n" + "\n\n".join(schemas)
-
-    # Operational guidance — excluded by default (ablation: +0.6 pts without it)
-    if is_legacy and "component_hint_ops" not in _excluded:
-        hint += "\n\n" + COMPONENT_HINT_OPS
-
-    return hint
+    if tool_names:
+        schemas = _select_relevant_schemas(tool_names)
+    else:
+        schemas = list(COMPONENT_SCHEMAS.values())
+    return "\n## Component Catalog\n\n" + "\n\n".join(schemas)

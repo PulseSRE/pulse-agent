@@ -73,6 +73,7 @@ class TestToolsUsageEndpoint:
             agent_mode="sre",
             status="success",
             session_id=None,
+            tool_source=None,
             time_from=None,
             time_to=None,
             page=2,

@@ -1,10 +1,10 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.15.0"><img src="https://img.shields.io/badge/release-v1.15.0-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-96-10b981?style=for-the-badge" alt="Tools">
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v1.16.0"><img src="https://img.shields.io/badge/release-v1.16.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <img src="https://img.shields.io/badge/tools-106_(75+31_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-17-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-1216-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1433-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/PromQL%20recipes-73-10b981?style=for-the-badge" alt="PromQL Recipes">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
@@ -13,7 +13,7 @@ AI-powered OpenShift/Kubernetes SRE and Security Agent built on Claude.
 
 Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude Opus to diagnose issues, triage incidents, manage resources, execute runbooks, and perform security audits — all through a conversational interface. Integrates with [OpenShift Pulse](https://github.com/alimobrem/OpenshiftPulse) for rich UI rendering, or runs standalone as a CLI. Includes 73 production-tested PromQL recipes, a semantic layout engine for dashboard generation, and an intelligence loop that feeds analytics back into the system prompt.
 
-**Docs:** [API Contract](API_CONTRACT.md) · [Security](SECURITY.md) · [Design Principles](DESIGN_PRINCIPLES.md) · [Eval Prompts](EVAL_PROMPTS.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
+**Docs:** [API Contract](API_CONTRACT.md) · [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Design Principles](DESIGN_PRINCIPLES.md) · [Testing & Evals](TESTING.md) · [Skill Developer Guide](docs/SKILL_DEVELOPER_GUIDE.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
 ## Features
 
@@ -134,6 +134,13 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Analytics Feedback** — `intelligence.py` feeds tool analytics back into the system prompt: query reliability scores, dashboard generation patterns, error hotspots, and token efficiency metrics
 - **Token Usage Tracking** — Records input/output/cache tokens per turn from the Claude API for cost visibility and optimization
 - **Prompt Optimization** — SRE system prompt reduced from 28KB to 8KB (71% reduction) via selective component schema injection and selective runbook injection
+
+### Skills & Extensibility
+- **Drop-in Skill Packages** -- Each skill is a self-contained directory with `skill.md` (prompt), `evals.yaml` (test cases), and optional `mcp.yaml` (MCP server config). Skills are loaded at startup by `skill_loader.py`, which owns tool selection and query routing
+- **MCP Server Integration** -- Connect external MCP servers via SSE transport. The OpenShift MCP server provides 31 tools across 11 toolsets, registered alongside native tools. `mcp_client.py` handles connection lifecycle, tool/prompt discovery, and registration
+- **Hot Reload** -- Skill packages and MCP server configs can be added without restarting the agent
+- **Toolbox UI** -- The frontend `/toolbox` page consolidates tools, skills, MCP servers, components, usage analytics, and chain patterns into a single view
+- **Developer Guide** -- See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating new skill packages
 
 ### Self-Improving Agent
 - **Incident Memory** — Stores every interaction with query, tool sequence, resolution, and outcome in the database
@@ -406,7 +413,7 @@ Built-in optimizations for getting the most out of Claude (`PULSE_AGENT_HARNESS=
 
 | Feature | What It Does | Impact |
 |---------|-------------|--------|
-| **Dynamic Tool Selection** | Categorizes 96 tools into 8 groups, loads only relevant ones per query | 84->15-25 tools, faster + cheaper |
+| **Dynamic Tool Selection** | Categorizes 106 tools into 8 groups, loads only relevant ones per query (via `skill_loader.py`) | 106->15-25 tools, faster + cheaper |
 | **Prompt Caching** | Marks system prompt + runbooks with `cache_control: ephemeral` | ~90% cost reduction on context |
 | **Cluster Context Injection** | Pre-fetches node count, namespaces, OCP version, failing pods, firing alerts | Saves 2-3 tool calls per query |
 | **Component Rendering Hints** | Guides Claude to focus on analysis, not data formatting | Cleaner responses |
@@ -501,6 +508,7 @@ Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_val
 
 | Pulse Agent | OpenShift Pulse UI | Protocol |
 |------------|-------------------|----------|
+| v1.16.0 | v5.16.2+ | 2 |
 | v1.15.0 | v5.16.2+ | 2 |
 | v1.13.0 | v5.16.2+ | 2 |
 | v1.12.0 | v5.16.2+ | 2 |
@@ -696,8 +704,8 @@ git push && git push --tags   # GitHub Actions builds and pushes automatically
 
 **Manual build:**
 ```bash
-podman build --platform linux/amd64 -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.15.0 .
-podman push quay.io/amobrem/pulse-agent:v1.15.0
+podman build --platform linux/amd64 -f Dockerfile.full -t quay.io/amobrem/pulse-agent:v1.16.0 .
+podman push quay.io/amobrem/pulse-agent:v1.16.0
 ```
 
 **Required GitHub Secrets:**
@@ -713,7 +721,9 @@ pip install -e '.[test]'
 python -m pytest tests/ -v
 ```
 
-1,078 tests covering all tools, all 16 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, PromQL recipes, view validation, layout engine, intelligence loop, token tracking, and the memory system. All tests run without a cluster or API key (fully mocked).
+See [TESTING.md](TESTING.md) for test conventions, fixtures, and coverage targets.
+
+1,433 tests covering all tools, all 16 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, PromQL recipes, view validation, layout engine, intelligence loop, token tracking, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ## Evaluation Framework
 
@@ -753,9 +763,9 @@ Current eval dimensions:
 
 ### Tool Eval Prompts
 
-84 real-world user prompts mapped to expected tool calls, covering all 82 registered tools. Used for evaluating agent tool selection quality and ensuring every tool is reachable.
+93 eval prompts mapped to expected tool calls, covering all registered tools. Used for evaluating agent tool selection quality and ensuring every tool is reachable.
 
-See **[EVAL_PROMPTS.md](EVAL_PROMPTS.md)** for the complete prompt-to-tool mapping.
+See **[TESTING.md](TESTING.md)** for the full testing strategy and eval prompt appendix.
 
 | Mode | Prompts | Example |
 |------|---------|---------|
@@ -782,7 +792,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>96 tools</strong> &bull; <strong>17 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>86 eval prompts</strong> &bull; <strong>1,198 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>106 tools (75 native + 31 MCP)</strong> &bull; <strong>17 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>93 eval prompts</strong> &bull; <strong>1,433 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">
