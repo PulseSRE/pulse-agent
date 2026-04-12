@@ -12,6 +12,9 @@ from anthropic import beta_tool
 
 from .k8s_client import safe
 
+_openapi_cache: tuple[dict, float] | None = None
+_OPENAPI_CACHE_TTL = 3600  # 1 hour
+
 
 @beta_tool
 def list_my_skills() -> str:
@@ -280,6 +283,15 @@ _FORBIDDEN_PATTERNS = [
 ]
 
 
+def _validate_skill_safety(content: str) -> str | None:
+    """Check content for forbidden patterns. Returns error message or None."""
+    content_lower = content.lower()
+    for pattern in _FORBIDDEN_PATTERNS:
+        if pattern in content_lower:
+            return f"Error: content contains forbidden pattern '{pattern}'. Skills cannot override system behavior."
+    return None
+
+
 @beta_tool
 def create_skill(
     name: str,
@@ -335,10 +347,9 @@ def create_skill(
         return "Error: need at least 2 keywords for routing"
 
     # Safety: check prompt for forbidden patterns
-    prompt_lower = prompt.lower()
-    for pattern in _FORBIDDEN_PATTERNS:
-        if pattern in prompt_lower:
-            return f"Error: prompt contains forbidden pattern '{pattern}'. Skills cannot override system behavior."
+    err = _validate_skill_safety(prompt)
+    if err:
+        return err
 
     # Validate priority
     if priority < 1 or priority > 10:
@@ -418,14 +429,13 @@ def edit_skill(name: str, content: str) -> str:
         return "Error: content must have opening and closing --- frontmatter delimiters"
 
     # Safety: check for forbidden patterns
-    content_lower = content.lower()
-    for pattern in _FORBIDDEN_PATTERNS:
-        if pattern in content_lower:
-            return f"Error: content contains forbidden pattern '{pattern}'. Skills cannot override system behavior."
+    err = _validate_skill_safety(content)
+    if err:
+        return err
 
     # Warn (but don't block) if security header is missing
     security_warning = ""
-    if "## security" not in content_lower:
+    if "## security" not in content.lower():
         security_warning = (
             "\n\nWarning: no '## Security' section found. Consider adding one to protect against prompt injection."
         )
@@ -584,10 +594,9 @@ def create_skill_from_template(
     body = parts[2].strip()
 
     # Safety: check body for forbidden patterns
-    body_lower = body.lower()
-    for pattern in _FORBIDDEN_PATTERNS:
-        if pattern in body_lower:
-            return f"Error: template body contains forbidden pattern '{pattern}'."
+    err = _validate_skill_safety(body)
+    if err:
+        return err
 
     # Build new skill.md
     frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
@@ -621,6 +630,27 @@ def create_skill_from_template(
 # ---------------------------------------------------------------------------
 
 
+def _get_openapi_definitions():
+    """Fetch and cache the cluster's OpenAPI definitions (1 hour TTL)."""
+    global _openapi_cache
+    import time as _time
+
+    now = _time.time()
+    if _openapi_cache and now - _openapi_cache[1] < _OPENAPI_CACHE_TTL:
+        return _openapi_cache[0]
+
+    from kubernetes import client
+
+    api_client = client.ApiClient()
+    openapi = api_client.call_api("/openapi/v2", "GET", response_type="object", _preload_content=False)
+    import json
+
+    schema_data = json.loads(openapi[0].read())
+    definitions = schema_data.get("definitions", {})
+    _openapi_cache = (definitions, now)
+    return definitions
+
+
 @beta_tool
 def explain_resource(resource: str, field: str = "") -> str:
     """Explain a Kubernetes resource type or field using the cluster's live API schema.
@@ -632,8 +662,6 @@ def explain_resource(resource: str, field: str = "") -> str:
         resource: Resource type (e.g., 'pods', 'deployments', 'services', 'nodes', 'configmaps').
         field: Optional dotted field path (e.g., 'spec.containers', 'spec.template.spec').
     """
-    from kubernetes import client
-
     from .k8s_client import _load_k8s
 
     _load_k8s()
@@ -682,14 +710,9 @@ def explain_resource(resource: str, field: str = "") -> str:
 
     api_version, kind, schema_key = entry
 
-    # Fetch OpenAPI schema
+    # Fetch OpenAPI schema (cached)
     try:
-        api_client = client.ApiClient()
-        openapi = api_client.call_api("/openapi/v2", "GET", response_type="object", _preload_content=False)
-        import json
-
-        schema_data = json.loads(openapi[0].read())
-        definitions = schema_data.get("definitions", {})
+        definitions = _get_openapi_definitions()
 
         schema = definitions.get(schema_key)
         if not schema:

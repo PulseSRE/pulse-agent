@@ -10,6 +10,7 @@ get_tool_category, select_tools) that was previously in harness.py.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -337,8 +338,6 @@ def classify_query(query: str) -> Skill:
     for kw, skill_name, kw_len in _keyword_index:
         if kw_len < 4:
             # Short keywords: word boundary match to avoid "pod" matching "tripod"
-            import re
-
             if re.search(r"\b" + re.escape(kw) + r"\b", q):
                 scores[skill_name] = scores.get(skill_name, 0) + kw_len
         elif kw in q:

@@ -194,9 +194,9 @@ def _mcp_post(base_url: str, payload: dict, session_id: str = "") -> tuple[dict,
         data=json.dumps(payload).encode(),
         headers=headers,
     )
-    resp = urllib.request.urlopen(req, timeout=15)
-    sid = resp.headers.get("Mcp-Session-Id", session_id)
-    raw = resp.read().decode()
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        sid = resp.headers.get("Mcp-Session-Id", session_id)
+        raw = resp.read().decode()
     return _parse_sse_response(raw), sid
 
 
