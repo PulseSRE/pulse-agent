@@ -546,6 +546,79 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "sre",
         "Audit log recording",
     ),
+    # Self-description tools
+    (
+        "what can you do?",
+        ["list_my_skills"],
+        "sre",
+        "List agent skills",
+    ),
+    (
+        "what tools do you have?",
+        ["list_my_tools"],
+        "sre",
+        "List agent tools",
+    ),
+    (
+        "what UI components can you render?",
+        ["list_ui_components"],
+        "sre",
+        "List UI components",
+    ),
+    (
+        "show me your PromQL recipes",
+        ["list_promql_recipes"],
+        "sre",
+        "List PromQL recipes",
+    ),
+    (
+        "what runbooks do you have?",
+        ["list_runbooks"],
+        "sre",
+        "List runbooks",
+    ),
+    (
+        "explain what fields a Deployment has",
+        ["explain_resource"],
+        "sre",
+        "Explain K8s resource",
+    ),
+    (
+        "what API resources are available?",
+        ["list_api_resources"],
+        "sre",
+        "List K8s API resources",
+    ),
+    (
+        "are there any deprecated APIs?",
+        ["list_deprecated_apis"],
+        "sre",
+        "Check deprecated APIs",
+    ),
+    (
+        "create a skill for database troubleshooting",
+        ["create_skill"],
+        "sre",
+        "Create skill via chat",
+    ),
+    (
+        "edit the capacity_planner skill prompt",
+        ["edit_skill"],
+        "sre",
+        "Edit skill via chat",
+    ),
+    (
+        "delete the test_skill",
+        ["delete_skill"],
+        "sre",
+        "Delete skill via chat",
+    ),
+    (
+        "clone the SRE skill as a new networking skill",
+        ["create_skill_from_template"],
+        "sre",
+        "Clone skill from template",
+    ),
 ]
 
 # Tools that are internal/meta and don't need user-facing eval prompts

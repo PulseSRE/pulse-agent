@@ -46,9 +46,10 @@ def score_eval_prompts(
         {"total": int, "passed": int, "failed": int, "accuracy": float,
          "failures": [{"query": str, "expected": list, "offered": list, "mode": str, "desc": str}]}
     """
-    from .k8s_tools import ALL_TOOLS as SRE_TOOLS
+    from .tool_registry import TOOL_REGISTRY
 
-    sre_tool_map = {t.name: t for t in SRE_TOOLS}
+    all_tools = list(TOOL_REGISTRY.values())
+    sre_tool_map = dict(TOOL_REGISTRY)
 
     passed = 0
     failures: list[dict] = []
@@ -65,7 +66,7 @@ def score_eval_prompts(
             continue
 
         # SRE and "both" modes use harness tool selection
-        _, _, offered = select_tools(query, SRE_TOOLS, sre_tool_map, mode)
+        _, _, offered = select_tools(query, all_tools, sre_tool_map, mode)
         if any(t in offered for t in expected_tools):
             passed += 1
         else:

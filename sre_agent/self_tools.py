@@ -901,3 +901,26 @@ def list_deprecated_apis() -> str:
     lines.append("Migrate to preferred versions before the next cluster upgrade.")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Register all self-description tools in the central registry
+# ---------------------------------------------------------------------------
+
+from .tool_registry import register_tool as _register
+
+for _tool in [
+    list_my_skills,
+    list_my_tools,
+    list_ui_components,
+    list_promql_recipes,
+    list_runbooks,
+    explain_resource,
+    list_api_resources,
+    list_deprecated_apis,
+    create_skill,
+    edit_skill,
+    delete_skill,
+    create_skill_from_template,
+]:
+    _register(_tool)

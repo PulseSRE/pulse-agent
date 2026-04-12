@@ -16,6 +16,7 @@ from sre_agent import (
     k8s_tools,  # noqa: F401
     predict_tools,  # noqa: F401
     security_tools,  # noqa: F401
+    self_tools,  # noqa: F401
     timeline_tools,  # noqa: F401
     view_tools,  # noqa: F401
 )
