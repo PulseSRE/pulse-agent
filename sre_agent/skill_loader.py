@@ -20,6 +20,8 @@ import yaml
 logger = logging.getLogger("pulse_agent.skill_loader")
 
 _SKILLS_DIR = Path(__file__).parent / "skills"
+# User-created skills go to a writable directory (PVC-backed in containers)
+_USER_SKILLS_DIR = Path("/tmp/pulse_agent/skills")
 
 
 @dataclass
@@ -228,37 +230,38 @@ def _validate_skill(skill: Skill) -> None:
 
 
 def load_skills(skills_dir: Path | None = None) -> dict[str, Skill]:
-    """Load all skill packages from the skills directory."""
+    """Load all skill packages from built-in and user-created directories."""
     global _skills, _load_timestamp, _keyword_index
-
-    directory = skills_dir or _SKILLS_DIR
-    if not directory.exists():
-        logger.info("Skills directory not found: %s", directory)
-        return {}
 
     loaded: dict[str, Skill] = {}
 
-    for skill_dir in sorted(directory.iterdir()):
-        skill_file = None
-        if skill_dir.is_dir():
-            skill_file = skill_dir / "skill.md"
-        elif skill_dir.is_file() and skill_dir.suffix == ".md":
-            # Support flat files too (skills/sre.md)
-            skill_file = skill_dir
+    # Scan both built-in and user-created skill directories
+    dirs_to_scan = [skills_dir or _SKILLS_DIR, _USER_SKILLS_DIR]
 
-        if skill_file and skill_file.exists():
-            skill = _parse_skill_md(skill_file)
-            if skill:
-                _validate_skill(skill)
-                loaded[skill.name] = skill
-                logger.info(
-                    "Loaded skill: %s v%d (%d keywords, %d categories%s)",
-                    skill.name,
-                    skill.version,
-                    len(skill.keywords),
-                    len(skill.categories),
-                    ", DEGRADED" if skill.degraded else "",
-                )
+    for directory in dirs_to_scan:
+        if not directory.exists():
+            continue
+
+        for skill_dir in sorted(directory.iterdir()):
+            skill_file = None
+            if skill_dir.is_dir():
+                skill_file = skill_dir / "skill.md"
+            elif skill_dir.is_file() and skill_dir.suffix == ".md":
+                skill_file = skill_dir
+
+            if skill_file and skill_file.exists():
+                skill = _parse_skill_md(skill_file)
+                if skill:
+                    _validate_skill(skill)
+                    loaded[skill.name] = skill
+                    logger.info(
+                        "Loaded skill: %s v%d (%d keywords, %d categories%s)",
+                        skill.name,
+                        skill.version,
+                        len(skill.keywords),
+                        len(skill.categories),
+                        ", DEGRADED" if skill.degraded else "",
+                    )
 
     _skills = loaded
     _keyword_index = _build_keyword_index(loaded)
