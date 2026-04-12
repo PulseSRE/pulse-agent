@@ -10,11 +10,14 @@ keywords:
   - build me a view, create me a view, make me a view
   - build me a dashboard, create me a dashboard, make me a dashboard
   - show me a dashboard, new view, customize the view
+  - security dashboard, security view, security findings dashboard
+  - capacity dashboard, node dashboard, helm dashboard
+  - incident dashboard, alert dashboard, monitoring dashboard
   - edit view, update view, modify the view, redesign, design, layout
   - add chart, add table, add widget, remove widget
   - show as chart, show as table, convert to
   - metric card, sparkline, bar chart, donut
-  - monitoring dashboard, monitoring view, clone dashboard
+  - monitoring view, clone dashboard
 categories: []
 write_tools: false
 priority: 10

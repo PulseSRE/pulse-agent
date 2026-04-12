@@ -152,6 +152,7 @@ _TYPO_MAP: dict[str, str] = {
     "nework": "network",
     # View/dashboard terms
     "dahsboard": "dashboard",
+    "dahboard": "dashboard",
     "dashbaord": "dashboard",
     "dashbord": "dashboard",
     "dasbhoard": "dashboard",

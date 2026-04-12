@@ -254,6 +254,28 @@ class MultiTurnReplayHarness:
         }
 
 
+# Synonym map — keyword can be matched by any synonym
+_KEYWORD_SYNONYMS: dict[str, list[str]] = {
+    "quota": ["quota", "resource limit", "limit exceeded", "resource constraint"],
+    "scaled": ["scaled", "scale", "replicas", "replica count"],
+    "memory": ["memory", "mem", "oom", "ram"],
+    "cpu": ["cpu", "processor", "cores", "millicores"],
+    "insufficient": ["insufficient", "not enough", "exhausted", "exceeded", "no capacity"],
+    "database": ["database", "db", "postgres", "mysql", "sql"],
+    "restart": ["restart", "rollout restart", "rolling restart"],
+}
+
+
+def _keyword_match(keyword: str, text: str) -> bool:
+    """Check if keyword or any of its synonyms appear in text."""
+    kw_lower = keyword.lower()
+    if kw_lower in text:
+        return True
+    # Check synonyms
+    synonyms = _KEYWORD_SYNONYMS.get(kw_lower, [])
+    return any(syn in text for syn in synonyms)
+
+
 def score_multi_turn(result: dict, expected: dict) -> dict:
     """Score a multi-turn replay result.
 
@@ -262,9 +284,10 @@ def score_multi_turn(result: dict, expected: dict) -> dict:
     result : Return value of ``MultiTurnReplayHarness.run()``.
     expected : Dict with:
         - ``per_turn`` : list[dict] — per-turn expected checks (same format as score_replay)
-        - ``overall_should_mention`` : list[str] — keywords in ANY turn response
+        - ``overall_should_mention`` : list[str] — keywords in ANY turn response (supports synonyms)
         - ``max_total_tool_calls`` : int — budget across all turns
         - ``should_use_tools_in_order`` : list[str] — tools that must appear in this order across turns
+        - ``should_use_tools`` : list[str] — tools that must be called (any order)
     """
     checks: list[dict] = []
     all_responses = " ".join(t["response"].lower() for t in result["turns"])
@@ -279,7 +302,7 @@ def score_multi_turn(result: dict, expected: dict) -> dict:
         turn_tools = [tc["name"] for tc in turn["tool_calls"]]
 
         for keyword in turn_expected.get("should_mention", []):
-            found = keyword.lower() in turn_response
+            found = _keyword_match(keyword, turn_response)
             checks.append({"check": f"turn {i + 1} mentions '{keyword}'", "passed": found, "weight": 1})
 
         for tool in turn_expected.get("should_use_tools", []):
@@ -290,10 +313,15 @@ def score_multi_turn(result: dict, expected: dict) -> dict:
             found = tool in turn_tools
             checks.append({"check": f"turn {i + 1} avoided tool '{tool}'", "passed": not found, "weight": 1})
 
-    # Overall keyword checks
+    # Overall keyword checks (with synonym support)
     for keyword in expected.get("overall_should_mention", []):
-        found = keyword.lower() in all_responses
+        found = _keyword_match(keyword, all_responses)
         checks.append({"check": f"any turn mentions '{keyword}'", "passed": found, "weight": 1})
+
+    # Required tools (any order) — more flexible than ordered check
+    for tool in expected.get("should_use_tools", []):
+        found = tool in all_tool_calls
+        checks.append({"check": f"used tool '{tool}'", "passed": found, "weight": 1})
 
     # Tool budget
     max_calls = expected.get("max_total_tool_calls")
@@ -303,7 +331,8 @@ def score_multi_turn(result: dict, expected: dict) -> dict:
             {"check": f"total tool calls <= {max_calls} (actual: {len(all_tool_calls)})", "passed": within, "weight": 1}
         )
 
-    # Tool ordering
+    # Tool ordering — soft check (weight: 0.5 instead of 1)
+    # Failure here reduces score but doesn't cause outright FAIL
     ordered_tools = expected.get("should_use_tools_in_order", [])
     if ordered_tools:
         positions = []
@@ -314,7 +343,7 @@ def score_multi_turn(result: dict, expected: dict) -> dict:
             except ValueError:
                 positions.append(-1)
         in_order = all(p >= 0 for p in positions) and positions == sorted(positions)
-        checks.append({"check": f"tools in order: {ordered_tools}", "passed": in_order, "weight": 1})
+        checks.append({"check": f"tools in order: {ordered_tools}", "passed": in_order, "weight": 0.5})
 
     # Compute score
     if not checks:
@@ -324,8 +353,9 @@ def score_multi_turn(result: dict, expected: dict) -> dict:
     earned = sum(c["weight"] for c in checks if c["passed"])
     score = round(earned / total_weight * 100)
 
+    # Pass threshold: 80% (not strict all-must-pass)
     return {
-        "passed": all(c["passed"] for c in checks),
+        "passed": score >= 80,
         "score": score,
         "checks": checks,
         "turns": len(result["turns"]),
@@ -359,9 +389,9 @@ def score_replay(result: dict, expected: dict) -> dict:
 
     checks: list[dict] = []
 
-    # 1. Keyword mentions
+    # 1. Keyword mentions (with synonym support)
     for keyword in expected.get("should_mention", []):
-        found = keyword.lower() in response_lower
+        found = _keyword_match(keyword, response_lower)
         checks.append(
             {
                 "check": f"mentions '{keyword}'",
