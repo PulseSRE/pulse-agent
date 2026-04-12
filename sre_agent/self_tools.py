@@ -355,27 +355,25 @@ def create_skill(
     if priority < 1 or priority > 10:
         return "Error: priority must be 1-10"
 
-    # Build skill.md content
-    keyword_lines = ", ".join(kw_list)
-    cat_yaml = "\n".join(f"  - {c}" for c in cat_list)
-    content = (
-        f"---\n"
-        f"name: {name}\n"
-        f"version: 1\n"
-        f"description: {description}\n"
-        f"keywords:\n"
-        f"  - {keyword_lines}\n"
-        f"categories:\n"
-        f"{cat_yaml}\n"
-        f"write_tools: {str(write_tools).lower()}\n"
-        f"priority: {priority}\n"
-        f"handoff_to:\n"
-        f"  sre: [fix, remediate, restart, scale, apply]\n"
-        f"  view_designer: [dashboard, view, create view]\n"
-        f"---\n\n"
-        f"{_SECURITY_HEADER}\n\n"
-        f"{prompt}\n"
-    )
+    # Build skill.md using yaml.dump for safe YAML generation
+    import yaml
+
+    frontmatter = {
+        "name": name,
+        "version": 1,
+        "description": description,
+        "keywords": [", ".join(kw_list)],
+        "categories": cat_list,
+        "write_tools": write_tools,
+        "priority": priority,
+        "handoff_to": {
+            "sre": ["fix", "remediate", "restart", "scale", "apply"],
+            "view_designer": ["dashboard", "view", "create view"],
+        },
+    }
+
+    yaml_str = yaml.dump(frontmatter, default_flow_style=False, sort_keys=False)
+    content = f"---\n{yaml_str}---\n\n{_SECURITY_HEADER}\n\n{prompt}\n"
 
     # Write to disk (user skills go to writable PVC directory)
     try:
@@ -385,21 +383,48 @@ def create_skill(
     except OSError as e:
         return f"Error: failed to write skill to {skill_dir}: {e}. The filesystem may be read-only."
 
-    # Hot-reload
-    skills = reload_skills()
+    # Validate: re-parse the written file to catch YAML errors
+    from .skill_loader import _parse_skill_md
 
-    if name in skills:
+    parsed = _parse_skill_md(skill_file)
+    if not parsed:
+        # Read back and show what went wrong
+        raw = skill_file.read_text(encoding="utf-8")
         return (
-            f"Skill '{name}' created and loaded.\n"
-            f"- Keywords: {keyword_lines}\n"
-            f"- Categories: {', '.join(cat_list)}\n"
-            f"- Priority: {priority}\n"
-            f"- Write tools: {write_tools}\n"
-            f"- Location: {skill_file}\n\n"
-            f"The skill is active now. Test it by asking a question with one of the keywords."
+            f"Error: skill file written but YAML parsing failed.\n"
+            f"File: {skill_file}\n"
+            f"Content preview:\n```\n{raw[:500]}\n```\n"
+            f"Fix the YAML frontmatter and try again."
         )
 
-    return f"Error: skill file written to {skill_file} but failed to load. Check the agent logs for parsing errors."
+    # Hot-reload all skills
+    skills = reload_skills()
+
+    if name not in skills:
+        return f"Error: skill file parsed OK but not found after reload. Name mismatch? File has name='{parsed.name}', expected '{name}'."
+
+    # Verify routing works — test with skill name and first keyword
+    from .skill_loader import classify_query
+
+    test_queries = [f"run {name}", kw_list[0] if kw_list else name]
+    routing_results = []
+    for tq in test_queries:
+        routed = classify_query(tq)
+        routing_results.append(
+            f"  '{tq}' → {routed.name} {'✓' if routed.name == name else '✗ (routed to wrong skill)'}"
+        )
+
+    return (
+        f"Skill '{name}' created and active!\n\n"
+        f"**Details:**\n"
+        f"- Keywords: {', '.join(kw_list)}\n"
+        f"- Categories: {', '.join(cat_list)}\n"
+        f"- Priority: {priority}\n"
+        f"- Write tools: {write_tools}\n"
+        f"- Location: {skill_file}\n\n"
+        f"**Routing test:**\n" + "\n".join(routing_results) + "\n\n"
+        f"The skill is live. Users can trigger it by mentioning: {', '.join(kw_list[:5])}"
+    )
 
 
 @beta_tool
