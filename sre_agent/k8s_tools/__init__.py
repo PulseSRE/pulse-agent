@@ -262,4 +262,4 @@ ALL_TOOLS = [
 from ..tool_registry import register_tool
 
 for _tool in ALL_TOOLS:
-    register_tool(_tool, is_write=(_tool.name in WRITE_TOOLS))  # type: ignore[attr-defined]
+    register_tool(_tool, is_write=(_tool.name in WRITE_TOOLS))

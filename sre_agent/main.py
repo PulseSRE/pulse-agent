@@ -85,8 +85,8 @@ def print_banner(mode: str, memory_active: bool):
     memory_tag = " [dim][memory active][/dim]" if memory_active else ""
     console.print(
         Panel(
-            str(cfg["banner"]) + memory_tag + "\n\n[dim]Commands: help, clear, mode, feedback, quit[/dim]",
-            border_style=str(cfg["color"]),
+            cfg["banner"] + memory_tag + "\n\n[dim]Commands: help, clear, mode, feedback, quit[/dim]",
+            border_style=cfg["color"],
         )
     )
 
@@ -175,7 +175,7 @@ def run_repl(mode: str):
         extra_map = None
         if memory_mgr:
             memory_mgr.start_turn()
-            augmented_prompt = memory_mgr.augment_prompt(str(cfg["base_prompt"]), user_input)
+            augmented_prompt = memory_mgr.augment_prompt(cfg["base_prompt"], user_input)
             extra_tools = memory_mgr.get_extra_tools()
             extra_defs = [t.to_dict() for t in extra_tools]
             extra_map = {t.name: t for t in extra_tools}
@@ -193,8 +193,7 @@ def run_repl(mode: str):
 
         try:
             console.print()
-            runner = cfg["runner"]
-            full_response = runner(  # type: ignore[operator]
+            full_response = cfg["runner"](
                 client,
                 messages,
                 system_prompt=augmented_prompt,

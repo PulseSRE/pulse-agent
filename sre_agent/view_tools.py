@@ -206,7 +206,7 @@ def namespace_summary(namespace: str) -> str:
         "columns": 4,
         "items": [resource_counts] + cards,
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -530,7 +530,7 @@ def cluster_metrics(category: str = "overview") -> str:
         "columns": min(len(cards), 4),
         "items": cards,
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -582,7 +582,7 @@ def list_saved_views() -> str:
         ],
         "rows": rows,
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -970,7 +970,7 @@ def emit_component(kind: str, spec_json: str) -> str:
     if spec.get("title"):
         text += f": {spec['title']}"
 
-    return (text, spec)  # type: ignore[return-value]
+    return (text, spec)
 
 
 @beta_tool
@@ -1038,7 +1038,7 @@ def get_view_versions(view_id: str) -> str:
         ],
         "rows": rows,
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool

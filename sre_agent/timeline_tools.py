@@ -19,7 +19,7 @@ from kubernetes.client.rest import ApiException
 from .k8s_client import get_apps_client, get_core_client, get_custom_client, safe
 
 
-@beta_tool  # type: ignore[type-var]
+@beta_tool
 def correlate_incident(
     namespace: str = "default",
     minutes_back: int = 30,
@@ -331,7 +331,7 @@ def correlate_incident(
                 for e in entries
             ],
         }
-        component["lanes"].append(lane)  # type: ignore[attr-defined]
+        component["lanes"].append(lane)
 
     return (text_summary, component)
 

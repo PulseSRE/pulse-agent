@@ -458,4 +458,4 @@ from .tool_registry import register_tool
 
 _GITOPS_WRITE_TOOLS = {"install_gitops_operator", "create_argo_application"}
 for _tool in GITOPS_TOOLS:
-    register_tool(_tool, is_write=(getattr(_tool, "name", "") in _GITOPS_WRITE_TOOLS))
+    register_tool(_tool, is_write=(_tool.name in _GITOPS_WRITE_TOOLS))

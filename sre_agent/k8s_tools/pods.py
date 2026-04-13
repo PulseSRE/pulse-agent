@@ -83,7 +83,7 @@ def list_pods(namespace: str = "default", label_selector: str = "", field_select
         if rows
         else None
     )
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -233,7 +233,7 @@ def describe_pod(namespace: str, pod_name: str) -> str:
         "components": components,
     }
 
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -295,7 +295,7 @@ def get_pod_logs(
         "source": source,
         "lines": lines[-500:],  # Cap at 500 lines
     }
-    return (log_text[:2000] if len(log_text) > 2000 else log_text, component)  # type: ignore[return-value]
+    return (log_text[:2000] if len(log_text) > 2000 else log_text, component)
 
 
 @beta_tool

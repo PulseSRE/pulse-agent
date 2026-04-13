@@ -8,7 +8,7 @@ import json
 import logging
 import time
 import uuid
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from ..agent import create_client, run_agent_streaming
 from ..config import get_settings
@@ -112,7 +112,7 @@ def _build_tool_result_handler(session_id: str, agent_mode: str, write_tools: se
 async def _run_agent_ws(
     websocket: WebSocket,
     messages: list[dict],
-    system_prompt: str | list[dict[str, Any]],
+    system_prompt: str,
     tool_defs: list,
     tool_map: dict,
     write_tools: set[str],
@@ -181,7 +181,7 @@ async def _run_agent_ws(
             ).result(timeout=5)
 
             # Block the agent thread -- wait for the UI to set the future result
-            waiter: concurrent.futures.Future[bool] = concurrent.futures.Future()
+            waiter = concurrent.futures.Future()
 
             def _on_done(f):
                 try:
@@ -226,7 +226,7 @@ async def _run_agent_ws(
         run_agent_streaming,
         client=client,
         messages=messages,
-        system_prompt=cast("str", effective_system),
+        system_prompt=effective_system,
         tool_defs=tool_defs,
         tool_map=tool_map,
         write_tools=write_tools,

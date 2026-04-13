@@ -78,7 +78,7 @@ def get_firing_alerts() -> str:
         if items
         else None
     )
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 # In-memory cache for metric names (TTL 5 minutes)
@@ -638,7 +638,7 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
         chart_type = _pick_chart_type(query, series, results)
         component = _build_chart_component(chart_type, series, tr=time_range)
         _record_success(len(series))
-        return (text, component)  # type: ignore[return-value]
+        return (text, component)
 
     else:
         # Instant query (vector) -> build a DataTableSpec or chart
@@ -670,7 +670,7 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
         text = "\n".join(lines)
 
         # Try chart for instant queries with categorical data (pie/donut/bar)
-        chart_type = _pick_chart_type(query, [], results, is_instant=True) if 2 <= len(results) <= 20 else None  # type: ignore[no-redef,assignment]
+        chart_type = _pick_chart_type(query, [], results, is_instant=True) if 2 <= len(results) <= 20 else None
         if chart_type and chart_type in ("donut", "pie", "bar", "treemap", "radar"):
             import math
 
@@ -692,7 +692,7 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
             if chart_series:
                 component = _build_chart_component(chart_type, chart_series)
                 _record_success(len(chart_series))
-                return (text, component)  # type: ignore[return-value]
+                return (text, component)
 
         # Build columns from label keys
         if label_keys:
@@ -701,7 +701,7 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
             columns = [{"id": "metric", "header": "Metric"}]
         columns.append({"id": "value", "header": "Value"})
 
-        component: dict | None = (  # type: ignore[no-redef]
+        component = (
             {
                 "kind": "data_table",
                 "title": title or _title_from_query(query),
@@ -719,7 +719,7 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
             record_query_result(query, success=True, series_count=len(rows))
         except Exception:
             pass
-        return (text, component)  # type: ignore[return-value]
+        return (text, component)
 
 
 @beta_tool
@@ -753,8 +753,8 @@ def get_node_metrics() -> str:
         cpu_m = parse_cpu_millicores(usage.get("cpu", "0"))
         mem_bytes = parse_memory_bytes(usage.get("memory", "0"))
 
-        cpu_pct_val: float = 0
-        mem_pct_val: float = 0
+        cpu_pct_val = 0
+        mem_pct_val = 0
         pct = ""
         if name in capacity_map:
             cap = capacity_map[name]
@@ -790,7 +790,7 @@ def get_node_metrics() -> str:
         if rows
         else None
     )
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -875,4 +875,4 @@ def get_pod_metrics(namespace: str = "default", sort_by: str = "cpu") -> str:
         if rows
         else None
     )
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)

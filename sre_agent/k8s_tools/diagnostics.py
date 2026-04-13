@@ -104,7 +104,7 @@ def get_events(
         if rows
         else None
     )
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -232,7 +232,7 @@ def get_cluster_operators() -> str:
         items.append({"name": name, "status": status, "detail": f"Available={available}"})
     text = "\n".join(lines) or "No ClusterOperators found."
     component = {"kind": "status_list", "title": f"Cluster Operators ({len(items)})", "items": items} if items else None
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -255,7 +255,7 @@ def get_configmap(namespace: str, name: str) -> str:
         key, val = next(iter(data.items()))
         lang = "json" if val.strip().startswith("{") or val.strip().startswith("[") else "yaml"
         component = {"kind": "yaml_viewer", "title": f"ConfigMap: {name}/{key}", "content": val, "language": lang}
-        return (text, component)  # type: ignore[return-value]
+        return (text, component)
 
     # Multiple keys -> key_value summary
     component = {
@@ -263,7 +263,7 @@ def get_configmap(namespace: str, name: str) -> str:
         "title": f"ConfigMap: {name}",
         "pairs": [{"key": k, "value": v[:100] + ("..." if len(v) > 100 else "")} for k, v in data.items()],
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -428,7 +428,7 @@ def top_pods_by_restarts(namespace: str = "ALL", limit: int = 20) -> str:
         if rows
         else None
     )
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -565,7 +565,7 @@ def get_tls_certificates(namespace: str = "ALL") -> str:
             try:
                 cn_attrs = cert.subject.get_attributes_for_oid(x509.oid.NameOID.COMMON_NAME)
                 if cn_attrs:
-                    cn = cn_attrs[0].value  # type: ignore[assignment]
+                    cn = cn_attrs[0].value
             except Exception:
                 pass
 
@@ -701,7 +701,7 @@ def search_logs(namespace: str, label_selector: str, pattern: str, tail_lines: i
         "source": label_selector,
         "lines": log_lines,
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool

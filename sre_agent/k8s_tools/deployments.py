@@ -72,7 +72,7 @@ def list_deployments(namespace: str = "default") -> str:
         if rows
         else None
     )
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -178,7 +178,7 @@ def describe_deployment(namespace: str, name: str) -> str:
 
     # Pod template spec as YAML
     try:
-        import yaml as _yaml  # type: ignore[import-untyped]
+        import yaml as _yaml
 
         template_spec = dep.spec.template.spec.to_dict() if hasattr(dep.spec.template.spec, "to_dict") else {}
         if template_spec:
@@ -200,7 +200,7 @@ def describe_deployment(namespace: str, name: str) -> str:
         "defaultOpen": True,
         "components": components,
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool

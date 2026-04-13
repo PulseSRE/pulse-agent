@@ -54,7 +54,7 @@ def list_my_skills() -> str:
             }
         ],
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -70,7 +70,7 @@ def list_my_tools() -> str:
 
     native = []
     mcp = []
-    rows: list[dict[str, str]] = []
+    rows = []
     for name in sorted(TOOL_REGISTRY):
         tool = TOOL_REGISTRY[name]
         desc = getattr(tool, "description", "")[:80]
@@ -102,7 +102,7 @@ def list_my_tools() -> str:
         ],
         "rows": rows,
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -155,7 +155,7 @@ def list_ui_components() -> str:
         "title": f"UI Components ({len(COMPONENT_REGISTRY)})",
         "tabs": tabs,
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -187,7 +187,7 @@ def list_promql_recipes(category: str = "") -> str:
             "title": f"PromQL Recipes ({total})",
             "cards": cards,
         }
-        return (text, component)  # type: ignore[return-value]
+        return (text, component)
 
     recipes = RECIPES.get(category, [])
     if not recipes:
@@ -221,7 +221,7 @@ def list_promql_recipes(category: str = "") -> str:
         ],
         "rows": rows,
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -259,7 +259,7 @@ def list_runbooks() -> str:
         "title": f"Diagnostic Runbooks ({len(_RUNBOOK_KEYWORDS)})",
         "items": items,
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 # ---------------------------------------------------------------------------

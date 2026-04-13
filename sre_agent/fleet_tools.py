@@ -119,7 +119,7 @@ def fleet_list_clusters() -> str:
             for c in clusters
         ],
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -215,7 +215,7 @@ def fleet_list_pods(namespace: str = "default", label_selector: str = "") -> str
         else None
     )
 
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -302,7 +302,7 @@ def fleet_list_deployments(namespace: str = "default") -> str:
         else None
     )
 
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -455,7 +455,7 @@ def fleet_compare_resource(kind: str, name: str, namespace: str = "default") -> 
     if len(flat_resources) < 2:
         return f"Need at least 2 clusters with the resource to compare. Got: {list(flat_resources.keys())}"
 
-    all_fields: set[str] = set()
+    all_fields = set()
     for flat in flat_resources.values():
         all_fields.update(flat.keys())
 
@@ -474,7 +474,7 @@ def fleet_compare_resource(kind: str, name: str, namespace: str = "default") -> 
     lines = [f"Drift detected in {kind}/{name} across {len(flat_resources)} clusters:"]
     for d in diffs[:30]:
         lines.append(f"\n  {d['field']}:")
-        for cluster_name, value in d["values"].items():  # type: ignore[attr-defined]
+        for cluster_name, value in d["values"].items():
             lines.append(f"    {cluster_name}: {value}")
 
     if len(diffs) > 30:
@@ -489,10 +489,10 @@ def fleet_compare_resource(kind: str, name: str, namespace: str = "default") -> 
             {"id": "field", "header": "Field"},
             *[{"id": cn, "header": cn} for cn in flat_resources],
         ],
-        "rows": [{"field": d["field"], **d["values"]} for d in diffs[:50]],  # type: ignore[dict-item]
+        "rows": [{"field": d["field"], **d["values"]} for d in diffs[:50]],
     }
 
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 # All fleet tools

@@ -133,7 +133,7 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
     # Harness: cached system prompt with cluster context
     cluster_ctx = get_cluster_context()
     hint = get_component_hint("sre", tool_names=list(readonly_map.keys()))
-    effective_system: str | list[dict[str, Any]] = build_cached_system_prompt(
+    effective_system = build_cached_system_prompt(
         SRE_SYSTEM_PROMPT + hint,
         cluster_ctx,
     )
@@ -153,7 +153,7 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
     response = run_agent_streaming(
         client=client,
         messages=[{"role": "user", "content": prompt}],
-        system_prompt=effective_system,  # type: ignore[arg-type]
+        system_prompt=effective_system,
         tool_defs=readonly_defs,
         tool_map=readonly_map,
         write_tools=set(),
@@ -230,7 +230,7 @@ def _run_security_followup_sync(finding: dict) -> dict:
     # Harness: cached system prompt with cluster context
     cluster_ctx = get_cluster_context()
     hint = get_component_hint("security", tool_names=list(sec_tool_map.keys()))
-    effective_system: str | list[dict[str, Any]] = build_cached_system_prompt(
+    effective_system = build_cached_system_prompt(
         SECURITY_SYSTEM_PROMPT + hint,
         cluster_ctx,
     )
@@ -249,7 +249,7 @@ def _run_security_followup_sync(finding: dict) -> dict:
     response = run_agent_streaming(
         client=client,
         messages=[{"role": "user", "content": prompt}],
-        system_prompt=effective_system,  # type: ignore[arg-type]
+        system_prompt=effective_system,
         tool_defs=sec_tool_defs,
         tool_map=sec_tool_map,
         write_tools=set(),  # read-only

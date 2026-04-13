@@ -346,7 +346,7 @@ def list_resources(
         "columns": col_defs,
         "rows": rows,
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -515,7 +515,7 @@ def get_resource_relationships(namespace: str, name: str, kind: str = "Pod") -> 
                 # Add child to existing node
                 for n in tree_nodes:
                     if n["id"] == owner_id and prev_id not in n["children"]:
-                        n["children"].append(prev_id)  # type: ignore[attr-defined]
+                        n["children"].append(prev_id)
             prev_id = owner_id
 
     root_id = prev_id  # topmost owner
@@ -550,7 +550,7 @@ def get_resource_relationships(namespace: str, name: str, kind: str = "Pod") -> 
         # Add to target's children
         for n in tree_nodes:
             if n["id"] == target_id and child_id not in n["children"]:
-                n["children"].append(child_id)  # type: ignore[attr-defined]
+                n["children"].append(child_id)
 
     component = (
         {
@@ -564,7 +564,7 @@ def get_resource_relationships(namespace: str, name: str, kind: str = "Pod") -> 
         else None
     )
 
-    return (text, component) if component else text  # type: ignore[return-value]
+    return (text, component) if component else text
 
 
 @beta_tool
@@ -714,7 +714,7 @@ def describe_resource(namespace: str, name: str, kind: str, group: str = "", ver
     # Add YAML manifest viewer (spec only, not full object — cleaner for users)
     spec = obj.get("spec")
     if spec:
-        import yaml as _yaml  # type: ignore[import-untyped]
+        import yaml as _yaml
 
         try:
             yaml_content = _yaml.dump(spec, default_flow_style=False)
@@ -736,4 +736,4 @@ def describe_resource(namespace: str, name: str, kind: str, group: str = "", ver
         "defaultOpen": True,
         "components": components,
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)

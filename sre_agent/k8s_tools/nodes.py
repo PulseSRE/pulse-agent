@@ -70,7 +70,7 @@ def list_nodes() -> str:
         if rows
         else None
     )
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -185,9 +185,9 @@ def visualize_nodes(label_selector: str = "", show_pods: bool = True) -> str:
         "nodes": node_specs,
     }
     if show_pods:
-        component["pods"] = pods_by_node  # type: ignore[assignment]
+        component["pods"] = pods_by_node
 
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool

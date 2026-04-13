@@ -45,14 +45,14 @@ _SRE_READ_TOOL_NAMES = {
     "get_node_metrics",
     "get_prometheus_query",
 }
-_READ_TOOLS = [t for t in SRE_TOOLS if t.name in _SRE_READ_TOOL_NAMES]  # type: ignore[attr-defined]
+_READ_TOOLS = [t for t in SRE_TOOLS if t.name in _SRE_READ_TOOL_NAMES]
 
 # Add read-only pillar tools for security investigations
 ALL_TOOLS = (
     ALL_SECURITY_TOOLS + _READ_TOOLS + GITOPS_TOOLS + TIMELINE_TOOLS + PREDICT_TOOLS + [request_sre_investigation]
 )
-TOOL_DEFS = [t.to_dict() for t in ALL_TOOLS]  # type: ignore[attr-defined]
-TOOL_MAP = {t.name: t for t in ALL_TOOLS}  # type: ignore[attr-defined]
+TOOL_DEFS = [t.to_dict() for t in ALL_TOOLS]
+TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 
 SECURITY_SYSTEM_PROMPT = """\
 You are an expert OpenShift/Kubernetes Security Scanning Agent.

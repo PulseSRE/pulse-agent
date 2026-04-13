@@ -58,7 +58,7 @@ _DATA_TOOL_NAMES = {
     "scan_rbac_risks",
 }
 
-_DATA_TOOLS = [t for t in SRE_TOOLS if t.name in _DATA_TOOL_NAMES]  # type: ignore[attr-defined]
+_DATA_TOOLS = [t for t in SRE_TOOLS if t.name in _DATA_TOOL_NAMES]
 
 # Combine data tools + view tools (no cluster write ops)
 # Security tools (get_security_summary, scan_pod_security, scan_rbac_risks)
@@ -68,11 +68,11 @@ _combined = _DATA_TOOLS + VIEW_TOOLS
 _seen: set[str] = set()
 ALL_TOOLS = []
 for t in _combined:
-    if t.name not in _seen:  # type: ignore[attr-defined]
-        _seen.add(t.name)  # type: ignore[attr-defined]
+    if t.name not in _seen:
+        _seen.add(t.name)
         ALL_TOOLS.append(t)
-TOOL_DEFS = [t.to_dict() for t in ALL_TOOLS]  # type: ignore[attr-defined]
-TOOL_MAP = {t.name: t for t in ALL_TOOLS}  # type: ignore[attr-defined]
+TOOL_DEFS = [t.to_dict() for t in ALL_TOOLS]
+TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 
 
 _VIEW_DESIGNER_BASE = """\

@@ -166,7 +166,7 @@ def get_fix_history_summary(days: int = 7) -> dict:
         avg_resolution_ms = int(sum(durations) / len(durations)) if durations else 0
 
         # Aggregate by category
-        categories: dict[str, dict[str, str | int]] = {}
+        categories = {}
         for action in actions:
             cat = action["category"] or "unknown"
             if cat not in categories:
@@ -177,11 +177,11 @@ def get_fix_history_summary(days: int = 7) -> dict:
                     "auto_fixed": 0,
                     "confirmation_required": 0,
                 }
-            categories[cat]["count"] = int(categories[cat]["count"]) + 1
+            categories[cat]["count"] += 1
             if action["status"] == "completed":
-                categories[cat]["success_count"] = int(categories[cat]["success_count"]) + 1
+                categories[cat]["success_count"] += 1
                 # All completed actions in monitor are auto-fixed (trust level 3+)
-                categories[cat]["auto_fixed"] = int(categories[cat]["auto_fixed"]) + 1
+                categories[cat]["auto_fixed"] += 1
             # Confirmation required is tracked separately in the monitor system
             # For now, we consider all actions as requiring no confirmation since they're auto-fixed
 
@@ -244,7 +244,7 @@ async def rest_fix_history(
     _auth=Depends(verify_token),
 ):
     """Paginated fix history (Protocol v2). Requires token auth."""
-    filters: dict[str, str | int] = {}
+    filters = {}
     if status:
         filters["status"] = status
     if category:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import difflib
 import shutil
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -270,7 +270,7 @@ async def list_skill_versions(name: str, _auth=Depends(verify_token)):
                 "version": skill.version,
                 "label": f"v{skill.version} (current)",
                 "filename": "skill.md",
-                "timestamp": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
+                "timestamp": datetime.fromtimestamp(stat.st_mtime, tz=datetime.UTC).isoformat(),
                 "current": True,
             }
         )
@@ -290,7 +290,7 @@ async def list_skill_versions(name: str, _auth=Depends(verify_token)):
                         "version": ver_num,
                         "label": f"v{ver_num}",
                         "filename": f.name,
-                        "timestamp": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
+                        "timestamp": datetime.fromtimestamp(stat.st_mtime, tz=datetime.UTC).isoformat(),
                         "current": False,
                     }
                 )
@@ -347,7 +347,7 @@ def _archive_version(skill_path: Path, version: int) -> None:
     versions_dir.mkdir(exist_ok=True)
 
     # Include timestamp to avoid collision if same version is saved multiple times
-    ts = datetime.now(tz=UTC).strftime("%Y%m%d%H%M%S")
+    ts = datetime.now(tz=datetime.UTC).strftime("%Y%m%d%H%M%S")
     archive_name = f"skill_v{version}_{ts}.md"
     shutil.copy2(skill_file, versions_dir / archive_name)
 

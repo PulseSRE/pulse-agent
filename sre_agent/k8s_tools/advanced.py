@@ -34,7 +34,7 @@ def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = True) -> 
         namespace: Override namespace (optional, uses the one in the YAML if not specified).
         dry_run: If True (default), only validate — don't actually apply. Set to False to apply for real.
     """
-    import yaml as yaml_lib  # type: ignore[import-untyped]
+    import yaml as yaml_lib
 
     try:
         resource = yaml_lib.safe_load(yaml_content)
@@ -487,4 +487,4 @@ def get_resource_recommendations(namespace: str, time_range: str = "24h") -> str
         ],
         "rows": rows[:50],
     }
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)

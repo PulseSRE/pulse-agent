@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 logger = logging.getLogger("pulse_agent.mcp_client")
 
@@ -156,9 +156,8 @@ def _connect_stdio(conn: MCPConnection) -> MCPConnection:
         except Exception:
             process.terminate()
             raise
-        tool_defs_list: list[dict[str, Any]] = tool_defs
-        conn.tools = [t["name"] for t in tool_defs_list]
-        conn.tool_schemas = {t["name"]: t for t in tool_defs_list}
+        conn.tools = [t["name"] for t in tool_defs]
+        conn.tool_schemas = {t["name"]: t for t in tool_defs}
         conn.connected = True
         logger.info("MCP '%s' connected: %d tools from %s", conn.name, len(conn.tools), conn.toolsets)
     except FileNotFoundError:
@@ -280,8 +279,8 @@ def _connect_sse(conn: MCPConnection) -> MCPConnection:
             logger.debug("Prompt discovery failed for '%s': %s", conn.name, e)
 
         conn.connected = True
-        conn._sse_base_url = base_url  # type: ignore[attr-defined]
-        conn._sse_session_id = session_id  # type: ignore[attr-defined]
+        conn._sse_base_url = base_url
+        conn._sse_session_id = session_id
         logger.info("MCP SSE '%s' connected: %d tools, %d prompts", conn.name, len(conn.tools), len(conn.prompts))
 
     except urllib.error.URLError as e:
@@ -292,14 +291,12 @@ def _connect_sse(conn: MCPConnection) -> MCPConnection:
     return conn
 
 
-def _discover_tools_stdio(process: subprocess.Popen, toolsets: list[str]) -> list[dict[str, Any]]:
+def _discover_tools_stdio(process: subprocess.Popen, toolsets: list[str]) -> list[str]:
     """Send MCP initialize request and discover available tools.
 
     MCP protocol: send JSON-RPC initialize → receive tools/list response.
     """
     try:
-        assert process.stdin is not None
-        assert process.stdout is not None
         # Send initialize request
         init_request = {
             "jsonrpc": "2.0",

@@ -237,8 +237,8 @@ def _build_system_prompt() -> str:
 SYSTEM_PROMPT = _build_system_prompt()
 
 # Build raw tool definitions from @beta_tool decorated functions
-TOOL_DEFS = [t.to_dict() for t in ALL_TOOLS]  # type: ignore[attr-defined]
-TOOL_MAP = {t.name: t for t in ALL_TOOLS}  # type: ignore[attr-defined]
+TOOL_DEFS = [t.to_dict() for t in ALL_TOOLS]
+TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 
 
 def create_client():
@@ -481,7 +481,7 @@ def run_agent_streaming(
             hint = get_component_hint(mode, tool_names=list(tool_map.keys()))
             effective_system = build_cached_system_prompt(system_prompt + hint, cluster_ctx)
     else:
-        effective_system = system_prompt  # type: ignore[assignment]
+        effective_system = system_prompt
 
     while iterations < MAX_ITERATIONS:
         iterations += 1

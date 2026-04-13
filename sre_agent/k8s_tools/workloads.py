@@ -68,7 +68,7 @@ def list_statefulsets(namespace: str = "default") -> str:
         if rows
         else None
     )
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -131,7 +131,7 @@ def list_daemonsets(namespace: str = "default") -> str:
         if rows
         else None
     )
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
@@ -358,7 +358,7 @@ def list_hpas(namespace: str = "default") -> str:
         if rows
         else None
     )
-    return (text, component)  # type: ignore[return-value]
+    return (text, component)
 
 
 @beta_tool
