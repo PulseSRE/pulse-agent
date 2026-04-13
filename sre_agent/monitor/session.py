@@ -143,7 +143,15 @@ class MonitorSession:
                         resource_key,
                     )
 
-            if not handler and not targeted_plan:
+            if not targeted_plan:
+                # No intelligent fix available — skip blunt handler.
+                # Blind restarts waste cycles on issues that need real diagnosis.
+                if investigation:
+                    logger.info(
+                        "Auto-fix skipped: investigation exists but no targeted strategy (confidence=%.2f) for %s",
+                        float(investigation.get("confidence", 0)),
+                        resource_key,
+                    )
                 continue
             if resource_key and resource_key in self._recent_fixes:
                 cooldown_remaining = 300 - (time.time() - self._recent_fixes[resource_key])
