@@ -207,14 +207,15 @@ def _connect_sse(conn: MCPConnection) -> MCPConnection:
 
     base_url = conn.url.rstrip("/")
 
-    # Retry with backoff — MCP sidecar may not be ready during startup
-    max_retries = 3
+    # Retry with backoff — MCP sidecar may take 15-30s to accept connections
+    max_retries = 5
+    retry_delays = [3, 5, 8, 10]  # total wait: up to 26s
     for attempt in range(max_retries):
         try:
             return _connect_sse_attempt(conn, base_url)
         except urllib.error.URLError as e:
             if attempt < max_retries - 1:
-                delay = 2**attempt  # 1s, 2s, 4s
+                delay = retry_delays[attempt]
                 logger.info(
                     "MCP '%s' not ready (attempt %d/%d), retrying in %ds: %s",
                     conn.name,
