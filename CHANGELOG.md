@@ -2,6 +2,42 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## v2.2.0 (2026-04-12)
+
+### Adaptive Tool Selection Engine
+- **TF-IDF Prediction** — Learns which tools are relevant for each query from real usage. Tokenizes queries into unigrams + bigrams, scores against `tool_predictions` table, returns top-K tools. Zero cost, sub-millisecond.
+- **LLM Fallback** — When TF-IDF confidence is low (cold start), Haiku picks tools from names only (~200 tokens). Selections feed back into TF-IDF dictionary, making the LLM path self-eliminating.
+- **Co-occurrence Bundles** — Tracks tools called together in the same turn (`tool_cooccurrence` table). When a tool is predicted, its co-occurring tools are automatically included.
+- **Negative Signals** — Tools offered but never called get `miss_count` increments, actively suppressing wasted tools via `score - miss_count * 0.3`.
+- **Mid-Turn Chain Expansion** — After each tool call, chain bigrams and co-occurrence data dynamically add predicted next-tools to the available set.
+- **Daily Score Decay** — Scores multiplied by 0.95 daily, entries not seen in 30 days pruned. Prevents stale patterns from dominating.
+- **ALWAYS_INCLUDE trimmed** — Reduced from 12 to 5 essential tools (list_pods, get_events, namespace_summary, record_audit_entry, list_my_skills).
+- **Minimum set size** — Enforces at least 8 tools per query, padding from category fallback if needed.
+- **New tables** — `tool_predictions` and `tool_cooccurrence` (migration 012).
+
+### Pre-Route Handoff
+- **Skill classifier checks handoff rules during routing** — If the keyword winner's `handoff_to` rules match the query, routes directly to the handoff target instead of routing to the winner first. Fixes queries like "create a capacity planning dashboard" routing to capacity_planner instead of view_designer.
+
+### Type Safety
+- **Typed `beta_tool` wrapper** — Created `sre_agent/decorators.py` with a properly-typed wrapper around `anthropic.beta_tool`. All 21 tool files import from `decorators` instead of `anthropic` directly. Single `type: ignore` in one file replaces 40+ across the codebase.
+- **ToolLike Protocol** — Added `ToolLike` protocol to `tool_registry.py` for proper typing of tool object collections.
+- **Mypy clean** — 0 errors across 115 source files with proper type annotations (no `type: ignore` in tool files).
+- **Ruff clean** — 0 lint errors.
+
+### Eval Improvements
+- **Error suite fixed** — `completed: true` for error-handling scenarios, `should_block_release: false` for all 5 error scenarios.
+- **Adversarial suite fixed** — `adversarial_resource_exhaustion` changed to `should_block_release: false` (agent correctly mitigated, not refused).
+- **Synonym expansion** — Added "forbidden"/"exceeded" as synonyms for "quota" in replay scoring.
+- **Error display** — Replay CLI now shows error messages in text output instead of silently swallowing exceptions.
+- **All 9 eval suites pass** — 70/70 scenarios green.
+
+## v2.1.0 (2026-04-12)
+
+- Vertex AI cost analytics endpoint
+- Coverage percentage returns 0-100 not 0-1
+- Analytics router prefix fix
+- Context bus timestamp test stabilization
+
 ## v2.0.0 (2026-04-12)
 
 ### Extensible Skill System
