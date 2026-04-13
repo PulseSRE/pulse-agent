@@ -559,11 +559,16 @@ def classify_intent(query: str) -> tuple[AgentMode, bool]:
     return "sre", sre_score > 0
 
 
-def build_orchestrated_config(mode: AgentMode) -> dict:
+def build_orchestrated_config(mode: AgentMode, query: str = "") -> dict:
     """Return tool_defs, tool_map, system_prompt, write_tools for the given mode.
 
     Tries skill-based config first (from skill .md files). Falls back to
     hardcoded config for backward compatibility.
+
+    Args:
+        mode: Agent mode (sre, security, both, view_designer, or custom skill name).
+        query: User query text for adaptive tool selection. When provided,
+               uses TF-IDF / LLM prediction instead of static category matching.
     """
     # Try skill-based config first
     try:
@@ -571,7 +576,7 @@ def build_orchestrated_config(mode: AgentMode) -> dict:
 
         skill = get_skill(mode)
         if skill:
-            return build_config_from_skill(skill)
+            return build_config_from_skill(skill, query=query)
     except Exception:
         logger.debug("Skill-based config failed for mode=%s, using legacy", mode)
 

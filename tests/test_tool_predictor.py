@@ -11,6 +11,7 @@ from sre_agent.tool_predictor import (
     ALWAYS_INCLUDE_SLIM,
     PredictionResult,
     decay_scores,
+    expand_tool_set,
     learn,
     llm_pick_tools,
     predict_tools,
@@ -337,3 +338,71 @@ class TestSelectToolsAdaptive:
             fallback_categories=["diagnostics"],
         )
         assert len(tool_map) >= 8
+
+
+class TestChainExpansion:
+    def _mock_tool(self, name):
+        t = MagicMock()
+        t.name = name
+        t.to_dict.return_value = {"name": name}
+        return t
+
+    def test_adds_chain_predicted_tools(self):
+        current_tools = {
+            "list_pods": self._mock_tool("list_pods"),
+            "describe_pod": self._mock_tool("describe_pod"),
+        }
+        new_tool = self._mock_tool("get_pod_logs")
+        all_tools = {**current_tools, "get_pod_logs": new_tool}
+
+        with patch(
+            "sre_agent.tool_chains._chain_hints_cache",
+            {
+                "describe_pod": [("get_pod_logs", 0.85), ("get_events", 0.6)],
+            },
+        ):
+            _expanded_defs, expanded_map = expand_tool_set(
+                called_tool="describe_pod",
+                current_tool_map=current_tools,
+                all_tool_map=all_tools,
+            )
+            assert "get_pod_logs" in expanded_map
+
+    def test_no_expansion_when_already_present(self):
+        current_tools = {
+            "describe_pod": self._mock_tool("describe_pod"),
+            "get_pod_logs": self._mock_tool("get_pod_logs"),
+        }
+
+        with patch(
+            "sre_agent.tool_chains._chain_hints_cache",
+            {
+                "describe_pod": [("get_pod_logs", 0.9)],
+            },
+        ):
+            _, expanded_map = expand_tool_set(
+                called_tool="describe_pod",
+                current_tool_map=current_tools,
+                all_tool_map=current_tools,
+            )
+            assert len(expanded_map) == len(current_tools)
+
+    @patch("sre_agent.tool_predictor._get_db")
+    def test_cooccurrence_expansion(self, mock_get_db):
+        db = MagicMock()
+        db.fetchall.return_value = [
+            {"tool_b": "get_events", "frequency": 10},
+        ]
+        mock_get_db.return_value = db
+
+        current_tools = {"describe_pod": self._mock_tool("describe_pod")}
+        events_tool = self._mock_tool("get_events")
+        all_tools = {**current_tools, "get_events": events_tool}
+
+        with patch("sre_agent.tool_chains._chain_hints_cache", {}):
+            _, expanded_map = expand_tool_set(
+                called_tool="describe_pod",
+                current_tool_map=current_tools,
+                all_tool_map=all_tools,
+            )
+            assert "get_events" in expanded_map

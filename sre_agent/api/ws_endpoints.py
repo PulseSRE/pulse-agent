@@ -109,6 +109,8 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         logger.debug("Failed to create chat session record", exc_info=True)
 
     # Use skill-based config (delegates to build_orchestrated_config which tries skills first)
+    # Note: no query available at connection time — tool selection uses categories.
+    # Adaptive selection happens per-turn in the auto-agent handler.
     config = build_orchestrated_config(mode)
     system_prompt = config["system_prompt"]
     tool_defs = config["tool_defs"]
@@ -405,7 +407,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                 except Exception:
                     pass
 
-            config = build_orchestrated_config(intent)
+            config = build_orchestrated_config(intent, query=content)
             last_mode = intent
             logger.info("Auto-agent classified intent=%s strong=%s for session=%s", intent, is_strong, session_id)
 

@@ -203,6 +203,19 @@ def record_turn(
             ),
         )
         db.commit()
+
+        # Feed adaptive tool predictor
+        try:
+            from .tool_predictor import learn as _learn_tools
+
+            _learn_tools(
+                query=query_summary,
+                tools_called=tools_called,
+                tools_offered=tools_offered,
+            )
+        except Exception:
+            pass
+
         logger.debug(
             f"Recorded turn: session={session_id}, turn={turn_number}, skill={routing_skill}, score={routing_score}"
         )

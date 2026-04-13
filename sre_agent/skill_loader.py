@@ -1026,7 +1026,7 @@ def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "s
     return [t.to_dict() for t in ordered], tool_map, list(tool_map.keys())
 
 
-def build_config_from_skill(skill: Skill) -> dict:
+def build_config_from_skill(skill: Skill, query: str = "") -> dict:
     """Build agent config from a skill — same format as orchestrator.build_orchestrated_config().
 
     Returns dict with: system_prompt, tool_defs, tool_map, write_tools.
@@ -1050,6 +1050,14 @@ def build_config_from_skill(skill: Skill) -> dict:
     if not skill.categories:
         # No categories = all tools (like view_designer)
         tool_map = dict(all_tools)
+    elif query:
+        from .tool_predictor import select_tools_adaptive
+
+        _defs, tool_map, _offered = select_tools_adaptive(
+            query,
+            all_tool_map=all_tools,
+            fallback_categories=skill.categories,
+        )
     else:
         # Collect tools from the skill's categories + ALWAYS_INCLUDE
         tool_names = set(ALWAYS_INCLUDE)

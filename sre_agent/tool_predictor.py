@@ -398,6 +398,56 @@ def select_tools_adaptive(
     return tool_defs, tool_map, offered
 
 
+def expand_tool_set(
+    *,
+    called_tool: str,
+    current_tool_map: dict,
+    all_tool_map: dict,
+    min_probability: float = 0.5,
+) -> tuple[list[dict], dict]:
+    """Expand the tool set based on chain bigrams and co-occurrence.
+
+    Called after each tool execution to dynamically add predicted next-tools.
+    Returns updated (tool_defs, tool_map).
+    """
+    from .tool_chains import _chain_hints_cache
+
+    new_tools: dict[str, object] = {}
+
+    # Chain bigram expansion
+    suggestions = _chain_hints_cache.get(called_tool, [])
+    for next_tool, prob in suggestions:
+        if prob >= min_probability and next_tool not in current_tool_map and next_tool in all_tool_map:
+            new_tools[next_tool] = all_tool_map[next_tool]
+
+    # Co-occurrence expansion
+    try:
+        db = _get_db()
+        rows = db.fetchall(
+            "SELECT tool_b, frequency FROM tool_cooccurrence "
+            "WHERE tool_a = %s AND frequency >= 3 "
+            "ORDER BY frequency DESC LIMIT 3",
+            (called_tool,),
+        )
+        for r in rows:
+            t = r["tool_b"]
+            if t not in current_tool_map and t in all_tool_map:
+                new_tools[t] = all_tool_map[t]
+    except Exception:
+        pass
+
+    if not new_tools:
+        return [t.to_dict() for t in current_tool_map.values()], dict(current_tool_map)
+
+    expanded = {**current_tool_map, **new_tools}
+    logger.debug(
+        "Chain expansion after %s: added %s",
+        called_tool,
+        ", ".join(new_tools.keys()),
+    )
+    return [t.to_dict() for t in expanded.values()], expanded
+
+
 def decay_scores(*, factor: float = 0.95, prune_days: int = 30) -> None:
     """Apply daily decay to prediction scores and prune stale entries.
 
