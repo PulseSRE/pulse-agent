@@ -325,8 +325,6 @@ ALWAYS_INCLUDE_SLIM = {
     "list_pods",
     "get_events",
     "namespace_summary",
-    "record_audit_entry",
-    "list_my_skills",
 }
 
 _MIN_TOOL_SET_SIZE = 8

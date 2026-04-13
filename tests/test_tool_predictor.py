@@ -273,6 +273,9 @@ class TestSelectToolsAdaptive:
             "scale_deployment",
             "drain_node",
             "list_nodes",
+            "list_resources",
+            "get_firing_alerts",
+            "describe_deployment",
         ]
         return {n: self._mock_tool(n) for n in names}
 
