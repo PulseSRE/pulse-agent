@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from sre_agent.db import Database
 from sre_agent.db_migrations import run_migrations
-from sre_agent.tool_predictor import PredictionResult, decay_scores, learn, predict_tools
+from sre_agent.tool_predictor import PredictionResult, decay_scores, learn, llm_pick_tools, predict_tools
 
 _TEST_DB_URL = os.environ.get(
     "PULSE_AGENT_TEST_DATABASE_URL",
@@ -208,3 +208,42 @@ class TestDecay:
     def test_no_crash_on_failure(self, mock_get_db):
         mock_get_db.side_effect = Exception("DB down")
         decay_scores()
+
+
+class TestLLMPicker:
+    @patch("sre_agent.agent.create_client")
+    def test_returns_tool_list(self, mock_create):
+        client = MagicMock()
+        mock_create.return_value = client
+        client.messages.create.return_value = MagicMock(
+            content=[MagicMock(text="list_pods, describe_pod, get_pod_logs")]
+        )
+
+        tools = llm_pick_tools(
+            query="why are pods crashing",
+            tool_names=["list_pods", "describe_pod", "get_pod_logs", "scale_deployment", "drain_node"],
+            top_k=3,
+        )
+        assert "list_pods" in tools
+        assert "describe_pod" in tools
+        assert len(tools) <= 3
+
+    @patch("sre_agent.agent.create_client")
+    def test_filters_invalid_names(self, mock_create):
+        client = MagicMock()
+        mock_create.return_value = client
+        client.messages.create.return_value = MagicMock(content=[MagicMock(text="list_pods, FAKE_TOOL, describe_pod")])
+
+        tools = llm_pick_tools(
+            query="check pods",
+            tool_names=["list_pods", "describe_pod"],
+            top_k=10,
+        )
+        assert "FAKE_TOOL" not in tools
+        assert "list_pods" in tools
+
+    @patch("sre_agent.agent.create_client")
+    def test_returns_empty_on_failure(self, mock_create):
+        mock_create.side_effect = Exception("API down")
+        tools = llm_pick_tools(query="test", tool_names=["list_pods"], top_k=5)
+        assert tools == []
