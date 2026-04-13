@@ -895,15 +895,15 @@ _SELF_DESCRIBE_KEYWORDS = {
 # MCP tools only fill gaps (e.g. helm_list, helm_install have no native equivalent).
 _MCP_NATIVE_OVERLAP: set[str] = {
     "pods_list",  # native: list_pods
+    "pods_list_in_namespace",  # native: list_pods(namespace=...)
+    "pods_get",  # native: describe_pod
+    "pods_log",  # native: get_pod_logs
     "resources_list",  # native: list_resources
+    "resources_get",  # native: describe_resource
+    "namespaces_list",  # native: list_resources(kind="Namespace")
+    "events_list",  # native: get_events
     "prometheus_query",  # native: get_prometheus_query
     "alertmanager_alerts",  # native: get_firing_alerts
-    "logs_read",  # native: get_pod_logs
-    "nodes_list",  # native: list_nodes
-    "events_list",  # native: get_events
-    "deployments_list",  # native: list_deployments
-    "pods_run",  # native: apply_yaml (covered)
-    "pods_delete",  # native: delete_pod
 }
 
 
