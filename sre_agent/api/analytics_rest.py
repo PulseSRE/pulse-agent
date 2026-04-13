@@ -223,71 +223,96 @@ def _compute_cost_stats(days: int) -> dict:
     """Compute cost statistics from tool_turns table.
 
     Analyzes token usage across sessions to compute average tokens per incident,
-    trends comparing current period vs previous period, and breakdown by agent_mode.
-
-    Args:
-        days: Number of days to look back (1-365)
-
-    Returns:
-        dict with avg_tokens_per_incident, trend, by_mode, total_tokens, total_incidents
+    trends comparing current period vs previous period, breakdown by agent_mode,
+    and estimated dollar cost using Vertex AI pricing.
     """
+    # Vertex AI pricing (per 1M tokens) — Claude Opus on Vertex
+    INPUT_PRICE = 15.0
+    OUTPUT_PRICE = 75.0
+    CACHE_READ_PRICE = 1.875
+    CACHE_WRITE_PRICE = 18.75
+
+    def _estimate_cost(input_t: int, output_t: int, cache_read_t: int = 0, cache_write_t: int = 0) -> float:
+        return round(
+            (
+                input_t * INPUT_PRICE
+                + output_t * OUTPUT_PRICE
+                + cache_read_t * CACHE_READ_PRICE
+                + cache_write_t * CACHE_WRITE_PRICE
+            )
+            / 1_000_000,
+            2,
+        )
+
     try:
         from .. import db
 
         database = db.get_database()
         interval_sql = "NOW() - INTERVAL '1 day' * ?"
 
-        # Current period: last N days
-        current_rows = database.fetchall(
-            f"SELECT session_id, SUM(input_tokens + output_tokens) AS session_tokens "
-            f"FROM tool_turns WHERE timestamp > {interval_sql} GROUP BY session_id",
+        # Current period token totals (split by type for cost calculation)
+        totals_row = database.fetchone(
+            f"SELECT "
+            f"  COALESCE(SUM(input_tokens), 0) AS total_input, "
+            f"  COALESCE(SUM(output_tokens), 0) AS total_output, "
+            f"  COALESCE(SUM(cache_read_tokens), 0) AS total_cache_read, "
+            f"  COALESCE(SUM(cache_creation_tokens), 0) AS total_cache_write, "
+            f"  COUNT(DISTINCT session_id) AS total_incidents "
+            f"FROM tool_turns WHERE timestamp > {interval_sql} AND input_tokens IS NOT NULL",
             (days,),
         )
 
-        if len(current_rows) == 0:
+        if not totals_row or totals_row["total_incidents"] == 0:
             return {
                 "avg_tokens_per_incident": 0,
                 "trend": {"current": 0, "previous": 0, "delta_pct": 0.0},
                 "by_mode": [],
                 "total_tokens": 0,
                 "total_incidents": 0,
+                "cost": {
+                    "total_usd": 0.0,
+                    "avg_per_incident_usd": 0.0,
+                    "input_usd": 0.0,
+                    "output_usd": 0.0,
+                    "cache_savings_usd": 0.0,
+                },
             }
 
-        current_total_tokens = sum(row["session_tokens"] for row in current_rows)
-        current_incidents = len(current_rows)
-        current_avg = current_total_tokens / current_incidents if current_incidents > 0 else 0
+        total_input = int(totals_row["total_input"])
+        total_output = int(totals_row["total_output"])
+        total_cache_read = int(totals_row["total_cache_read"])
+        total_cache_write = int(totals_row["total_cache_write"])
+        total_incidents = int(totals_row["total_incidents"])
+        total_tokens = total_input + total_output
 
-        # Previous period: N*2 to N days ago (same-length window for fair comparison)
-        previous_rows = database.fetchall(
-            f"SELECT session_id, SUM(input_tokens + output_tokens) AS session_tokens "
+        current_avg = total_tokens / total_incidents if total_incidents > 0 else 0
+
+        # Previous period for trend
+        prev_row = database.fetchone(
+            f"SELECT "
+            f"  COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens, "
+            f"  COUNT(DISTINCT session_id) AS total_incidents "
             f"FROM tool_turns "
-            f"WHERE timestamp > {interval_sql} AND timestamp <= {interval_sql} "
-            f"GROUP BY session_id",
+            f"WHERE timestamp > {interval_sql} AND timestamp <= {interval_sql} AND input_tokens IS NOT NULL",
             (days * 2, days),
         )
-        previous_total_tokens = sum(row["session_tokens"] for row in previous_rows)
-        previous_incidents = len(previous_rows)
-        previous_avg = previous_total_tokens / previous_incidents if previous_incidents > 0 else 0
+        prev_tokens = int(prev_row["total_tokens"]) if prev_row else 0
+        prev_incidents = int(prev_row["total_incidents"]) if prev_row else 0
+        previous_avg = prev_tokens / prev_incidents if prev_incidents > 0 else 0
 
-        # Compute trend delta_pct
-        if previous_avg > 0:
-            delta_pct = ((current_avg - previous_avg) / previous_avg) * 100
-        else:
-            delta_pct = 0.0
+        delta_pct = round((current_avg - previous_avg) / previous_avg * 100, 1) if previous_avg > 0 else 0.0
 
-        # Query by_mode breakdown
-        by_mode_query = f"""
-            SELECT
-                agent_mode,
-                COUNT(DISTINCT session_id) AS incident_count,
-                SUM(input_tokens + output_tokens) AS total_tokens
-            FROM tool_turns
-            WHERE timestamp > {interval_sql}
-            GROUP BY agent_mode
-            ORDER BY total_tokens DESC
-        """
-
-        by_mode_rows = database.fetchall(by_mode_query, (days,))
+        # By-mode breakdown
+        by_mode_rows = database.fetchall(
+            f"SELECT agent_mode, "
+            f"  COUNT(DISTINCT session_id) AS incident_count, "
+            f"  COALESCE(SUM(input_tokens), 0) AS input_tokens, "
+            f"  COALESCE(SUM(output_tokens), 0) AS output_tokens, "
+            f"  COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens "
+            f"FROM tool_turns WHERE timestamp > {interval_sql} AND input_tokens IS NOT NULL "
+            f"GROUP BY agent_mode ORDER BY total_tokens DESC",
+            (days,),
+        )
 
         by_mode = [
             {
@@ -295,20 +320,34 @@ def _compute_cost_stats(days: int) -> dict:
                 "incident_count": row["incident_count"],
                 "total_tokens": row["total_tokens"],
                 "avg_tokens": round(row["total_tokens"] / row["incident_count"], 1) if row["incident_count"] > 0 else 0,
+                "cost_usd": _estimate_cost(row["input_tokens"], row["output_tokens"]),
             }
             for row in by_mode_rows
         ]
+
+        # Cost calculation
+        total_cost = _estimate_cost(total_input, total_output, total_cache_read, total_cache_write)
+        avg_cost = round(total_cost / total_incidents, 3) if total_incidents > 0 else 0.0
+        # Cache savings: what it would have cost if cache_read tokens were charged at full input price
+        cache_savings = round(total_cache_read * (INPUT_PRICE - CACHE_READ_PRICE) / 1_000_000, 2)
 
         return {
             "avg_tokens_per_incident": round(current_avg, 1),
             "trend": {
                 "current": round(current_avg, 1),
                 "previous": round(previous_avg, 1),
-                "delta_pct": round(delta_pct, 1),
+                "delta_pct": delta_pct,
             },
             "by_mode": by_mode,
-            "total_tokens": current_total_tokens,
-            "total_incidents": current_incidents,
+            "total_tokens": total_tokens,
+            "total_incidents": total_incidents,
+            "cost": {
+                "total_usd": total_cost,
+                "avg_per_incident_usd": avg_cost,
+                "input_usd": round(total_input * INPUT_PRICE / 1_000_000, 2),
+                "output_usd": round(total_output * OUTPUT_PRICE / 1_000_000, 2),
+                "cache_savings_usd": cache_savings,
+            },
         }
 
     except Exception as e:
@@ -319,6 +358,13 @@ def _compute_cost_stats(days: int) -> dict:
             "by_mode": [],
             "total_tokens": 0,
             "total_incidents": 0,
+            "cost": {
+                "total_usd": 0.0,
+                "avg_per_incident_usd": 0.0,
+                "input_usd": 0.0,
+                "output_usd": 0.0,
+                "cache_savings_usd": 0.0,
+            },
         }
 
 
