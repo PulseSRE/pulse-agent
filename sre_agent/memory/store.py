@@ -438,5 +438,104 @@ class IncidentStore:
         self.db.commit()
         return cur.rowcount
 
+    @db_safe(default={})
+    def get_accuracy_stats(self, days: int = 30) -> dict:
+        """Get accuracy statistics from incidents and runbooks.
+
+        Args:
+            days: Number of days to look back (1-365)
+
+        Returns:
+            dict with avg_quality_score, quality_trend, anti_patterns, learning stats
+        """
+        from datetime import timedelta
+
+        # Calculate cutoff timestamps (SQLite datetime comparison)
+        now = datetime.now(UTC)
+        cutoff = (now - timedelta(days=days)).isoformat()
+        prev_period_cutoff = (now - timedelta(days=days * 2)).isoformat()
+        month_ago = (now - timedelta(days=30)).isoformat()
+
+        # Get average quality score for current period
+        current_row = self.db.fetchone(
+            "SELECT AVG(score) as avg_score FROM incidents WHERE score > 0 AND timestamp >= ?",
+            (cutoff,),
+        )
+        avg_quality_score = round(current_row["avg_score"], 2) if current_row and current_row["avg_score"] else 0.0
+
+        # Get average quality score for previous period (for trend)
+        prev_row = self.db.fetchone(
+            "SELECT AVG(score) as avg_score FROM incidents WHERE score > 0 AND timestamp >= ? AND timestamp < ?",
+            (prev_period_cutoff, cutoff),
+        )
+        prev_avg = prev_row["avg_score"] if prev_row and prev_row["avg_score"] else 0.0
+
+        # Calculate trend (positive = improving)
+        quality_trend = round(avg_quality_score - prev_avg, 2) if prev_avg > 0 else 0.0
+
+        # Get anti-patterns: low-score incidents grouped by error_type and namespace
+        anti_patterns = []
+        anti_pattern_rows = self.db.fetchall(
+            """SELECT error_type, namespace, COUNT(*) as count
+               FROM incidents
+               WHERE score < 0.4 AND score > 0 AND timestamp >= ?
+               GROUP BY error_type, namespace
+               HAVING COUNT(*) >= 2
+               ORDER BY count DESC
+               LIMIT 10""",
+            (cutoff,),
+        )
+
+        for row in anti_pattern_rows:
+            anti_patterns.append(
+                {
+                    "error_type": row["error_type"] or "unknown",
+                    "namespace": row["namespace"] or "cluster-wide",
+                    "count": row["count"],
+                }
+            )
+
+        # Get learning stats
+        runbook_count_row = self.db.fetchone("SELECT COUNT(*) as cnt FROM runbooks")
+        runbook_count = runbook_count_row["cnt"] if runbook_count_row else 0
+
+        # Calculate runbook success rate
+        success_row = self.db.fetchone(
+            "SELECT SUM(success_count) as success, SUM(failure_count) as failure FROM runbooks"
+        )
+        total_success = success_row["success"] if success_row and success_row["success"] else 0
+        total_failure = success_row["failure"] if success_row and success_row["failure"] else 0
+        total_runs = total_success + total_failure
+        success_rate = round(total_success / total_runs, 2) if total_runs > 0 else 0.0
+
+        # Get pattern stats
+        pattern_count_row = self.db.fetchone("SELECT COUNT(*) as cnt FROM patterns")
+        pattern_count = pattern_count_row["cnt"] if pattern_count_row else 0
+
+        pattern_types_rows = self.db.fetchall(
+            "SELECT pattern_type, COUNT(*) as cnt FROM patterns GROUP BY pattern_type ORDER BY cnt DESC LIMIT 5"
+        )
+        pattern_types = [{"type": r["pattern_type"], "count": r["cnt"]} for r in pattern_types_rows]
+
+        # Get new runbooks this month
+        new_runbooks_row = self.db.fetchone(
+            "SELECT COUNT(*) as cnt FROM runbooks WHERE created_at >= ?",
+            (month_ago,),
+        )
+        new_runbooks_this_month = new_runbooks_row["cnt"] if new_runbooks_row else 0
+
+        return {
+            "avg_quality_score": avg_quality_score,
+            "quality_trend": quality_trend,
+            "anti_patterns": anti_patterns,
+            "learning": {
+                "runbook_count": runbook_count,
+                "success_rate": success_rate,
+                "pattern_count": pattern_count,
+                "pattern_types": pattern_types,
+                "new_runbooks_this_month": new_runbooks_this_month,
+            },
+        }
+
     def close(self):
         self.db.close()
