@@ -202,7 +202,7 @@ def learn(
         logger.debug("Failed to record tool predictions", exc_info=True)
 
 
-_CONFIDENCE_THRESHOLD = 10  # min total hit_count to trust TF-IDF
+_CONFIDENCE_THRESHOLD = 5  # min total hit_count to trust TF-IDF
 
 
 @dataclass
@@ -254,11 +254,12 @@ def predict_tools(query: str, *, top_k: int = 10) -> PredictionResult:
     if max_hits < _CONFIDENCE_THRESHOLD:
         return PredictionResult(confidence="low")
 
-    predicted = [r["tool_name"] for r in rows]
+    predicted = list(dict.fromkeys(r["tool_name"] for r in rows))
 
     # Co-occurrence expansion
+    predicted_set = set(predicted)
     expanded = _expand_cooccurrence(db, predicted, top_k)
-    final = predicted + [t for t in expanded if t not in predicted]
+    final = predicted + [t for t in expanded if t not in predicted_set]
 
     return PredictionResult(tools=final[: top_k + 5], confidence="high", source="tfidf")
 
@@ -271,8 +272,9 @@ def _expand_cooccurrence(db, tools: list[str], limit: int = 5) -> list[str]:
     placeholders = ", ".join(["%s"] * len(tools))
     try:
         rows = db.fetchall(
-            f"SELECT tool_b, frequency FROM tool_cooccurrence "
+            f"SELECT tool_b, SUM(frequency) AS frequency FROM tool_cooccurrence "
             f"WHERE tool_a IN ({placeholders}) AND tool_b NOT IN ({placeholders}) "
+            f"GROUP BY tool_b "
             f"ORDER BY frequency DESC LIMIT %s",
             (*tools, *tools, limit),
         )
