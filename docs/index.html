@@ -101,7 +101,7 @@
   <section class="hero">
     <img src="logo.svg" alt="Pulse Agent" style="width: 80px; height: 80px; filter: drop-shadow(0 0 20px rgba(0,255,136,0.5)); animation: pulse-glow 3s ease-in-out infinite;">
     <h1>PULSE AGENT</h1>
-    <div class="version">v2.0.0 // 111 TOOLS // 35 MODULES // PROTOCOL v2</div>
+    <div class="version">v2.2.0 // 111 TOOLS // 36 MODULES // PROTOCOL v2 // ADAPTIVE SELECTION</div>
     <p class="tagline">AI-powered SRE and Security agent for OpenShift. <em>Claude</em> diagnoses, triages, and remediates — 24/7.</p>
     <div class="hero-buttons">
       <a href="https://github.com/alimobrem/pulse-agent" class="btn btn-primary">[ SOURCE ]</a>
@@ -114,12 +114,12 @@
 
   <div class="stats-bar">
     <div class="stat"><div class="stat-value">111</div><div class="stat-label">Tools</div></div>
-    <div class="stat"><div class="stat-value cyan">35</div><div class="stat-label">Modules</div></div>
-    <div class="stat"><div class="stat-value magenta">1,454</div><div class="stat-label">Tests</div></div>
+    <div class="stat"><div class="stat-value cyan">36</div><div class="stat-label">Modules</div></div>
+    <div class="stat"><div class="stat-value magenta">1,520</div><div class="stat-label">Tests</div></div>
     <div class="stat"><div class="stat-value" style="color: var(--violet); text-shadow: 0 0 15px rgba(139,92,246,0.4);">6</div><div class="stat-label">Skills</div></div>
     <div class="stat"><div class="stat-value">73</div><div class="stat-label">PromQL Recipes</div></div>
-    <div class="stat"><div class="stat-value yellow">86</div><div class="stat-label">Eval Prompts</div></div>
-    <div class="stat"><div class="stat-value" style="color: var(--green)">79.1%</div><div class="stat-label">Eval Accuracy</div></div>
+    <div class="stat"><div class="stat-value yellow">98</div><div class="stat-label">Eval Prompts</div></div>
+    <div class="stat"><div class="stat-value" style="color: var(--green)">98.1%</div><div class="stat-label">Release Gate</div></div>
   </div>
 
   <div class="neon-divider"></div>
@@ -189,12 +189,16 @@
         <p>6 ArgoCD integration tools. Application sync status, health checks, rollback operations, and drift detection across GitOps-managed clusters.</p>
       </div>
       <div class="feature-card">
+        <h3>Adaptive Tool Selection <span class="badge badge-ai">AI</span></h3>
+        <p>TF-IDF prediction from real usage, Haiku LLM fallback for cold start, co-occurrence bundles, mid-turn chain expansion. Negative signals suppress wasted tools. Self-improving — LLM trains itself out of a job.</p>
+      </div>
+      <div class="feature-card">
         <h3>Eval Framework</h3>
-        <p>86 evaluation prompts for systematic agent testing. 79.1% tool selection accuracy. Self-improving evals learned from real user interactions.</p>
+        <p>9 eval suites, 70 scenarios, 98 eval prompts, LLM-as-judge scoring. Ablation testing, outcome regression tracking, weekly digest. 98.1% release gate accuracy.</p>
       </div>
       <div class="feature-card">
         <h3>Modular Architecture</h3>
-        <p>35 focused modules across 3 packages. No file over 910 lines. Typo auto-correction for 130+ K8s terms. Centralized Pydantic config, zero raw os.environ.</p>
+        <p>36 focused modules across 3 packages. No file over 910 lines. Typo auto-correction for 130+ K8s terms. Centralized Pydantic config, zero raw os.environ.</p>
       </div>
     </div>
   </section>
