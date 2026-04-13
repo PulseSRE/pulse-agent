@@ -396,11 +396,11 @@ async def _run_agent_ws(
         except Exception:
             pass
 
-    # Record turn-level data (tools + token usage)
+    # Record turn-level data (tools + token usage + routing decision)
     try:
+        from ..skill_loader import get_last_routing_decision
         from ..tool_usage import record_turn
 
-        # Determine tools offered from tool_defs
         offered = [td.get("name", "") for td in tool_defs if isinstance(td, dict)]
 
         record_turn(
@@ -410,6 +410,7 @@ async def _run_agent_ws(
             query_summary=user_query[:200],
             tools_offered=offered,
             tools_called=session_tools,
+            routing_decision=get_last_routing_decision(),
             **turn_token_usage,
         )
     except Exception:

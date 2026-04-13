@@ -401,7 +401,7 @@ def _compute_harness_effectiveness(days: int) -> str:
 
 
 def _fetch_routing_accuracy_data(days: int) -> dict:
-    """Fetch routing accuracy data (shared by text and structured versions)."""
+    """Fetch routing accuracy data including misroute details."""
     from .db import get_database
 
     db = get_database()
@@ -419,11 +419,40 @@ def _fetch_routing_accuracy_data(days: int) -> dict:
         (days,),
     )
     if not row or not row.get("total"):
-        return {"mode_switch_rate": 0.0, "total_sessions": 0}
+        return {"mode_switch_rate": 0.0, "total_sessions": 0, "misroutes": []}
     switches = row["switches"]
     total = row["total"]
     switch_pct = round(switches / total * 100, 1) if total else 0
-    return {"mode_switch_rate": switch_pct, "total_sessions": total}
+
+    # Fetch misroute details: which skill was routed to, what it switched to, and the query
+    misroutes: list[dict] = []
+    misroute_rows = db.fetchall(
+        "SELECT prev_skill, next_skill, query_summary, prev_score "
+        "FROM ("
+        "    SELECT routing_skill as prev_skill, "
+        "           LEAD(routing_skill) OVER (PARTITION BY session_id ORDER BY turn_number) as next_skill, "
+        "           query_summary, "
+        "           routing_score as prev_score "
+        "    FROM tool_turns "
+        "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? "
+        "      AND routing_skill IS NOT NULL"
+        ") sub "
+        "WHERE next_skill IS NOT NULL AND prev_skill != next_skill "
+        "ORDER BY prev_score ASC NULLS FIRST "
+        "LIMIT 20",
+        (days,),
+    )
+    for mr in misroute_rows or []:
+        misroutes.append(
+            {
+                "from_skill": mr["prev_skill"],
+                "to_skill": mr["next_skill"],
+                "query": mr.get("query_summary", ""),
+                "score": mr.get("prev_score"),
+            }
+        )
+
+    return {"mode_switch_rate": switch_pct, "total_sessions": total, "misroutes": misroutes}
 
 
 def _compute_routing_accuracy(days: int) -> str:
@@ -433,11 +462,19 @@ def _compute_routing_accuracy(days: int) -> str:
         if not data["total_sessions"]:
             return ""
         accuracy = 100 - data["mode_switch_rate"]
-        return (
+        parts = [
             f"### Routing Accuracy\n"
             f"Mode routing accuracy: {accuracy:.0f}% "
             f"({data['mode_switch_rate']}% of multi-turn sessions had mode switches)"
-        )
+        ]
+        misroutes = data.get("misroutes", [])
+        if misroutes:
+            parts.append(f"\nRecent misroutes ({len(misroutes)}):")
+            for mr in misroutes[:5]:
+                parts.append(
+                    f'  {mr["from_skill"]}→{mr["to_skill"]}: "{mr["query"][:60]}" (score={mr.get("score", "?")})'
+                )
+        return "\n".join(parts)
     except Exception:
         logger.debug("Failed to compute routing accuracy", exc_info=True)
         return ""

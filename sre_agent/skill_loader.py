@@ -348,6 +348,11 @@ _LLM_CACHE_MAX = 100
 _last_routing_decision: dict = {}
 
 
+def get_last_routing_decision() -> dict | None:
+    """Return the last routing decision, or None if no routing has occurred."""
+    return dict(_last_routing_decision) if _last_routing_decision else None
+
+
 def classify_query(query: str) -> Skill:
     """Route a query to the best matching skill.
 

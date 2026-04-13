@@ -119,6 +119,18 @@ def _migrate_010_prompt_log(db: Database) -> None:
     db.executescript(PROMPT_LOG_SCHEMA)
 
 
+def _migrate_011_routing_decisions(db: Database) -> None:
+    """Add routing decision columns to tool_turns for misroute tracking."""
+    db.executescript("""
+        ALTER TABLE tool_turns ADD COLUMN IF NOT EXISTS routing_skill TEXT;
+        ALTER TABLE tool_turns ADD COLUMN IF NOT EXISTS routing_score INTEGER;
+        ALTER TABLE tool_turns ADD COLUMN IF NOT EXISTS routing_competing JSONB;
+        ALTER TABLE tool_turns ADD COLUMN IF NOT EXISTS routing_used_llm BOOLEAN DEFAULT FALSE;
+        CREATE INDEX IF NOT EXISTS idx_tool_turns_routing ON tool_turns(routing_skill) WHERE routing_skill IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_tool_turns_timestamp ON tool_turns(timestamp DESC);
+    """)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -130,4 +142,5 @@ MIGRATIONS = [
     (8, "skill_usage", _migrate_008_skill_usage),
     (9, "tool_source", _migrate_009_tool_source),
     (10, "prompt_log", _migrate_010_prompt_log),
+    (11, "routing_decisions", _migrate_011_routing_decisions),
 ]

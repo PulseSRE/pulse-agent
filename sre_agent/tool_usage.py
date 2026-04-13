@@ -142,6 +142,7 @@ def record_turn(
     output_tokens: int = 0,
     cache_read_tokens: int = 0,
     cache_creation_tokens: int = 0,
+    routing_decision: dict | None = None,
 ) -> None:
     """Record a turn to the tool_turns table.
 
@@ -150,25 +151,40 @@ def record_turn(
     Truncates query_summary to 200 chars.
     """
     try:
+        import json as _json
+
         from .db import get_database
 
         db = get_database()
 
-        # Truncate query summary
         if len(query_summary) > 200:
             query_summary = query_summary[:200]
+
+        routing_skill = routing_decision.get("skill_name") if routing_decision else None
+        routing_score = routing_decision.get("keyword_score") if routing_decision else None
+        routing_competing = (
+            _json.dumps(routing_decision.get("competing_scores", {}))
+            if routing_decision and routing_decision.get("competing_scores")
+            else None
+        )
+        routing_used_llm = routing_decision.get("used_llm_fallback", False) if routing_decision else False
 
         db.execute(
             "INSERT INTO tool_turns "
             "(session_id, turn_number, agent_mode, query_summary, tools_offered, tools_called, "
-            "input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            "input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, "
+            "routing_skill, routing_score, routing_competing, routing_used_llm) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (session_id, turn_number) DO UPDATE SET "
             "tools_called = EXCLUDED.tools_called, "
             "input_tokens = EXCLUDED.input_tokens, "
             "output_tokens = EXCLUDED.output_tokens, "
             "cache_read_tokens = EXCLUDED.cache_read_tokens, "
-            "cache_creation_tokens = EXCLUDED.cache_creation_tokens",
+            "cache_creation_tokens = EXCLUDED.cache_creation_tokens, "
+            "routing_skill = EXCLUDED.routing_skill, "
+            "routing_score = EXCLUDED.routing_score, "
+            "routing_competing = EXCLUDED.routing_competing, "
+            "routing_used_llm = EXCLUDED.routing_used_llm",
             (
                 session_id,
                 turn_number,
@@ -180,11 +196,15 @@ def record_turn(
                 output_tokens or None,
                 cache_read_tokens or None,
                 cache_creation_tokens or None,
+                routing_skill,
+                routing_score,
+                routing_competing,
+                routing_used_llm,
             ),
         )
         db.commit()
         logger.debug(
-            f"Recorded turn: session={session_id}, turn={turn_number}, offered={len(tools_offered)}, called={len(tools_called)}"
+            f"Recorded turn: session={session_id}, turn={turn_number}, skill={routing_skill}, score={routing_score}"
         )
     except Exception as e:
         logger.debug(f"Failed to record turn: {e}")
