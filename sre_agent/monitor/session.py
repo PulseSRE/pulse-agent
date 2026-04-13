@@ -117,16 +117,34 @@ class MonitorSession:
             if self.trust_level == 3 and category not in self.auto_fix_categories:
                 continue
 
-            handler = AUTO_FIX_HANDLERS.get(category)
-            if not handler:
-                continue
-
-            # Cooldown: skip resources fixed in the last 5 minutes
+            # Compute resource key early — needed by both targeted and blunt fix paths
             resources = finding.get("resources", [])
             resource_key = ""
             if resources:
                 r = resources[0]
                 resource_key = f"{r.get('kind', '')}:{r.get('namespace', '')}:{r.get('name', '')}"
+
+            handler = AUTO_FIX_HANDLERS.get(category)
+
+            # Try intelligent fix first — uses investigation diagnosis
+            from .fix_planner import execute_fix as execute_targeted_fix
+            from .fix_planner import get_investigation_for_finding, plan_fix
+
+            investigation = get_investigation_for_finding(finding.get("id", ""))
+            targeted_plan = None
+            if investigation:
+                targeted_plan = plan_fix(investigation, finding)
+                if targeted_plan:
+                    logger.info(
+                        "Intelligent fix available: strategy=%s cause=%s confidence=%.2f for %s",
+                        targeted_plan.strategy,
+                        targeted_plan.cause_category,
+                        targeted_plan.confidence,
+                        resource_key,
+                    )
+
+            if not handler and not targeted_plan:
+                continue
             if resource_key and resource_key in self._recent_fixes:
                 cooldown_remaining = 300 - (time.time() - self._recent_fixes[resource_key])
                 if cooldown_remaining > 0:
@@ -217,7 +235,10 @@ class MonitorSession:
 
             start_ms = _ts()
             try:
-                tool, before_state, after_state = await asyncio.to_thread(handler, finding)
+                if targeted_plan:
+                    tool, before_state, after_state = await asyncio.to_thread(execute_targeted_fix, targeted_plan)
+                else:
+                    tool, before_state, after_state = await asyncio.to_thread(handler, finding)
                 duration_ms = _ts() - start_ms
 
                 # Update report with success

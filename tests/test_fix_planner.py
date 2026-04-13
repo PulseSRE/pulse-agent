@@ -6,7 +6,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from sre_agent.monitor.fix_planner import FixPlan, classify_root_cause, execute_fix, plan_fix
+from sre_agent.monitor.fix_planner import (
+    FixPlan,
+    classify_root_cause,
+    execute_fix,
+    get_investigation_for_finding,
+    plan_fix,
+)
 
 
 class TestClassifyRootCause:
@@ -193,3 +199,34 @@ class TestExecuteFix:
         )
         tool, _before, _after = execute_fix(plan)
         assert tool == "skip"
+
+
+class TestGetInvestigation:
+    @patch("sre_agent.monitor.fix_planner._get_db")
+    def test_returns_latest_investigation(self, mock_get_db):
+        db = MagicMock()
+        db.fetchone.return_value = {
+            "suspected_cause": "Image does not exist",
+            "recommended_fix": "Roll back",
+            "confidence": 0.95,
+        }
+        mock_get_db.return_value = db
+
+        result = get_investigation_for_finding("f-abc123")
+        assert result is not None
+        assert result["suspected_cause"] == "Image does not exist"
+
+    @patch("sre_agent.monitor.fix_planner._get_db")
+    def test_returns_none_when_no_investigation(self, mock_get_db):
+        db = MagicMock()
+        db.fetchone.return_value = None
+        mock_get_db.return_value = db
+
+        result = get_investigation_for_finding("f-nonexistent")
+        assert result is None
+
+    @patch("sre_agent.monitor.fix_planner._get_db")
+    def test_returns_none_on_db_error(self, mock_get_db):
+        mock_get_db.side_effect = Exception("DB down")
+        result = get_investigation_for_finding("f-abc")
+        assert result is None
