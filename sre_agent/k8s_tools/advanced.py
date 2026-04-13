@@ -7,11 +7,11 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 
-from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 from kubernetes.stream import stream as k8s_stream
 
 from .. import k8s_client as _kc
+from ..decorators import beta_tool
 from ..errors import ToolError
 from .validators import _validate_k8s_name, _validate_k8s_namespace
 
@@ -26,7 +26,7 @@ MAX_EXEC_OUTPUT = 10 * 1024  # 10KB cap
 
 
 @beta_tool
-def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = True) -> str:
+def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = True):
     """Apply a YAML manifest to the cluster. Runs server-side dry-run first by default. REQUIRES USER CONFIRMATION.
 
     Args:
@@ -193,7 +193,7 @@ def create_network_policy(
 
 
 @beta_tool
-def exec_command(namespace: str, pod_name: str, command: str, container: str = "") -> str:
+def exec_command(namespace: str, pod_name: str, command: str, container: str = ""):
     """Execute a command inside a running pod container. Use this for debugging, checking environment variables, testing connectivity, or inspecting files.
 
     Args:
@@ -245,7 +245,7 @@ def exec_command(namespace: str, pod_name: str, command: str, container: str = "
 
 
 @beta_tool
-def test_connectivity(source_namespace: str, source_pod: str, target_host: str, target_port: int) -> str:
+def test_connectivity(source_namespace: str, source_pod: str, target_host: str, target_port: int):
     """Test network connectivity from a pod to a target host and port. Useful for debugging service discovery, network policies, and DNS issues.
 
     Args:
@@ -330,7 +330,7 @@ def test_connectivity(source_namespace: str, source_pod: str, target_host: str, 
 
 
 @beta_tool
-def get_resource_recommendations(namespace: str, time_range: str = "24h") -> str:
+def get_resource_recommendations(namespace: str, time_range: str = "24h"):
     """Analyze resource usage vs requests/limits and recommend right-sizing. Shows over-provisioned and under-provisioned workloads.
 
     Args:

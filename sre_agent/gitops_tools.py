@@ -7,10 +7,11 @@ show provenance, sync state, and drift for every managed resource.
 from __future__ import annotations
 
 import json
+from typing import Any
 
-from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 
+from .decorators import beta_tool
 from .k8s_client import get_core_client, get_custom_client
 
 _ARGO_GROUP = "argoproj.io"
@@ -444,7 +445,7 @@ def create_argo_application(
     )
 
 
-GITOPS_TOOLS = [
+GITOPS_TOOLS: list[Any] = [
     get_argo_applications,
     get_argo_app_detail,
     detect_gitops_drift,

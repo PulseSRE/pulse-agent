@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -166,7 +167,7 @@ def get_fix_history_summary(days: int = 7) -> dict:
         avg_resolution_ms = int(sum(durations) / len(durations)) if durations else 0
 
         # Aggregate by category
-        categories = {}
+        categories: dict[str, dict[str, Any]] = {}
         for action in actions:
             cat = action["category"] or "unknown"
             if cat not in categories:
@@ -244,7 +245,7 @@ async def rest_fix_history(
     _auth=Depends(verify_token),
 ):
     """Paginated fix history (Protocol v2). Requires token auth."""
-    filters = {}
+    filters: dict[str, str | int] = {}
     if status:
         filters["status"] = status
     if category:

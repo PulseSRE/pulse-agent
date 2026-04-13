@@ -7,10 +7,10 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
-from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 
 from .. import k8s_client as _kc
+from ..decorators import beta_tool
 from ..errors import ToolError
 from .validators import MAX_RESULTS, _validate_k8s_namespace
 
@@ -20,7 +20,7 @@ atexit.register(_log_pool.shutdown, wait=False)
 
 
 @beta_tool
-def list_namespaces() -> str:
+def list_namespaces():
     """List all namespaces in the cluster with their status."""
     result = _kc.safe(lambda: _kc.get_core_client().list_namespace(limit=MAX_RESULTS))
     if isinstance(result, ToolError):
@@ -32,9 +32,7 @@ def list_namespaces() -> str:
 
 
 @beta_tool
-def get_events(
-    namespace: str = "default", resource_kind: str = "", resource_name: str = "", event_type: str = ""
-) -> str:
+def get_events(namespace: str = "default", resource_kind: str = "", resource_name: str = "", event_type: str = ""):
     """Get cluster events, optionally filtered by resource.
 
     Args:
@@ -108,7 +106,7 @@ def get_events(
 
 
 @beta_tool
-def get_resource_quotas(namespace: str = "default") -> str:
+def get_resource_quotas(namespace: str = "default"):
     """Get resource quotas and current usage for a namespace.
 
     Args:
@@ -132,7 +130,7 @@ def get_resource_quotas(namespace: str = "default") -> str:
 
 
 @beta_tool
-def get_services(namespace: str = "default") -> str:
+def get_services(namespace: str = "default"):
     """List services in a namespace with their type, cluster IP, and ports.
 
     Args:
@@ -159,7 +157,7 @@ def get_services(namespace: str = "default") -> str:
 
 
 @beta_tool
-def get_persistent_volume_claims(namespace: str = "default") -> str:
+def get_persistent_volume_claims(namespace: str = "default"):
     """List PersistentVolumeClaims with their status, capacity, and storage class.
 
     Args:
@@ -186,7 +184,7 @@ def get_persistent_volume_claims(namespace: str = "default") -> str:
 
 
 @beta_tool
-def get_cluster_version() -> str:
+def get_cluster_version():
     """Get the Kubernetes/OpenShift cluster version information."""
     result = _kc.safe(lambda: _kc.get_version_client().get_code())
     if isinstance(result, ToolError):
@@ -211,7 +209,7 @@ def get_cluster_version() -> str:
 
 
 @beta_tool
-def get_cluster_operators() -> str:
+def get_cluster_operators():
     """List OpenShift ClusterOperators and their status (Available, Progressing, Degraded). Only works on OpenShift clusters."""
     try:
         result = _kc.get_custom_client().list_cluster_custom_object("config.openshift.io", "v1", "clusteroperators")
@@ -236,7 +234,7 @@ def get_cluster_operators() -> str:
 
 
 @beta_tool
-def get_configmap(namespace: str, name: str) -> str:
+def get_configmap(namespace: str, name: str):
     """Get the contents of a ConfigMap.
 
     Args:
@@ -267,7 +265,7 @@ def get_configmap(namespace: str, name: str) -> str:
 
 
 @beta_tool
-def describe_service(namespace: str, name: str) -> str:
+def describe_service(namespace: str, name: str):
     """Get detailed information about a service including endpoints, ports, selector, and target pods.
 
     Args:
@@ -325,7 +323,7 @@ def describe_service(namespace: str, name: str) -> str:
 
 
 @beta_tool
-def get_endpoint_slices(namespace: str, service_name: str) -> str:
+def get_endpoint_slices(namespace: str, service_name: str):
     """Get EndpointSlices for a service showing which pods are backing it and their readiness.
 
     Args:
@@ -366,7 +364,7 @@ def get_endpoint_slices(namespace: str, service_name: str) -> str:
 
 
 @beta_tool
-def top_pods_by_restarts(namespace: str = "ALL", limit: int = 20) -> str:
+def top_pods_by_restarts(namespace: str = "ALL", limit: int = 20):
     """Show pods sorted by restart count (highest first). The fastest way to find troubled workloads.
 
     Args:
@@ -432,7 +430,7 @@ def top_pods_by_restarts(namespace: str = "ALL", limit: int = 20) -> str:
 
 
 @beta_tool
-def get_recent_changes(namespace: str = "ALL", minutes: int = 60) -> str:
+def get_recent_changes(namespace: str = "ALL", minutes: int = 60):
     """Show recent cluster changes: new/modified resources, deployments, scaling events, and config changes from the last N minutes.
 
     Args:
@@ -514,7 +512,7 @@ def get_recent_changes(namespace: str = "ALL", minutes: int = 60) -> str:
 
 
 @beta_tool
-def get_tls_certificates(namespace: str = "ALL") -> str:
+def get_tls_certificates(namespace: str = "ALL"):
     """List TLS secrets and their certificate expiry dates. Helps identify certificates approaching expiry.
 
     Args:
@@ -565,7 +563,8 @@ def get_tls_certificates(namespace: str = "ALL") -> str:
             try:
                 cn_attrs = cert.subject.get_attributes_for_oid(x509.oid.NameOID.COMMON_NAME)
                 if cn_attrs:
-                    cn = cn_attrs[0].value
+                    raw = cn_attrs[0].value
+                    cn = raw if isinstance(raw, str) else raw.decode()
             except Exception:
                 pass
 
@@ -611,7 +610,7 @@ def get_tls_certificates(namespace: str = "ALL") -> str:
 
 
 @beta_tool
-def search_logs(namespace: str, label_selector: str, pattern: str, tail_lines: int = 100, container: str = "") -> str:
+def search_logs(namespace: str, label_selector: str, pattern: str, tail_lines: int = 100, container: str = ""):
     """Search logs across multiple pods matching a label selector. Returns matching lines with pod name prefix.
 
     Args:
@@ -705,7 +704,7 @@ def search_logs(namespace: str, label_selector: str, pattern: str, tail_lines: i
 
 
 @beta_tool
-def get_pod_disruption_budgets(namespace: str = "ALL") -> str:
+def get_pod_disruption_budgets(namespace: str = "ALL"):
     """List PodDisruptionBudgets showing min available, max unavailable, disruptions allowed, and current healthy pods.
 
     Args:
@@ -751,7 +750,7 @@ def get_pod_disruption_budgets(namespace: str = "ALL") -> str:
 
 
 @beta_tool
-def list_limit_ranges(namespace: str = "default") -> str:
+def list_limit_ranges(namespace: str = "default"):
     """List LimitRanges in a namespace showing default requests/limits for containers.
 
     Args:

@@ -8,8 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC
 
-from anthropic import beta_tool
-
+from .decorators import beta_tool
 from .k8s_client import safe
 
 _openapi_cache: tuple[dict, float] | None = None
@@ -17,7 +16,7 @@ _OPENAPI_CACHE_TTL = 3600  # 1 hour
 
 
 @beta_tool
-def list_my_skills() -> str:
+def list_my_skills():
     """List all available agent skills with descriptions. Call when the user asks what you can do or what skills you have."""
     from .skill_loader import list_skills
 
@@ -58,7 +57,7 @@ def list_my_skills() -> str:
 
 
 @beta_tool
-def list_my_tools() -> str:
+def list_my_tools():
     """List all tools available to the agent grouped by source. Call when the user asks what tools you have."""
     from .mcp_client import list_mcp_tools
     from .tool_registry import TOOL_REGISTRY
@@ -70,7 +69,7 @@ def list_my_tools() -> str:
 
     native = []
     mcp = []
-    rows = []
+    rows: list[dict[str, str]] = []
     for name in sorted(TOOL_REGISTRY):
         tool = TOOL_REGISTRY[name]
         desc = getattr(tool, "description", "")[:80]
@@ -106,7 +105,7 @@ def list_my_tools() -> str:
 
 
 @beta_tool
-def list_ui_components() -> str:
+def list_ui_components():
     """List all UI component types the agent can render in dashboards and chat responses.
 
     Call when the user asks what visualizations, components, or widget types are available.
@@ -159,7 +158,7 @@ def list_ui_components() -> str:
 
 
 @beta_tool
-def list_promql_recipes(category: str = "") -> str:
+def list_promql_recipes(category: str = ""):
     """List available PromQL query recipes by category.
 
     Call when the user asks what metrics, queries, or PromQL recipes are available.
@@ -225,7 +224,7 @@ def list_promql_recipes(category: str = "") -> str:
 
 
 @beta_tool
-def list_runbooks() -> str:
+def list_runbooks():
     """List available SRE runbooks that guide incident diagnosis.
 
     Call when the user asks what runbooks are available, what incidents
@@ -428,7 +427,7 @@ def create_skill(
 
 
 @beta_tool
-def edit_skill(name: str, content: str) -> str:
+def edit_skill(name: str, content: str):
     """Edit an existing skill's skill.md content.
 
     Archives the current version before overwriting, validates YAML frontmatter,
@@ -506,7 +505,7 @@ _BUILTIN_SKILLS = {"sre", "security", "view_designer"}
 
 
 @beta_tool
-def delete_skill(name: str) -> str:
+def delete_skill(name: str):
     """Delete a user-created skill package.
 
     Removes the skill directory from disk and hot-reloads. Built-in skills
@@ -681,7 +680,7 @@ def _get_openapi_definitions():
 
 
 @beta_tool
-def explain_resource(resource: str, field: str = "") -> str:
+def explain_resource(resource: str, field: str = ""):
     """Explain a Kubernetes resource type or field using the cluster's live API schema.
 
     Works like 'kubectl explain'. Shows fields, types, and descriptions from
@@ -789,7 +788,7 @@ def explain_resource(resource: str, field: str = "") -> str:
 
 
 @beta_tool
-def list_api_resources(group: str = "") -> str:
+def list_api_resources(group: str = ""):
     """List all Kubernetes API resources available on this cluster.
 
     Shows resource types, their API group, kind, and supported verbs.
@@ -880,7 +879,7 @@ def list_api_resources(group: str = "") -> str:
 
 
 @beta_tool
-def list_deprecated_apis() -> str:
+def list_deprecated_apis():
     """Check for deprecated API versions on this cluster.
 
     Shows API groups where non-preferred (older) versions are still available,

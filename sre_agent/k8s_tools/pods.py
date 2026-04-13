@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from anthropic import beta_tool
-
 from .. import k8s_client as _kc
+from ..decorators import beta_tool
 from ..errors import ToolError
 from .validators import MAX_RESULTS, _validate_k8s_name, _validate_k8s_namespace
 
@@ -15,7 +14,7 @@ MAX_TAIL_LINES = 1000
 
 
 @beta_tool
-def list_pods(namespace: str = "default", label_selector: str = "", field_selector: str = "") -> str:
+def list_pods(namespace: str = "default", label_selector: str = "", field_selector: str = ""):
     """List pods in a namespace with their status, restarts, and age.
 
     Args:
@@ -87,7 +86,7 @@ def list_pods(namespace: str = "default", label_selector: str = "", field_select
 
 
 @beta_tool
-def describe_pod(namespace: str, pod_name: str) -> str:
+def describe_pod(namespace: str, pod_name: str):
     """Get detailed information about a specific pod including conditions, containers, and recent events.
 
     Args:
@@ -237,9 +236,7 @@ def describe_pod(namespace: str, pod_name: str) -> str:
 
 
 @beta_tool
-def get_pod_logs(
-    namespace: str, pod_name: str, container: str = "", tail_lines: int = 100, previous: bool = False
-) -> str:
+def get_pod_logs(namespace: str, pod_name: str, container: str = "", tail_lines: int = 100, previous: bool = False):
     """Get logs from a pod container.
 
     Args:
@@ -299,7 +296,7 @@ def get_pod_logs(
 
 
 @beta_tool
-def delete_pod(namespace: str, pod_name: str, grace_period_seconds: int = 30) -> str:
+def delete_pod(namespace: str, pod_name: str, grace_period_seconds: int = 30):
     """Delete a pod (it will be recreated by its controller if one exists). REQUIRES USER CONFIRMATION.
 
     Args:

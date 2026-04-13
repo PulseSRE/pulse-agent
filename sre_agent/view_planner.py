@@ -7,7 +7,7 @@ The user approves or adjusts, then the agent executes.
 
 from __future__ import annotations
 
-from anthropic import beta_tool
+from .decorators import beta_tool
 
 
 @beta_tool

@@ -13,9 +13,9 @@ import urllib.request
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
-from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 
+from .decorators import beta_tool
 from .k8s_client import get_apps_client, get_core_client, get_custom_client, safe
 
 
@@ -331,7 +331,7 @@ def correlate_incident(
                 for e in entries
             ],
         }
-        component["lanes"].append(lane)
+        component["lanes"].append(lane)  # type: ignore[attr-defined]
 
     return (text_summary, component)
 

@@ -6,6 +6,8 @@ production-grade views that platform engineers use daily.
 
 from __future__ import annotations
 
+from typing import Any
+
 from .k8s_tools import ALL_TOOLS as SRE_TOOLS
 from .view_tools import VIEW_TOOLS
 
@@ -66,7 +68,7 @@ _DATA_TOOLS = [t for t in SRE_TOOLS if t.name in _DATA_TOOL_NAMES]
 _combined = _DATA_TOOLS + VIEW_TOOLS
 # Deduplicate by name (keep first occurrence)
 _seen: set[str] = set()
-ALL_TOOLS = []
+ALL_TOOLS: list[Any] = []
 for t in _combined:
     if t.name not in _seen:
         _seen.add(t.name)

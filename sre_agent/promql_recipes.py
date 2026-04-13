@@ -815,7 +815,7 @@ def get_query_reliability(query_template: str) -> dict | None:
 
         db = get_database()
         qhash = hashlib.sha256(query_template.encode()).hexdigest()
-        row = db.fetch_one(
+        row = db.fetchone(
             "SELECT success_count, failure_count, avg_series_count FROM promql_queries WHERE query_hash = %s",
             (qhash,),
         )
@@ -832,7 +832,7 @@ def get_reliable_queries(category: str, min_success: int = 3) -> list[dict]:
         from .db import get_database
 
         db = get_database()
-        rows = db.fetch_all(
+        rows = db.fetchall(
             "SELECT query_template, success_count, failure_count, avg_series_count "
             "FROM promql_queries WHERE category = %s AND success_count >= %s "
             "ORDER BY success_count DESC LIMIT 20",

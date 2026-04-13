@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from typing import Any
 
-from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 
 from .. import k8s_client as _kc
+from ..decorators import beta_tool
 from ..errors import ToolError
 from .validators import MAX_RESULTS, _validate_k8s_name
 
@@ -155,7 +156,7 @@ def list_resources(
     field_selector: str = "",
     sort_by: str = "",
     show_wide: bool = False,
-) -> str:
+):
     """List any Kubernetes resource type using the server's printer columns.
 
     Uses the Kubernetes Table API to get the same columns as 'kubectl get'.
@@ -350,7 +351,7 @@ def list_resources(
 
 
 @beta_tool
-def get_resource_relationships(namespace: str, name: str, kind: str = "Pod") -> str:
+def get_resource_relationships(namespace: str, name: str, kind: str = "Pod"):
     """Trace the ownership chain for a Kubernetes resource — find what controls it and what it controls.
 
     Shows the full hierarchy: e.g., Pod -> ReplicaSet -> Deployment, or Deployment -> ReplicaSet -> Pods.
@@ -468,8 +469,8 @@ def get_resource_relationships(namespace: str, name: str, kind: str = "Pod") -> 
         "ConfigMap": "v1~configmaps",
     }
 
-    tree_nodes = []
-    node_ids = set()
+    tree_nodes: list[dict[str, Any]] = []
+    node_ids: set[str] = set()
 
     # Add the target resource
     target_id = f"{kind}/{name}"
@@ -568,7 +569,7 @@ def get_resource_relationships(namespace: str, name: str, kind: str = "Pod") -> 
 
 
 @beta_tool
-def describe_resource(namespace: str, name: str, kind: str, group: str = "", version: str = "v1") -> str:
+def describe_resource(namespace: str, name: str, kind: str, group: str = "", version: str = "v1"):
     """Get detailed information about any Kubernetes resource including metadata, status, conditions, and events. Use this for resources that don't have a specialized describe tool.
 
     Args:

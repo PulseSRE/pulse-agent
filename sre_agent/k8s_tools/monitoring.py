@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
-from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 
 from .. import k8s_client as _kc
+from ..decorators import beta_tool
 from ..errors import ToolError
 from .validators import MAX_RESULTS
 
@@ -17,7 +18,7 @@ _METRICS_VERSION = "v1beta1"
 
 
 @beta_tool
-def get_firing_alerts() -> str:
+def get_firing_alerts():
     """Get all currently firing alerts from Alertmanager. Returns alert name, severity, namespace, summary, and duration."""
 
     core = _kc.get_core_client()
@@ -98,7 +99,7 @@ _CATEGORY_PREFIXES: dict[str, list[str]] = {
 
 
 @beta_tool
-def discover_metrics(category: str = "all") -> str:
+def discover_metrics(category: str = "all"):
     """Discover available Prometheus metrics on this cluster. Call this BEFORE
     writing PromQL queries to know which metrics actually exist.
 
@@ -187,7 +188,7 @@ def discover_metrics(category: str = "all") -> str:
 
 
 @beta_tool
-def verify_query(query: str) -> str:
+def verify_query(query: str):
     """Test a PromQL query against Prometheus to verify it returns data.
     Call this BEFORE using a query in a dashboard to ensure it works.
 
@@ -271,7 +272,7 @@ def verify_query(query: str) -> str:
 
 
 @beta_tool
-def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", description: str = "") -> str:
+def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", description: str = ""):
     """Execute a PromQL query against Prometheus/Thanos and return the results as an interactive chart.
 
     Args:
@@ -670,8 +671,10 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
         text = "\n".join(lines)
 
         # Try chart for instant queries with categorical data (pie/donut/bar)
-        chart_type = _pick_chart_type(query, [], results, is_instant=True) if 2 <= len(results) <= 20 else None
-        if chart_type and chart_type in ("donut", "pie", "bar", "treemap", "radar"):
+        chart_type_instant: str | None = (
+            _pick_chart_type(query, [], results, is_instant=True) if 2 <= len(results) <= 20 else None
+        )
+        if chart_type_instant and chart_type_instant in ("donut", "pie", "bar", "treemap", "radar"):
             import math
 
             chart_series = []
@@ -690,9 +693,9 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
                 )
 
             if chart_series:
-                component = _build_chart_component(chart_type, chart_series)
+                component_chart = _build_chart_component(chart_type_instant, chart_series)
                 _record_success(len(chart_series))
-                return (text, component)
+                return (text, component_chart)
 
         # Build columns from label keys
         if label_keys:
@@ -701,7 +704,7 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
             columns = [{"id": "metric", "header": "Metric"}]
         columns.append({"id": "value", "header": "Value"})
 
-        component = (
+        component_table: dict[str, Any] | None = (
             {
                 "kind": "data_table",
                 "title": title or _title_from_query(query),
@@ -719,11 +722,11 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
             record_query_result(query, success=True, series_count=len(rows))
         except Exception:
             pass
-        return (text, component)
+        return (text, component_table)
 
 
 @beta_tool
-def get_node_metrics() -> str:
+def get_node_metrics():
     """Get actual CPU and memory usage for all nodes from the metrics API. Requires metrics-server to be installed."""
     from ..units import format_cpu, format_memory, parse_cpu_millicores, parse_memory_bytes
 
@@ -753,8 +756,8 @@ def get_node_metrics() -> str:
         cpu_m = parse_cpu_millicores(usage.get("cpu", "0"))
         mem_bytes = parse_memory_bytes(usage.get("memory", "0"))
 
-        cpu_pct_val = 0
-        mem_pct_val = 0
+        cpu_pct_val: float = 0
+        mem_pct_val: float = 0
         pct = ""
         if name in capacity_map:
             cap = capacity_map[name]
@@ -794,7 +797,7 @@ def get_node_metrics() -> str:
 
 
 @beta_tool
-def get_pod_metrics(namespace: str = "default", sort_by: str = "cpu") -> str:
+def get_pod_metrics(namespace: str = "default", sort_by: str = "cpu"):
     """Get actual CPU and memory usage for pods from the metrics API. Requires metrics-server.
 
     Args:

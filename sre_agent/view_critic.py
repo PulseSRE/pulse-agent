@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from anthropic import beta_tool
+from .decorators import beta_tool
 
 logger = logging.getLogger("pulse_agent.view_critic")
 

@@ -6,8 +6,7 @@ import contextvars
 import json
 import uuid
 
-from anthropic import beta_tool
-
+from .decorators import beta_tool
 from .tool_registry import register_tool
 
 # Structured signal prefix — tools return this instead of magic string markers.
@@ -41,7 +40,7 @@ def get_current_user() -> str:
 
 
 @beta_tool
-def create_dashboard(title: str, description: str = "") -> str:
+def create_dashboard(title: str, description: str = ""):
     """Create a custom dashboard view. Quality is auto-validated on save — no need to call critique_view.
 
     Layout is computed automatically based on component types.
@@ -62,7 +61,7 @@ def create_dashboard(title: str, description: str = "") -> str:
 
 
 @beta_tool
-def namespace_summary(namespace: str) -> str:
+def namespace_summary(namespace: str):
     """Get a high-level summary of a namespace: pod counts by status, deployment health, warning events, and resource usage. Use this as the first tool when the user asks for an overview of a namespace.
 
     Args:
@@ -210,7 +209,7 @@ def namespace_summary(namespace: str) -> str:
 
 
 @beta_tool
-def cluster_metrics(category: str = "overview") -> str:
+def cluster_metrics(category: str = "overview"):
     """Get key cluster metrics as metric cards for dashboard headers.
 
     Returns different KPI cards based on the category — pick the one that
@@ -534,7 +533,7 @@ def cluster_metrics(category: str = "overview") -> str:
 
 
 @beta_tool
-def list_saved_views() -> str:
+def list_saved_views():
     """List all custom dashboard views saved by the current user. Returns view titles, descriptions, widget counts, and direct links. Use this when the user asks to see their dashboards, saved views, or custom views."""
     from . import db
 
@@ -586,7 +585,7 @@ def list_saved_views() -> str:
 
 
 @beta_tool
-def get_view_details(view_id: str) -> str:
+def get_view_details(view_id: str):
     """Get details of a saved view including its widget list. Use this before modifying a view to understand its current state.
 
     Args:
@@ -882,7 +881,7 @@ def update_view_widgets(
 
 
 @beta_tool
-def add_widget_to_view(view_id: str) -> str:
+def add_widget_to_view(view_id: str):
     """Add the most recent component from this conversation to an existing view. Call this AFTER calling a data tool (like get_prometheus_query, list_pods, etc.) that generated a component. The UI will auto-refresh.
 
     Args:
@@ -892,7 +891,7 @@ def add_widget_to_view(view_id: str) -> str:
 
 
 @beta_tool
-def remove_widget_from_view(view_id: str, widget_title: str) -> str:
+def remove_widget_from_view(view_id: str, widget_title: str):
     """Remove a widget from a view by its title. Case-insensitive partial match. The UI will auto-refresh.
 
     Args:
@@ -934,7 +933,7 @@ def remove_widget_from_view(view_id: str, widget_title: str) -> str:
 
 
 @beta_tool
-def emit_component(kind: str, spec_json: str) -> str:
+def emit_component(kind: str, spec_json: str):
     """Emit a custom component for the current dashboard. Use for bar_list, progress_list, stat_card, or any component type.
 
     The component is added to the session and will be included when create_dashboard is called.
@@ -974,7 +973,7 @@ def emit_component(kind: str, spec_json: str) -> str:
 
 
 @beta_tool
-def undo_view_change(view_id: str, version: int = -1) -> str:
+def undo_view_change(view_id: str, version: int = -1):
     """Undo the last change to a view, or restore a specific version. Every view change is automatically versioned.
 
     Args:
@@ -1002,7 +1001,7 @@ def undo_view_change(view_id: str, version: int = -1) -> str:
 
 
 @beta_tool
-def get_view_versions(view_id: str) -> str:
+def get_view_versions(view_id: str):
     """Show the version history for a view — every change is tracked.
 
     Args:
@@ -1042,7 +1041,7 @@ def get_view_versions(view_id: str) -> str:
 
 
 @beta_tool
-def delete_dashboard(view_id: str) -> str:
+def delete_dashboard(view_id: str):
     """Delete a saved dashboard view permanently. This cannot be undone.
 
     Args:
@@ -1063,7 +1062,7 @@ def delete_dashboard(view_id: str) -> str:
 
 
 @beta_tool
-def clone_dashboard(view_id: str, new_title: str = "") -> str:
+def clone_dashboard(view_id: str, new_title: str = ""):
     """Clone an existing dashboard to create a copy you can modify independently.
 
     Args:

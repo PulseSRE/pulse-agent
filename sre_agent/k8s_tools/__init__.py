@@ -8,6 +8,8 @@ This package re-exports all tools and constants for backward compatibility.
 
 from __future__ import annotations
 
+from typing import Any
+
 __all__ = [
     "ALL_TOOLS",
     "MAX_REPLICAS",
@@ -204,7 +206,7 @@ WRITE_TOOLS = {
     "test_connectivity",
 }
 
-ALL_TOOLS = [
+ALL_TOOLS: list[Any] = [
     # Universal resource listing + relationships
     get_resource_relationships,
     # Universal resource listing — replaces list_namespaces, list_nodes, list_deployments,

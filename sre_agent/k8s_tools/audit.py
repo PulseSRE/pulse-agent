@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from anthropic import beta_tool
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
 from .. import k8s_client as _kc
+from ..decorators import beta_tool
 
 
 @beta_tool

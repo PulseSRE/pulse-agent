@@ -6,7 +6,7 @@ by publishing handoff requests to the shared context bus.
 
 from __future__ import annotations
 
-from anthropic import beta_tool
+from .decorators import beta_tool
 
 
 @beta_tool

@@ -12,8 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from anthropic import beta_tool
-
+from .decorators import beta_tool
 from .errors import ToolError
 from .k8s_client import get_autoscaling_client, get_core_client, safe
 from .units import parse_cpu_millicores, parse_memory_bytes

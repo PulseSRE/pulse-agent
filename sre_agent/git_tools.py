@@ -15,9 +15,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 
+from .decorators import beta_tool
 from .k8s_client import get_custom_client
 
 # Per-thread PR counter to prevent runaway PR creation (thread-safe)

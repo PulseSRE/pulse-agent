@@ -9,9 +9,9 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 
+from .decorators import beta_tool
 from .errors import ToolError
 from .k8s_client import (
     get_core_client,

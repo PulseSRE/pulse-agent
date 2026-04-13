@@ -10,6 +10,7 @@ import os
 import threading
 import time
 from datetime import UTC, datetime
+from typing import Any
 
 import anthropic
 
@@ -48,7 +49,7 @@ from .view_tools import (
     namespace_summary,
 )
 
-ALL_TOOLS = (
+ALL_TOOLS: list[Any] = (
     _K8S_TOOLS
     + FLEET_TOOLS
     + GITOPS_TOOLS
@@ -388,7 +389,7 @@ def _execute_tool_with_timeout(
 def run_agent_streaming(
     client,
     messages: list[dict],
-    system_prompt: str,
+    system_prompt: str | list[dict[str, Any]],
     tool_defs: list,
     tool_map: dict,
     write_tools: set[str] | None = None,
@@ -474,14 +475,18 @@ def run_agent_streaming(
                 # Fallback for modes without a skill
                 cluster_ctx = get_cluster_context(mode=mode)
                 hint = get_component_hint(mode, tool_names=list(tool_map.keys()))
-                effective_system = build_cached_system_prompt(system_prompt + hint, cluster_ctx)
+                base = (system_prompt + hint) if isinstance(system_prompt, str) else hint
+                effective_system = build_cached_system_prompt(base, cluster_ctx)
         except Exception:
             # Safe fallback
             cluster_ctx = get_cluster_context(mode=mode)
             hint = get_component_hint(mode, tool_names=list(tool_map.keys()))
-            effective_system = build_cached_system_prompt(system_prompt + hint, cluster_ctx)
+            base = (system_prompt + hint) if isinstance(system_prompt, str) else hint
+            effective_system = build_cached_system_prompt(base, cluster_ctx)
     else:
-        effective_system = system_prompt
+        effective_system = (
+            system_prompt if isinstance(system_prompt, list) else build_cached_system_prompt(system_prompt, "")
+        )
 
     while iterations < MAX_ITERATIONS:
         iterations += 1

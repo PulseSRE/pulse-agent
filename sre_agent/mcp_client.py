@@ -279,8 +279,8 @@ def _connect_sse(conn: MCPConnection) -> MCPConnection:
             logger.debug("Prompt discovery failed for '%s': %s", conn.name, e)
 
         conn.connected = True
-        conn._sse_base_url = base_url
-        conn._sse_session_id = session_id
+        conn._sse_base_url = base_url  # type: ignore[attr-defined]
+        conn._sse_session_id = session_id  # type: ignore[attr-defined]
         logger.info("MCP SSE '%s' connected: %d tools, %d prompts", conn.name, len(conn.tools), len(conn.prompts))
 
     except urllib.error.URLError as e:
@@ -291,7 +291,7 @@ def _connect_sse(conn: MCPConnection) -> MCPConnection:
     return conn
 
 
-def _discover_tools_stdio(process: subprocess.Popen, toolsets: list[str]) -> list[str]:
+def _discover_tools_stdio(process: subprocess.Popen, toolsets: list[str]) -> list[dict[str, Any]]:
     """Send MCP initialize request and discover available tools.
 
     MCP protocol: send JSON-RPC initialize → receive tools/list response.
@@ -308,6 +308,8 @@ def _discover_tools_stdio(process: subprocess.Popen, toolsets: list[str]) -> lis
                 "clientInfo": {"name": "pulse-agent", "version": "1.0"},
             },
         }
+        assert process.stdin is not None
+        assert process.stdout is not None
         process.stdin.write(json.dumps(init_request) + "\n")
         process.stdin.flush()
 

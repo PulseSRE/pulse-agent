@@ -5,6 +5,8 @@ Uses the shared agent loop from agent.py — no write tools, read-only.
 
 from __future__ import annotations
 
+from typing import Any
+
 from .agent import run_agent_streaming
 from .gitops_tools import GITOPS_TOOLS
 from .handoff_tools import request_sre_investigation
@@ -48,7 +50,7 @@ _SRE_READ_TOOL_NAMES = {
 _READ_TOOLS = [t for t in SRE_TOOLS if t.name in _SRE_READ_TOOL_NAMES]
 
 # Add read-only pillar tools for security investigations
-ALL_TOOLS = (
+ALL_TOOLS: list[Any] = (
     ALL_SECURITY_TOOLS + _READ_TOOLS + GITOPS_TOOLS + TIMELINE_TOOLS + PREDICT_TOOLS + [request_sre_investigation]
 )
 TOOL_DEFS = [t.to_dict() for t in ALL_TOOLS]

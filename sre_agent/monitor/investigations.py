@@ -133,7 +133,7 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
     # Harness: cached system prompt with cluster context
     cluster_ctx = get_cluster_context()
     hint = get_component_hint("sre", tool_names=list(readonly_map.keys()))
-    effective_system = build_cached_system_prompt(
+    effective_system: str | list[dict[str, Any]] = build_cached_system_prompt(
         SRE_SYSTEM_PROMPT + hint,
         cluster_ctx,
     )
@@ -230,7 +230,7 @@ def _run_security_followup_sync(finding: dict) -> dict:
     # Harness: cached system prompt with cluster context
     cluster_ctx = get_cluster_context()
     hint = get_component_hint("security", tool_names=list(sec_tool_map.keys()))
-    effective_system = build_cached_system_prompt(
+    effective_system: str | list[dict[str, Any]] = build_cached_system_prompt(
         SECURITY_SYSTEM_PROMPT + hint,
         cluster_ctx,
     )

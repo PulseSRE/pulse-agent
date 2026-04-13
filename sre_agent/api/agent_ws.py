@@ -8,7 +8,7 @@ import json
 import logging
 import time
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..agent import create_client, run_agent_streaming
 from ..config import get_settings
@@ -112,7 +112,7 @@ def _build_tool_result_handler(session_id: str, agent_mode: str, write_tools: se
 async def _run_agent_ws(
     websocket: WebSocket,
     messages: list[dict],
-    system_prompt: str,
+    system_prompt: str | list[dict[str, Any]],
     tool_defs: list,
     tool_map: dict,
     write_tools: set[str],
@@ -181,7 +181,7 @@ async def _run_agent_ws(
             ).result(timeout=5)
 
             # Block the agent thread -- wait for the UI to set the future result
-            waiter = concurrent.futures.Future()
+            waiter: concurrent.futures.Future[bool] = concurrent.futures.Future()
 
             def _on_done(f):
                 try:
@@ -203,7 +203,7 @@ async def _run_agent_ws(
             _pending_confirms.pop(ws_id, None)
 
     # Augment system prompt with memory context and start timing
-    effective_system = system_prompt
+    effective_system: str | list[dict] = system_prompt
     manager = None
     if get_settings().memory:
         try:

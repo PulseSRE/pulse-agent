@@ -559,7 +559,7 @@ def classify_intent(query: str) -> tuple[AgentMode, bool]:
     return "sre", sre_score > 0
 
 
-def build_orchestrated_config(mode: AgentMode, query: str = "") -> dict:
+def build_orchestrated_config(mode: str, query: str = "") -> dict:
     """Return tool_defs, tool_map, system_prompt, write_tools for the given mode.
 
     Tries skill-based config first (from skill .md files). Falls back to

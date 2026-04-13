@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 
-from anthropic import beta_tool
-
+from ..decorators import beta_tool
 from .store import IncidentStore
 
 _store: IncidentStore | None = None

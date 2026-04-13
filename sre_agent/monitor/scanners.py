@@ -6,6 +6,7 @@ import json
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Any
 
 from ..config import get_settings
 from ..errors import ToolError
@@ -22,7 +23,7 @@ logger = logging.getLogger("pulse_agent.monitor")
 def scan_crashlooping_pods(pods=None) -> list[dict]:
     """Find pods in CrashLoopBackOff or high restart counts."""
     crashloop_threshold = get_settings().crashloop_threshold
-    findings = []
+    findings: list[dict[str, Any]] = []
     try:
         if pods is None:
             pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
@@ -56,7 +57,7 @@ def scan_crashlooping_pods(pods=None) -> list[dict]:
 
 def scan_pending_pods() -> list[dict]:
     """Find pods stuck in Pending state."""
-    findings = []
+    findings: list[dict[str, Any]] = []
     try:
         core = get_core_client()
         pods = safe(lambda: core.list_pod_for_all_namespaces(field_selector="status.phase=Pending"))
@@ -93,7 +94,7 @@ def scan_pending_pods() -> list[dict]:
 
 def scan_failed_deployments() -> list[dict]:
     """Find deployments with unavailable replicas."""
-    findings = []
+    findings: list[dict[str, Any]] = []
     try:
         apps = get_apps_client()
         deploys = safe(lambda: apps.list_deployment_for_all_namespaces())
@@ -125,7 +126,7 @@ def scan_failed_deployments() -> list[dict]:
 
 def scan_node_pressure() -> list[dict]:
     """Find nodes with pressure conditions (DiskPressure, MemoryPressure, PIDPressure)."""
-    findings = []
+    findings: list[dict[str, Any]] = []
     try:
         core = get_core_client()
         nodes = safe(lambda: core.list_node())
@@ -161,7 +162,7 @@ def scan_node_pressure() -> list[dict]:
 
 def scan_expiring_certs() -> list[dict]:
     """Find TLS secrets with certificates expiring within 30 days."""
-    findings = []
+    findings: list[dict[str, Any]] = []
     try:
         import base64
         from datetime import timedelta
@@ -234,7 +235,7 @@ def scan_expiring_certs() -> list[dict]:
 
 def scan_firing_alerts() -> list[dict]:
     """Check Prometheus for firing alerts."""
-    findings = []
+    findings: list[dict[str, Any]] = []
     try:
         core = get_core_client()
         result = core.connect_get_namespaced_service_proxy_with_path(
@@ -293,7 +294,7 @@ def scan_firing_alerts() -> list[dict]:
 
 def scan_oom_killed_pods(pods=None) -> list[dict]:
     """Find pods with OOMKilled exit code in last terminated state."""
-    findings = []
+    findings: list[dict[str, Any]] = []
     try:
         if pods is None:
             pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
@@ -323,7 +324,7 @@ def scan_oom_killed_pods(pods=None) -> list[dict]:
 
 def scan_image_pull_errors(pods=None) -> list[dict]:
     """Find pods in ImagePullBackOff or ErrImagePull state."""
-    findings = []
+    findings: list[dict[str, Any]] = []
     try:
         if pods is None:
             pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
@@ -355,7 +356,7 @@ def scan_image_pull_errors(pods=None) -> list[dict]:
 
 def scan_degraded_operators() -> list[dict]:
     """Find ClusterOperators with Degraded=True condition."""
-    findings = []
+    findings: list[dict[str, Any]] = []
     try:
         custom = get_custom_client()
         result = safe(
@@ -387,7 +388,7 @@ def scan_degraded_operators() -> list[dict]:
 
 def scan_daemonset_gaps() -> list[dict]:
     """Find DaemonSets where desiredNumberScheduled != numberReady."""
-    findings = []
+    findings: list[dict[str, Any]] = []
     try:
         apps = get_apps_client()
         dsets = safe(lambda: apps.list_daemon_set_for_all_namespaces())
@@ -417,7 +418,7 @@ def scan_daemonset_gaps() -> list[dict]:
 
 def scan_hpa_saturation() -> list[dict]:
     """Find HPAs at maxReplicas."""
-    findings = []
+    findings: list[dict[str, Any]] = []
     try:
         autoscaling = get_autoscaling_client()
         hpas = safe(lambda: autoscaling.list_horizontal_pod_autoscaler_for_all_namespaces())
@@ -445,7 +446,7 @@ def scan_hpa_saturation() -> list[dict]:
     return findings
 
 
-ALL_SCANNERS = [
+ALL_SCANNERS: list[tuple[str, Callable[..., Any]]] = [
     ("crashloop", scan_crashlooping_pods),
     ("pending", scan_pending_pods),
     ("workloads", scan_failed_deployments),
@@ -460,7 +461,7 @@ ALL_SCANNERS = [
 ]
 
 
-def _get_all_scanners() -> list[tuple[str, Callable]]:
+def _get_all_scanners() -> list[tuple[str, Callable[..., Any]]]:
     """Return all scanners including audit scanners (lazy import to avoid circular dependency)."""
     from ..audit_scanner import (
         scan_auth_events,

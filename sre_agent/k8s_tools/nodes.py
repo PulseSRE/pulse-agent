@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import json
-
-from anthropic import beta_tool
+from typing import Any
 
 from .. import k8s_client as _kc
+from ..decorators import beta_tool
 from ..errors import ToolError
 from .validators import _validate_k8s_name
 
 
 @beta_tool
-def list_nodes() -> str:
+def list_nodes():
     """List all nodes with their status, roles, version, and resource capacity."""
     result = _kc.safe(lambda: _kc.get_core_client().list_node())
     if isinstance(result, ToolError):
@@ -74,7 +74,7 @@ def list_nodes() -> str:
 
 
 @beta_tool
-def visualize_nodes(label_selector: str = "", show_pods: bool = True) -> str:
+def visualize_nodes(label_selector: str = "", show_pods: bool = True):
     """Visualize cluster nodes as an interactive hex map showing health status,
     CPU/memory usage, and pod distribution. Each node renders as a clickable
     hexagon with status coloring and resource gauges. Use this for cluster
@@ -178,7 +178,7 @@ def visualize_nodes(label_selector: str = "", show_pods: bool = True) -> str:
     total_pods = sum(n["podCount"] for n in node_specs)
     text = f"Cluster: {ready_count}/{len(node_specs)} nodes ready, {total_pods} pods running"
 
-    component = {
+    component: dict[str, Any] = {
         "kind": "node_map",
         "title": "Cluster Nodes",
         "description": text,
@@ -191,7 +191,7 @@ def visualize_nodes(label_selector: str = "", show_pods: bool = True) -> str:
 
 
 @beta_tool
-def describe_node(node_name: str) -> str:
+def describe_node(node_name: str):
     """Get detailed information about a node including conditions, taints, and resource usage.
 
     Args:
@@ -229,7 +229,7 @@ def describe_node(node_name: str) -> str:
 
 
 @beta_tool
-def cordon_node(node_name: str) -> str:
+def cordon_node(node_name: str):
     """Mark a node as unschedulable (cordon). REQUIRES USER CONFIRMATION.
 
     Args:
@@ -244,7 +244,7 @@ def cordon_node(node_name: str) -> str:
 
 
 @beta_tool
-def uncordon_node(node_name: str) -> str:
+def uncordon_node(node_name: str):
     """Mark a node as schedulable (uncordon). REQUIRES USER CONFIRMATION.
 
     Args:
@@ -259,7 +259,7 @@ def uncordon_node(node_name: str) -> str:
 
 
 @beta_tool
-def drain_node(node_name: str) -> str:
+def drain_node(node_name: str):
     """Cordon a node and evict all pods (respecting PDBs). REQUIRES USER CONFIRMATION.
 
     This cordons the node first, then evicts pods one by one. Pods managed by

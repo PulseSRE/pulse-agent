@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from anthropic import beta_tool
 from kubernetes.client.rest import ApiException
 
 from .. import k8s_client as _kc
+from ..decorators import beta_tool
 from ..errors import ToolError
 from .validators import MAX_RESULTS
 
 
 @beta_tool
-def list_statefulsets(namespace: str = "default") -> str:
+def list_statefulsets(namespace: str = "default"):
     """List StatefulSets with their replica counts and status.
 
     Args:
@@ -72,7 +72,7 @@ def list_statefulsets(namespace: str = "default") -> str:
 
 
 @beta_tool
-def list_daemonsets(namespace: str = "default") -> str:
+def list_daemonsets(namespace: str = "default"):
     """List DaemonSets with their status and node counts.
 
     Args:
@@ -135,7 +135,7 @@ def list_daemonsets(namespace: str = "default") -> str:
 
 
 @beta_tool
-def list_jobs(namespace: str = "default", show_completed: bool = False) -> str:
+def list_jobs(namespace: str = "default", show_completed: bool = False):
     """List Jobs with their status, completions, and duration.
 
     Args:
@@ -178,7 +178,7 @@ def list_jobs(namespace: str = "default", show_completed: bool = False) -> str:
 
 
 @beta_tool
-def list_cronjobs(namespace: str = "default") -> str:
+def list_cronjobs(namespace: str = "default"):
     """List CronJobs with their schedule, last run, and active jobs.
 
     Args:
@@ -207,7 +207,7 @@ def list_cronjobs(namespace: str = "default") -> str:
 
 
 @beta_tool
-def list_ingresses(namespace: str = "default") -> str:
+def list_ingresses(namespace: str = "default"):
     """List Ingresses with their hosts, paths, and backends.
 
     Args:
@@ -248,7 +248,7 @@ def list_ingresses(namespace: str = "default") -> str:
 
 
 @beta_tool
-def list_routes(namespace: str = "default") -> str:
+def list_routes(namespace: str = "default"):
     """List OpenShift Routes with their hosts, paths, TLS, and target services. OpenShift only.
 
     Args:
@@ -293,7 +293,7 @@ def list_routes(namespace: str = "default") -> str:
 
 
 @beta_tool
-def list_hpas(namespace: str = "default") -> str:
+def list_hpas(namespace: str = "default"):
     """List Horizontal Pod Autoscalers with their current/target metrics and replica counts.
 
     Args:
@@ -362,7 +362,7 @@ def list_hpas(namespace: str = "default") -> str:
 
 
 @beta_tool
-def list_operator_subscriptions(namespace: str = "ALL") -> str:
+def list_operator_subscriptions(namespace: str = "ALL"):
     """List OLM Operator Subscriptions showing installed operators, their channels, and install plans. OpenShift only.
 
     Args:

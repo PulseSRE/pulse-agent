@@ -14,8 +14,7 @@ import json
 import logging
 from typing import Any
 
-from anthropic import beta_tool
-
+from .decorators import beta_tool
 from .errors import ToolError
 from .k8s_client import age, get_apps_client, get_core_client, get_custom_client
 
@@ -94,7 +93,7 @@ def _proxy_apps_client(cluster_name: str):
 
 
 @beta_tool
-def fleet_list_clusters() -> str:
+def fleet_list_clusters():
     """List all managed clusters in the fleet with their availability status."""
     clusters = _get_managed_clusters()
     if not clusters:
@@ -123,7 +122,7 @@ def fleet_list_clusters() -> str:
 
 
 @beta_tool
-def fleet_list_pods(namespace: str = "default", label_selector: str = "") -> str:
+def fleet_list_pods(namespace: str = "default", label_selector: str = ""):
     """List pods across ALL managed clusters in the fleet.
 
     Args:
@@ -219,7 +218,7 @@ def fleet_list_pods(namespace: str = "default", label_selector: str = "") -> str
 
 
 @beta_tool
-def fleet_list_deployments(namespace: str = "default") -> str:
+def fleet_list_deployments(namespace: str = "default"):
     """List deployments across ALL managed clusters in the fleet.
 
     Args:
@@ -306,7 +305,7 @@ def fleet_list_deployments(namespace: str = "default") -> str:
 
 
 @beta_tool
-def fleet_get_alerts() -> str:
+def fleet_get_alerts():
     """Get firing alerts from the local (hub) cluster. Managed cluster alerts require direct Alertmanager access which is not yet supported."""
     clusters = _get_managed_clusters()
     if not clusters:
@@ -370,7 +369,7 @@ def _read_resource(kind: str, name: str, namespace: str, core=None, apps=None):
 
 
 @beta_tool
-def fleet_compare_resource(kind: str, name: str, namespace: str = "default") -> str:
+def fleet_compare_resource(kind: str, name: str, namespace: str = "default"):
     """Compare a specific resource across all managed clusters to detect configuration drift.
 
     Args:
@@ -418,7 +417,7 @@ def fleet_compare_resource(kind: str, name: str, namespace: str = "default") -> 
             resources[cluster["name"]] = {"error": str(e)}
 
     # Compare key fields
-    diffs = []
+    diffs: list[dict[str, Any]] = []
     ignore_prefixes = {
         "metadata.uid",
         "metadata.resource_version",
@@ -455,7 +454,7 @@ def fleet_compare_resource(kind: str, name: str, namespace: str = "default") -> 
     if len(flat_resources) < 2:
         return f"Need at least 2 clusters with the resource to compare. Got: {list(flat_resources.keys())}"
 
-    all_fields = set()
+    all_fields: set[str] = set()
     for flat in flat_resources.values():
         all_fields.update(flat.keys())
 
@@ -496,7 +495,7 @@ def fleet_compare_resource(kind: str, name: str, namespace: str = "default") -> 
 
 
 # All fleet tools
-FLEET_TOOLS = [
+FLEET_TOOLS: list[Any] = [
     fleet_list_clusters,
     fleet_list_pods,
     fleet_list_deployments,

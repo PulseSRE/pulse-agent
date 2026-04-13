@@ -5,15 +5,14 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from anthropic import beta_tool
-
 from .. import k8s_client as _kc
+from ..decorators import beta_tool
 from ..errors import ToolError
 from .validators import MAX_RESULTS, _validate_k8s_name, _validate_k8s_namespace
 
 
 @beta_tool
-def list_deployments(namespace: str = "default") -> str:
+def list_deployments(namespace: str = "default"):
     """List deployments with their replica counts and status.
 
     Args:
@@ -76,7 +75,7 @@ def list_deployments(namespace: str = "default") -> str:
 
 
 @beta_tool
-def describe_deployment(namespace: str, name: str) -> str:
+def describe_deployment(namespace: str, name: str):
     """Get detailed information about a deployment including strategy, conditions, and pod template.
 
     Args:
@@ -204,7 +203,7 @@ def describe_deployment(namespace: str, name: str) -> str:
 
 
 @beta_tool
-def scale_deployment(namespace: str, name: str, replicas: int) -> str:
+def scale_deployment(namespace: str, name: str, replicas: int):
     """Scale a deployment to a specific number of replicas. REQUIRES USER CONFIRMATION.
 
     Args:
@@ -229,7 +228,7 @@ def scale_deployment(namespace: str, name: str, replicas: int) -> str:
 
 
 @beta_tool
-def restart_deployment(namespace: str, name: str) -> str:
+def restart_deployment(namespace: str, name: str):
     """Trigger a rolling restart of a deployment. REQUIRES USER CONFIRMATION.
 
     Args:
@@ -249,7 +248,7 @@ def restart_deployment(namespace: str, name: str) -> str:
 
 
 @beta_tool
-def rollback_deployment(namespace: str, name: str, revision: int = 0) -> str:
+def rollback_deployment(namespace: str, name: str, revision: int = 0):
     """Rollback a deployment to a previous revision. If revision is 0, rolls back to the previous revision. REQUIRES USER CONFIRMATION.
 
     Args:
@@ -315,7 +314,7 @@ def rollback_deployment(namespace: str, name: str, revision: int = 0) -> str:
 
 
 @beta_tool
-def list_replicasets(namespace: str, deployment_name: str = "") -> str:
+def list_replicasets(namespace: str, deployment_name: str = ""):
     """List ReplicaSets, optionally filtered to a specific deployment's rollout history.
 
     Args:
