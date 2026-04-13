@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from itertools import combinations
 
 logger = logging.getLogger("pulse_agent.tool_predictor")
 
@@ -129,3 +130,72 @@ def extract_tokens(query: str) -> list[str]:
     # Combine and deduplicate
     all_tokens = filtered + bigrams
     return list(dict.fromkeys(all_tokens))  # Preserves order while deduplicating
+
+
+def _get_db():
+    """Get database connection. Separate function for easy mocking."""
+    from .db import get_database
+
+    return get_database()
+
+
+def learn(
+    *,
+    query: str,
+    tools_called: list[str],
+    tools_offered: list[str],
+) -> None:
+    """Record a completed turn to update predictions and co-occurrence.
+
+    Fire-and-forget: swallows all exceptions.
+    """
+    if not tools_called:
+        return
+
+    try:
+        db = _get_db()
+        tokens = extract_tokens(query)
+        if not tokens:
+            return
+
+        called_set = set(tools_called)
+        not_called = set(tools_offered) - called_set
+
+        # Positive signals: tokens x tools_called
+        for token in tokens:
+            for tool in tools_called:
+                db.execute(
+                    "INSERT INTO tool_predictions (token, tool_name, score, hit_count, miss_count, last_seen) "
+                    "VALUES (%s, %s, 1.0, 1, 0, NOW()) "
+                    "ON CONFLICT (token, tool_name) DO UPDATE SET "
+                    "score = tool_predictions.score + 1.0, "
+                    "hit_count = tool_predictions.hit_count + 1, "
+                    "last_seen = NOW()",
+                    (token, tool),
+                )
+
+        # Negative signals: tokens x tools_not_called
+        for token in tokens:
+            for tool in not_called:
+                db.execute(
+                    "INSERT INTO tool_predictions (token, tool_name, score, hit_count, miss_count, last_seen) "
+                    "VALUES (%s, %s, 0.0, 0, 1, NOW()) "
+                    "ON CONFLICT (token, tool_name) DO UPDATE SET "
+                    "miss_count = tool_predictions.miss_count + 1, "
+                    "last_seen = NOW()",
+                    (token, tool),
+                )
+
+        # Co-occurrence: pairs of tools called together
+        for tool_a, tool_b in combinations(sorted(tools_called), 2):
+            db.execute(
+                "INSERT INTO tool_cooccurrence (tool_a, tool_b, frequency) "
+                "VALUES (%s, %s, 1) "
+                "ON CONFLICT (tool_a, tool_b) DO UPDATE SET "
+                "frequency = tool_cooccurrence.frequency + 1",
+                (tool_a, tool_b),
+            )
+
+        db.commit()
+    except Exception:
+        logger.debug("Failed to record tool predictions", exc_info=True)
