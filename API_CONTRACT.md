@@ -49,6 +49,16 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `POST` | `/views/claim/:token` | token | Claim a shared view |
 | `GET` | `/views/:id/versions` | token | List version history for a view |
 | `POST` | `/views/:id/undo` | token | Undo last change to a view |
+| `GET` | `/fix-history/summary` | token | Aggregated fix stats: totals, success/rollback rates, by-category with auto_fixed/confirmation_required, trend (query: `days` 1-90) |
+| `GET` | `/monitor/coverage` | token | Scanner coverage: active/total scanners, coverage %, category breakdown, per-scanner finding stats (query: `days` 1-90) |
+| `GET` | `/monitor/history` | token | Paginated scan run history (query: `limit`, `offset`) |
+| `GET` | `/analytics/confidence` | token | Confidence calibration: Brier score, accuracy %, rating (good/fair/poor), prediction buckets (query: `days` 1-365) |
+| `GET` | `/analytics/accuracy` | token | Agent accuracy: quality score trend, anti-patterns, learning stats, operator override rate (query: `days` 1-365) |
+| `GET` | `/analytics/cost` | token | Token cost per incident with trending, by-mode breakdown (query: `days` 1-365) |
+| `GET` | `/analytics/intelligence` | token | 8 intelligence sections as structured dicts: query reliability, error hotspots, token efficiency, harness effectiveness, routing accuracy, feedback analysis, token trending, dashboard patterns (query: `days` 1-90, `mode`) |
+| `GET` | `/analytics/prompt` | token | Prompt section breakdown, cache hit rate, version drift history (query: `days` 1-365, `skill`) |
+| `GET` | `/recommendations` | token | Contextual capability recommendations: unused scanners, untried features (max 4) |
+| `GET` | `/analytics/readiness` | token | Readiness gate summary: pass/fail/attention counts, pass rate, attention items |
 
 **Authentication:** Token-authenticated endpoints accept `Authorization: Bearer <token>` header or `?token=<token>` query parameter. The token is `PULSE_AGENT_WS_TOKEN`. Unauthenticated requests return 401.
 
@@ -765,6 +775,31 @@ Emitted after each scan cycle completes. Includes per-scanner timing, findings c
   "pageSize": 20
 }
 ```
+
+#### `skill_activity` — Active skill change or handoff
+
+Emitted when the agent switches skills or a handoff occurs between agent modes.
+
+```json
+{
+  "type": "skill_activity",
+  "data": {
+    "skill_name": "sre",
+    "status": "active",
+    "timestamp": 1711540800000,
+    "handoff_from": "security",
+    "handoff_to": "sre"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `skill_name` | `string` | Currently active skill |
+| `status` | `string` | Skill status (`"active"`, `"idle"`) |
+| `timestamp` | `number` | Unix epoch milliseconds |
+| `handoff_from` | `string?` | Previous skill (only on handoff) |
+| `handoff_to` | `string?` | New skill (only on handoff) |
 
 #### `error` — Rate limit or other errors
 
