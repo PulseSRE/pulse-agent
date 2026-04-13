@@ -45,7 +45,7 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 
 ### Autonomous Monitor
 - **Continuous Scanning** — 60-second scan interval via `/ws/monitor` endpoint, pushing findings to the Pulse UI in real time
-- **16 Scanners** — Crashlooping pods, pending pods, failed deployments, node pressure, certificate expiry, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation, plus 5 audit scanners (config changes, RBAC, deployments, warning events, auth)
+- **17 Scanners** — Crashlooping pods, pending pods, failed deployments, node pressure, certificate expiry, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation, security posture, plus 5 audit scanners (config changes, RBAC, deployments, warning events, auth)
 - **Warning-Severity Investigations** — Monitor now investigates warning findings, not just critical, for earlier detection
 - **Default Namespace Scanning** — `default` namespace removed from skip list so user workloads are always detected
 - **Auto-Fix at Trust Level 3** — Automatically applies fixes for safe categories (crashloop pod deletion, deployment restarts) without user approval
@@ -117,10 +117,10 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Column sort, toggle, per-column filters** — Full table controls via settings panel
 
 ### Eval Scoring & Self-Improving Evals
-- **Tool Selection Accuracy** — 86 static eval prompts scored against the harness: does `select_tools()` offer the right tools for each query? Current baseline: **79.1%** (68/86)
-- **Learned Eval Prompts** — Auto-generated from real user interactions via implicit positive feedback (user didn't retry = good response). Merged with static prompts at test time
-- **Scoring API** — `GET /eval/score` returns accuracy breakdown (static, learned, combined) with failure details
-- **Regression Gate** — CI test fails if accuracy drops below 75%
+- **9 Eval Suites, 70 Scenarios** — Deterministic eval framework covering release gating, safety, integration, adversarial, errors, fleet, sysadmin, core, and view designer scenarios
+- **98 Eval Prompts** — Mapped to expected tool calls across SRE, security, view designer, and cross-agent modes. CI enforced: adding a new tool without an eval prompt fails the test suite
+- **Adaptive Tool Selection** — TF-IDF prediction + Haiku LLM fallback + co-occurrence expansion. Current release gate: **98.1%** average
+- **Regression Gate** — CI blocks release if eval gate score drops below threshold
 
 ### Tool Analytics
 - **Full Audit Log** — Every tool invocation recorded to PostgreSQL (`tool_usage` table): tool name, category, status, duration, input summary, error details, session/turn tracking
@@ -159,7 +159,7 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 
 ## Prerequisites
 
-- **Python 3.11+** — for the agent
+- **Python 3.12+** — for the agent
 - **PostgreSQL 14+** — for data persistence (views, tool usage, memory)
 - **Kubernetes/OpenShift cluster** — with cluster-admin or equivalent RBAC
 - **Claude API access** — either Anthropic API key or Google Vertex AI project
@@ -188,7 +188,7 @@ cd ../OpenshiftPulse && ./deploy/deploy.sh
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - Access to a Kubernetes/OpenShift cluster (`oc login` or valid `~/.kube/config`)
 - Claude API access via [Vertex AI](#vertex-ai) or [Anthropic API](#anthropic-api)
 
@@ -516,6 +516,8 @@ Supported: `data_table`, `info_card_grid`, `badge_list`, `status_list`, `key_val
 
 | Pulse Agent | OpenShift Pulse UI | Protocol |
 |------------|-------------------|----------|
+| v2.2.0 | v5.16.2+ | 2 |
+| v2.1.0 | v5.16.2+ | 2 |
 | v2.0.0 | v5.16.2+ | 2 |
 | v1.16.0 | v5.16.2+ | 2 |
 | v1.15.0 | v5.16.2+ | 2 |
@@ -639,7 +641,7 @@ sre_agent/
 ├── tool_registry.py     # Central tool registry — all @beta_tool functions register here
 ├── security_agent.py    # Security scanner (read-only, delegates to shared loop)
 ├── k8s_client.py        # Shared Kubernetes client with lazy initialization
-├── k8s_tools.py         # 35+ Kubernetes/OpenShift tools (@beta_tool)
+├── k8s_tools/           # 41 K8s tools across 11 submodules (@beta_tool)
 ├── security_tools.py    # 9 security scanning tools (@beta_tool)
 ├── handoff_tools.py     # 2 agent-to-agent handoff tools (request_security_scan, request_sre_investigation)
 ├── harness.py           # Claude harness: tool selection, prompt caching, cluster context
@@ -657,6 +659,8 @@ sre_agent/
 ├── intelligence.py      # Intelligence loop — analytics feedback into system prompt
 ├── tool_usage.py        # Tool invocation audit log (PostgreSQL)
 ├── tool_chains.py       # Tool chain discovery and next-tool hints (bigram analysis)
+├── tool_predictor.py    # Adaptive tool selection (TF-IDF + LLM fallback + co-occurrence)
+├── decorators.py        # Typed beta_tool wrapper (centralizes SDK type mismatch)
 └── memory/              # Self-improving agent layer
     ├── __init__.py      # MemoryManager orchestrator
     ├── store.py         # Database persistence (incidents, runbooks, patterns, metrics)
@@ -736,7 +740,7 @@ python -m pytest tests/ -v
 
 See [TESTING.md](TESTING.md) for test conventions, fixtures, and coverage targets.
 
-1,454 tests covering all tools, all 16 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, PromQL recipes, view validation, layout engine, intelligence loop, token tracking, and the memory system. All tests run without a cluster or API key (fully mocked).
+1,520 tests covering all tools, all 17 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, PromQL recipes, view validation, layout engine, intelligence loop, token tracking, tool prediction, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ## Evaluation Framework
 
@@ -783,7 +787,7 @@ See **[TESTING.md](TESTING.md)** for the full testing strategy and eval prompt a
 | Mode | Prompts | Example |
 |------|---------|---------|
 | SRE | 64 | "why are my pods crashing" → `list_pods`, `describe_pod`, `get_pod_logs` |
-| Security | 8 | "scan RBAC for overly permissive roles" → `scan_rbac_risks` |
+| Security | 9 | "scan RBAC for overly permissive roles" → `scan_rbac_risks` |
 | View Designer | 11 | "create a dashboard for production" → `plan_dashboard`, `create_dashboard` |
 | Cross-Agent | 1 | "hand this off to security" → `request_security_scan` |
 
@@ -796,16 +800,21 @@ Hard blocker categories:
 - `missing_confirmation`
 
 Suites:
-- `release` — primary gating suite for CI
-- `safety` — adversarial safety checks
-- `integration` — reliability/failure-mode checks
-- `core` — mixed baseline coverage (includes intentional blocker scenarios)
+- `release` — primary gating suite for CI (12 scenarios)
+- `safety` — adversarial safety checks (3 scenarios)
+- `integration` — reliability/failure-mode checks (7 scenarios)
+- `core` — mixed baseline coverage (6 scenarios, includes intentional blocker scenarios)
+- `view_designer` — dashboard generation quality (7 scenarios)
+- `adversarial` — prompt injection and edge cases (5 scenarios)
+- `errors` — error handling and recovery (5 scenarios)
+- `fleet` — multi-cluster operations (5 scenarios)
+- `sysadmin` — real-world sysadmin queries (20 scenarios)
 - `outcomes` — compares current vs baseline action outcomes from fix history telemetry
 
 ---
 
 <p align="center">
-  <strong>111 tools (75 native + 36 MCP)</strong> &bull; <strong>17 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>98 eval prompts</strong> &bull; <strong>1,454 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>111 tools (75 native + 36 MCP)</strong> &bull; <strong>17 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>98 eval prompts</strong> &bull; <strong>1,520 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

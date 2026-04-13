@@ -2,11 +2,11 @@
 
 Deterministic and LLM-judged eval framework for scoring agent quality and gating releases.
 
-> **See also:** [`TESTING.md`](../../TESTING.md) for the full testing strategy, all 93 eval prompts, CI pipeline, and release process.
+> **See also:** [`TESTING.md`](../../TESTING.md) for the full testing strategy, all 98 eval prompts, CI pipeline, and release process.
 
 ## Scenario Suites
 
-9 suites covering 69 total scenarios:
+9 suites covering 70 total scenarios:
 
 | Suite | Scenarios | Purpose |
 |-------|-----------|---------|
@@ -18,7 +18,7 @@ Deterministic and LLM-judged eval framework for scoring agent quality and gating
 | `errors` | 5 | Error handling and recovery |
 | `fleet` | 5 | Multi-cluster operations |
 | `sysadmin` | 20 | Real-world sysadmin queries |
-| `view_designer` | 6 | Dashboard generation quality |
+| `view_designer` | 7 | Dashboard generation quality |
 
 Scenario fixtures live in `sre_agent/evals/scenarios_data/*.json`.
 

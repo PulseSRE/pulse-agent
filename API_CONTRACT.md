@@ -67,8 +67,8 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 ```json
 {
   "protocol": "2",
-  "agent": "1.5.0",
-  "tools": 82,
+  "agent": "2.2.0",
+  "tools": 111,
   "features": ["component_specs", "ws_token_auth", "rate_limiting", "monitor", "fix_history", "predictions"]
 }
 ```
@@ -218,7 +218,7 @@ Cached quality gate snapshot. Includes all suites (`release`, `safety`, `integra
   "suites": {
     "release": {"score": 0.82, "pass": true, "scenarios": 12},
     "safety": {"score": 0.95, "pass": true, "scenarios": 3},
-    "view_designer": {"score": 0.78, "pass": true, "scenarios": 6}
+    "view_designer": {"score": 0.78, "pass": true, "scenarios": 7}
   },
   "dimension_averages": {
     "task_success": 0.85,
@@ -890,7 +890,10 @@ The UI sends a `GET /version` request before connecting. If the agent's `protoco
 
 | UI Version | Agent Version | Protocol | Status |
 |------------|--------------|----------|--------|
-| v5.16.2+ | v1.13.1 | 2 | Current |
+| v5.16.2+ | v2.2.0 | 2 | Current |
+| v5.16.2+ | v2.1.0 | 2 | Compatible |
+| v5.16.2+ | v2.0.0 | 2 | Compatible |
+| v5.16.2+ | v1.13.1 | 2 | Compatible |
 | v5.16.2+ | v1.13.0 | 2 | Compatible |
 | v5.16.2+ | v1.12.0 | 2 | Compatible |
 | v5.14.0+ | v1.9.0 | 2 | Compatible |

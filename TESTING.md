@@ -31,14 +31,14 @@ Testing philosophy: deterministic tests run on every commit at zero cost. LLM-ju
                   +-------------------------+
                 +-----------------------+-----+
                 |  Deterministic Evals          |   <- every PR and push
-                |  9 suites, 69 scenarios       |      Tool selection, safety, guardrails.
+                |  9 suites, 70 scenarios       |      Tool selection, safety, guardrails.
                 +-------------------------------+
               +-----------------------------------+
               |       Skill-Bundled Evals          |   <- every PR and push
               |  Per-skill evals.yaml scenarios    |      Tool selection per skill domain.
               +-----------------------------------+
             +---------------------------------------+
-            |          Unit Tests (1488)             |   <- every PR and push
+            |          Unit Tests (1520)             |   <- every PR and push
             |  Tools, scanners, API, config, memory  |      Fast, deterministic, mocked K8s.
             +---------------------------------------+
 ```
@@ -50,7 +50,7 @@ All commands run from the project root (`/Users/amobrem/ali/pulse-agent`).
 ### Unit Tests
 
 ```bash
-python3 -m pytest tests/ -v                          # all 1488 tests
+python3 -m pytest tests/ -v                          # all 1520 tests
 python3 -m pytest tests/test_k8s_tools.py -v         # single file
 python3 -m pytest tests/ -k "test_crashloop" -v      # by name pattern
 python3 -m pytest tests/ -x                           # stop on first failure
@@ -103,14 +103,14 @@ python -m sre_agent.evals.weekly_digest_cli --current-days 7 --baseline-days 7 \
 
 ### Coverage
 
-1488 pytest tests across 40+ test files in `tests/`. Major coverage areas:
+1520 pytest tests across 40+ test files in `tests/`. Major coverage areas:
 
 | Area | Test files | What they cover |
 |------|-----------|-----------------|
 | K8s tools | `test_k8s_tools.py` | All 41 `@beta_tool` functions, input validation, `safe()` error handling |
 | Security tools | `test_security_tools.py` | 9 security scanning tools |
 | API endpoints | `test_api_http.py`, `test_api_websocket.py`, `test_api_tools.py` | REST + WebSocket endpoints, auth, protocol v2 |
-| Monitor/scanners | `test_monitor.py`, `test_scanners.py`, `test_audit_scanner.py` | 16 scanners, auto-fix, noise learning |
+| Monitor/scanners | `test_monitor.py`, `test_scanners.py`, `test_audit_scanner.py` | 17 scanners, auto-fix, noise learning |
 | Agent loop | `test_agent.py` | Streaming loop, circuit breaker, confirmation gate |
 | Harness | `test_harness.py` | Dynamic tool selection, prompt caching |
 | Orchestrator | `test_orchestrator.py` | Intent classification, typo correction |
@@ -205,7 +205,7 @@ sre_agent/evals/
   outcomes_cli.py      # Outcomes CLI
   weekly_digest.py     # Weekly summary generation
   weekly_digest_cli.py # Weekly digest CLI
-  scenarios_data/      # 9 JSON suite files (69 scenarios total)
+  scenarios_data/      # 9 JSON suite files (70 scenarios total)
   fixtures/            # 17 recorded tool-call trace files
   baselines/           # Saved baseline results (core.json, release.json, view_designer.json)
   policies/            # Regression policy YAML
@@ -213,13 +213,13 @@ sre_agent/evals/
 
 ### Scenario Suites
 
-9 suites, 69 total scenarios:
+9 suites, 70 total scenarios:
 
 | Suite | Scenarios | Purpose | Gating? |
 |-------|-----------|---------|---------|
 | `core` | 6 | Fundamental SRE diagnostics | No |
 | `release` | 12 | Release gate -- CI blocks on failure | **Yes** |
-| `view_designer` | 6 | Dashboard generation quality | **Yes** |
+| `view_designer` | 7 | Dashboard generation quality | **Yes** |
 | `safety` | 3 | Dangerous action guardrails | No (informational) |
 | `integration` | 7 | Cross-tool workflows | No |
 | `adversarial` | 5 | Prompt injection and edge cases | No |
@@ -364,6 +364,7 @@ Each skill package can include an `evals.yaml` file with scenarios specific to t
 | Security | `sre_agent/skills/security/evals.yaml` | Prompt + expected tools + mentions |
 | View Designer | `sre_agent/skills/view-designer/evals.yaml` | Prompt + expected tools + mentions |
 | Capacity Planner | `sre_agent/skills/capacity-planner/evals.yaml` | Prompt + expected tools + mentions |
+| Postgres Troubleshooter | `sre_agent/skills/postgres-troubleshooter/evals.yaml` | Prompt + expected tools + mentions |
 
 ### Skill Eval Format
 
@@ -511,7 +512,7 @@ The pipeline publishes a GitHub step summary with a table like:
 - release gate: PASS (scenarios=12, avg=0.92)
 - safety suite: PASS (scenarios=3)
 - integration suite: PASS (scenarios=7)
-- view_designer gate: PASS (scenarios=6, avg=0.88)
+- view_designer gate: PASS (scenarios=7, avg=0.88)
 - outcomes gate: PASS (current_actions=45, baseline_actions=42)
 ```
 
@@ -792,7 +793,7 @@ All eval prompts mapped to expected tool calls. Used for evaluating agent tool s
 | show me cluster KPI metrics | `cluster_metrics` | Cluster metrics |
 | give me a namespace summary for staging | `namespace_summary` | Namespace summary |
 
-### Skill-Bundled (23 prompts across 4 skills)
+### Skill-Bundled (23 prompts across 5 skills)
 
 Defined in `sre_agent/skills/*/evals.yaml`. Auto-registered as eval suites.
 
@@ -802,6 +803,7 @@ Defined in `sre_agent/skills/*/evals.yaml`. Auto-registered as eval suites.
 | security | 5 | "scan for RBAC vulnerabilities" |
 | view_designer | 6 | "create a monitoring dashboard" |
 | capacity_planner | 6 | "will we run out of CPU in the next week?" |
+| postgres_troubleshooter | — | "why is my database connection failing?" |
 
 ### Tools Excluded from Eval
 

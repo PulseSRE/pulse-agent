@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v2.2.0, Protocol v2, 111 tools (75 native + 36 MCP), 6 skills (4 built-in + 2 user-created), 17 scanners, 1520 tests, 73 PromQL recipes, 98 eval prompts. Modular package architecture: k8s_tools/ (11 modules), monitor/ (10 modules), api/ (12 modules) — no file over 910 lines. Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings) and pre-route handoff. Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence. Adaptive tool selection: TF-IDF prediction + Haiku LLM fallback + co-occurrence expansion, targeting 50%+ harness accuracy.
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v2.2.0, Protocol v2, 111 tools (75 native + 36 MCP), 6 skills (5 built-in: sre, security, view_designer, capacity_planner, postgres_troubleshooter + user-created), 17 scanners, 1520 tests, 73 PromQL recipes, 9 eval suites, 70 scenarios, 98 eval prompts. 36 modules (k8s_tools/11, monitor/10, api/12, plus decorators.py, tool_predictor.py) — no file over 910 lines. Python 3.12, Mypy clean (0 errors), ruff clean. Migration version 012 (tool_predictions, tool_cooccurrence). Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings) and pre-route handoff in skill classifier. Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence. Adaptive tool selection: TF-IDF + LLM fallback + chain expansion. ALWAYS_INCLUDE trimmed from 12 to 5. Release gate: 98.1% (release suite avg).
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -81,7 +81,7 @@ cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --set agent.mcp.enabl
 
 ### Monitor System (`monitor/` package — 10 modules)
 - `MonitorSession` (session.py) — periodic cluster scanning (default 60s interval)
-- 16 scanners: crashlooping pods, pending pods, failed deployments, node pressure, expiring certs, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation + 5 audit scanners (config changes, RBAC, deployments, warning events, auth)
+- 17 scanners: crashlooping pods, pending pods, failed deployments, node pressure, expiring certs, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation, security posture + 5 audit scanners (config changes, RBAC, deployments, warning events, auth)
 - Auto-fix at trust level 3+: deletes crashlooping pods, restarts failed deployments
 - Confidence scores on all findings, investigations, and action proposals
 - `resolution` events emitted when findings resolve (auto-fix or self-healed)
