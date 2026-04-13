@@ -22,10 +22,7 @@ class TestPromptQuality:
                 if kw_lower in keyword_owners and keyword_owners[kw_lower] != skill.name:
                     collisions.append((kw_lower, keyword_owners[kw_lower], skill.name))
                 keyword_owners[kw_lower] = skill.name
-        # Some collisions are OK (e.g., "alert" in both sre and monitoring)
-        # But flag them for review
-        if collisions:
-            print(f"Keyword collisions (review these): {collisions[:10]}")
+        assert not collisions, f"Keyword collisions between skills: {collisions[:10]}"
 
     def test_always_include_reasonable_size(self):
         """ALWAYS_INCLUDE should not exceed 15 tools."""
