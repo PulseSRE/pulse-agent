@@ -49,11 +49,17 @@ class Skill:
     skip_component_hints: bool = False
     degraded: bool = False
     degraded_reason: str = ""
+    display_name: str = ""
+    icon: str = ""
+    builtin: bool = True
 
     def to_dict(self) -> dict:
         """Serialize for API responses."""
         return {
             "name": self.name,
+            "display_name": self.display_name or _format_display_name(self.name),
+            "icon": self.icon or _default_icon(self.name),
+            "builtin": self.builtin,
             "version": self.version,
             "description": self.description,
             "keywords": self.keywords,
@@ -67,6 +73,22 @@ class Skill:
             "degraded_reason": self.degraded_reason,
             "prompt_length": len(self.system_prompt),
         }
+
+
+_BUILTIN_ICONS: dict[str, str] = {
+    "sre": "Wrench",
+    "security": "Shield",
+    "view_designer": "LayoutDashboard",
+    "capacity_planner": "TrendingUp",
+}
+
+
+def _default_icon(name: str) -> str:
+    return _BUILTIN_ICONS.get(name, "Puzzle")
+
+
+def _format_display_name(name: str) -> str:
+    return name.replace("_", " ").replace("-", " ").title()
 
 
 # Global skill registry
@@ -121,6 +143,9 @@ def _parse_skill_md(path: Path) -> Skill | None:
         for err in errors:
             logger.warning("Skill '%s' validation: %s", name, err)
 
+    # Determine if this is a built-in skill (from the package dir, not user dir)
+    is_builtin = str(_SKILLS_DIR) in str(path)
+
     return Skill(
         name=name,
         version=meta.get("version", 1),
@@ -135,6 +160,9 @@ def _parse_skill_md(path: Path) -> Skill | None:
         configurable=meta.get("configurable", []),
         skip_component_hints=meta.get("skip_component_hints", False),
         path=path.parent,
+        display_name=meta.get("display_name", ""),
+        icon=meta.get("icon", ""),
+        builtin=is_builtin,
     )
 
 
