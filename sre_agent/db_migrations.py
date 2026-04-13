@@ -131,6 +131,13 @@ def _migrate_011_routing_decisions(db: Database) -> None:
     """)
 
 
+def _migrate_012_tool_predictions(db: Database) -> None:
+    """Add tool_predictions and tool_cooccurrence tables for adaptive tool selection."""
+    from .db_schema import TOOL_COOCCURRENCE_SCHEMA, TOOL_PREDICTIONS_SCHEMA
+
+    db.executescript(TOOL_PREDICTIONS_SCHEMA + TOOL_COOCCURRENCE_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -143,4 +150,5 @@ MIGRATIONS = [
     (9, "tool_source", _migrate_009_tool_source),
     (10, "prompt_log", _migrate_010_prompt_log),
     (11, "routing_decisions", _migrate_011_routing_decisions),
+    (12, "tool_predictions", _migrate_012_tool_predictions),
 ]

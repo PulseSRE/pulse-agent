@@ -347,6 +347,28 @@ CREATE INDEX IF NOT EXISTS idx_prompt_log_hash ON prompt_log(prompt_hash);
 CREATE INDEX IF NOT EXISTS idx_prompt_log_skill ON prompt_log(skill_name, timestamp DESC);
 """
 
+TOOL_PREDICTIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS tool_predictions (
+    token       TEXT NOT NULL,
+    tool_name   TEXT NOT NULL,
+    score       FLOAT NOT NULL DEFAULT 1.0,
+    hit_count   INT NOT NULL DEFAULT 1,
+    miss_count  INT NOT NULL DEFAULT 0,
+    last_seen   TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (token, tool_name)
+);
+CREATE INDEX IF NOT EXISTS idx_tool_predictions_token ON tool_predictions(token);
+"""
+
+TOOL_COOCCURRENCE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS tool_cooccurrence (
+    tool_a      TEXT NOT NULL,
+    tool_b      TEXT NOT NULL,
+    frequency   INT NOT NULL DEFAULT 1,
+    PRIMARY KEY (tool_a, tool_b)
+);
+"""
+
 ALL_SCHEMAS = (
     INCIDENTS_SCHEMA
     + RUNBOOKS_SCHEMA
