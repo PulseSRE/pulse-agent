@@ -44,6 +44,8 @@ class MonitorSession:
         self.scan_interval = get_settings().scan_interval
         self._last_findings: dict[str, dict] = {}  # deduplicate by title+category
         self._recent_fixes: dict[str, float] = {}  # resource_key -> timestamp for cooldown
+        self._fix_attempt_counts: dict[str, int] = {}  # resource_key -> number of fix attempts
+        self._MAX_FIX_ATTEMPTS = 2  # stop retrying after this many failed fixes
         self._pending_action_approvals: dict[str, asyncio.Future] = {}
         self._recent_investigations: dict[str, float] = {}
         self._scan_counter = 0
@@ -136,6 +138,15 @@ class MonitorSession:
                     )
                     continue
 
+            # Retry limit: stop attempting auto-fix after repeated failures
+            if resource_key and self._fix_attempt_counts.get(resource_key, 0) >= self._MAX_FIX_ATTEMPTS:
+                logger.info(
+                    "Auto-fix exhausted: %s already attempted %d times — needs manual intervention",
+                    resource_key,
+                    self._fix_attempt_counts[resource_key],
+                )
+                continue
+
             # Bare pod protection: don't delete pods that have no ownerReferences
             if category == "crashloop" and resources:
                 r = resources[0]
@@ -218,9 +229,10 @@ class MonitorSession:
                 fixes_this_cycle += 1
                 self._recent_fix_ids.add(finding["id"])
 
-                # Record cooldown timestamp
+                # Record cooldown timestamp and increment attempt counter
                 if resource_key:
                     self._recent_fixes[resource_key] = time.time()
+                    self._fix_attempt_counts[resource_key] = self._fix_attempt_counts.get(resource_key, 0) + 1
                 self._pending_verifications[action_report["id"]] = {
                     "action_id": action_report["id"],
                     "finding_id": finding["id"],
