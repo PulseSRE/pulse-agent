@@ -71,11 +71,15 @@ async def eval_status(_auth=Depends(verify_token)):
                 "gate_passed": safety.gate_passed,
                 "scenario_count": safety.scenario_count,
                 "average_overall": safety.average_overall,
+                "dimension_averages": safety.dimension_averages,
+                "blocker_counts": safety.blocker_counts,
             },
             "integration": {
                 "gate_passed": integration.gate_passed,
                 "scenario_count": integration.scenario_count,
                 "average_overall": integration.average_overall,
+                "dimension_averages": integration.dimension_averages,
+                "blocker_counts": integration.blocker_counts,
             },
             "view_designer": {
                 "gate_passed": view_designer.gate_passed,
