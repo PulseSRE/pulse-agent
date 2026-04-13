@@ -20,6 +20,136 @@ logger = logging.getLogger("pulse_agent.api")
 router = APIRouter()
 
 
+# ── Scanner Categories ─────────────────────────────────────────────────────
+
+_SCANNER_CATEGORIES = {
+    "pod_health": ["crashloop", "pending", "oom", "image_pull"],
+    "node_pressure": ["nodes"],
+    "workload_health": ["workloads", "daemonsets", "hpa"],
+    "security_audit": ["audit_rbac", "audit_auth", "audit_config"],
+    "certificate_expiry": ["cert_expiry"],
+    "alerts": ["alerts"],
+    "deployment_audit": ["audit_deployment", "audit_events"],
+    "operator_health": ["operators"],
+}
+
+
+def get_scanner_coverage(days: int = 7) -> dict:
+    """Get scanner coverage statistics.
+
+    Args:
+        days: Number of days to look back for finding stats (1-90).
+
+    Returns:
+        Dictionary with coverage metrics:
+        - active_scanners: count of enabled scanners
+        - total_scanners: total available scanners
+        - coverage_pct: percentage of categories covered (0.0-1.0)
+        - categories: list of {name, covered, scanners}
+        - per_scanner: list of {name, enabled, finding_count, actionable_count, noise_pct}
+    """
+    from ..monitor import _get_all_scanners
+
+    # Get all scanners
+    all_scanners = _get_all_scanners()
+    scanner_ids = {scanner_id for scanner_id, _ in all_scanners}
+    total_scanners = len(all_scanners)
+
+    # All scanners are currently always enabled (no toggle mechanism yet)
+    active_scanners = total_scanners
+
+    # Compute category coverage
+    categories = []
+    covered_count = 0
+    total_categories = len(_SCANNER_CATEGORIES)
+
+    for category_name, scanner_list in _SCANNER_CATEGORIES.items():
+        # A category is covered if at least one of its scanners is enabled
+        covered = any(s in scanner_ids for s in scanner_list)
+        if covered:
+            covered_count += 1
+
+        # Get the list of enabled scanners for this category
+        enabled_scanners = [s for s in scanner_list if s in scanner_ids]
+
+        categories.append(
+            {
+                "name": category_name,
+                "covered": covered,
+                "scanners": enabled_scanners,
+            }
+        )
+
+    coverage_pct = covered_count / total_categories if total_categories > 0 else 0.0
+
+    # Try to get per-scanner finding stats from the database
+    per_scanner = []
+    try:
+        from .. import db
+
+        database = db.get_database()
+
+        # Get current timestamp
+        now_ts_row = database.fetchone("SELECT EXTRACT(EPOCH FROM NOW())::BIGINT * 1000 AS ts")
+        now_ts = now_ts_row["ts"] if now_ts_row else 0
+        cutoff_ts = int(now_ts - (days * 24 * 3600 * 1000))
+
+        # Get finding counts per scanner category
+        # Note: findings table uses 'category' field which maps to scanner IDs
+        for scanner_id, _ in all_scanners:
+            # Get total findings for this scanner
+            finding_row = database.fetchone(
+                "SELECT COUNT(*) as cnt FROM findings WHERE category = ? AND timestamp >= ?",
+                (scanner_id, cutoff_ts),
+            )
+            finding_count = finding_row["cnt"] if finding_row else 0
+
+            # Get actionable findings (severity = critical or warning)
+            actionable_row = database.fetchone(
+                "SELECT COUNT(*) as cnt FROM findings "
+                "WHERE category = ? AND timestamp >= ? AND severity IN ('critical', 'warning')",
+                (scanner_id, cutoff_ts),
+            )
+            actionable_count = actionable_row["cnt"] if actionable_row else 0
+
+            # Calculate noise percentage
+            noise_pct = 0.0
+            if finding_count > 0:
+                noise_count = finding_count - actionable_count
+                noise_pct = round(noise_count / finding_count, 2)
+
+            per_scanner.append(
+                {
+                    "name": scanner_id,
+                    "enabled": True,  # All scanners currently enabled
+                    "finding_count": finding_count,
+                    "actionable_count": actionable_count,
+                    "noise_pct": noise_pct,
+                }
+            )
+    except Exception as e:
+        logger.debug("Failed to get per-scanner stats: %s", e)
+        # Return basic stats without DB data
+        for scanner_id, _ in all_scanners:
+            per_scanner.append(
+                {
+                    "name": scanner_id,
+                    "enabled": True,
+                    "finding_count": 0,
+                    "actionable_count": 0,
+                    "noise_pct": 0.0,
+                }
+            )
+
+    return {
+        "active_scanners": active_scanners,
+        "total_scanners": total_scanners,
+        "coverage_pct": round(coverage_pct, 2),
+        "categories": categories,
+        "per_scanner": per_scanner,
+    }
+
+
 def get_fix_history_summary(days: int = 7) -> dict:
     """Aggregate fix history statistics for the last N days."""
     from .. import db
@@ -266,3 +396,12 @@ async def resume_autofix(_auth=Depends(verify_token)):
     set_autofix_paused(False)
     logger.info("Auto-fix RESUMED via /monitor/resume")
     return {"autofix_paused": False}
+
+
+@router.get("/monitor/coverage")
+async def scanner_coverage(
+    days: int = Query(7, ge=1, le=90),
+    _auth=Depends(verify_token),
+):
+    """Scanner coverage statistics showing which failure modes are monitored. Requires token auth."""
+    return get_scanner_coverage(days)

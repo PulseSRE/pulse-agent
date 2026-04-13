@@ -133,3 +133,62 @@ class TestFixHistorySummary:
         assert r.status_code == 200
         # Verify that the function was called with days=30
         mock_fn.assert_called_once_with(30)
+
+
+# ── Scanner Coverage ───────────────────────────────────────────────────────
+
+
+class TestScannerCoverage:
+    def test_returns_coverage_stats(self, api_client, api_headers):
+        """Test that monitor/coverage returns scanner coverage statistics."""
+        mock_coverage = {
+            "active_scanners": 14,
+            "total_scanners": 16,
+            "coverage_pct": 0.85,
+            "categories": [
+                {"name": "pod_health", "covered": True, "scanners": ["crashloop", "pending", "oom", "image_pull"]},
+                {"name": "node_pressure", "covered": True, "scanners": ["nodes"]},
+                {"name": "certificate_expiry", "covered": False, "scanners": []},
+            ],
+            "per_scanner": [
+                {"name": "crashloop", "enabled": True, "finding_count": 42, "actionable_count": 38, "noise_pct": 0.09},
+                {"name": "pending", "enabled": True, "finding_count": 15, "actionable_count": 12, "noise_pct": 0.2},
+                {"name": "cert_expiry", "enabled": False, "finding_count": 0, "actionable_count": 0, "noise_pct": 0.0},
+            ],
+        }
+
+        with patch("sre_agent.api.monitor_rest.get_scanner_coverage", return_value=mock_coverage):
+            r = api_client.get("/monitor/coverage", headers=api_headers)
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["active_scanners"] == 14
+        assert data["total_scanners"] == 16
+        assert data["coverage_pct"] == 0.85
+        assert len(data["categories"]) == 3
+        assert data["categories"][0]["name"] == "pod_health"
+        assert data["categories"][0]["covered"] is True
+        assert len(data["per_scanner"]) == 3
+
+    def test_requires_auth(self, api_client):
+        """Test that the endpoint requires authentication."""
+        r = api_client.get("/monitor/coverage")
+        assert r.status_code == 401
+
+    def test_custom_days_parameter(self, api_client, api_headers):
+        """Test that days parameter is passed through correctly."""
+        mock_coverage = {
+            "active_scanners": 16,
+            "total_scanners": 16,
+            "coverage_pct": 1.0,
+            "categories": [],
+            "per_scanner": [],
+        }
+
+        with patch("sre_agent.api.monitor_rest.get_scanner_coverage") as mock_fn:
+            mock_fn.return_value = mock_coverage
+            r = api_client.get("/monitor/coverage?days=30", headers=api_headers)
+
+        assert r.status_code == 200
+        # Verify that the function was called with days=30
+        mock_fn.assert_called_once_with(30)
