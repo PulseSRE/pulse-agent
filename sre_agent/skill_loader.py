@@ -428,6 +428,22 @@ def classify_query(query: str) -> Skill:
         best_name = max(scores, key=lambda n: (scores[n], _skills[n].priority))
         best_score = scores[best_name]
         if best_score >= _LLM_CLASSIFY_THRESHOLD:
+            best_skill = _skills[best_name]
+
+            # Pre-route handoff: if the winner's handoff_to rules match,
+            # route directly to the handoff target instead of routing
+            # to the winner and handing off later.
+            handoff_target = check_handoff(best_skill, query)
+            if handoff_target:
+                best_skill = handoff_target
+                best_name = handoff_target.name
+                logger.info(
+                    "classify_query: pre-route handoff %s → %s for '%s'",
+                    _skills[max(scores, key=lambda n: scores[n])].name,
+                    best_name,
+                    query[:60],
+                )
+
             _last_routing_decision.clear()
             _last_routing_decision.update(
                 {
@@ -444,7 +460,7 @@ def classify_query(query: str) -> Skill:
                 best_score,
                 scores,
             )
-            return _skills[best_name]
+            return best_skill
 
     # Low confidence or no matches: try LLM fallback
     llm_result = _llm_classify(query)
