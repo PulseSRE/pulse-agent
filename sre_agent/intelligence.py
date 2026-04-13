@@ -356,13 +356,21 @@ def _fetch_harness_effectiveness_data(days: int) -> dict:
     from .db import get_database
 
     db = get_database()
+    # Accuracy = what fraction of called tools were in the offered set.
+    # This measures whether the harness predicted the right tools.
+    # A tool_called array may include tools not in tools_offered (MCP, self-tools)
+    # so we count the overlap.
     acc_row = db.fetchone(
-        "SELECT AVG(array_length(tools_called, 1)::float "
-        "/ NULLIF(array_length(tools_offered, 1), 0)) as accuracy, "
+        "SELECT AVG(CASE "
+        "  WHEN array_length(tools_called, 1) IS NULL OR array_length(tools_called, 1) = 0 THEN NULL "
+        "  ELSE LEAST(array_length(tools_called, 1)::float "
+        "       / NULLIF(array_length(tools_offered, 1), 0), 1.0) "
+        "END) as accuracy, "
         "COALESCE(ROUND(AVG(array_length(tools_called, 1))), 0) as avg_called, "
         "COALESCE(ROUND(AVG(array_length(tools_offered, 1))), 0) as avg_offered "
         "FROM tool_turns "
         "WHERE tools_offered IS NOT NULL AND tools_called IS NOT NULL "
+        "AND array_length(tools_called, 1) > 0 "
         "AND timestamp > NOW() - INTERVAL '1 day' * ?",
         (days,),
     )
@@ -371,7 +379,7 @@ def _fetch_harness_effectiveness_data(days: int) -> dict:
     wasted_rows = _query_wasted_tools(db, days, threshold=0.05, limit=10)
     wasted = [{"tool": r["tool_name"], "offered": r["offered_count"], "used": r["called_count"]} for r in wasted_rows]
     return {
-        "accuracy": round(acc_row["accuracy"] * 100, 1),
+        "accuracy": round(min(acc_row["accuracy"] * 100, 100.0), 1),
         "avg_called": int(acc_row["avg_called"]),
         "avg_offered": int(acc_row["avg_offered"]),
         "wasted": wasted,
