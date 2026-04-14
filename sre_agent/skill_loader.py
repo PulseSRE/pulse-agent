@@ -10,7 +10,6 @@ get_tool_category, select_tools) that was previously in harness.py.
 from __future__ import annotations
 
 import logging
-import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -291,7 +290,8 @@ def revalidate_skills() -> None:
 
 def load_skills(skills_dir: Path | None = None) -> dict[str, Skill]:
     """Load all skill packages from built-in and user-created directories."""
-    global _skills, _load_timestamp, _keyword_index
+    global _skills, _load_timestamp, _keyword_index, _selector
+    _selector = None  # force re-initialization when skills change
 
     loaded: dict[str, Skill] = {}
 
@@ -382,139 +382,89 @@ def get_last_routing_decision() -> dict | None:
     return dict(_last_routing_decision) if _last_routing_decision else None
 
 
-def classify_query(query: str) -> Skill:
+_selector = None  # SkillSelector | None — lazy-initialized
+
+
+def _get_selector():
+    """Lazy-initialize the SkillSelector singleton."""
+    global _selector
+    if _selector is None:
+        if not _skills:
+            load_skills()
+        from .skill_selector import SkillSelector
+
+        _selector = SkillSelector(_skills, keyword_index=_keyword_index)
+    return _selector
+
+
+def classify_query(query: str, *, context: dict | None = None) -> Skill:
     """Route a query to the best matching skill.
 
-    Two-tier classification:
-    1. Fast keyword scoring (free, instant) — handles obvious queries
-    2. LLM fallback (haiku, ~$0.001) — handles ambiguous queries when keyword
-       confidence is below threshold
-
-    Applies typo correction before matching. Uses word-boundary matching
-    for short keywords (< 4 chars) to avoid false positives.
+    ORCA multi-signal routing: keyword + component tags + historical channels
+    with weighted score fusion and dynamic thresholds.
     """
     if not _skills:
         load_skills()
 
-    # Apply typo correction if available
+    # Apply typo correction
     try:
         from .orchestrator import fix_typos
 
-        q = fix_typos(query).lower()
+        q = fix_typos(query)
     except ImportError:
-        q = query.lower()
+        q = query
 
-    scores: dict[str, int] = {}
+    selector = _get_selector()
+    result = selector.select(q, context=context)
 
-    # Direct skill name match (e.g., "run openshiftpulse_app_monitor")
-    for skill_name in _skills:
-        # Match skill name with underscores or hyphens or spaces
-        variants = [skill_name, skill_name.replace("_", " "), skill_name.replace("_", "-")]
-        for variant in variants:
-            if variant in q:
-                scores[skill_name] = scores.get(skill_name, 0) + len(variant) * 2  # high weight
-                break
+    best_skill = _skills.get(result.skill_name)
 
-    for kw, skill_name, kw_len in _keyword_index:
-        if kw_len < 4:
-            # Short keywords: word boundary match to avoid "pod" matching "tripod"
-            if re.search(r"\b" + re.escape(kw) + r"\b", q):
-                scores[skill_name] = scores.get(skill_name, 0) + kw_len
-        elif kw in q:
-            scores[skill_name] = scores.get(skill_name, 0) + kw_len
+    # If ORCA didn't find a high-confidence match, try LLM fallback
+    if result.source == "fallback" and not best_skill:
+        llm_result = _llm_classify(query)
+        if llm_result:
+            best_skill = llm_result
+            result.skill_name = llm_result.name
+            result.source = "llm_fallback"
 
-    # High confidence: use keyword result
-    if scores:
-        best_name = max(scores, key=lambda n: (scores[n], _skills[n].priority))
-        best_score = scores[best_name]
-        if best_score >= _LLM_CLASSIFY_THRESHOLD:
-            best_skill = _skills[best_name]
+    if not best_skill:
+        best_skill = _skills.get("sre") or next(iter(_skills.values()))
+        result.skill_name = best_skill.name
 
-            # Pre-route handoff: if the winner's handoff_to rules match,
-            # route directly to the handoff target instead of routing
-            # to the winner and handing off later.
-            handoff_target = check_handoff(best_skill, query)
-            if handoff_target:
-                best_skill = handoff_target
-                best_name = handoff_target.name
-                logger.info(
-                    "classify_query: pre-route handoff %s → %s for '%s'",
-                    _skills[max(scores, key=lambda n: scores[n])].name,
-                    best_name,
-                    query[:60],
-                )
-
-            _last_routing_decision.clear()
-            _last_routing_decision.update(
-                {
-                    "skill_name": best_name,
-                    "keyword_score": best_score,
-                    "used_llm_fallback": False,
-                    "competing_scores": dict(scores),
-                }
-            )
-            logger.debug(
-                "classify_query: '%s' → %s (score=%d, competing=%s)",
-                query[:60],
-                best_name,
-                best_score,
-                scores,
-            )
-            return best_skill
-
-    # Low confidence or no matches: try LLM fallback
-    llm_result = _llm_classify(query)
-    if llm_result:
-        _last_routing_decision.clear()
-        _last_routing_decision.update(
-            {
-                "skill_name": llm_result.name,
-                "keyword_score": scores.get(llm_result.name, 0),
-                "used_llm_fallback": True,
-                "competing_scores": dict(scores),
-            }
-        )
-        logger.debug(
-            "classify_query: '%s' → %s (LLM fallback, keyword_scores=%s)",
+    # Pre-route handoff
+    handoff_target = check_handoff(best_skill, query)
+    if handoff_target:
+        logger.info(
+            "classify_query: pre-route handoff %s → %s for '%s'",
+            best_skill.name,
+            handoff_target.name,
             query[:60],
-            llm_result.name,
-            scores,
         )
-        return llm_result
+        best_skill = handoff_target
+        result.skill_name = handoff_target.name
 
-    # If we had some keyword scores, use the best one
-    if scores:
-        best_name = max(scores, key=lambda n: (scores[n], _skills[n].priority))
-        _last_routing_decision.clear()
-        _last_routing_decision.update(
-            {
-                "skill_name": best_name,
-                "keyword_score": scores[best_name],
-                "used_llm_fallback": False,
-                "competing_scores": dict(scores),
-            }
-        )
-        logger.debug(
-            "classify_query: '%s' → %s (low-confidence fallback, score=%d)",
-            query[:60],
-            best_name,
-            scores[best_name],
-        )
-        return _skills[best_name]
-
-    # Default to SRE (highest priority general-purpose skill)
-    fallback = _skills.get("sre") or next(iter(_skills.values()))
+    # Update _last_routing_decision for backward compat
     _last_routing_decision.clear()
     _last_routing_decision.update(
         {
-            "skill_name": fallback.name,
-            "keyword_score": 0,
-            "used_llm_fallback": False,
-            "competing_scores": {},
+            "skill_name": result.skill_name,
+            "keyword_score": int(result.fused_scores.get(result.skill_name, 0) * 10),
+            "used_llm_fallback": result.source == "llm_fallback",
+            "competing_scores": {k: int(v * 10) for k, v in result.fused_scores.items()},
         }
     )
-    logger.debug("classify_query: '%s' → %s (default fallback)", query[:60], fallback.name)
-    return fallback
+
+    logger.debug(
+        "classify_query: '%s' → %s (source=%s, score=%.3f, threshold=%.2f, %dms)",
+        query[:60],
+        result.skill_name,
+        result.source,
+        result.fused_scores.get(result.skill_name, 0),
+        result.threshold_used,
+        result.selection_ms,
+    )
+
+    return best_skill
 
 
 def _llm_classify(query: str) -> Skill | None:
