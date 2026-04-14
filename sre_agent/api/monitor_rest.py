@@ -524,7 +524,7 @@ async def get_topology(
     edges = []
 
     for key, node in graph._nodes.items():
-        if namespace and node.namespace and node.namespace != namespace:
+        if namespace and node.namespace != namespace:
             continue
         nodes.append(
             {
@@ -546,10 +546,20 @@ async def get_topology(
                 }
             )
 
+    # Build filtered summary (not global)
+    kinds: dict[str, int] = {}
+    for n in nodes:
+        kinds[n["kind"]] = kinds.get(n["kind"], 0) + 1
+
     return {
         "nodes": nodes,
         "edges": edges,
-        "summary": graph.summary(),
+        "summary": {
+            "nodes": len(nodes),
+            "edges": len(edges),
+            "kinds": kinds,
+            "last_refresh": graph._last_refresh,
+        },
     }
 
 
