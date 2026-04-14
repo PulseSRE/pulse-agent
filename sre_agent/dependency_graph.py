@@ -142,9 +142,11 @@ class DependencyGraph:
 
                     # Owner references
                     for ref in p.metadata.owner_references or []:
-                        owner_key = _resource_key(ref.kind, ns, ref.name)
+                        # Nodes are cluster-scoped — always use empty namespace
+                        owner_ns = "" if ref.kind == "Node" else ns
+                        owner_key = _resource_key(ref.kind, owner_ns, ref.name)
                         if owner_key not in self._nodes:
-                            self.add_node(ref.kind, ns, ref.name)
+                            self.add_node(ref.kind, owner_ns, ref.name)
                         self.add_edge(owner_key, pod_key, "owns")
 
                     # Volume mounts → PVC
