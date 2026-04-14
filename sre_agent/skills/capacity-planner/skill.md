@@ -21,6 +21,20 @@ requires_tools:
 handoff_to:
   sre: [fix, remediate, scale, drain, cordon, apply]
   view_designer: [dashboard, view, create view, build view]
+trigger_patterns:
+  - "capacity|headroom|exhaustion|running.out"
+  - "forecast|projection|growth.plan"
+  - "right.?size|overcommit|bin.?pack"
+  - "how.much.room|enough.resource|scale.plan"
+tool_sequences:
+  capacity_audit: [get_node_metrics, list_resources, get_prometheus_query, list_hpas]
+  forecast: [get_prometheus_query, get_node_metrics, list_resources]
+investigation_framework: |
+  1. Gather current node resource utilization (CPU, memory)
+  2. Check resource requests vs limits vs actual usage
+  3. Identify overcommitted or underutilized namespaces
+  4. Forecast exhaustion timeline using Prometheus trends
+  5. Recommend scaling actions (add nodes, right-size requests, HPA)
 configurable:
   - forecast_horizon:
       type: enum

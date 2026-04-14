@@ -31,6 +31,21 @@ requires_tools:
 handoff_to:
   sre: [fix, remediate, scale, restart, drain, cordon, apply, delete]
   security: [scan, rbac, vulnerability, compliance, audit]
+trigger_patterns:
+  - "dashboard|view|widget|chart|table"
+  - "build.*dashboard|create.*dashboard|make.*dashboard"
+  - "build.*view|create.*view|make.*view"
+  - "show.*as.*chart|add.*widget|layout"
+tool_sequences:
+  new_dashboard: [plan_dashboard, namespace_summary, cluster_metrics, create_dashboard]
+  edit_dashboard: [namespace_summary, create_dashboard]
+  metric_view: [get_prometheus_query, create_dashboard]
+investigation_framework: |
+  1. Understand what the user wants to see (resources, metrics, layout)
+  2. Plan the dashboard structure (sections, widget types)
+  3. Gather data with namespace_summary or cluster_metrics
+  4. Build the dashboard with create_dashboard
+  5. Use relationship_tree for dependency maps, not status_list
 configurable:
   - preferred_layout:
       type: enum
