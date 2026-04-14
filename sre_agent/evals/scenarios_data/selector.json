@@ -1,0 +1,29 @@
+{
+  "suite_name": "selector",
+  "description": "Skill selector accuracy — verifies ORCA multi-signal routing selects the correct skill for each query",
+  "scenarios": [
+    {"id": "sel_crashloop_sre", "query": "why is my pod crashlooping in production", "expected_skill": "sre", "acceptable": ["sre"]},
+    {"id": "sel_pending_sre", "query": "pods stuck in pending state", "expected_skill": "sre", "acceptable": ["sre"]},
+    {"id": "sel_node_pressure", "query": "node is under memory pressure", "expected_skill": "sre", "acceptable": ["sre"]},
+    {"id": "sel_oom_sre", "query": "container was OOMKilled at 256Mi limit", "expected_skill": "sre", "acceptable": ["sre"]},
+    {"id": "sel_deploy_fail", "query": "deployment rollout is stuck", "expected_skill": "sre", "acceptable": ["sre"]},
+    {"id": "sel_hpa_saturated", "query": "HPA is at max replicas and can't scale", "expected_skill": "sre", "acceptable": ["sre"]},
+    {"id": "sel_alerts_firing", "query": "check what alerts are firing", "expected_skill": "sre", "acceptable": ["sre"]},
+    {"id": "sel_rbac_security", "query": "scan for RBAC vulnerabilities", "expected_skill": "security", "acceptable": ["security"]},
+    {"id": "sel_pod_security", "query": "check pod security violations", "expected_skill": "security", "acceptable": ["security"]},
+    {"id": "sel_network_policy", "query": "which namespaces have no network policies", "expected_skill": "security", "acceptable": ["security"]},
+    {"id": "sel_secret_audit", "query": "audit secrets for rotation", "expected_skill": "security", "acceptable": ["security"]},
+    {"id": "sel_cert_expiry", "query": "check TLS certificate expiry", "expected_skill": "security", "acceptable": ["security", "sre"]},
+    {"id": "sel_create_dashboard", "query": "create a dashboard for namespace monitoring", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_capacity_plan", "query": "forecast when we'll run out of CPU capacity", "expected_skill": "capacity_planner", "acceptable": ["capacity_planner", "sre"]},
+    {"id": "sel_ambiguous_cert", "query": "the TLS certificate is expiring soon", "expected_skill": "sre", "acceptable": ["sre", "security"]},
+    {"id": "sel_ambiguous_network", "query": "check network connectivity between pods", "expected_skill": "sre", "acceptable": ["sre", "security"]},
+    {"id": "sel_temporal_deploy", "query": "pods crashing after we just deployed v2.5", "expected_skill": "sre", "acceptable": ["sre"]},
+    {"id": "sel_temporal_upgrade", "query": "cluster unstable since the upgrade", "expected_skill": "sre", "acceptable": ["sre"]},
+    {"id": "sel_alert_name", "query": "KubePodCrashLooping alert firing in production", "expected_skill": "sre", "acceptable": ["sre"]},
+    {"id": "sel_empty_query", "query": "", "expected_skill": "sre", "acceptable": ["sre"]},
+    {"id": "sel_gibberish", "query": "xyzzy foobar baz", "expected_skill": "sre", "acceptable": ["sre"]},
+    {"id": "sel_skill_name_direct", "query": "run security scan", "expected_skill": "security", "acceptable": ["security"]},
+    {"id": "sel_capacity_dashboard", "query": "create a capacity planning dashboard for me", "expected_skill": "view_designer", "acceptable": ["view_designer", "capacity_planner"]}
+  ]
+}
