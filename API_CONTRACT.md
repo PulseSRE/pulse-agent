@@ -59,6 +59,11 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/analytics/prompt` | token | Prompt section breakdown, cache hit rate, version drift history (query: `days` 1-365, `skill`) |
 | `GET` | `/recommendations` | token | Contextual capability recommendations: unused scanners, untried features (max 4) |
 | `GET` | `/analytics/readiness` | token | Readiness gate summary: pass/fail/attention counts, pass rate, attention items |
+| `GET` | `/postmortems` | token | Auto-generated postmortems, newest first (query: `limit` 1-100) |
+| `GET` | `/topology` | token | Dependency graph nodes + edges for visualization (query: `namespace` optional filter) |
+| `GET` | `/plan-templates` | token | List investigation plan templates |
+| `GET` | `/plan-templates/{type}` | token | Get a single plan template by incident type |
+| `GET` | `/fix-history/resolutions` | token | Recent resolution outcomes with verification status (query: `days`, `limit`) |
 
 **Authentication:** Token-authenticated endpoints accept `Authorization: Bearer <token>` header or `?token=<token>` query parameter. The token is `PULSE_AGENT_WS_TOKEN`. Unauthenticated requests return 401.
 
@@ -69,6 +74,7 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
   "protocol": "2",
   "agent": "2.2.0",
   "tools": 111,
+  "skills": 8,
   "features": ["component_specs", "ws_token_auth", "rate_limiting", "monitor", "fix_history", "predictions"]
 }
 ```

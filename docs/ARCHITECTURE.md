@@ -1368,6 +1368,45 @@ User: "Build me a production dashboard"
 
 ---
 
+## 15b. Multi-Signal Skill Selection & Plan Execution
+
+### Multi-Signal Skill Selector (`skill_selector.py`)
+
+Replaces keyword-only routing with 5-channel fusion. Each channel scores every skill independently, then scores are fused with weighted sum and re-ranked.
+
+**Channels:**
+1. **Keyword** (0.35) — ported from `classify_query()`, normalized 0.0-1.0
+2. **Alert Taxonomy** (0.15) — alert name prefixes + scanner categories → skill mapping
+3. **Component Tags** (0.25) — regex-extract K8s resource types, match skill categories
+4. **Historical** (0.20) — token→skill frequency from `skill_usage` table, 5-min cache
+5. **Temporal** (0.05) — recent deploy/change keywords boost operations skills
+6. **Semantic** (0.0) — embedding similarity stub, behind `PULSE_AGENT_EMBEDDING_CHANNEL=1`
+
+Dynamic thresholds: P1→0.35, P2→0.45, P3→0.60. Hard/soft conflict detection for mutually exclusive tools. Selection outcomes logged to `skill_selection_log` table.
+
+### Phased Plan Execution (`plan_runtime.py`, `skill_plan.py`)
+
+Incident resolution via multi-phase skill plans instead of flat agent loops:
+
+```
+triage → diagnose → [branch: db/pod/network] → remediate → verify → postmortem
+```
+
+**Components:**
+- `SkillPlan` / `SkillPhase` / `SkillOutput` — data model with DAG validation, cycle detection
+- `PlanRuntime.execute()` — topological execution, progressive context compression (~120-180 tokens/phase)
+- `plan_templates/*.yaml` — 6 pre-defined templates (crashloop, OOM, node-pressure, deployment-failure, security, latency)
+- `plan-builder` meta-skill — dynamic plan construction when no template matches
+
+### Knowledge Infrastructure
+
+- **Dependency Graph** (`dependency_graph.py`) — live K8s resource graph refreshed each scan. Nodes: Pods, Deployments, Services, PVCs, ConfigMaps, Secrets, Nodes. Edges: ownerReferences, selectors, mounts. Used for blast radius analysis.
+- **Auto-Postmortems** (`postmortem.py`) — generated after plan completion. Timeline, root cause, contributing factors, prevention recommendations. Stored in `postmortems` table.
+- **Skill Scaffolding** (`skill_scaffolder.py`) — auto-drafts `skill.md` from novel incident resolutions. Stored with `generated_by: auto`, `reviewed: false`.
+- **Change Risk Scoring** (`change_risk.py`) — pre-deploy risk analysis (0-100). Image changes, resource changes, blast radius, historical failure rate.
+- **SLO Registry** (`slo_registry.py`) — per-service SLO tracking with burn rate alerting.
+- **Selector Learning** (`selector_learning.py`) — batch weight recomputation from selection outcomes.
+
 ## 16. Future Roadmap
 
 ### Progressive Rendering
