@@ -151,29 +151,39 @@ def execute_fix(plan: FixPlan) -> tuple[str, str, str]:
     return executor(plan)
 
 
-def _execute_patch_image(plan: FixPlan) -> tuple[str, str, str]:
-    """Fix bad image by rolling back to the previous deployment revision."""
+def _get_first_resource(plan: FixPlan) -> tuple[dict, str]:
+    """Extract the first resource and namespace from a fix plan."""
     resources = plan.params.get("resources", [])
     if not resources:
         raise ValueError("No resources in fix plan")
-
     r = resources[0]
-    ns = r.get("namespace", "default")
+    return r, r.get("namespace", "default")
+
+
+def _find_owning_deployment(pod_name: str, ns: str) -> str | None:
+    """Walk Pod → ReplicaSet → Deployment owner chain. Returns deployment name or None."""
+    core = get_core_client()
+    apps = get_apps_client()
+    pod = core.read_namespaced_pod(pod_name, ns)
+    for ref in pod.metadata.owner_references or []:
+        if ref.kind == "ReplicaSet":
+            rs = apps.read_namespaced_replica_set(ref.name, ns)
+            for rs_ref in rs.metadata.owner_references or []:
+                if rs_ref.kind == "Deployment":
+                    return rs_ref.name
+    return None
+
+
+def _execute_patch_image(plan: FixPlan) -> tuple[str, str, str]:
+    """Fix bad image by rolling back to the previous deployment revision."""
+    r, ns = _get_first_resource(plan)
     core = get_core_client()
     apps = get_apps_client()
 
     pod = core.read_namespaced_pod(r["name"], ns)
     bad_image = pod.spec.containers[0].image if pod.spec.containers else "unknown"
 
-    # Find owning Deployment
-    dep_name = None
-    for ref in pod.metadata.owner_references or []:
-        if ref.kind == "ReplicaSet":
-            rs = apps.read_namespaced_replica_set(ref.name, ns)
-            for rs_ref in rs.metadata.owner_references or []:
-                if rs_ref.kind == "Deployment":
-                    dep_name = rs_ref.name
-                    break
+    dep_name = _find_owning_deployment(r["name"], ns)
 
     if not dep_name:
         # Fallback: delete the pod
@@ -214,28 +224,17 @@ def _execute_patch_image(plan: FixPlan) -> tuple[str, str, str]:
 
 def _execute_patch_resources(plan: FixPlan) -> tuple[str, str, str]:
     """Fix OOM by doubling the memory limit on the deployment."""
-    resources = plan.params.get("resources", [])
-    if not resources:
-        raise ValueError("No resources in fix plan")
-
-    r = resources[0]
-    ns = r.get("namespace", "default")
+    r, ns = _get_first_resource(plan)
     name = r.get("name", "")
     kind = r.get("kind", "")
     apps = get_apps_client()
 
     # If resource is a Pod, find the owning Deployment
     if kind == "Pod":
-        core = get_core_client()
-        pod = core.read_namespaced_pod(name, ns)
-        for ref in pod.metadata.owner_references or []:
-            if ref.kind == "ReplicaSet":
-                rs = apps.read_namespaced_replica_set(ref.name, ns)
-                for rs_ref in rs.metadata.owner_references or []:
-                    if rs_ref.kind == "Deployment":
-                        name = rs_ref.name
-                        kind = "Deployment"
-                        break
+        dep_name = _find_owning_deployment(name, ns)
+        if dep_name:
+            name = dep_name
+            kind = "Deployment"
 
     if kind != "Deployment":
         raise ValueError(f"Cannot patch resources on {kind}/{name} — only Deployments supported")

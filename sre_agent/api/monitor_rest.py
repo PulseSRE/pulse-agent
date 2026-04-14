@@ -153,22 +153,28 @@ def get_fix_history_summary(days: int = 7) -> dict:
             (days,),
         )
 
+        # Single-pass aggregation
         total_actions = len(actions)
-        completed = sum(1 for a in actions if a["status"] == "completed")
-        failed = sum(1 for a in actions if a["status"] == "failed")
-        rolled_back = sum(1 for a in actions if a["status"] == "rolled_back")
-
-        # Calculate rates
-        success_rate = completed / total_actions if total_actions > 0 else 0.0
-        rollback_rate = rolled_back / total_actions if total_actions > 0 else 0.0
-
-        # Calculate average resolution time
-        durations = [a["duration_ms"] for a in actions if a["duration_ms"] and a["status"] == "completed"]
-        avg_resolution_ms = int(sum(durations) / len(durations)) if durations else 0
-
-        # Aggregate by category
+        completed = 0
+        failed = 0
+        rolled_back = 0
+        durations: list[int] = []
+        resolved = 0
+        still_failing = 0
+        improved = 0
         categories: dict[str, dict[str, Any]] = {}
+
         for action in actions:
+            status = action["status"]
+            if status == "completed":
+                completed += 1
+                if action["duration_ms"]:
+                    durations.append(action["duration_ms"])
+            elif status == "failed":
+                failed += 1
+            elif status == "rolled_back":
+                rolled_back += 1
+
             cat = action["category"] or "unknown"
             if cat not in categories:
                 categories[cat] = {
@@ -179,26 +185,28 @@ def get_fix_history_summary(days: int = 7) -> dict:
                     "confirmation_required": 0,
                 }
             categories[cat]["count"] += 1
-            if action["status"] == "completed":
+            if status == "completed":
                 categories[cat]["success_count"] += 1
-                # All completed actions in monitor are auto-fixed (trust level 3+)
                 categories[cat]["auto_fixed"] += 1
-            # Confirmation required is tracked separately in the monitor system
-            # For now, we consider all actions as requiring no confirmation since they're auto-fixed
 
+            vs = action.get("verification_status")
+            if vs == "verified":
+                resolved += 1
+            elif vs == "still_failing":
+                still_failing += 1
+            elif vs == "improved":
+                improved += 1
+
+        success_rate = completed / total_actions if total_actions > 0 else 0.0
+        rollback_rate = rolled_back / total_actions if total_actions > 0 else 0.0
+        avg_resolution_ms = int(sum(durations) / len(durations)) if durations else 0
         by_category = sorted(categories.values(), key=lambda x: x["count"], reverse=True)
-
-        # Verification breakdown
-        resolved = sum(1 for a in actions if a.get("verification_status") == "verified")
-        still_failing = sum(1 for a in actions if a.get("verification_status") == "still_failing")
-        improved = sum(1 for a in actions if a.get("verification_status") == "improved")
-        pending_verification = total_actions - resolved - still_failing - improved
 
         verification = {
             "resolved": resolved,
             "still_failing": still_failing,
             "improved": improved,
-            "pending": pending_verification,
+            "pending": total_actions - resolved - still_failing - improved,
             "resolution_rate": round(resolved / total_actions, 2) if total_actions > 0 else 0.0,
         }
 

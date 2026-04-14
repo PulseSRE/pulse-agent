@@ -15,7 +15,7 @@ from ..config import get_settings
 from ..db import get_database
 from ..k8s_client import get_core_client, safe
 from .actions import save_action, save_investigation, update_action_verification
-from .autofix import AUTO_FIX_HANDLERS, _autofix_paused
+from .autofix import _autofix_paused
 from .confidence import _estimate_auto_fix_confidence, _estimate_finding_confidence, _finding_key
 from .findings import _make_action_report, _ts
 from .investigations import (
@@ -124,9 +124,7 @@ class MonitorSession:
                 r = resources[0]
                 resource_key = f"{r.get('kind', '')}:{r.get('namespace', '')}:{r.get('name', '')}"
 
-            handler = AUTO_FIX_HANDLERS.get(category)
-
-            # Try intelligent fix first — uses investigation diagnosis
+            # Try intelligent fix — uses investigation diagnosis
             from .fix_planner import execute_fix as execute_targeted_fix
             from .fix_planner import get_investigation_for_finding, plan_fix
 
@@ -247,12 +245,7 @@ class MonitorSession:
 
             start_ms = _ts()
             try:
-                if targeted_plan:
-                    tool, before_state, after_state = await asyncio.to_thread(execute_targeted_fix, targeted_plan)
-                else:
-                    # handler is guaranteed to be not None due to check at line 146
-                    assert handler is not None
-                    tool, before_state, after_state = await asyncio.to_thread(handler, finding)
+                tool, before_state, after_state = await asyncio.to_thread(execute_targeted_fix, targeted_plan)
                 duration_ms = _ts() - start_ms
 
                 # Update report with success
