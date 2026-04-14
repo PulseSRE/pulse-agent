@@ -1,0 +1,37 @@
+# Node Pressure Resolution Plan Template
+# Handles nodes under disk, memory, or PID pressure
+
+id: node-pressure-v1
+name: Node Pressure Resolution
+incident_type: node-pressure
+max_total_duration: 1200  # 20 minutes
+
+phases:
+  - id: triage
+    skill_name: sre
+    required: true
+    timeout_seconds: 120
+    produces: [severity, affected_nodes, pressure_type, node_conditions]
+
+  - id: node_diagnostics
+    skill_name: sre
+    required: true
+    depends_on: [triage]
+    timeout_seconds: 300
+    produces: [root_cause, disk_usage, memory_usage, pod_count, confidence]
+
+  - id: drain_cordon
+    skill_name: sre
+    required: false
+    depends_on: [node_diagnostics]
+    timeout_seconds: 600
+    approval_required: true
+    produces: [node_action, pods_evicted, node_status]
+
+  - id: verify
+    skill_name: sre
+    required: true
+    depends_on: [drain_cordon]
+    timeout_seconds: 180
+    runs: always
+    produces: [node_ready, pressure_cleared, workload_redistributed]

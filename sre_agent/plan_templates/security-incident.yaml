@@ -1,0 +1,44 @@
+# Security Incident Response Plan Template
+# Handles security findings, RBAC violations, or suspicious activity
+
+id: security-incident-v1
+name: Security Incident Response
+incident_type: security-incident
+max_total_duration: 1800  # 30 minutes
+
+phases:
+  - id: triage
+    skill_name: security
+    required: true
+    timeout_seconds: 180
+    produces: [severity, incident_type, affected_resources, scope]
+
+  - id: security_scan
+    skill_name: security
+    required: true
+    depends_on: [triage]
+    timeout_seconds: 600
+    produces: [vulnerabilities, misconfigurations, compliance_violations, confidence]
+
+  - id: rbac_audit
+    skill_name: security
+    required: true
+    depends_on: [triage]
+    timeout_seconds: 300
+    produces: [excessive_permissions, service_account_issues, role_bindings]
+
+  - id: remediation_plan
+    skill_name: sre
+    required: true
+    depends_on: [security_scan, rbac_audit]
+    timeout_seconds: 480
+    approval_required: true
+    produces: [remediation_steps, risk_mitigation, rollback_plan]
+
+  - id: verify
+    skill_name: security
+    required: true
+    depends_on: [remediation_plan]
+    timeout_seconds: 240
+    runs: always
+    produces: [scan_clean, rbac_compliant, incident_resolved]

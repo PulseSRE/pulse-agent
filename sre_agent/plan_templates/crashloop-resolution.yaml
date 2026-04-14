@@ -1,0 +1,37 @@
+# Crashloop Resolution Plan Template
+# Handles pods stuck in CrashLoopBackOff state
+
+id: crashloop-resolution-v1
+name: Crashloop Resolution
+incident_type: crashloop
+max_total_duration: 900  # 15 minutes
+
+phases:
+  - id: triage
+    skill_name: sre
+    required: true
+    timeout_seconds: 120
+    produces: [severity, affected_pods, namespace, restart_count]
+
+  - id: diagnose
+    skill_name: sre
+    required: true
+    depends_on: [triage]
+    timeout_seconds: 300
+    produces: [root_cause, root_cause_category, confidence, exit_code, error_message]
+
+  - id: remediate
+    skill_name: sre
+    required: false
+    depends_on: [diagnose]
+    timeout_seconds: 300
+    approval_required: false
+    produces: [fix_applied, fix_type]
+
+  - id: verify
+    skill_name: sre
+    required: true
+    depends_on: [remediate]
+    timeout_seconds: 120
+    runs: always
+    produces: [pod_status, restart_count_after, resolution_confirmed]

@@ -1,0 +1,37 @@
+# Deployment Failure Plan Template
+# Handles failed deployments, rollouts stuck in progress, or new ReplicaSets not scaling
+
+id: deployment-failure-v1
+name: Deployment Failure Resolution
+incident_type: deployment-failure
+max_total_duration: 900  # 15 minutes
+
+phases:
+  - id: triage
+    skill_name: sre
+    required: true
+    timeout_seconds: 120
+    produces: [severity, deployment_name, namespace, replicas_desired, replicas_ready]
+
+  - id: change_analysis
+    skill_name: sre
+    required: true
+    depends_on: [triage]
+    timeout_seconds: 300
+    produces: [root_cause, image_changed, config_changed, recent_events, confidence]
+
+  - id: rollback_decision
+    skill_name: sre
+    required: false
+    depends_on: [change_analysis]
+    timeout_seconds: 300
+    approval_required: true
+    produces: [action_taken, rollback_applied, revision_number]
+
+  - id: verify
+    skill_name: sre
+    required: true
+    depends_on: [rollback_decision]
+    timeout_seconds: 180
+    runs: always
+    produces: [deployment_status, all_pods_ready, resolution_confirmed]

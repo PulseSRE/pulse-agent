@@ -1,0 +1,50 @@
+# Latency Degradation Plan Template
+# Handles increased response times, slow queries, or performance degradation
+# Includes conditional branching based on root cause layer
+
+id: latency-degradation-v1
+name: Latency Degradation Investigation
+incident_type: latency-degradation
+max_total_duration: 1200  # 20 minutes
+
+phases:
+  - id: triage
+    skill_name: sre
+    required: true
+    timeout_seconds: 120
+    produces: [severity, affected_services, latency_p95, latency_p99, error_rate]
+
+  - id: trace_source
+    skill_name: sre
+    required: true
+    depends_on: [triage]
+    timeout_seconds: 300
+    produces: [root_cause_layer, hotspot_component, confidence]
+
+  - id: investigate
+    skill_name: sre
+    required: true
+    depends_on: [trace_source]
+    timeout_seconds: 360
+    branch_on: root_cause_layer
+    branches:
+      database: [sre]
+      pod: [sre]
+      network: [sre]
+    produces: [root_cause, bottleneck_details, resource_constraints]
+
+  - id: remediate
+    skill_name: sre
+    required: false
+    depends_on: [investigate]
+    timeout_seconds: 300
+    approval_required: false
+    produces: [fix_applied, optimization_type]
+
+  - id: verify
+    skill_name: sre
+    required: true
+    depends_on: [remediate]
+    timeout_seconds: 180
+    runs: always
+    produces: [latency_improved, p95_after, p99_after, resolution_confirmed]

@@ -1,0 +1,37 @@
+# OOM (Out of Memory) Investigation Plan Template
+# Handles pods being OOMKilled or experiencing memory pressure
+
+id: oom-investigation-v1
+name: OOM Investigation
+incident_type: oom
+max_total_duration: 900  # 15 minutes
+
+phases:
+  - id: triage
+    skill_name: sre
+    required: true
+    timeout_seconds: 120
+    produces: [severity, affected_pods, namespace, memory_limit, memory_usage]
+
+  - id: memory_analysis
+    skill_name: sre
+    required: true
+    depends_on: [triage]
+    timeout_seconds: 300
+    produces: [root_cause, memory_trend, recommended_limit, confidence]
+
+  - id: patch_resources
+    skill_name: sre
+    required: false
+    depends_on: [memory_analysis]
+    timeout_seconds: 300
+    approval_required: true
+    produces: [patch_applied, new_memory_limit]
+
+  - id: verify
+    skill_name: sre
+    required: true
+    depends_on: [patch_resources]
+    timeout_seconds: 180
+    runs: always
+    produces: [pod_status, oom_events_after, resolution_confirmed]
