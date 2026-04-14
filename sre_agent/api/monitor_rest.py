@@ -707,6 +707,39 @@ async def agent_learning_feed(
                 }
             )
 
+        # Recent routing decisions (show WHY queries were routed)
+        routing_rows = database.fetchall(
+            "SELECT query_summary, selected_skill, channel_scores, fused_scores "
+            "FROM skill_selection_log "
+            "WHERE session_id != '__weight_snapshot__' "
+            "AND timestamp > NOW() - INTERVAL '%s days' "
+            "ORDER BY timestamp DESC LIMIT 5",
+            (days,),
+        )
+        for r in routing_rows:
+            try:
+                ch = (
+                    json.loads(r["channel_scores"])
+                    if isinstance(r["channel_scores"], str)
+                    else (r["channel_scores"] or {})
+                )
+                # Build a readable breakdown
+                top_channels = []
+                for ch_name, scores in ch.items():
+                    if scores and isinstance(scores, dict):
+                        best = max(scores.values()) if scores else 0
+                        if best > 0.1:
+                            top_channels.append(f"{ch_name}: {best:.0%}")
+                events.append(
+                    {
+                        "type": "routing_decision",
+                        "description": f'"{r["query_summary"][:60]}" → {r["selected_skill"]}',
+                        "data": {"channels": ", ".join(top_channels[:4]) if top_channels else "low signal"},
+                    }
+                )
+            except Exception:
+                pass
+
         # Selection stats
         sel_row = database.fetchone(
             "SELECT COUNT(*) as total, "
