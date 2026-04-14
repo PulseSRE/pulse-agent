@@ -33,6 +33,7 @@ include = ["sre_agent*"]
 "sre_agent.evals.fixtures" = ["*.json"]
 "sre_agent.evals.baselines" = ["*.json"]
 "sre_agent.skills" = ["**/*.md", "**/*.yaml", "**/*.yml"]
+"sre_agent.plan_templates" = ["*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
