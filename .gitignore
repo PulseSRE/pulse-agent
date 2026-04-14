@@ -8,3 +8,4 @@ build/
 .venv/
 tmp/
 .worktrees/
+.playwright-mcp/
