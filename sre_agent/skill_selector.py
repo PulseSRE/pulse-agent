@@ -14,6 +14,7 @@ Channels:
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -41,6 +42,7 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "historical": 0.20,
     "taxonomy": 0.15,  # added in Task 4
     "temporal": 0.05,  # added in Task 4
+    "semantic": 0.0,  # activate via PULSE_AGENT_EMBEDDING_CHANNEL=1
 }
 
 # K8s resource types for component tag extraction
@@ -203,6 +205,9 @@ class SkillSelector:
 
         # Channel 5: Temporal context
         channel_scores["temporal"] = self._score_temporal(query)
+
+        # Channel 6: Semantic embedding (optional)
+        channel_scores["semantic"] = self._score_semantic_embedding(query)
 
         # Fuse scores
         fused = self._fuse_scores(channel_scores)
@@ -378,6 +383,23 @@ class SkillSelector:
             if cats & {"operations", "workloads", "diagnostics"}:
                 scores[skill_name] = 0.6
         return scores
+
+    def _score_semantic_embedding(self, query: str) -> dict[str, float]:
+        """Channel 6 (optional): Semantic similarity via embeddings.
+
+        Requires PULSE_AGENT_EMBEDDING_CHANNEL=1 to activate.
+        Uses cached skill description embeddings for cosine similarity.
+        """
+        if not os.environ.get("PULSE_AGENT_EMBEDDING_CHANNEL"):
+            return {}
+
+        # Stub: embedding infrastructure not yet deployed.
+        # When enabled, this will:
+        # 1. Embed query using sentence-transformers or Claude API
+        # 2. Compare against pre-cached skill description embeddings
+        # 3. Return cosine similarity scores per skill
+        logger.debug("Semantic embedding channel: stub (not yet implemented)")
+        return {}
 
     def _fuse_scores(self, channel_scores: dict[str, dict[str, float]]) -> dict[str, float]:
         """Weighted sum fusion across all channels."""

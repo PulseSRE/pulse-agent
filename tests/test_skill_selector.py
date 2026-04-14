@@ -301,3 +301,10 @@ class TestRecordOutcome:
 
         result = SelectionResult(skill_name="sre", fused_scores={}, channel_scores={}, threshold_used=0.45)
         record_selection_outcome(session_id="s3", query_summary="test", result=result)
+
+
+class TestSemanticEmbedding:
+    def test_disabled_by_default(self):
+        selector = SkillSelector({"sre": _mock_skill("sre")})
+        scores = selector._score_semantic_embedding("check pods")
+        assert scores == {}
