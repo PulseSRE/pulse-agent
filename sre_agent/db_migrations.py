@@ -36,7 +36,8 @@ def run_migrations(db: Database) -> None:
         try:
             fn(db)
             db.execute(
-                "INSERT INTO schema_migrations (version, name, applied_at) VALUES (%s, %s, NOW())",
+                "INSERT INTO schema_migrations (version, name, applied_at) VALUES (%s, %s, NOW()) "
+                "ON CONFLICT (version) DO NOTHING",
                 (version, name),
             )
             db.commit()
@@ -152,6 +153,20 @@ def _migrate_014_skill_selection_log(db: Database) -> None:
     db.executescript(SKILL_SELECTION_LOG_SCHEMA)
 
 
+def _migrate_015_postmortems(db: Database) -> None:
+    """Add postmortems table for auto-generated incident reports."""
+    from .db_schema import POSTMORTEMS_SCHEMA
+
+    db.executescript(POSTMORTEMS_SCHEMA)
+
+
+def _migrate_016_slo_definitions(db: Database) -> None:
+    """Add slo_definitions table for SLO/SLI tracking."""
+    from .db_schema import SLO_DEFINITIONS_SCHEMA
+
+    db.executescript(SLO_DEFINITIONS_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -167,4 +182,6 @@ MIGRATIONS = [
     (12, "bigint_timestamps", _migrate_012_bigint_timestamps),
     (13, "tool_predictions", _migrate_013_tool_predictions),
     (14, "skill_selection_log", _migrate_014_skill_selection_log),
+    (15, "postmortems", _migrate_015_postmortems),
+    (16, "slo_definitions", _migrate_016_slo_definitions),
 ]

@@ -106,7 +106,7 @@ _RESOURCE_CATEGORY_MAP: dict[str, list[str]] = {
 }
 
 # Historical cache
-_historical_cache: dict[str, dict[str, float]] | None = None
+_historical_cache: dict[str, dict[str, int]] | None = None
 _historical_cache_ts: float = 0
 _HISTORICAL_CACHE_TTL = 300  # 5 minutes
 
@@ -330,44 +330,74 @@ class SkillSelector:
         return scores
 
     def _score_historical(self, query: str) -> dict[str, float]:
-        """Channel 4: Historical co-occurrence from skill_usage table."""
+        """Channel 4: Historical co-occurrence — which skills handled similar queries."""
         global _historical_cache, _historical_cache_ts
 
         now = time.time()
         if _historical_cache is not None and now - _historical_cache_ts < _HISTORICAL_CACHE_TTL:
-            return dict(_historical_cache)
+            # Use cached token→skill mapping
+            return self._match_historical_tokens(query)
 
         try:
             from .db import get_database
-            from .tool_predictor import extract_tokens
 
             db = get_database()
-            tokens = extract_tokens(query)
-            if not tokens:
-                return {}
 
-            # Query skill_usage for skills that handled similar queries
+            # Build token→skill frequency map from recent successful skill_usage
             rows = db.fetchall(
-                "SELECT skill_name, COUNT(*) as cnt "
+                "SELECT skill_name, query_summary "
                 "FROM skill_usage "
                 "WHERE feedback IS NULL OR feedback != 'negative' "
-                "GROUP BY skill_name "
-                "ORDER BY cnt DESC "
-                "LIMIT 20"
+                "AND timestamp > NOW() - INTERVAL '7 days' "
+                "ORDER BY timestamp DESC "
+                "LIMIT 200"
             )
             if not rows:
                 return {}
 
-            total = sum(r["cnt"] for r in rows)
-            scores = {r["skill_name"]: r["cnt"] / total for r in rows}
+            from .tool_predictor import extract_tokens
 
-            _historical_cache = scores
+            # Build token→skill frequency map
+            token_skill_freq: dict[str, dict[str, int]] = {}
+            for row in rows:
+                tokens = extract_tokens(row.get("query_summary", ""))
+                skill = row["skill_name"]
+                for token in tokens[:10]:  # limit tokens per query
+                    if token not in token_skill_freq:
+                        token_skill_freq[token] = {}
+                    token_skill_freq[token][skill] = token_skill_freq[token].get(skill, 0) + 1
+
+            _historical_cache = token_skill_freq
             _historical_cache_ts = now
-            return dict(scores)
+            return self._match_historical_tokens(query)
 
         except Exception:
             logger.debug("Historical scoring failed", exc_info=True)
             return {}
+
+    def _match_historical_tokens(self, query: str) -> dict[str, float]:
+        """Match query tokens against cached historical token→skill map."""
+        if not _historical_cache:
+            return {}
+
+        from .tool_predictor import extract_tokens
+
+        tokens = extract_tokens(query)
+        if not tokens:
+            return {}
+
+        skill_scores: dict[str, float] = {}
+        for token in tokens:
+            skill_freq = _historical_cache.get(token, {})
+            for skill, freq in skill_freq.items():
+                skill_scores[skill] = skill_scores.get(skill, 0) + freq
+
+        if not skill_scores:
+            return {}
+
+        # Normalize to 0.0-1.0
+        max_score = max(skill_scores.values())
+        return {k: v / max_score for k, v in skill_scores.items()}
 
     def _score_temporal(self, query: str) -> dict[str, float]:
         """Channel 5: Detect temporal context (recent changes) and boost relevant skills."""

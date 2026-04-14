@@ -18,7 +18,14 @@ import re
 import time
 import uuid
 
-from .skill_plan import PlanResult, SkillOutput, SkillPhase, SkillPlan, topological_order, validate_plan
+from .skill_plan import (
+    PlanResult,
+    SkillOutput,
+    SkillPhase,
+    SkillPlan,
+    topological_order,
+    validate_plan,
+)
 
 logger = logging.getLogger("pulse_agent.plan_runtime")
 
@@ -186,26 +193,9 @@ class PlanRuntime:
         incident: dict,
         prior_outputs: dict[str, SkillOutput],
     ) -> SkillOutput:
-        """Execute a single phase — assemble context, run agent, extract output.
-
-        Currently a stub that returns a mock SkillOutput. The real integration
-        with run_agent_streaming() will be wired in a future task. The runtime's
-        control flow (dependencies, branches, timeouts, always-run) is the value
-        delivered by this module.
-
-        Args:
-            phase: The SkillPhase to execute.
-            incident: Incident context dict.
-            prior_outputs: Outputs from previously completed phases.
-
-        Returns:
-            SkillOutput with structured findings.
-        """
-        # Build compressed context from prior phases
+        """Execute a single phase — load skill, call agent, parse output."""
         prior_context = self._compress_prior_outputs(prior_outputs)
-
-        # Build the phase prompt (used by real agent integration in future task)
-        _prompt = self._build_phase_prompt(phase, incident, prior_context)
+        prompt = self._build_phase_prompt(phase, incident, prior_context)
 
         logger.info(
             "Executing phase '%s' with skill '%s' (%d prior outputs)",
@@ -214,23 +204,86 @@ class PlanRuntime:
             len(prior_outputs),
         )
 
-        # In the real implementation, this would:
-        # 1. Load the skill from skill_loader
-        # 2. Build tool_defs from the skill's categories
-        # 3. Call run_agent_streaming() with the phase prompt
-        # 4. Parse the agent's response for structured SkillOutput fields
-        # 5. Compress the output for the next phase
+        try:
+            from .agent import create_client, run_agent_streaming
+            from .skill_loader import build_config_from_skill, get_skill
 
+            skill = get_skill(phase.skill_name)
+            if not skill:
+                return SkillOutput(
+                    skill_id=phase.skill_name,
+                    phase_id=phase.id,
+                    status="failed",
+                    evidence_summary=f"Unknown skill: {phase.skill_name}",
+                )
+
+            config = build_config_from_skill(skill, query=prompt)
+            client = self._client or create_client()
+
+            tools_called: list[str] = []
+
+            def on_tool(name):
+                tools_called.append(name)
+
+            response = await asyncio.to_thread(
+                run_agent_streaming,
+                client,
+                [{"role": "user", "content": prompt}],
+                config["system_prompt"],
+                config["tool_defs"],
+                config["tool_map"],
+                config.get("write_tools", set()),
+                on_tool_use=on_tool,
+                mode=phase.skill_name,
+            )
+
+            # Try to extract structured SkillOutput from response
+            output = self._parse_skill_output(response, phase, tools_called)
+            return output
+
+        except Exception as e:
+            logger.error("Phase '%s' execution failed: %s", phase.id, e, exc_info=True)
+            return SkillOutput(
+                skill_id=phase.skill_name,
+                phase_id=phase.id,
+                status="failed",
+                evidence_summary=f"Execution error: {type(e).__name__}: {str(e)[:200]}",
+            )
+
+    def _parse_skill_output(self, response: str, phase, tools_called: list[str]) -> SkillOutput:
+        """Parse agent response into SkillOutput — extract JSON if present, otherwise use raw text."""
+        import json
+        import re
+
+        # Try to find structured JSON in response
+        match = re.search(r"```json\s*(\{.*?\})\s*```", response, re.DOTALL)
+        if match:
+            try:
+                data = json.loads(match.group(1))
+                return SkillOutput(
+                    skill_id=phase.skill_name,
+                    phase_id=phase.id,
+                    status=data.get("status", "complete"),
+                    findings=data.get("findings", {}),
+                    branch_signal=data.get("branch_signal"),
+                    evidence_summary=data.get("evidence_summary", response[:300]),
+                    actions_taken=data.get("actions_taken", tools_called),
+                    open_questions=data.get("open_questions", []),
+                    risk_flags=data.get("risk_flags", []),
+                    confidence=float(data.get("confidence", 0.7)),
+                )
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # Fallback: use raw response text
         return SkillOutput(
             skill_id=phase.skill_name,
             phase_id=phase.id,
             status="complete",
-            findings={
-                "phase": phase.id,
-                "incident": incident.get("category", "unknown"),
-            },
-            evidence_summary=f"Phase '{phase.id}' executed with skill '{phase.skill_name}'",
-            confidence=0.8,
+            findings={"raw_response": response[:500]},
+            evidence_summary=response[:300],
+            actions_taken=tools_called,
+            confidence=0.7,
         )
 
     def _compress_prior_outputs(self, outputs: dict[str, SkillOutput]) -> str:

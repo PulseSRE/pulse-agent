@@ -8,9 +8,7 @@ from sre_agent.slo_registry import SLODefinition, SLORegistry
 class TestSLORegistry:
     def test_register_and_get(self):
         reg = SLORegistry()
-        slo = SLODefinition(
-            service_name="checkout", slo_type="availability", target=0.999
-        )
+        slo = SLODefinition(service_name="checkout", slo_type="availability", target=0.999)
         reg.register(slo)
         assert reg.get("checkout", "availability") is not None
 
@@ -22,9 +20,7 @@ class TestSLORegistry:
 
     def test_list_all(self):
         reg = SLORegistry()
-        reg.register(
-            SLODefinition(service_name="a", slo_type="availability", target=0.999)
-        )
+        reg.register(SLODefinition(service_name="a", slo_type="availability", target=0.999))
         reg.register(SLODefinition(service_name="b", slo_type="latency", target=0.95))
         assert len(reg.list_all()) == 2
 
@@ -61,9 +57,7 @@ class TestBurnRate:
 class TestEvaluateAll:
     def test_evaluates_registered_slos(self):
         reg = SLORegistry()
-        reg.register(
-            SLODefinition(service_name="a", slo_type="availability", target=0.999)
-        )
+        reg.register(SLODefinition(service_name="a", slo_type="availability", target=0.999))
         reg.register(SLODefinition(service_name="b", slo_type="latency", target=0.95))
         results = reg.evaluate_all({"a:availability": 0.998, "b:latency": 0.96})
         assert len(results) == 2

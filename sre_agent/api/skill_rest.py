@@ -145,7 +145,10 @@ async def update_skill(name: str, body: dict, _auth=Depends(verify_token)):
 
     content = body.get("content", "")
     if not content or "---" not in content:
-        raise HTTPException(status_code=400, detail="Content must include YAML frontmatter (--- delimiters)")
+        raise HTTPException(
+            status_code=400,
+            detail="Content must include YAML frontmatter (--- delimiters)",
+        )
 
     skill_file = skill.path / "skill.md"
     if not skill_file.exists():
@@ -209,6 +212,14 @@ async def clone_skill(name: str, body: dict, _auth=Depends(verify_token)):
     if not new_name:
         raise HTTPException(status_code=400, detail="new_name is required")
 
+    import re as _re
+
+    if not _re.match(r"^[a-z0-9][a-z0-9_-]{0,63}$", new_name):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid skill name — must be lowercase alphanumeric with hyphens/underscores",
+        )
+
     new_description = body.get("description", source.description)
 
     # Read source skill.md
@@ -222,7 +233,13 @@ async def clone_skill(name: str, body: dict, _auth=Depends(verify_token)):
     import re
 
     content = re.sub(r"^name:\s*.*$", f"name: {new_name}", content, count=1, flags=re.MULTILINE)
-    content = re.sub(r"^description:\s*.*$", f"description: {new_description}", content, count=1, flags=re.MULTILINE)
+    content = re.sub(
+        r"^description:\s*.*$",
+        f"description: {new_description}",
+        content,
+        count=1,
+        flags=re.MULTILINE,
+    )
     content = re.sub(r"^version:\s*\d+", "version: 1", content, count=1, flags=re.MULTILINE)
 
     # Write to new directory
@@ -315,9 +332,12 @@ async def skill_version_diff(
     def _resolve_path(filename: str) -> Path:
         if filename == "skill.md":
             return skill.path / "skill.md"
-        p = skill.path / ".versions" / filename
+        versions_dir = skill.path / ".versions"
+        p = (versions_dir / filename).resolve()
+        if not str(p).startswith(str(versions_dir.resolve())):
+            raise HTTPException(status_code=400, detail="Invalid version filename")
         if not p.exists():
-            raise HTTPException(status_code=404, detail=f"Version file not found: {filename}")
+            raise HTTPException(status_code=404, detail=f"Version not found: {filename}")
         return p
 
     path_a = _resolve_path(v1)
@@ -372,7 +392,11 @@ async def prompt_versions(
     """Track prompt hash changes over time for a skill."""
     from ..prompt_log import get_prompt_versions
 
-    return {"skill": skill, "versions": get_prompt_versions(skill, days=days), "days": days}
+    return {
+        "skill": skill,
+        "versions": get_prompt_versions(skill, days=days),
+        "days": days,
+    }
 
 
 @router.get("/prompt/log")
@@ -504,14 +528,27 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
                 for pod in pods.items:
                     for cs in pod.status.container_statuses or []:
                         waiting = cs.state.waiting if cs.state else None
-                        if waiting and waiting.reason in ("CrashLoopBackOff", "Error", "RunContainerError"):
+                        if waiting and waiting.reason in (
+                            "CrashLoopBackOff",
+                            "Error",
+                            "RunContainerError",
+                        ):
                             # Revert to old args
                             apps.patch_namespaced_deployment(
                                 name=deploy_name,
                                 namespace=ns,
                                 body={
                                     "spec": {
-                                        "template": {"spec": {"containers": [{"name": "mcp-server", "args": old_args}]}}
+                                        "template": {
+                                            "spec": {
+                                                "containers": [
+                                                    {
+                                                        "name": "mcp-server",
+                                                        "args": old_args,
+                                                    }
+                                                ]
+                                            }
+                                        }
                                     }
                                 },
                                 field_manager="helm",
@@ -595,7 +632,10 @@ async def add_mcp_server(body: dict, _auth=Depends(verify_token)):
 
     # Security: disable stdio transport for user-added servers (command injection risk)
     if transport == "stdio":
-        raise HTTPException(status_code=400, detail="stdio transport is disabled for security. Use 'sse' transport.")
+        raise HTTPException(
+            status_code=400,
+            detail="stdio transport is disabled for security. Use 'sse' transport.",
+        )
     if transport != "sse":
         raise HTTPException(status_code=400, detail="transport must be 'sse'")
 
@@ -611,15 +651,25 @@ async def add_mcp_server(body: dict, _auth=Depends(verify_token)):
     hostname = parsed.hostname or ""
 
     # Block cloud metadata endpoints
-    _BLOCKED_HOSTS = {"169.254.169.254", "metadata.google.internal", "metadata.internal"}
+    _BLOCKED_HOSTS = {
+        "169.254.169.254",
+        "metadata.google.internal",
+        "metadata.internal",
+    }
     if hostname in _BLOCKED_HOSTS:
-        raise HTTPException(status_code=400, detail="URL blocked: cloud metadata endpoints are not allowed")
+        raise HTTPException(
+            status_code=400,
+            detail="URL blocked: cloud metadata endpoints are not allowed",
+        )
 
     # Block private/internal IP ranges
     try:
         addr = ipaddress.ip_address(hostname)
         if addr.is_private or addr.is_loopback or addr.is_link_local:
-            raise HTTPException(status_code=400, detail="URL blocked: private/internal IP addresses are not allowed")
+            raise HTTPException(
+                status_code=400,
+                detail="URL blocked: private/internal IP addresses are not allowed",
+            )
     except ValueError:
         pass  # Hostname is a DNS name, not an IP — allow it
 

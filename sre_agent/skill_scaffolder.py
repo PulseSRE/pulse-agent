@@ -96,10 +96,24 @@ def save_scaffolded_skill(skill_content: str, skill_name: str) -> str | None:
 
     Returns the path if saved, None on failure.
     """
+    import re
+
+    # Validate skill_name — prevent path traversal
+    if not re.match(r"^[a-z0-9][a-z0-9_-]{0,63}$", skill_name):
+        logger.warning("Invalid skill_name rejected: %s", skill_name[:50])
+        return None
+
     try:
         from pathlib import Path
 
         skills_dir = Path(__file__).parent / "skills" / skill_name
+
+        # Verify resolved path stays within skills directory
+        base = (Path(__file__).parent / "skills").resolve()
+        if not str(skills_dir.resolve()).startswith(str(base)):
+            logger.warning("Path traversal blocked for skill: %s", skill_name)
+            return None
+
         skills_dir.mkdir(parents=True, exist_ok=True)
 
         skill_path = skills_dir / "skill.md"

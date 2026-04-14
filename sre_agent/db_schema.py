@@ -391,6 +391,37 @@ CREATE INDEX IF NOT EXISTS idx_skill_selection_log_skill ON skill_selection_log(
 CREATE INDEX IF NOT EXISTS idx_skill_selection_log_session ON skill_selection_log(session_id);
 """
 
+POSTMORTEMS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS postmortems (
+    id TEXT PRIMARY KEY,
+    incident_type TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    timeline TEXT,
+    root_cause TEXT,
+    contributing_factors JSONB,
+    blast_radius JSONB,
+    actions_taken JSONB,
+    prevention JSONB,
+    metrics_impact TEXT,
+    confidence FLOAT DEFAULT 0.0,
+    generated_at BIGINT DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_postmortems_type ON postmortems(incident_type);
+"""
+
+SLO_DEFINITIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS slo_definitions (
+    id SERIAL PRIMARY KEY,
+    service_name TEXT NOT NULL,
+    slo_type TEXT NOT NULL,
+    target FLOAT NOT NULL,
+    window_days INTEGER DEFAULT 30,
+    description TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(service_name, slo_type)
+);
+"""
+
 ALL_SCHEMAS = (
     INCIDENTS_SCHEMA
     + RUNBOOKS_SCHEMA
@@ -413,4 +444,9 @@ ALL_SCHEMAS = (
     + CHAT_MESSAGES_SCHEMA
     + SKILL_USAGE_SCHEMA
     + PROMPT_LOG_SCHEMA
+    + TOOL_PREDICTIONS_SCHEMA
+    + TOOL_COOCCURRENCE_SCHEMA
+    + SKILL_SELECTION_LOG_SCHEMA
+    + POSTMORTEMS_SCHEMA
+    + SLO_DEFINITIONS_SCHEMA
 )
