@@ -1,20 +1,30 @@
 ---
 name: plan_builder
-version: 1
-description: Constructs investigation plans for novel incidents before acting
+version: 2
+description: Builds investigation plans and custom skills from user requirements
+display_name: Plan Builder
+icon: Target
 keywords:
-  - unknown incident
-  - plan investigation
-  - complex issue
-  - multi-step problem
+  - build a plan, create a plan, make a plan, investigation plan
+  - build a skill, create a skill, new skill, custom skill
+  - build an investigation, design investigation, plan investigation
+  - build a runbook, create a runbook, playbook, procedure
+  - how would you investigate, investigation strategy
+  - multi-step, step by step, systematic approach
+  - complex issue, unknown incident
 categories:
   - diagnostics
   - workloads
   - monitoring
   - operations
 write_tools: false
-priority: 1
+priority: 5
 skip_component_hints: true
+trigger_patterns:
+  - "build.*plan|create.*plan|make.*plan"
+  - "build.*skill|create.*skill|new.*skill"
+  - "build.*runbook|create.*runbook"
+  - "investigation.*strategy|how.*investigate"
 ---
 
 ## Security
