@@ -244,3 +244,60 @@ class TestEnhancedThresholds:
         selector = SkillSelector({"sre": _mock_skill("sre")})
         t = selector._compute_threshold({"incident_priority": "P1", "max_fused_score": 0.2})
         assert t == 0.25  # 0.35 - 0.10, clamped at 0.25
+
+
+class TestRecordOutcome:
+    @patch("sre_agent.db.get_database")
+    def test_records_selection(self, mock_get_db):
+        from sre_agent.skill_selector import record_selection_outcome
+
+        db = MagicMock()
+        mock_get_db.return_value = db
+
+        result = SelectionResult(
+            skill_name="sre",
+            fused_scores={"sre": 0.8},
+            channel_scores={"keyword": {"sre": 0.9}},
+            threshold_used=0.45,
+            selection_ms=5,
+        )
+        record_selection_outcome(
+            session_id="s1",
+            query_summary="check pods",
+            result=result,
+            tools_called=["list_pods"],
+            tools_offered=["list_pods", "get_events"],
+        )
+        assert db.execute.called
+        assert db.commit.called
+
+    @patch("sre_agent.db.get_database")
+    def test_detects_missing_tools(self, mock_get_db):
+        from sre_agent.skill_selector import record_selection_outcome
+
+        db = MagicMock()
+        mock_get_db.return_value = db
+
+        result = SelectionResult(
+            skill_name="sre",
+            fused_scores={},
+            channel_scores={},
+            threshold_used=0.45,
+        )
+        record_selection_outcome(
+            session_id="s2",
+            query_summary="test",
+            result=result,
+            tools_called=["list_pods", "unknown_tool"],
+            tools_offered=["list_pods"],
+        )
+        # Check that missing tool was detected
+        call_args = db.execute.call_args[0][1]
+        assert "unknown_tool" in str(call_args)
+
+    @patch("sre_agent.db.get_database", side_effect=Exception("DB down"))
+    def test_no_crash_on_failure(self, mock_get_db):
+        from sre_agent.skill_selector import record_selection_outcome
+
+        result = SelectionResult(skill_name="sre", fused_scores={}, channel_scores={}, threshold_used=0.45)
+        record_selection_outcome(session_id="s3", query_summary="test", result=result)

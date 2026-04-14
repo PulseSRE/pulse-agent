@@ -12,10 +12,13 @@ Executes SkillPlan graphs phase-by-phase:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 import time
+import uuid
 
-from .skill_plan import PlanResult, SkillOutput, SkillPlan, topological_order
+from .skill_plan import PlanResult, SkillOutput, SkillPhase, SkillPlan, topological_order, validate_plan
 
 logger = logging.getLogger("pulse_agent.plan_runtime")
 
@@ -300,3 +303,63 @@ class PlanRuntime:
         parts.append("\nInvestigate and produce structured findings.")
 
         return "\n".join(parts)
+
+
+def extract_plan_from_response(response: str) -> SkillPlan | None:
+    """Extract a SkillPlan from an agent's JSON response.
+
+    Looks for a JSON code block containing plan phases.
+    Returns None if no valid plan found.
+    """
+    # Find JSON code block
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL)
+    if not match:
+        # Try bare JSON
+        match = re.search(r"\{[^{}]*\"phases\"[^{}]*\[.*?\]\s*\}", response, re.DOTALL)
+
+    if not match:
+        return None
+
+    try:
+        data = json.loads(match.group(1) if match.lastindex else match.group(0))
+    except json.JSONDecodeError:
+        return None
+
+    if "phases" not in data:
+        return None
+
+    phases = []
+    for p in data["phases"]:
+        phases.append(
+            SkillPhase(
+                id=p.get("id", f"phase-{len(phases)}"),
+                skill_name=p.get("skill_name", "sre"),
+                required=p.get("required", True),
+                depends_on=p.get("depends_on", []),
+                timeout_seconds=p.get("timeout_seconds", 120),
+                produces=p.get("produces", []),
+                branch_on=p.get("branch_on"),
+                branches=p.get("branches", {}),
+                parallel_with=p.get("parallel_with"),
+                approval_required=p.get("approval_required", False),
+                runs=p.get("runs", "on_success"),
+            )
+        )
+
+    plan = SkillPlan(
+        id=f"dynamic-{uuid.uuid4().hex[:8]}",
+        name=data.get("plan_name", "Dynamic Plan"),
+        phases=phases,
+        incident_type=data.get("incident_type", "unknown"),
+        max_total_duration=data.get("max_total_duration", 1800),
+        generated_by="auto",
+        reviewed=False,
+    )
+
+    errors = validate_plan(plan)
+    if errors:
+        logger.warning("Dynamic plan validation failed: %s", errors)
+        return None
+
+    logger.info("Extracted dynamic plan: %s (%d phases)", plan.name, len(plan.phases))
+    return plan

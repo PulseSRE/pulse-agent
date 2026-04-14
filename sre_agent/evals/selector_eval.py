@@ -80,13 +80,15 @@ def run_selector_eval(suite_path: str = "selector") -> SelectorEvalResult:
         if selected in acceptable:
             result.passed += 1
         else:
-            result.failed_scenarios.append({
-                "id": scenario["id"],
-                "query": query[:60],
-                "expected": expected,
-                "got": selected,
-                "scores": {k: round(v, 3) for k, v in selection.fused_scores.items()},
-            })
+            result.failed_scenarios.append(
+                {
+                    "id": scenario["id"],
+                    "query": query[:60],
+                    "expected": expected,
+                    "got": selected,
+                    "scores": {k: round(v, 3) for k, v in selection.fused_scores.items()},
+                }
+            )
 
     n = max(len(scenarios), 1)
     result.recall_at_5 = round(correct_in_top_5 / n, 4)

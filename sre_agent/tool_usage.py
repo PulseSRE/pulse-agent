@@ -216,6 +216,33 @@ def record_turn(
         except Exception:
             pass
 
+        # Feed skill selector feedback
+        try:
+            from .skill_loader import get_last_routing_decision
+            from .skill_selector import record_selection_outcome
+
+            decision = get_last_routing_decision()
+            if decision and decision.get("skill_name"):
+                from .skill_selector import SelectionResult
+
+                # Reconstruct a minimal SelectionResult from routing decision
+                result = SelectionResult(
+                    skill_name=decision["skill_name"],
+                    fused_scores=decision.get("competing_scores", {}),
+                    channel_scores={},
+                    threshold_used=0.45,
+                    selection_ms=0,
+                )
+                record_selection_outcome(
+                    session_id=session_id,
+                    query_summary=query_summary,
+                    result=result,
+                    tools_called=tools_called,
+                    tools_offered=tools_offered,
+                )
+        except Exception:
+            pass
+
         logger.debug(
             f"Recorded turn: session={session_id}, turn={turn_number}, skill={routing_skill}, score={routing_score}"
         )

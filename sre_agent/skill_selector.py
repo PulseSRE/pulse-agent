@@ -430,3 +430,51 @@ class SkillSelector:
             base = min(base + 0.10, 0.70)
 
         return base
+
+
+def record_selection_outcome(
+    *,
+    session_id: str,
+    query_summary: str,
+    result: SelectionResult,
+    tools_called: list[str] | None = None,
+    tools_offered: list[str] | None = None,
+    skill_overridden: str | None = None,
+) -> None:
+    """Log selection outcome to skill_selection_log. Fire-and-forget."""
+    try:
+        import json
+
+        from .db import get_database
+
+        db = get_database()
+
+        # Detect missed retrievals
+        missing = []
+        if tools_called and tools_offered:
+            offered_set = set(tools_offered)
+            missing = [t for t in tools_called if t not in offered_set]
+
+        db.execute(
+            "INSERT INTO skill_selection_log "
+            "(session_id, query_summary, channel_scores, fused_scores, selected_skill, "
+            "threshold_used, conflicts_detected, skill_overridden, tools_requested_missing, "
+            "selection_ms, channel_weights) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                session_id,
+                query_summary[:200],
+                json.dumps(result.channel_scores),
+                json.dumps(result.fused_scores),
+                result.skill_name,
+                result.threshold_used,
+                json.dumps(result.conflicts) if result.conflicts else None,
+                skill_overridden,
+                missing or None,
+                result.selection_ms,
+                json.dumps(DEFAULT_WEIGHTS),
+            ),
+        )
+        db.commit()
+    except Exception:
+        logger.debug("Failed to record selection outcome", exc_info=True)
