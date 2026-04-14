@@ -181,4 +181,35 @@ def get_slo_registry() -> SLORegistry:
     global _registry
     if _registry is None:
         _registry = SLORegistry()
+        _register_defaults(_registry)
     return _registry
+
+
+def _register_defaults(registry: SLORegistry) -> None:
+    """Register default SLOs for known Pulse Agent services."""
+    defaults = [
+        SLODefinition(
+            service_name="pulse-openshift-sre-agent",
+            slo_type="availability",
+            target=0.999,
+            window_days=30,
+            description="Agent API must be available 99.9% over rolling 30 days",
+        ),
+        SLODefinition(
+            service_name="openshiftpulse",
+            slo_type="availability",
+            target=0.999,
+            window_days=30,
+            description="UI must be available 99.9% over rolling 30 days",
+        ),
+        SLODefinition(
+            service_name="pulse-openshift-sre-agent-postgresql",
+            slo_type="availability",
+            target=0.999,
+            window_days=30,
+            description="PostgreSQL must be available 99.9% over rolling 30 days",
+        ),
+    ]
+    for slo in defaults:
+        registry.register(slo)
+    logger.info("Registered %d default SLOs", len(defaults))
