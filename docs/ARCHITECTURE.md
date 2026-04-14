@@ -1368,21 +1368,27 @@ User: "Build me a production dashboard"
 
 ---
 
-## 15b. Multi-Signal Skill Selection & Plan Execution
+## 15b. Agent Intelligence Architecture
 
 ### Multi-Signal Skill Selector (`skill_selector.py`)
 
-Replaces keyword-only routing with 5-channel fusion. Each channel scores every skill independently, then scores are fused with weighted sum and re-ranked.
+Replaces keyword-only routing with 6-channel weighted fusion. Each channel scores every skill independently, then scores are fused and re-ranked. Learned weights persist across pod restarts.
 
-**Channels:**
-1. **Keyword** (0.35) — ported from `classify_query()`, normalized 0.0-1.0
-2. **Alert Taxonomy** (0.15) — alert name prefixes + scanner categories → skill mapping
-3. **Component Tags** (0.25) — regex-extract K8s resource types, match skill categories
-4. **Historical** (0.20) — token→skill frequency from `skill_usage` table, 5-min cache
-5. **Temporal** (0.05) — recent deploy/change keywords boost operations skills
-6. **Semantic** (0.0) — embedding similarity stub, behind `PULSE_AGENT_EMBEDDING_CHANNEL=1`
+**Channels (default weights, sum to 1.0):**
+1. **Keyword** (0.30) — direct keyword + skill name matching, normalized 0.0-1.0
+2. **Component Tags** (0.20) — regex-extract K8s resource types (Pod, Deployment, Service, etc.), match against skill categories
+3. **Historical** (0.20) — token→skill frequency from `skill_usage` table, 5-min cache
+4. **Semantic** (0.15) — TF-IDF cosine similarity against skill descriptions + keywords. Activate with `PULSE_AGENT_EMBEDDING_CHANNEL=1`
+5. **Alert Taxonomy** (0.10) — alert name prefixes (kube→sre, rbac→security) + scanner categories
+6. **Temporal** (0.05) — recent deploy/change keywords boost operations skills
 
-Dynamic thresholds: P1→0.35, P2→0.45, P3→0.60. Hard/soft conflict detection for mutually exclusive tools. Selection outcomes logged to `skill_selection_log` table.
+**Dynamic thresholds:** P1→0.35, P2→0.45, P3→0.60. Low signal (<0.3) lowers threshold by 0.10. Recent similar incidents boost by 0.10.
+
+**Conflict detection:** Hard conflicts (restart vs rollback) and soft conflicts (scale vs rollback) detected in offered tool sets.
+
+**Self-improving:** `selector_learning.py` recomputes channel weights from `skill_selection_log` outcomes. Weights persisted to DB via `load_learned_weights()` / `_persist_weights()`. Loaded on `SkillSelector.__init__()`.
+
+**Skill metadata:** All 8 skills enriched with `trigger_patterns` (regex), `tool_sequences` (named workflows), and `investigation_framework` (structured reasoning steps).
 
 ### Phased Plan Execution (`plan_runtime.py`, `skill_plan.py`)
 
@@ -1392,20 +1398,109 @@ Incident resolution via multi-phase skill plans instead of flat agent loops:
 triage → diagnose → [branch: db/pod/network] → remediate → verify → postmortem
 ```
 
-**Components:**
-- `SkillPlan` / `SkillPhase` / `SkillOutput` — data model with DAG validation, cycle detection
-- `PlanRuntime.execute()` — topological execution, progressive context compression (~120-180 tokens/phase)
-- `plan_templates/*.yaml` — 6 pre-defined templates (crashloop, OOM, node-pressure, deployment-failure, security, latency)
-- `plan-builder` meta-skill — dynamic plan construction when no template matches
+**Data Model:**
+- `SkillPhase` — id, skill_name, required, depends_on, timeout_seconds, produces, branch_on, branches, parallel_with, approval_required, runs ("on_success" | "always")
+- `SkillPlan` — id, name, phases (DAG), incident_type, max_total_duration, generated_by
+- `SkillOutput` — status, findings, evidence_summary (~120-180 tokens), actions_taken, open_questions, risk_flags, confidence, branch_signal
+- `PlanResult` — phase_outputs, total_duration_ms, phases_completed/total, status
+
+**Execution (`PlanRuntime.execute()`):**
+1. Topological sort phases by dependencies
+2. Group phases with same dependencies → run in parallel via `asyncio.gather()`
+3. Apply branch conditions (e.g., branch_on="source" → db/pod/network)
+4. Check approval gates (approval_required → mark `needs_escalation`, skip execution)
+5. Progressive context compression between phases (~120-180 tokens per SkillOutput)
+6. "Always" phases (postmortem) run even after failure
+7. Async callbacks (`on_phase_start`, `on_phase_complete`) — support both sync and async
+
+**Live WebSocket updates:** During plan execution, `investigation_progress` events emitted per phase via monitor WebSocket. UI shows inline phase progress on active findings (triage ✓ → diagnose ● → remediate ○).
+
+**Plan Templates (`plan_templates/*.yaml`):**
+6 pre-defined + auto-generated. Loaded at startup, hot-reloaded on change.
+- `crashloop-resolution` — triage → diagnose → remediate → verify
+- `oom-investigation` — triage → memory analysis → patch → verify
+- `node-pressure` — triage → node diagnostics → drain/cordon → verify
+- `deployment-failure` — triage → change analysis → rollback → verify
+- `security-incident` — triage → security scan → RBAC audit → remediation
+- `latency-degradation` — triage → trace → branch (db/pod/network) → remediate → verify
+
+**Dynamic plans:** `plan-builder` meta-skill constructs plans for novel incidents. After resolution, `scaffold_plan_template()` saves the plan as YAML + hot-reloads registry. `scaffold_skill_from_resolution()` auto-drafts a `skill.md`. Both stored with `generated_by: auto`, `reviewed: false`.
+
+**REST API:** `GET/PUT/DELETE /plan-templates/{type}`. Auto-generated plans deletable; built-in protected.
 
 ### Knowledge Infrastructure
 
-- **Dependency Graph** (`dependency_graph.py`) — live K8s resource graph refreshed each scan. Nodes: Pods, Deployments, Services, PVCs, ConfigMaps, Secrets, Nodes. Edges: ownerReferences, selectors, mounts. Used for blast radius analysis.
-- **Auto-Postmortems** (`postmortem.py`) — generated after plan completion. Timeline, root cause, contributing factors, prevention recommendations. Stored in `postmortems` table.
-- **Skill Scaffolding** (`skill_scaffolder.py`) — auto-drafts `skill.md` from novel incident resolutions. Stored with `generated_by: auto`, `reviewed: false`.
-- **Change Risk Scoring** (`change_risk.py`) — pre-deploy risk analysis (0-100). Image changes, resource changes, blast radius, historical failure rate.
-- **SLO Registry** (`slo_registry.py`) — per-service SLO tracking with burn rate alerting.
-- **Selector Learning** (`selector_learning.py`) — batch weight recomputation from selection outcomes.
+**Dependency Graph (`dependency_graph.py`):**
+Live K8s resource graph, refreshed each scan cycle.
+- **Nodes:** Pods, Deployments, Services, PVCs, ConfigMaps, Secrets, Nodes, ReplicaSets, StatefulSets, DaemonSets, Jobs
+- **Edges:** ownerReferences ("owns"), service selectors ("selects"), volume mounts ("mounts"), configmap/secret refs ("references"), pod→node scheduling ("schedules")
+- **Queries:** `upstream_dependencies()`, `downstream_blast_radius()` (BFS traversal), `related_resources()`
+- **Integration:** Blast radius injected into investigation prompts. UI at `/topology` with namespace filter, click-to-select, edge labels.
+- **Dedup:** Cluster-scoped resources (Nodes) always use empty namespace to prevent duplicates.
+
+**Auto-Postmortems (`postmortem.py`):**
+Generated after every plan execution (even if plan fails). Stored in `postmortems` table. Includes:
+- Timeline reconstruction from phase outputs
+- Root cause from diagnostic evidence
+- Contributing factors, blast radius, actions taken
+- Prevention recommendations, metrics impact
+- UI: Postmortems tab in Incident Center with expandable detail cards.
+
+**Change Risk Scoring (`change_risk.py`):**
+Pre-deploy risk analysis on every `audit_deployment` scanner finding:
+- Image change magnitude (new image +30, tag change +10)
+- Resource request/limit changes (+15)
+- ConfigMap/Secret changes (+10)
+- Time of day (off-hours +15)
+- Historical failure rate from `actions` table (+20 if >30%)
+- Blast radius from dependency graph (+15 if >10 downstream)
+- Score 0-100: LOW (<25), MEDIUM (25-49), HIGH (50-69), CRITICAL (70+)
+- UI: orange "Deploy Risk" badge on change_risk findings.
+
+**SLO Registry (`slo_registry.py`):**
+Per-service SLO tracking with live Prometheus burn rate monitoring.
+- Define via REST API (`POST /slo`) or agent chat ("set a 99.9% availability SLO for checkout")
+- Types: availability, latency (p99), error_rate
+- `query_prometheus_values()` builds PromQL per SLO type
+- `evaluate_with_prometheus()` returns current burn rate + error budget
+- Alert levels: ok (>30% budget), warning (10-30%), critical (<10%)
+- Context injected into skill selector when budget depleting
+- UI: SLOs tab in Toolbox with CRUD, burn rate progress bars, alert badges.
+- REST: `GET/POST/DELETE /slo`
+
+**Selector Learning (`selector_learning.py`):**
+- `recompute_channel_weights(days=7)` — analyzes `skill_selection_log`, computes precision per channel, adjusts via learning rate 0.1
+- `identify_skill_gaps(days=30)` — finds recurring query patterns with no good skill match
+- `prune_low_performers(days=30)` — flags skills with >30% override rate
+- Weights persisted to DB, loaded on SkillSelector init
+
+**Skill Scaffolding (`skill_scaffolder.py`):**
+- `scaffold_skill_from_resolution()` — auto-draft skill.md with keywords, tool sequence, root cause pattern
+- `scaffold_plan_template()` — save plan YAML from executed phases, hot-reload registry
+- `save_scaffolded_skill()` — write to disk with path traversal protection
+- All artifacts tagged `generated_by: auto`, `reviewed: false`
+- UI: amber "AI-generated · Needs review" badges in Skills tab
+
+### Agent Intelligence UI Surfaces
+
+All ORCA data surfaced in the UI:
+
+| Surface | Location | Data Source |
+|---------|----------|-------------|
+| Investigation Phases | Incident Center > Active (inline) | `investigation_progress` WebSocket events |
+| Postmortems | Incident Center > Postmortems tab | `GET /postmortems` |
+| Impact Analysis | `/topology` route | `GET /topology` (dependency graph) |
+| Plans | Toolbox > Plans tab | `GET /plan-templates` |
+| SLOs | Toolbox > SLOs tab | `GET /slo` |
+| Agent Intelligence | Toolbox > Analytics | Multiple endpoints |
+| Routing Decisions | Analytics > Recent Routing | `GET /analytics/learning` |
+| Fix Outcomes | Analytics > Fix Outcomes | `GET /fix-history/summary` |
+| Fix Strategies | Analytics > Fix Strategy Effectiveness | `GET /analytics/fix-strategies` |
+| Agent Learning | Analytics > Agent Learning | `GET /analytics/learning` |
+| Deploy Risk | Active findings badge | Findings with `category: change_risk` |
+| Dependency Graph | Analytics > Dependency Graph | `GET /topology` (summary) |
+| Service Health | Analytics > Service Health Targets | `GET /slo` |
+| Skill Routing | Analytics > Skill Routing | `GET /skills/usage` |
 
 ## 16. Future Roadmap
 
