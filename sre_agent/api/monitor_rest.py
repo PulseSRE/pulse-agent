@@ -605,3 +605,119 @@ async def get_plan_template(incident_type: str, _auth=Depends(verify_token)):
             for p in template.phases
         ],
     }
+
+
+@router.put("/plan-templates/{incident_type}")
+async def update_plan_template(incident_type: str, request: Request, _auth=Depends(verify_token)):
+    """Update an existing plan template. Rewrites the YAML file and reloads."""
+    import re
+    from pathlib import Path
+
+    import yaml
+
+    from ..plan_templates import get_template, load_templates
+
+    template = get_template(incident_type)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    body = await request.json()
+
+    # Validate incident_type for path safety
+    if not re.match(r"^[a-z0-9][a-z0-9_-]{0,63}$", incident_type):
+        raise HTTPException(status_code=400, detail="Invalid incident type")
+
+    templates_dir = Path(__file__).parent.parent / "plan_templates"
+    # Find the YAML file for this template
+    target_path = None
+    for path in templates_dir.glob("*.yaml"):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            if data.get("incident_type") == incident_type or data.get("id") == template.id:
+                target_path = path
+                break
+        except Exception:
+            continue
+
+    if not target_path:
+        raise HTTPException(status_code=404, detail="Template file not found")
+
+    # Verify resolved path stays within templates directory
+    if not str(target_path.resolve()).startswith(str(templates_dir.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    # Build updated YAML
+    updated = {
+        "id": template.id,
+        "name": body.get("name", template.name),
+        "incident_type": incident_type,
+        "max_total_duration": body.get("max_total_duration", template.max_total_duration),
+        "phases": body.get(
+            "phases",
+            [
+                {
+                    "id": p.id,
+                    "skill_name": p.skill_name,
+                    "required": p.required,
+                    "depends_on": p.depends_on,
+                    "timeout_seconds": p.timeout_seconds,
+                    "produces": p.produces,
+                    "branch_on": p.branch_on,
+                    "branches": p.branches,
+                    "parallel_with": p.parallel_with,
+                    "approval_required": p.approval_required,
+                    "runs": p.runs,
+                }
+                for p in template.phases
+            ],
+        ),
+    }
+
+    with open(target_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(updated, f, default_flow_style=False, sort_keys=False)
+
+    load_templates()
+    logger.info("Updated plan template: %s", incident_type)
+    return {"status": "updated", "incident_type": incident_type}
+
+
+@router.delete("/plan-templates/{incident_type}")
+async def delete_plan_template(incident_type: str, _auth=Depends(verify_token)):
+    """Delete a plan template. Only auto-generated templates can be deleted."""
+    from pathlib import Path
+
+    import yaml
+
+    from ..plan_templates import get_template, load_templates
+
+    template = get_template(incident_type)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    # Only allow deleting auto-generated templates
+    if not template.id.startswith("auto-"):
+        raise HTTPException(status_code=403, detail="Cannot delete built-in templates")
+
+    templates_dir = Path(__file__).parent.parent / "plan_templates"
+    target_path = None
+    for path in templates_dir.glob("*.yaml"):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            if data.get("incident_type") == incident_type or data.get("id") == template.id:
+                target_path = path
+                break
+        except Exception:
+            continue
+
+    if not target_path:
+        raise HTTPException(status_code=404, detail="Template file not found")
+
+    if not str(target_path.resolve()).startswith(str(templates_dir.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    target_path.unlink()
+    load_templates()
+    logger.info("Deleted plan template: %s", incident_type)
+    return {"status": "deleted", "incident_type": incident_type}
