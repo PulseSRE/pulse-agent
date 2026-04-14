@@ -81,11 +81,68 @@ def recompute_channel_weights(days: int = 7) -> dict[str, float]:
             new_weights = {k: round(v / total, 4) for k, v in new_weights.items()}
 
         logger.info("Recomputed channel weights: %s (from %d samples)", new_weights, len(rows))
+
+        # Persist weights to DB for next startup
+        _persist_weights(db, new_weights)
+
         return new_weights
 
     except Exception:
         logger.debug("Weight recomputation failed", exc_info=True)
         return {}
+
+
+def _persist_weights(db, weights: dict[str, float]) -> None:
+    """Save learned weights to DB so they survive pod restarts."""
+    import json
+
+    try:
+        db.execute(
+            "INSERT INTO skill_selection_log (session_id, query_summary, selected_skill, "
+            "threshold_used, selection_ms, channel_weights) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (
+                "__weight_snapshot__",
+                "learned_weights",
+                "__system__",
+                0.0,
+                0,
+                json.dumps(weights),
+            ),
+        )
+        db.commit()
+        logger.info("Persisted learned weights to DB")
+    except Exception:
+        logger.debug("Failed to persist weights", exc_info=True)
+
+
+def load_learned_weights() -> dict[str, float] | None:
+    """Load the most recently persisted weights from DB.
+
+    Returns None if no learned weights exist.
+    """
+    try:
+        import json
+
+        from .db import get_database
+
+        db = get_database()
+        row = db.fetchone(
+            "SELECT channel_weights FROM skill_selection_log "
+            "WHERE session_id = '__weight_snapshot__' "
+            "ORDER BY timestamp DESC LIMIT 1"
+        )
+        if not row or not row.get("channel_weights"):
+            return None
+
+        weights = (
+            json.loads(row["channel_weights"]) if isinstance(row["channel_weights"], str) else row["channel_weights"]
+        )
+        logger.info("Loaded learned weights from DB: %s", weights)
+        return weights
+    except Exception:
+        logger.debug("Failed to load learned weights", exc_info=True)
+        return None
 
 
 def identify_skill_gaps(days: int = 30) -> list[dict]:

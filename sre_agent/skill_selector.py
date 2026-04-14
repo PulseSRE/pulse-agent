@@ -185,6 +185,17 @@ class SkillSelector:
         self._keyword_index = keyword_index or []
         self._weights = dict(DEFAULT_WEIGHTS)
 
+        # Load learned weights if available
+        try:
+            from .selector_learning import load_learned_weights
+
+            learned = load_learned_weights()
+            if learned:
+                self._weights.update(learned)
+                logger.info("Using learned channel weights")
+        except Exception:
+            pass
+
     def select(self, query: str, *, context: dict | None = None) -> SelectionResult:
         """Run all active channels, fuse scores, return best skill."""
         start = time.monotonic()

@@ -50,6 +50,31 @@ def _build_investigation_prompt(finding: dict) -> str:
     if shared:
         prompt += f"\n\n{shared}\n"
 
+    # Inject dependency graph context — upstream/downstream for affected resources
+    try:
+        from ..dependency_graph import get_dependency_graph
+
+        graph = get_dependency_graph()
+        if graph.node_count > 0 and resources:
+            dep_lines = []
+            for r in resources[:3]:
+                kind = r.get("kind", "")
+                name = r.get("name", "")
+                ns = r.get("namespace", "")
+                if kind and name:
+                    upstream = graph.upstream_dependencies(kind, ns, name)
+                    downstream = graph.downstream_blast_radius(kind, ns, name)
+                    if upstream or downstream:
+                        dep_lines.append(f"  {kind}/{name}:")
+                        if upstream:
+                            dep_lines.append(f"    Depends on: {', '.join(upstream[:5])}")
+                        if downstream:
+                            dep_lines.append(f"    Blast radius: {', '.join(downstream[:5])}")
+            if dep_lines:
+                prompt += "\nResource dependencies:\n" + "\n".join(dep_lines) + "\n"
+    except Exception:
+        pass
+
     return prompt
 
 

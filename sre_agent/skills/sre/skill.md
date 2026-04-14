@@ -27,6 +27,26 @@ requires_tools:
 handoff_to:
   view_designer: [dashboard, view, create view, build view, overview dashboard]
   security: [scan, rbac, vulnerability, compliance, audit security, scc]
+trigger_patterns:
+  - "pod.*crash|crashloop|restart.*loop"
+  - "deploy.*fail|rollout.*stuck"
+  - "node.*pressure|not.?ready|cordoned"
+  - "oom|out.of.memory|memory.*limit"
+  - "pending|unschedulable|insufficient"
+  - "hpa.*max|autoscal"
+  - "pvc.*bound|volume.*mount"
+tool_sequences:
+  crashloop: [list_pods, describe_pod, get_pod_logs, get_events]
+  node_issue: [get_node_status, list_pods, get_events, get_prometheus_query]
+  deployment: [list_deployments, describe_deployment, get_events, get_pod_logs]
+  networking: [get_services, get_routes, describe_pod, get_events]
+investigation_framework: |
+  1. Identify affected resources and scope (single pod vs deployment vs node)
+  2. Check resource health status and recent events
+  3. Examine logs for error patterns
+  4. Query Prometheus for metric anomalies
+  5. Determine root cause and blast radius
+  6. Recommend targeted fix (not blind restarts)
 configurable:
   - communication_style:
       type: enum

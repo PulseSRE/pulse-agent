@@ -21,6 +21,24 @@ requires_tools:
 handoff_to:
   sre: [fix, remediate, scale, restart, apply, patch, delete]
   view_designer: [dashboard, view, create view, security dashboard]
+trigger_patterns:
+  - "rbac|role.?binding|cluster.?role|overpermissive"
+  - "scc|security.?context|privileged|run.?as.?root"
+  - "network.?policy|netpol|ingress.?allow"
+  - "cert.*expir|tls|certificate"
+  - "image.*vuln|cve|scan.*image"
+  - "pod.?security|psa|baseline|restricted"
+tool_sequences:
+  rbac_audit: [scan_rbac_risks, get_security_summary]
+  pod_security: [scan_pod_security, get_security_summary]
+  full_audit: [get_security_summary, scan_rbac_risks, scan_pod_security, scan_network_policies]
+investigation_framework: |
+  1. Run broad security posture scan
+  2. Identify high-severity findings
+  3. Check RBAC for overpermissive roles
+  4. Check pod security standards compliance
+  5. Verify network policies exist and are effective
+  6. Report findings with severity and remediation steps
 configurable:
   - communication_style:
       type: enum
