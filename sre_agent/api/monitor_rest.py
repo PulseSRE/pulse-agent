@@ -471,3 +471,127 @@ async def scanner_coverage(
 ):
     """Scanner coverage statistics showing which failure modes are monitored. Requires token auth."""
     return get_scanner_coverage(days)
+
+
+# ── Postmortems ────────────────────────────────────────────────────────────
+
+
+@router.get("/postmortems")
+async def list_postmortems(
+    limit: int = Query(20, ge=1, le=100),
+    _auth=Depends(verify_token),
+):
+    """List auto-generated postmortems, newest first."""
+    try:
+        from .. import db
+
+        database = db.get_database()
+        rows = database.fetchall(
+            "SELECT id, incident_type, plan_id, timeline, root_cause, "
+            "contributing_factors, blast_radius, actions_taken, prevention, "
+            "metrics_impact, confidence, generated_at "
+            "FROM postmortems ORDER BY generated_at DESC LIMIT ?",
+            (limit,),
+        )
+
+        results = []
+        for row in rows:
+            entry = dict(row)
+            for field in ("contributing_factors", "blast_radius", "actions_taken", "prevention"):
+                if isinstance(entry.get(field), str):
+                    entry[field] = json.loads(entry[field])
+            results.append(entry)
+
+        return {"postmortems": results, "total": len(results)}
+    except Exception as e:
+        logger.debug("Failed to list postmortems: %s", e)
+        return {"postmortems": [], "total": 0}
+
+
+# ── Topology / Dependency Graph ────────────────────────────────────────────
+
+
+@router.get("/topology")
+async def get_topology(
+    namespace: str | None = Query(None),
+    _auth=Depends(verify_token),
+):
+    """Return the dependency graph as nodes + edges for visualization."""
+    from ..dependency_graph import get_dependency_graph
+
+    graph = get_dependency_graph()
+    nodes = []
+    edges = []
+
+    for key, node in graph._nodes.items():
+        if namespace and node.namespace and node.namespace != namespace:
+            continue
+        nodes.append(
+            {
+                "id": key,
+                "kind": node.kind,
+                "name": node.name,
+                "namespace": node.namespace,
+            }
+        )
+
+    node_ids = {n["id"] for n in nodes}
+    for edge in graph._edges:
+        if edge.source in node_ids and edge.target in node_ids:
+            edges.append(
+                {
+                    "source": edge.source,
+                    "target": edge.target,
+                    "relationship": edge.relationship,
+                }
+            )
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "summary": graph.summary(),
+    }
+
+
+# ── Plan Templates ─────────────────────────────────────────────────────────
+
+
+@router.get("/plan-templates")
+async def list_plan_templates(_auth=Depends(verify_token)):
+    """List all investigation plan templates."""
+    from ..plan_templates import list_templates
+
+    return {"templates": list_templates()}
+
+
+@router.get("/plan-templates/{incident_type}")
+async def get_plan_template(incident_type: str, _auth=Depends(verify_token)):
+    """Get a single plan template by incident type."""
+    from ..plan_templates import get_template
+
+    template = get_template(incident_type)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    return {
+        "id": template.id,
+        "name": template.name,
+        "incident_type": template.incident_type,
+        "max_total_duration": template.max_total_duration,
+        "phases": [
+            {
+                "id": p.id,
+                "skill_name": p.skill_name,
+                "required": p.required,
+                "depends_on": p.depends_on,
+                "timeout_seconds": p.timeout_seconds,
+                "produces": p.produces,
+                "branch_on": p.branch_on,
+                "branches": p.branches,
+                "parallel_with": p.parallel_with,
+                "approval_required": p.approval_required,
+                "runs": p.runs,
+            }
+            for p in template.phases
+        ],
+    }

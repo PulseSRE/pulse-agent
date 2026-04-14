@@ -13,6 +13,24 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+def _mock_runtime() -> PlanRuntime:
+    """Create a PlanRuntime with _execute_phase mocked to return stub outputs."""
+    runtime = PlanRuntime()
+
+    async def _stub_execute_phase(phase, incident, prior):
+        return SkillOutput(
+            skill_id=phase.skill_name,
+            phase_id=phase.id,
+            status="complete",
+            findings={"phase": phase.id},
+            evidence_summary=f"Phase {phase.id} completed",
+            confidence=0.85,
+        )
+
+    runtime._execute_phase = _stub_execute_phase
+    return runtime
+
+
 class TestPlanRuntime:
     def test_execute_linear_plan(self):
         plan = SkillPlan(
@@ -24,7 +42,7 @@ class TestPlanRuntime:
                 SkillPhase(id="verify", skill_name="sre", depends_on=["diagnose"]),
             ],
         )
-        runtime = PlanRuntime()
+        runtime = _mock_runtime()
         result = _run(runtime.execute(plan, {"category": "crashloop"}))
         assert result.status == "complete"
         assert result.phases_completed == 3
@@ -43,7 +61,7 @@ class TestPlanRuntime:
                 SkillPhase(id="verify", skill_name="sre", depends_on=["triage"]),
             ],
         )
-        runtime = PlanRuntime()
+        runtime = _mock_runtime()
         _run(
             runtime.execute(
                 plan,
@@ -64,7 +82,7 @@ class TestPlanRuntime:
                 SkillPhase(id="diagnose", skill_name="sre", depends_on=["triage"]),
             ],
         )
-        runtime = PlanRuntime()
+        runtime = _mock_runtime()
 
         # Override _execute_phase to fail on diagnose
         original = runtime._execute_phase
@@ -94,7 +112,7 @@ class TestPlanRuntime:
                 ),
             ],
         )
-        runtime = PlanRuntime()
+        runtime = _mock_runtime()
         result = _run(runtime.execute(plan, {}))
         assert "verify" in result.phase_outputs
 
@@ -108,7 +126,7 @@ class TestPlanRuntime:
                 SkillPhase(id="diagnose", skill_name="sre", depends_on=["triage"]),
             ],
         )
-        runtime = PlanRuntime()
+        runtime = _mock_runtime()
 
         # Make triage fail
         async def fail_triage(phase, incident, prior):
@@ -128,7 +146,7 @@ class TestPlanRuntime:
             name="duration",
             phases=[SkillPhase(id="triage", skill_name="sre")],
         )
-        runtime = PlanRuntime()
+        runtime = _mock_runtime()
         result = _run(runtime.execute(plan, {}))
         assert result.total_duration_ms >= 0
 

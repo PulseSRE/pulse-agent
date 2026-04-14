@@ -51,6 +51,8 @@ class Skill:
     display_name: str = ""
     icon: str = ""
     builtin: bool = True
+    generated_by: str = ""
+    reviewed: bool = True
 
     def to_dict(self) -> dict:
         """Serialize for API responses."""
@@ -71,6 +73,8 @@ class Skill:
             "degraded": self.degraded,
             "degraded_reason": self.degraded_reason,
             "prompt_length": len(self.system_prompt),
+            "generated_by": self.generated_by,
+            "reviewed": self.reviewed,
         }
 
 
@@ -162,6 +166,8 @@ def _parse_skill_md(path: Path) -> Skill | None:
         display_name=meta.get("display_name", ""),
         icon=meta.get("icon", ""),
         builtin=is_builtin,
+        generated_by=meta.get("generated_by", ""),
+        reviewed=meta.get("reviewed", True),
     )
 
 

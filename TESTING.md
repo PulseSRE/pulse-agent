@@ -31,14 +31,14 @@ Testing philosophy: deterministic tests run on every commit at zero cost. LLM-ju
                   +-------------------------+
                 +-----------------------+-----+
                 |  Deterministic Evals          |   <- every PR and push
-                |  9 suites, 70 scenarios       |      Tool selection, safety, guardrails.
+                |  11 suites, 98 scenarios       |      Tool selection, safety, guardrails.
                 +-------------------------------+
               +-----------------------------------+
               |       Skill-Bundled Evals          |   <- every PR and push
               |  Per-skill evals.yaml scenarios    |      Tool selection per skill domain.
               +-----------------------------------+
             +---------------------------------------+
-            |          Unit Tests (1520)             |   <- every PR and push
+            |          Unit Tests (1666)             |   <- every PR and push
             |  Tools, scanners, API, config, memory  |      Fast, deterministic, mocked K8s.
             +---------------------------------------+
 ```
@@ -50,7 +50,7 @@ All commands run from the project root (`/Users/amobrem/ali/pulse-agent`).
 ### Unit Tests
 
 ```bash
-python3 -m pytest tests/ -v                          # all 1520 tests
+python3 -m pytest tests/ -v                          # all 1666 tests
 python3 -m pytest tests/test_k8s_tools.py -v         # single file
 python3 -m pytest tests/ -k "test_crashloop" -v      # by name pattern
 python3 -m pytest tests/ -x                           # stop on first failure
@@ -103,7 +103,7 @@ python -m sre_agent.evals.weekly_digest_cli --current-days 7 --baseline-days 7 \
 
 ### Coverage
 
-1520 pytest tests across 40+ test files in `tests/`. Major coverage areas:
+1666 pytest tests across 40+ test files in `tests/`. Major coverage areas:
 
 | Area | Test files | What they cover |
 |------|-----------|-----------------|
@@ -205,7 +205,7 @@ sre_agent/evals/
   outcomes_cli.py      # Outcomes CLI
   weekly_digest.py     # Weekly summary generation
   weekly_digest_cli.py # Weekly digest CLI
-  scenarios_data/      # 9 JSON suite files (70 scenarios total)
+  scenarios_data/      # 11 JSON suite files (98 scenarios total)
   fixtures/            # 17 recorded tool-call trace files
   baselines/           # Saved baseline results (core.json, release.json, view_designer.json)
   policies/            # Regression policy YAML

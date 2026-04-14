@@ -4,7 +4,7 @@
   <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v2.2.0"><img src="https://img.shields.io/badge/release-v2.2.0-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-111_(75+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-17-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-1520-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1666-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/PromQL%20recipes-73-10b981?style=for-the-badge" alt="PromQL Recipes">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
@@ -740,7 +740,7 @@ python -m pytest tests/ -v
 
 See [TESTING.md](TESTING.md) for test conventions, fixtures, and coverage targets.
 
-1,520 tests covering all tools, all 17 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, PromQL recipes, view validation, layout engine, intelligence loop, token tracking, tool prediction, and the memory system. All tests run without a cluster or API key (fully mocked).
+1,666 tests covering all tools, all 17 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, PromQL recipes, view validation, layout engine, intelligence loop, token tracking, tool prediction, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ## Evaluation Framework
 
@@ -814,7 +814,7 @@ Suites:
 ---
 
 <p align="center">
-  <strong>111 tools (75 native + 36 MCP)</strong> &bull; <strong>17 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>98 eval prompts</strong> &bull; <strong>1,520 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>111 tools (75 native + 36 MCP)</strong> &bull; <strong>17 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>98 eval prompts</strong> &bull; <strong>1,666 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

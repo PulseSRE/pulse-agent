@@ -362,6 +362,7 @@ class TestSecurityFollowup:
             patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
             patch("sre_agent.monitor.session._run_security_followup_sync", return_value=mock_sec_result) as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
+            patch.object(session, "_try_plan_execution", return_value=False),
         ):
             mock_cb.is_open = False
             loop = asyncio.new_event_loop()
@@ -411,6 +412,7 @@ class TestSecurityFollowup:
             patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
             patch("sre_agent.monitor.session._run_security_followup_sync") as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
+            patch.object(session, "_try_plan_execution", return_value=False),
         ):
             mock_cb.is_open = False
             loop = asyncio.new_event_loop()
@@ -468,6 +470,7 @@ class TestSecurityFollowup:
             patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
             patch("sre_agent.monitor.session._run_security_followup_sync", return_value=mock_sec_result) as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
+            patch.object(session, "_try_plan_execution", return_value=False),
         ):
             mock_cb.is_open = False
             loop = asyncio.new_event_loop()
@@ -520,6 +523,7 @@ class TestMonitorAutoLearn:
         with (
             patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
+            patch.object(session, "_try_plan_execution", return_value=False),
         ):
             mock_cb.is_open = False
             loop = asyncio.new_event_loop()
@@ -626,6 +630,7 @@ class TestMonitorAutoLearn:
         with (
             patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
+            patch.object(session, "_try_plan_execution", return_value=False),
         ):
             mock_cb.is_open = False
             # Should not raise even without memory

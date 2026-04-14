@@ -46,8 +46,10 @@ class TestFixHistorySummaryVerification:
 
         database = db.get_database()
 
-        # Insert test actions with different verification statuses
+        # Clean up any stale data from prior aborted runs, then insert
         ts = int(time.time() * 1000)
+        database.execute("DELETE FROM actions WHERE id IN (?, ?, ?, ?)", ("a1", "a2", "a3", "a4"))
+        database.commit()
         database.execute(
             "INSERT INTO actions (id, finding_id, status, category, duration_ms, verification_status, timestamp) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
