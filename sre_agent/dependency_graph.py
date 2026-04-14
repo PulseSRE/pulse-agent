@@ -179,6 +179,16 @@ class DependencyGraph:
                 for n in nodes.items:
                     self.add_node("Node", "", n.metadata.name, dict(n.metadata.labels or {}))
 
+            # Node → Pod scheduling (pod.spec.nodeName)
+            if not isinstance(pods, ToolError):
+                for p in pods.items:
+                    node_name = getattr(p.spec, "node_name", None)
+                    if node_name:
+                        node_key = _resource_key("Node", "", node_name)
+                        pod_key = _resource_key("Pod", p.metadata.namespace, p.metadata.name)
+                        if node_key in self._nodes and pod_key in self._nodes:
+                            self.add_edge(node_key, pod_key, "schedules")
+
             self._last_refresh = time.time()
             logger.info("Dependency graph refreshed: %d nodes, %d edges", self.node_count, self.edge_count)
 
