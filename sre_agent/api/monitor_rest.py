@@ -566,6 +566,70 @@ async def get_topology(
 # ── Plan Templates ─────────────────────────────────────────────────────────
 
 
+@router.get("/slo")
+async def get_slo_status(_auth=Depends(verify_token)):
+    """Current SLO status with burn rates from live Prometheus data."""
+    from ..slo_registry import get_slo_registry
+
+    registry = get_slo_registry()
+    slos = registry.list_all()
+
+    if not slos:
+        return {"slos": [], "total": 0}
+
+    statuses = registry.evaluate_with_prometheus()
+
+    return {
+        "slos": [
+            {
+                "service": s.definition.service_name,
+                "type": s.definition.slo_type,
+                "target": s.definition.target,
+                "window_days": s.definition.window_days,
+                "description": s.definition.description,
+                "current_value": s.current_value,
+                "error_budget_remaining": s.error_budget_remaining,
+                "burn_rate": s.burn_rate,
+                "alert_level": s.alert_level,
+            }
+            for s in statuses
+        ],
+        "total": len(statuses),
+    }
+
+
+@router.post("/slo")
+async def register_slo(request: Request, _auth=Depends(verify_token)):
+    """Register a new SLO definition."""
+    from ..slo_registry import SLODefinition, get_slo_registry
+
+    body = await request.json()
+    slo = SLODefinition(
+        service_name=body.get("service", ""),
+        slo_type=body.get("type", "availability"),
+        target=float(body.get("target", 0.999)),
+        window_days=int(body.get("window_days", 30)),
+        description=body.get("description", ""),
+    )
+
+    if not slo.service_name:
+        raise HTTPException(status_code=400, detail="service name required")
+
+    registry = get_slo_registry()
+    registry.register(slo)
+    return {"status": "registered", "service": slo.service_name, "type": slo.slo_type}
+
+
+@router.delete("/slo/{service}/{slo_type}")
+async def unregister_slo(service: str, slo_type: str, _auth=Depends(verify_token)):
+    """Remove an SLO definition."""
+    from ..slo_registry import get_slo_registry
+
+    registry = get_slo_registry()
+    registry.unregister(service, slo_type)
+    return {"status": "removed", "service": service, "type": slo_type}
+
+
 @router.get("/plan-templates")
 async def list_plan_templates(_auth=Depends(verify_token)):
     """List all investigation plan templates."""
