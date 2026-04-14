@@ -145,6 +145,13 @@ def _migrate_013_tool_predictions(db: Database) -> None:
     db.executescript(TOOL_PREDICTIONS_SCHEMA + TOOL_COOCCURRENCE_SCHEMA)
 
 
+def _migrate_014_skill_selection_log(db: Database) -> None:
+    """Add skill_selection_log table for ORCA selector observability."""
+    from .db_schema import SKILL_SELECTION_LOG_SCHEMA
+
+    db.executescript(SKILL_SELECTION_LOG_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -159,4 +166,5 @@ MIGRATIONS = [
     (11, "routing_decisions", _migrate_011_routing_decisions),
     (12, "bigint_timestamps", _migrate_012_bigint_timestamps),
     (13, "tool_predictions", _migrate_013_tool_predictions),
+    (14, "skill_selection_log", _migrate_014_skill_selection_log),
 ]

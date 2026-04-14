@@ -369,6 +369,28 @@ CREATE TABLE IF NOT EXISTS tool_cooccurrence (
 );
 """
 
+SKILL_SELECTION_LOG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS skill_selection_log (
+    id              SERIAL PRIMARY KEY,
+    timestamp       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    session_id      TEXT NOT NULL,
+    query_summary   TEXT NOT NULL,
+    channel_scores  JSONB NOT NULL,
+    fused_scores    JSONB NOT NULL,
+    selected_skill  TEXT NOT NULL,
+    threshold_used  FLOAT NOT NULL,
+    conflicts_detected JSONB,
+    skill_overridden TEXT,
+    tools_requested_missing TEXT[],
+    selection_ms    INTEGER,
+    incident_priority TEXT,
+    channel_weights JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_skill_selection_log_ts ON skill_selection_log(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_selection_log_skill ON skill_selection_log(selected_skill);
+CREATE INDEX IF NOT EXISTS idx_skill_selection_log_session ON skill_selection_log(session_id);
+"""
+
 ALL_SCHEMAS = (
     INCIDENTS_SCHEMA
     + RUNBOOKS_SCHEMA
