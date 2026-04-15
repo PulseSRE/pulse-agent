@@ -862,6 +862,7 @@ TOOL_CATEGORIES = {
             "delete_dashboard",
             "clone_dashboard",
             "critique_view",
+            "optimize_view",
             # Data tools needed for dashboard content
             "get_prometheus_query",
             "discover_metrics",

@@ -476,6 +476,10 @@ Use `add_widget_to_view(view_id)` to extend existing views -- never recreate.
 4. `update_view_widgets(view_id, action="rename_widget", widget_index=N, new_title="...")` -> rename
 5. `add_widget_to_view(view_id)` -> add latest component to existing view
 6. `remove_widget_from_view(view_id, widget_title)` -> remove widget by title
+7. `optimize_view(view_id, strategy)` -> reorganize layout:
+   - `"group"` — group related widgets into sections (compute, memory, workloads, etc.)
+   - `"reflow"` — re-run semantic layout engine (fix whitespace, resize widgets)
+   - `"compact"` — remove gaps, pack widgets tightly
 
 ## Production Readiness Fixes
 

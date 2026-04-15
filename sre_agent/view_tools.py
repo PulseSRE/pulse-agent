@@ -1088,6 +1088,118 @@ def clone_dashboard(view_id: str, new_title: str = ""):
     )
 
 
+@beta_tool
+def optimize_view(view_id: str, strategy: str = "group") -> str:
+    """Analyze and reorganize a dashboard's widgets for better layout. Groups related widgets into sections, reorders by priority, and re-computes positions.
+
+    Args:
+        view_id: The view ID (e.g. 'cv-abc123').
+        strategy: One of:
+            'group' — Group widgets by topic (compute, memory, workloads, alerts, etc.) and wrap in sections.
+            'reflow' — Re-run the layout engine on current widgets without grouping.
+            'compact' — Remove empty space, pack widgets tightly.
+    """
+    from . import db
+    from .layout_engine import compute_positions
+
+    owner = get_current_user()
+    view = db.get_view(view_id, owner)
+    if not view:
+        view = db.get_view(view_id)
+    if not view:
+        return f"View '{view_id}' not found."
+    owner = view.get("owner", owner)
+
+    layout = view.get("layout", [])
+    if not layout:
+        return f"View '{view_id}' has no widgets to optimize."
+
+    if strategy == "reflow":
+        # Just re-run layout engine on existing widgets
+        positioned = compute_positions(layout)
+        db.update_view(view_id, owner, layout=positioned)
+        return _signal(
+            "view_updated",
+            f"Re-flowed {len(positioned)} widgets with semantic layout engine.",
+            view_id=view_id,
+        )
+
+    if strategy == "compact":
+        # Strip layout hints and let the engine repack from scratch
+        stripped = [{k: v for k, v in w.items() if k not in ("x", "y", "w", "h", "layout")} for w in layout]
+        positioned = compute_positions(stripped)
+        db.update_view(view_id, owner, layout=positioned)
+        return _signal(
+            "view_updated",
+            f"Compacted {len(positioned)} widgets — removed gaps and re-packed.",
+            view_id=view_id,
+        )
+
+    # strategy == "group": analyze widgets and group into sections
+    groups: dict[str, list[dict]] = {}
+    _TOPIC_KEYWORDS: dict[str, list[str]] = {
+        "Compute": ["cpu", "node", "compute", "core", "processor"],
+        "Memory": ["memory", "mem", "oom", "rss", "heap"],
+        "Network": ["network", "traffic", "ingress", "route", "dns", "bandwidth", "http"],
+        "Storage": ["storage", "pvc", "disk", "volume", "iops"],
+        "Workloads": ["pod", "deploy", "replica", "container", "restart", "crash", "workload"],
+        "Alerts": ["alert", "firing", "critical", "warning", "incident"],
+        "Security": ["security", "rbac", "scc", "vulnerability", "scan", "compliance"],
+    }
+
+    for widget in layout:
+        title = (widget.get("title", "") or "").lower()
+        query = json.dumps(widget).lower()
+        assigned = False
+        for group_name, keywords in _TOPIC_KEYWORDS.items():
+            if any(kw in title or kw in query for kw in keywords):
+                groups.setdefault(group_name, []).append(widget)
+                assigned = True
+                break
+        if not assigned:
+            groups.setdefault("Overview", []).append(widget)
+
+    # Build sectioned layout — KPI groups first, then sections in order
+    sectioned: list[dict] = []
+    # Pull out metric_cards and info_card_grids as top-level KPIs
+    kpis = [w for ws in groups.values() for w in ws if w.get("kind") in ("metric_card", "info_card_grid", "stat_card")]
+    non_kpis = {id(w) for w in kpis}
+
+    # Add KPIs first (no section wrapper needed)
+    sectioned.extend(kpis)
+
+    # Add each group as a section if it has 2+ non-KPI widgets
+    for group_name in ["Overview", "Compute", "Memory", "Workloads", "Network", "Storage", "Alerts", "Security"]:
+        group_widgets = [w for w in groups.get(group_name, []) if id(w) not in non_kpis]
+        if not group_widgets:
+            continue
+        if len(group_widgets) == 1:
+            # Single widget — don't wrap in section
+            sectioned.append(group_widgets[0])
+        else:
+            # Wrap in a section
+            sectioned.append(
+                {
+                    "kind": "section",
+                    "title": group_name,
+                    "items": group_widgets,
+                    "layout": {"w": "full"},
+                }
+            )
+
+    positioned = compute_positions(sectioned)
+    db.update_view(view_id, owner, layout=positioned)
+
+    group_summary = ", ".join(f"{name} ({len(ws)})" for name, ws in groups.items() if ws)
+    return _signal(
+        "view_updated",
+        f"Reorganized {len(layout)} widgets into {len(groups)} groups: {group_summary}. "
+        f"KPIs moved to top, related widgets grouped into sections.",
+        view_id=view_id,
+    )
+
+
+register_tool(optimize_view)
 register_tool(delete_dashboard)
 register_tool(clone_dashboard)
 register_tool(create_dashboard)
@@ -1125,4 +1237,5 @@ VIEW_TOOLS = [
     get_view_versions,
     critique_view,
     plan_dashboard,
+    optimize_view,
 ]

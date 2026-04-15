@@ -515,6 +515,12 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "Dashboard cloning",
     ),
     (
+        "optimize the layout of my dashboard and group related widgets",
+        ["optimize_view"],
+        "view_designer",
+        "View layout optimization",
+    ),
+    (
         "show me cluster KPI metrics",
         ["cluster_metrics"],
         "view_designer",

@@ -41,7 +41,8 @@ trigger_patterns:
   - "show.*as.*chart|add.*widget|layout"
 tool_sequences:
   new_dashboard: [plan_dashboard, namespace_summary, cluster_metrics, create_dashboard]
-  edit_dashboard: [namespace_summary, create_dashboard]
+  edit_dashboard: [get_view_details, update_view_widgets]
+  optimize_layout: [get_view_details, optimize_view]
   metric_view: [get_prometheus_query, create_dashboard]
 investigation_framework: |
   1. Understand what the user wants to see (resources, metrics, layout)
