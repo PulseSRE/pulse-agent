@@ -24,6 +24,23 @@
     {"id": "sel_empty_query", "query": "", "expected_skill": "sre", "acceptable": ["sre"]},
     {"id": "sel_gibberish", "query": "xyzzy foobar baz", "expected_skill": "sre", "acceptable": ["sre"]},
     {"id": "sel_skill_name_direct", "query": "run security scan", "expected_skill": "security", "acceptable": ["security"]},
-    {"id": "sel_capacity_dashboard", "query": "create a capacity planning dashboard for me", "expected_skill": "view_designer", "acceptable": ["view_designer", "capacity_planner"]}
+    {"id": "sel_capacity_dashboard", "query": "create a capacity planning dashboard for me", "expected_skill": "view_designer", "acceptable": ["view_designer", "capacity_planner"]},
+    {"id": "sel_fix_layout", "query": "fix the layout", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_fix_dashboard_layout", "query": "fix the dashboard layout", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_fix_view", "query": "fix the view", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_update_layout", "query": "update the layout", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_update_view", "query": "update the view", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_whitespace", "query": "too much whitespace in my dashboard", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_reorganize", "query": "reorganize the view", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_optimize_layout", "query": "optimize the layout", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_widgets_cut_off", "query": "the widgets are cut off", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_compact_dashboard", "query": "compact the dashboard", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_add_chart", "query": "add a CPU chart to the dashboard", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_remove_widget", "query": "remove the third widget from the dashboard", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_fix_pod_sre", "query": "fix this crashing pod", "expected_skill": "sre", "acceptable": ["sre"]},
+    {"id": "sel_fix_deployment_sre", "query": "fix the failing deployment", "expected_skill": "sre", "acceptable": ["sre"]},
+    {"id": "sel_slo_burn", "query": "show me current SLO burn rates", "expected_skill": "slo_management", "acceptable": ["slo_management", "sre"]},
+    {"id": "sel_postmortem", "query": "generate a postmortem for the last incident", "expected_skill": "postmortem", "acceptable": ["postmortem", "sre"]},
+    {"id": "sel_plan_builder", "query": "build me a skill for database troubleshooting", "expected_skill": "plan_builder", "acceptable": ["plan_builder", "sre"]}
   ]
 }
