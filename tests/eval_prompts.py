@@ -532,6 +532,12 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "view_designer",
         "Namespace summary cards",
     ),
+    (
+        "show me the topology graph for the openshiftpulse namespace",
+        ["get_topology_graph"],
+        "sre",
+        "Topology graph rendering",
+    ),
     # ─── Cross-Agent Handoff ──────────────────────────────────────────────
     (
         "I found a security issue, hand this off to the security team",
@@ -624,6 +630,18 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         ["create_skill_from_template"],
         "sre",
         "Clone skill from template",
+    ),
+    (
+        "show me pods from production and staging namespaces in one table",
+        ["create_live_table"],
+        "sre",
+        "Multi-namespace live table",
+    ),
+    (
+        "create a live table of pods with CPU usage and error counts",
+        ["create_live_table"],
+        "sre",
+        "Multi-datasource live table with enrichment",
     ),
 ]
 

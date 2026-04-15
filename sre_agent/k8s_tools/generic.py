@@ -146,6 +146,164 @@ def _resolve_plural(kind: str) -> str:
     return lower + "s"
 
 
+def _fetch_table_rows(
+    resource: str,
+    namespace: str = "",
+    group: str = "",
+    version: str = "v1",
+    label_selector: str = "",
+    field_selector: str = "",
+    show_wide: bool = False,
+) -> dict[str, Any] | str:
+    """Fetch K8s resources via the Table API and return parsed columns + rows.
+
+    Returns a dict with keys ``columns``, ``rows``, ``gvr`` on success,
+    or an error string on failure.  Reusable by ``list_resources`` and
+    ``create_live_table``.
+    """
+    import ssl
+    import urllib.parse
+    import urllib.request
+
+    resource, group = _resolve_short_name(resource, group)
+    gvr = f"{group}~{version}~{resource}" if group else f"{version}~{resource}"
+
+    api_base = f"/apis/{group}/{version}" if group else f"/api/{version}"
+    if namespace and namespace.upper() != "ALL":
+        path = f"{api_base}/namespaces/{namespace}/{resource}"
+    else:
+        path = f"{api_base}/{resource}"
+
+    params: dict[str, str] = {}
+    if label_selector:
+        params["labelSelector"] = label_selector
+    if field_selector:
+        params["fieldSelector"] = field_selector
+    params["limit"] = str(MAX_RESULTS)
+
+    url = f"https://kubernetes.default.svc{path}"
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+
+    try:
+        with open("/var/run/secrets/kubernetes.io/serviceaccount/token") as f:
+            token = f.read().strip()
+    except FileNotFoundError:
+        return "Error: Not running in-cluster (no service account token)."
+
+    ctx = ssl.create_default_context()
+    try:
+        ctx.load_verify_locations("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+    except Exception as e:
+        return f"Error: Cannot load cluster CA certificate ({e}). Refusing to connect without TLS verification."
+
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json;as=Table;g=meta.k8s.io;v=v1",
+        },
+    )
+
+    try:
+        resp = urllib.request.urlopen(req, context=ctx, timeout=15)
+        data = json.loads(resp.read())
+    except Exception as e:
+        return f"Error listing {resource}: {e}"
+
+    col_defs_raw = data.get("columnDefinitions", [])
+    table_rows = data.get("rows", [])
+
+    if not table_rows:
+        return f"No {resource} found."
+
+    _NAME_TYPE_MAP = {
+        "Name": "resource_name",
+        "Status": "status",
+        "Phase": "status",
+        "Ready": "replicas",
+        "Age": "age",
+        "Node": "node",
+        "Namespace": "namespace",
+        "Suspend": "boolean",
+        "Selector": "labels",
+        "Node Selector": "labels",
+    }
+
+    max_priority = 99 if show_wide else 0
+    col_defs: list[dict[str, str]] = []
+    col_indices: list[int] = []
+    for i, col in enumerate(col_defs_raw):
+        if col.get("priority", 0) > max_priority:
+            continue
+        col_id = col["name"].lower().replace(" ", "_").replace("-", "_").replace("(", "").replace(")", "")
+        col_type = _NAME_TYPE_MAP.get(col["name"]) or _infer_column_type(col_id) or "text"
+        col_defs.append({"id": col_id, "header": col["name"], "type": col_type})
+        col_indices.append(i)
+
+    is_cluster_scoped = all(
+        not (tr.get("object", {}).get("metadata", {}) if isinstance(tr.get("object"), dict) else {}).get("namespace")
+        for tr in table_rows[:5]
+    )
+
+    rows: list[dict[str, Any]] = []
+    for tr in table_rows:
+        cells = tr.get("cells", [])
+        meta = tr.get("object", {}).get("metadata", {}) if isinstance(tr.get("object"), dict) else {}
+        ns = meta.get("namespace", "")
+        row: dict[str, Any] = {"_gvr": gvr}
+        if ns and not is_cluster_scoped:
+            row["namespace"] = ns
+
+        for j, idx in enumerate(col_indices):
+            if idx < len(cells):
+                val = cells[idx]
+                row[col_defs[j]["id"]] = val if val is not None else ""
+
+        labels = meta.get("labels")
+        if labels:
+            row["labels"] = labels
+        annotations = meta.get("annotations")
+        if annotations:
+            filtered = {
+                k: v
+                for k, v in annotations.items()
+                if not k.startswith("kubectl.kubernetes.io/") and not k.startswith("openshift.io/") and len(v) < 200
+            }
+            if filtered:
+                row["annotations"] = filtered
+        owner_refs = meta.get("ownerReferences")
+        if owner_refs:
+            row["owner"] = "/".join(f"{o['kind']}/{o['name']}" for o in owner_refs)
+        row["_uid"] = meta.get("uid", "")
+
+        rows.append(row)
+
+    # Add namespace column for cross-namespace listings
+    if (
+        not is_cluster_scoped
+        and (not namespace or namespace.upper() == "ALL")
+        and not any(c["id"] == "namespace" for c in col_defs)
+    ):
+        col_defs.insert(0, {"id": "namespace", "header": "Namespace", "type": "namespace"})
+
+    if is_cluster_scoped:
+        col_defs = [c for c in col_defs if c["id"] != "namespace"]
+
+    # Add metadata columns
+    has_labels = any(r.get("labels") for r in rows[:5])
+    has_annotations = any(r.get("annotations") for r in rows[:5])
+    has_owner = any(r.get("owner") for r in rows[:5])
+    if has_labels:
+        col_defs.append({"id": "labels", "header": "Labels", "type": "labels"})
+    if has_annotations:
+        col_defs.append({"id": "annotations", "header": "Annotations", "type": "labels"})
+    if has_owner:
+        col_defs.append({"id": "owner", "header": "Owner", "type": "text"})
+
+    return {"columns": col_defs, "rows": rows, "gvr": gvr}
+
+
 @beta_tool
 def list_resources(
     resource: str,
@@ -173,156 +331,12 @@ def list_resources(
         sort_by: Column name to sort by. Prefix with '-' for descending.
         show_wide: If true, include all columns (like kubectl -o wide).
     """
-    import ssl
-    import urllib.parse
-    import urllib.request
+    result = _fetch_table_rows(resource, namespace, group, version, label_selector, field_selector, show_wide)
+    if isinstance(result, str):
+        return result
 
-    # Resolve short names (svc->services, deploy->deployments, cm->configmaps, etc.)
-    resource, group = _resolve_short_name(resource, group)
-
-    gvr = f"{group}~{version}~{resource}" if group else f"{version}~{resource}"
-
-    # Build the API path
-    api_base = f"/apis/{group}/{version}" if group else f"/api/{version}"
-    if namespace and namespace.upper() != "ALL":
-        path = f"{api_base}/namespaces/{namespace}/{resource}"
-    else:
-        path = f"{api_base}/{resource}"
-
-    params = {}
-    if label_selector:
-        params["labelSelector"] = label_selector
-    if field_selector:
-        params["fieldSelector"] = field_selector
-    params["limit"] = str(MAX_RESULTS)
-
-    url = f"https://kubernetes.default.svc{path}"
-    if params:
-        url += "?" + urllib.parse.urlencode(params)
-
-    # Read SA token for auth
-    try:
-        with open("/var/run/secrets/kubernetes.io/serviceaccount/token") as f:
-            token = f.read().strip()
-    except FileNotFoundError:
-        return "Error: Not running in-cluster (no service account token)."
-
-    ctx = ssl.create_default_context()
-    try:
-        ctx.load_verify_locations("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
-    except Exception as e:
-        return f"Error: Cannot load cluster CA certificate ({e}). Refusing to connect without TLS verification."
-
-    # Request as Table format — server returns printer columns + pre-formatted cells
-    req = urllib.request.Request(
-        url,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json;as=Table;g=meta.k8s.io;v=v1",
-        },
-    )
-
-    try:
-        resp = urllib.request.urlopen(req, context=ctx, timeout=15)
-        data = json.loads(resp.read())
-    except Exception as e:
-        return f"Error listing {resource}: {e}"
-
-    col_defs_raw = data.get("columnDefinitions", [])
-    table_rows = data.get("rows", [])
-
-    if not table_rows:
-        return f"No {resource} found."
-
-    # Map server column names to our renderer types
-    _NAME_TYPE_MAP = {
-        "Name": "resource_name",
-        "Status": "status",
-        "Phase": "status",
-        "Ready": "replicas",
-        "Age": "age",
-        "Node": "node",
-        "Namespace": "namespace",
-        "Suspend": "boolean",
-        "Selector": "labels",
-        "Node Selector": "labels",
-    }
-
-    # Build column definitions — filter by priority unless show_wide
-    max_priority = 99 if show_wide else 0
-    col_defs = []
-    col_indices = []
-    for i, col in enumerate(col_defs_raw):
-        if col.get("priority", 0) > max_priority:
-            continue
-        col_id = col["name"].lower().replace(" ", "_").replace("-", "_").replace("(", "").replace(")", "")
-        col_type = _NAME_TYPE_MAP.get(col["name"]) or _infer_column_type(col_id) or "text"
-        col_defs.append({"id": col_id, "header": col["name"], "type": col_type})
-        col_indices.append(i)
-
-    # Detect if resource is cluster-scoped (no namespace on any row)
-    is_cluster_scoped = all(
-        not (tr.get("object", {}).get("metadata", {}) if isinstance(tr.get("object"), dict) else {}).get("namespace")
-        for tr in table_rows[:5]
-    )
-
-    # Build rows from Table cells
-    rows = []
-    for tr in table_rows:
-        cells = tr.get("cells", [])
-        meta = tr.get("object", {}).get("metadata", {}) if isinstance(tr.get("object"), dict) else {}
-        ns = meta.get("namespace", "")
-        row: dict = {"_gvr": gvr}
-        if ns and not is_cluster_scoped:
-            row["namespace"] = ns
-
-        for j, idx in enumerate(col_indices):
-            if idx < len(cells):
-                val = cells[idx]
-                row[col_defs[j]["id"]] = val if val is not None else ""
-
-        # Pass through metadata fields not already in printer columns
-        labels = meta.get("labels")
-        if labels:
-            row["labels"] = labels
-        annotations = meta.get("annotations")
-        if annotations:
-            filtered = {
-                k: v
-                for k, v in annotations.items()
-                if not k.startswith("kubectl.kubernetes.io/") and not k.startswith("openshift.io/") and len(v) < 200
-            }
-            if filtered:
-                row["annotations"] = filtered
-        owner_refs = meta.get("ownerReferences")
-        if owner_refs:
-            row["owner"] = "/".join(f"{o['kind']}/{o['name']}" for o in owner_refs)
-        row["_uid"] = meta.get("uid", "")
-
-        rows.append(row)
-
-    # Add namespace column only for namespaced resources listed across namespaces
-    if (
-        not is_cluster_scoped
-        and (not namespace or namespace.upper() == "ALL")
-        and not any(c["id"] == "namespace" for c in col_defs)
-    ):
-        col_defs.insert(0, {"id": "namespace", "header": "Namespace", "type": "namespace"})
-
-    # Remove namespace column from cluster-scoped resources
-    if is_cluster_scoped:
-        col_defs = [c for c in col_defs if c["id"] != "namespace"]
-
-    # Add metadata columns — always present, UI can toggle visibility
-    has_labels = any(r.get("labels") for r in rows[:5])
-    has_annotations = any(r.get("annotations") for r in rows[:5])
-    has_owner = any(r.get("owner") for r in rows[:5])
-    if has_labels:
-        col_defs.append({"id": "labels", "header": "Labels", "type": "labels"})
-    if has_annotations:
-        col_defs.append({"id": "annotations", "header": "Annotations", "type": "labels"})
-    if has_owner:
-        col_defs.append({"id": "owner", "header": "Owner", "type": "text"})
+    col_defs = result["columns"]
+    rows = result["rows"]
 
     # Sort if requested
     if sort_by:
@@ -330,20 +344,23 @@ def list_resources(
         sort_key = sort_by.lstrip("-").lower().replace(" ", "_").replace("-", "_")
         rows.sort(key=lambda r: str(r.get(sort_key, "")), reverse=desc)
 
+    # Resolve resource name for display (short names already resolved by _fetch_table_rows)
+    resource_resolved, _ = _resolve_short_name(resource, group)
+
     # Build text summary
     name_col = next((c["id"] for c in col_defs if c.get("type") == "resource_name"), "name")
     text_lines = []
     for r in rows[:20]:
         ns_prefix = f"{r.get('namespace', '')}/" if r.get("namespace") else ""
         text_lines.append(f"{ns_prefix}{r.get(name_col, '?')}")
-    text = f"{resource} ({len(rows)}):\n" + "\n".join(text_lines)
+    text = f"{resource_resolved} ({len(rows)}):\n" + "\n".join(text_lines)
     if len(rows) > 20:
         text += f"\n... and {len(rows) - 20} more"
 
     component = {
         "kind": "data_table",
-        "title": f"{resource.replace('_', ' ').title()} ({len(rows)})",
-        "description": f"{'Filtered' if label_selector else 'All'} {resource} in {namespace or 'cluster'}",
+        "title": f"{resource_resolved.replace('_', ' ').title()} ({len(rows)})",
+        "description": f"{'Filtered' if label_selector else 'All'} {resource_resolved} in {namespace or 'cluster'}",
         "columns": col_defs,
         "rows": rows,
     }

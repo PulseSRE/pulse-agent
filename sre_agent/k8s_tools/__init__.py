@@ -20,6 +20,7 @@ __all__ = [
     "_K8S_NAME_RE",
     "_KIND_PLURAL_MAP",
     "_SHORT_NAMES",
+    "_fetch_table_rows",
     "_infer_column_type",
     "_metric_names_cache",
     "_resolve_plural",
@@ -28,6 +29,7 @@ __all__ = [
     "_validate_k8s_namespace",
     "apply_yaml",
     "cordon_node",
+    "create_live_table",
     "create_network_policy",
     "delete_pod",
     "describe_deployment",
@@ -129,6 +131,7 @@ from .diagnostics import (
 from .generic import (
     _KIND_PLURAL_MAP,
     _SHORT_NAMES,
+    _fetch_table_rows,
     _infer_column_type,
     _resolve_plural,
     _resolve_short_name,
@@ -136,6 +139,9 @@ from .generic import (
     get_resource_relationships,
     list_resources,
 )
+
+# --- Live table ---
+from .live_table import create_live_table
 
 # --- Monitoring tools ---
 from .monitoring import (
@@ -258,6 +264,8 @@ ALL_TOOLS: list[Any] = [
     test_connectivity,  # network connectivity tests
     # Audit
     record_audit_entry,
+    # Live table
+    create_live_table,
 ]
 
 # Register all tools in the central registry

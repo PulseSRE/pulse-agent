@@ -358,8 +358,21 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
     elif kind == "data_table":
         if not comp.get("columns"):
             result.errors.append(f"Data table '{title}' must have 'columns' (list).")
-        if "rows" not in comp:
-            result.errors.append(f"Data table '{title}' must have 'rows' (list).")
+        if "rows" not in comp and not comp.get("datasources"):
+            result.errors.append(f"Data table '{title}' must have 'rows' (list) or 'datasources' (list).")
+        if comp.get("datasources"):
+            for ds in comp["datasources"]:
+                if not ds.get("id"):
+                    result.errors.append(f"Data table '{title}': datasource missing 'id'.")
+                if not ds.get("type"):
+                    result.errors.append(f"Data table '{title}': datasource missing 'type'.")
+                ds_type = ds.get("type")
+                if ds_type == "k8s" and not ds.get("resource"):
+                    result.errors.append(f"Data table '{title}': K8s datasource missing 'resource'.")
+                elif ds_type == "promql" and not ds.get("query"):
+                    result.errors.append(f"Data table '{title}': PromQL datasource missing 'query'.")
+                elif ds_type == "logs" and not ds.get("namespace"):
+                    result.errors.append(f"Data table '{title}': Logs datasource missing 'namespace'.")
 
     elif kind == "grid":
         items = comp.get("items")

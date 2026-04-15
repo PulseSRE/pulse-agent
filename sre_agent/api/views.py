@@ -289,3 +289,57 @@ async def rest_query(
             return {"component": component}
         return {"component": None, "text": _text_result}
     return {"component": None, "text": str(result)}
+
+
+# ---------------------------------------------------------------------------
+# Log Counts -- enrichment endpoint for live table log datasources
+# ---------------------------------------------------------------------------
+
+
+@router.get("/log-counts")
+async def rest_log_counts(
+    namespace: str = Query(..., description="K8s namespace"),
+    pattern: str = Query("error|Error|ERROR", description="Grep pattern to count"),
+    label_selector: str = Query("", alias="labelSelector", description="Pod label selector"),
+    tail_lines: int = Query(100, alias="tailLines", ge=10, le=1000, description="Log lines to scan per pod"),
+    _auth=Depends(verify_token),
+):
+    """Count log lines matching a pattern per pod.  Used by live table log enrichment.
+
+    Returns ``{"counts": {"pod-name": N, ...}}`` with one entry per pod.
+    Capped at 20 pods to avoid API overload.
+    """
+    import asyncio
+    import re
+
+    from ..k8s_client import get_core_client, safe
+
+    core = get_core_client()
+
+    # List pods matching the selector
+    pods_result = safe(
+        lambda: core.list_namespaced_pod(
+            namespace,
+            label_selector=label_selector or "",
+            limit=20,
+        )
+    )
+    if isinstance(pods_result, str):
+        return {"counts": {}, "error": pods_result}
+
+    compiled = re.compile(pattern) if pattern else None
+
+    async def _count_pod(pod_name: str) -> tuple[str, int]:
+        try:
+            logs = await asyncio.to_thread(
+                lambda: safe(lambda: core.read_namespaced_pod_log(pod_name, namespace, tail_lines=tail_lines))
+            )
+            if isinstance(logs, str) and compiled:
+                return (pod_name, len(compiled.findall(logs)))
+            return (pod_name, 0)
+        except Exception:
+            return (pod_name, 0)
+
+    pod_names = [p.metadata.name for p in pods_result.items if p.metadata and p.metadata.name]
+    results = await asyncio.gather(*[_count_pod(n) for n in pod_names])
+    return {"counts": dict(results)}

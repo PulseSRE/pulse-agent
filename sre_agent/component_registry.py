@@ -195,8 +195,8 @@ register_component(
         name="data_table",
         description="Sortable, filterable, paginated table",
         category="data",
-        required_fields=["columns", "rows"],
-        optional_fields=["title", "description", "resourceType", "gvr"],
+        required_fields=["columns"],
+        optional_fields=["title", "description", "resourceType", "gvr", "rows", "datasources", "deduplicateBy"],
         supports_mutations=["update_columns", "sort_by", "filter_by", "change_kind"],
         example={
             "kind": "data_table",
@@ -204,7 +204,7 @@ register_component(
             "columns": [{"id": "name", "header": "Name"}],
             "rows": [{"name": "nginx-abc", "_gvr": "v1~pods"}],
         },
-        prompt_hint="data_table — Sortable table. Include _gvr for clickable names. Column types: resource_name, status, age, cpu, memory, replicas, sparkline.",
+        prompt_hint="data_table — Sortable table. Include _gvr for clickable names. Column types: resource_name, status, age, cpu, memory, replicas, sparkline. Use datasources for live multi-source tables with K8s, PromQL, or log data.",
     )
 )
 

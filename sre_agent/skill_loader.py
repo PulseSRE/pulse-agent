@@ -651,6 +651,7 @@ TOOL_CATEGORIES = {
             "describe_resource",
             "search_logs",
             "get_resource_relationships",
+            "create_live_table",
         ],
     },
     "workloads": {
@@ -845,9 +846,12 @@ TOOL_CATEGORIES = {
             "table",
             "metric card",
             "layout",
+            "topology",
+            "dependency graph",
         ],
         "tools": [
             "plan_dashboard",
+            "get_topology_graph",
             "create_dashboard",
             "namespace_summary",
             "cluster_metrics",
@@ -1030,7 +1034,7 @@ def get_tool_skills(tool_name: str) -> list[str]:
 
 # Map orchestrator modes to relevant tool categories
 MODE_CATEGORIES: dict[str, list[str] | None] = {
-    "sre": ["diagnostics", "workloads", "networking", "storage", "monitoring", "operations", "gitops"],
+    "sre": ["diagnostics", "workloads", "networking", "storage", "monitoring", "operations", "gitops", "views"],
     "security": ["security", "networking"],
     "view_designer": None,  # all tools — view_designer has its own curated list
     "both": None,  # all categories
