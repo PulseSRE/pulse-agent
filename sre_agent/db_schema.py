@@ -443,6 +443,21 @@ CREATE INDEX IF NOT EXISTS idx_plan_executions_ts ON plan_executions(timestamp D
 CREATE INDEX IF NOT EXISTS idx_plan_executions_status ON plan_executions(status);
 """
 
+USER_EVENTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS user_events (
+    id          SERIAL PRIMARY KEY,
+    timestamp   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    session_id  TEXT NOT NULL,
+    user_id     TEXT NOT NULL DEFAULT '',
+    event_type  TEXT NOT NULL,
+    page        TEXT NOT NULL DEFAULT '',
+    data        JSONB DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_user_events_ts ON user_events(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_user_events_page ON user_events(page, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_user_events_type ON user_events(event_type);
+"""
+
 ALL_SCHEMAS = (
     INCIDENTS_SCHEMA
     + RUNBOOKS_SCHEMA
@@ -471,4 +486,5 @@ ALL_SCHEMAS = (
     + POSTMORTEMS_SCHEMA
     + SLO_DEFINITIONS_SCHEMA
     + PLAN_EXECUTIONS_SCHEMA
+    + USER_EVENTS_SCHEMA
 )

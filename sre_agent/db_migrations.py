@@ -192,4 +192,12 @@ MIGRATIONS = [
     (15, "postmortems", _migrate_015_postmortems),
     (16, "slo_definitions", _migrate_016_slo_definitions),
     (17, "plan_executions", _migrate_017_plan_executions),
+    (18, "user_events", _migrate_018_user_events),
 ]
+
+
+def _migrate_018_user_events(db: Database) -> None:
+    """Add user_events table for session analytics."""
+    from .db_schema import USER_EVENTS_SCHEMA
+
+    db.executescript(USER_EVENTS_SCHEMA)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from .auth import verify_token
 
@@ -551,3 +551,117 @@ def _compute_recommendations() -> dict:
     except Exception:
         logger.debug("Failed to compute recommendations", exc_info=True)
     return {"recommendations": recommendations[:4]}
+
+
+@router.post("/events", status_code=202)
+async def record_user_events(request: Request, _auth=Depends(verify_token)):
+    """Record a batch of user session events. Fire-and-forget."""
+    import json
+
+    from ..db import get_database
+
+    try:
+        body = await request.json()
+        events = body.get("events", [])
+        if not events:
+            return {"status": "ok", "recorded": 0}
+
+        user_id = request.headers.get("x-forwarded-user", "")
+        db = get_database()
+
+        for event in events[:50]:  # cap at 50 per batch
+            db.execute(
+                "INSERT INTO user_events (session_id, user_id, event_type, page, data) VALUES (%s, %s, %s, %s, %s)",
+                (
+                    event.get("session_id", ""),
+                    user_id,
+                    event.get("event_type", "unknown"),
+                    event.get("page", ""),
+                    json.dumps(event.get("data", {})),
+                ),
+            )
+        db.commit()
+        return {"status": "ok", "recorded": len(events)}
+    except Exception:
+        logger.debug("Failed to record user events", exc_info=True)
+        return {"status": "ok", "recorded": 0}
+
+
+@router.get("/sessions")
+async def session_analytics(
+    days: int = Query(7, ge=1, le=90),
+    _auth=Depends(verify_token),
+):
+    """Aggregated session analytics — page views, time-on-page, agent queries by page."""
+    try:
+        from ..db import get_database
+
+        db = get_database()
+
+        # Top pages by visit count
+        page_rows = db.fetchall(
+            "SELECT page, COUNT(*) as views, COUNT(DISTINCT session_id) as sessions "
+            "FROM user_events WHERE event_type = 'page_view' "
+            "AND timestamp > NOW() - INTERVAL '%s days' "
+            "GROUP BY page ORDER BY views DESC LIMIT 20",
+            (days,),
+        )
+
+        # Average time on page
+        duration_rows = db.fetchall(
+            "SELECT page, AVG((data->>'duration_ms')::int) as avg_ms, "
+            "COUNT(*) as sample_count "
+            "FROM user_events WHERE event_type = 'page_leave' "
+            "AND timestamp > NOW() - INTERVAL '%s days' "
+            "GROUP BY page ORDER BY avg_ms DESC LIMIT 20",
+            (days,),
+        )
+
+        # Agent queries by page
+        query_rows = db.fetchall(
+            "SELECT page, COUNT(*) as queries "
+            "FROM user_events WHERE event_type = 'agent_query' "
+            "AND timestamp > NOW() - INTERVAL '%s days' "
+            "GROUP BY page ORDER BY queries DESC LIMIT 20",
+            (days,),
+        )
+
+        # Top follow-up suggestions clicked
+        suggestion_rows = db.fetchall(
+            "SELECT data->>'text' as suggestion, COUNT(*) as clicks "
+            "FROM user_events WHERE event_type = 'suggestion_click' "
+            "AND timestamp > NOW() - INTERVAL '%s days' "
+            "GROUP BY data->>'text' ORDER BY clicks DESC LIMIT 10",
+            (days,),
+        )
+
+        # Feature usage
+        feature_rows = db.fetchall(
+            "SELECT data->>'feature' as feature, COUNT(*) as uses "
+            "FROM user_events WHERE event_type = 'feature_use' "
+            "AND timestamp > NOW() - INTERVAL '%s days' "
+            "GROUP BY data->>'feature' ORDER BY uses DESC LIMIT 10",
+            (days,),
+        )
+
+        return {
+            "pages": [dict(r) for r in (page_rows or [])],
+            "time_on_page": [
+                {"page": r["page"], "avg_seconds": round((r["avg_ms"] or 0) / 1000, 1), "samples": r["sample_count"]}
+                for r in (duration_rows or [])
+            ],
+            "agent_queries_by_page": [dict(r) for r in (query_rows or [])],
+            "top_suggestions": [dict(r) for r in (suggestion_rows or [])],
+            "feature_usage": [dict(r) for r in (feature_rows or [])],
+            "days": days,
+        }
+    except Exception:
+        logger.debug("Session analytics failed", exc_info=True)
+        return {
+            "pages": [],
+            "time_on_page": [],
+            "agent_queries_by_page": [],
+            "top_suggestions": [],
+            "feature_usage": [],
+            "days": days,
+        }
