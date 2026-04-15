@@ -550,17 +550,29 @@ class MonitorSession:
             except Exception:
                 pass
 
-            # Try plan-based execution first — if a template matches, use plan for investigation
-            plan_ran = False
+            # Spawn plan-based investigation as a background task — does NOT block the scan loop.
+            # The plan runs triage→diagnose→remediate→verify asynchronously, emitting
+            # investigation_progress events via WebSocket as each phase completes.
             try:
-                plan_ran = await self._try_plan_execution(finding)
+                from ..plan_templates import match_template
+
+                template = match_template(category=finding.get("category", ""))
+                if template:
+                    self._recent_investigations[key] = now
+                    investigations_run += 1
+                    self._daily_investigation_count += 1
+                    # Fire and forget — plan runtime handles its own errors and WebSocket updates
+                    asyncio.create_task(
+                        self._try_plan_execution(finding),
+                        name=f"plan-{finding.get('id', 'unknown')[:12]}",
+                    )
+                    logger.info(
+                        "Spawned async investigation for %s (template=%s)",
+                        finding.get("title", "")[:40],
+                        template.name,
+                    )
             except Exception:
-                logger.debug("Plan execution attempt failed, falling back to flat investigation", exc_info=True)
-            # If plan ran, still let auto-fix evaluate the finding (plan investigates, auto-fix acts)
-            if plan_ran:
-                self._recent_investigations[key] = now
-                investigations_run += 1
-                self._daily_investigation_count += 1
+                logger.debug("Plan execution spawn failed", exc_info=True)
 
             report = {
                 "type": "investigation_report",

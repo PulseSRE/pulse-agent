@@ -8,11 +8,15 @@ from sre_agent.plan_templates import get_template, list_templates, load_template
 class TestLoadTemplates:
     def test_loads_all_templates(self):
         templates = load_templates()
-        assert len(templates) >= 6
+        assert len(templates) >= 10
         assert "crashloop" in templates
         assert "oom" in templates
-        assert "node-pressure" in templates
-        assert "deployment-failure" in templates
+        assert "nodes" in templates
+        assert "workloads" in templates
+        assert "image_pull" in templates
+        assert "scheduling" in templates
+        assert "cert_expiry" in templates
+        assert "operators" in templates
         assert "security-incident" in templates
         assert "latency-degradation" in templates
 
@@ -90,9 +94,9 @@ class TestMatchTemplate:
 
     def test_fuzzy_category_match(self):
         load_templates()
-        plan = match_template(category="deployment")
+        plan = match_template(category="workloads")
         assert plan is not None
-        assert "deployment" in plan.incident_type
+        assert plan.incident_type == "workloads"
 
     def test_keyword_match_latency(self):
         load_templates()
@@ -100,11 +104,11 @@ class TestMatchTemplate:
         assert plan is not None
         assert "latency" in plan.incident_type
 
-    def test_keyword_match_pressure(self):
+    def test_keyword_match_nodes(self):
         load_templates()
-        plan = match_template(keywords=["node", "pressure"])
+        plan = match_template(category="nodes")
         assert plan is not None
-        assert "node-pressure" in plan.incident_type
+        assert plan.incident_type == "nodes"
 
     def test_no_match(self):
         load_templates()
