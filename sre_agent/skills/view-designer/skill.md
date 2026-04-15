@@ -18,6 +18,9 @@ keywords:
   - show as chart, show as table, convert to
   - metric card, sparkline, bar chart, donut
   - monitoring view, clone dashboard
+  - fix the layout, fix layout, fix the view, fix dashboard, fix the dashboard
+  - too much whitespace, widgets cut off, compact the, reflow, reorganize
+  - optimize layout, optimize the layout, optimize view, optimize dashboard
 categories:
   - views
   - diagnostics
@@ -32,8 +35,8 @@ requires_tools:
   - cluster_metrics
   - get_prometheus_query
 handoff_to:
-  sre: [fix, remediate, scale, restart, drain, cordon, apply, delete]
-  security: [scan, rbac, vulnerability, compliance, audit]
+  sre: [remediate, scale, restart, drain, cordon, apply, delete, fix pod, fix deployment, fix node]
+  security: [scan rbac, scan security, vulnerability, compliance, audit security]
 trigger_patterns:
   - "dashboard|view|widget|chart|table"
   - "build.*dashboard|create.*dashboard|make.*dashboard"
