@@ -1,0 +1,29 @@
+# HPA Saturation Plan Template
+# Handles HPAs at max replicas unable to scale further
+
+id: hpa-saturation-v1
+name: HPA Saturation Investigation
+incident_type: hpa
+max_total_duration: 600  # 10 minutes
+
+phases:
+  - id: triage
+    skill_name: sre
+    required: true
+    timeout_seconds: 120
+    produces: [severity, hpa_name, namespace, current_replicas, max_replicas, cpu_utilization]
+
+  - id: diagnose
+    skill_name: sre
+    required: true
+    depends_on: [triage]
+    timeout_seconds: 180
+    produces: [root_cause, scaling_blocked_reason, resource_headroom, confidence]
+
+  - id: verify
+    skill_name: sre
+    required: true
+    depends_on: [diagnose]
+    timeout_seconds: 120
+    runs: always
+    produces: [hpa_status, scaling_recommendation, resolution_confirmed]

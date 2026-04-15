@@ -144,7 +144,8 @@ async def version():
     return {
         "protocol": PROTOCOL_VERSION,
         "agent": _get_agent_version(),
-        "tools": len(__import__('sre_agent.tool_registry', fromlist=['TOOL_REGISTRY']).TOOL_REGISTRY) or len(SRE_ALL_TOOLS) + len(SEC_ALL_TOOLS),
+        "tools": len(__import__("sre_agent.tool_registry", fromlist=["TOOL_REGISTRY"]).TOOL_REGISTRY)
+        or len(SRE_ALL_TOOLS) + len(SEC_ALL_TOOLS),
         "skills": len(list_skills()),
         "features": ["component_specs", "ws_token_auth", "rate_limiting", "monitor", "fix_history", "predictions"],
     }

@@ -12,9 +12,9 @@ cat > "$HOOK_DIR/pre-commit" << 'HOOK'
 echo "Running pre-commit checks..."
 python3 -m ruff check sre_agent/ tests/ || exit 1
 python3 -m ruff format --check sre_agent/ tests/ || exit 1
-python3 -m mypy sre_agent/ --ignore-missing-imports || exit 1
-python3 -m pytest tests/ -q || exit 1
-echo "Pre-commit checks passed."
+# Fast subset: lint + format + core tests (~15s). Full suite runs in CI.
+python3 -m pytest tests/test_skill_loader.py tests/test_orchestrator.py tests/test_agent.py tests/test_plan_templates.py tests/test_eval_tool_selection.py tests/test_backend_integration.py -q || exit 1
+echo "Pre-commit checks passed (fast). Full suite: python3 -m pytest tests/ -q"
 HOOK
 
 chmod +x "$HOOK_DIR/pre-commit"
