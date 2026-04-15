@@ -55,6 +55,7 @@ class MonitorSession:
         self._scan_lock = asyncio.Lock()  # H1: prevent concurrent scans
         self._last_security_followup: float = 0.0  # cooldown tracker
         self._recent_fix_ids: set[str] = set()  # finding IDs that were auto-fixed (for resolution attribution)
+        self._investigation_tasks: list[asyncio.Task] = []  # track spawned async investigations for cleanup
         # Improvement flywheel timers
         self._last_daily_run: float = 0.0
         self._last_weekly_run: float = 0.0
@@ -80,6 +81,13 @@ class MonitorSession:
         except Exception:
             self.running = False
             return False
+
+    async def cancel_pending_investigations(self) -> None:
+        """Cancel all running investigation tasks. Called on session cleanup."""
+        for task in self._investigation_tasks:
+            if not task.done():
+                task.cancel()
+        self._investigation_tasks.clear()
 
     async def auto_fix(self, findings: list[dict]) -> None:
         """Attempt to auto-fix findings when trust level permits.
@@ -562,10 +570,12 @@ class MonitorSession:
                     investigations_run += 1
                     self._daily_investigation_count += 1
                     # Fire and forget — plan runtime handles its own errors and WebSocket updates
-                    asyncio.create_task(
+                    task = asyncio.create_task(
                         self._try_plan_execution(finding),
                         name=f"plan-{finding.get('id', 'unknown')[:12]}",
                     )
+                    self._investigation_tasks = [t for t in self._investigation_tasks if not t.done()]
+                    self._investigation_tasks.append(task)
                     logger.info(
                         "Spawned async investigation for %s (template=%s)",
                         finding.get("title", "")[:40],
@@ -677,7 +687,10 @@ class MonitorSession:
                         logger.warning("Failed to store investigation: %s", e)
 
                 # Auto-scaffold skill from novel flat investigations (no plan template matched)
-                if not plan_ran and result.get("confidence", 0) >= 0.75:
+                from ..plan_templates import match_template as _match_tmpl
+
+                _has_template = _match_tmpl(category=finding.get("category", "")) is not None
+                if not _has_template and result.get("confidence", 0) >= 0.75:
                     try:
                         from ..skill_scaffolder import (
                             save_scaffolded_skill,

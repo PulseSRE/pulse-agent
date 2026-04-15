@@ -57,7 +57,7 @@ class TestParseSkillMd:
         assert skill is not None
         assert skill.name == "security"
         assert skill.write_tools is False
-        assert skill.requires_tools == []  # security tools register lazily
+        assert "request_sre_investigation" in skill.requires_tools
 
     def test_parse_view_designer(self):
         skill_dir = Path(__file__).parent.parent / "sre_agent" / "skills" / "view-designer"

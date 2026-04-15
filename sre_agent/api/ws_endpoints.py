@@ -730,6 +730,7 @@ async def websocket_monitor(websocket: WebSocket):
         logger.error("Monitor WebSocket error: %s", e)
     finally:
         session.running = False
+        await session.cancel_pending_investigations()
         scan_task.cancel()
         try:
             await scan_task
