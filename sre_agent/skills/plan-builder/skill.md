@@ -20,10 +20,6 @@ categories:
 write_tools: true
 priority: 15
 skip_component_hints: true
-requires_tools:
-  - create_skill
-  - create_skill_from_template
-  - list_skills
 trigger_patterns:
   - "build.*plan|create.*plan|make.*plan"
   - "build.*skill|create.*skill|new.*skill"
