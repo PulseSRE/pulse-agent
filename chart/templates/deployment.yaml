@@ -70,6 +70,8 @@ spec:
             capabilities:
               drop: ["ALL"]
           env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
             {{- if .Values.vertexAI.projectId }}
             - name: ANTHROPIC_VERTEX_PROJECT_ID
               value: {{ .Values.vertexAI.projectId | quote }}

@@ -131,7 +131,7 @@ cleanup_namespace() {
 }
 
 get_ws_token() {
-  $CMD get secret pulse-ws-token -n "$AGENT_NS" -o jsonpath='{.data.token}' 2>/dev/null | base64 -d 2>/dev/null || echo ""
+  $CMD get secret pulse-ws-token -n "$AGENT_NS" -o jsonpath='{.data.token}' 2>/dev/null | base64 --decode 2>/dev/null || echo ""
 }
 
 # #3: Cache agent pod name (refreshed once per scenario, not per check)
@@ -258,7 +258,7 @@ spec:
   containers:
   - name: oom
     image: busybox
-    command: ["/bin/sh", "-c", "head -c 50M /dev/urandom > /dev/null; tail -f /dev/null"]
+    command: ["/bin/sh", "-c", "dd if=/dev/zero of=/dev/shm/fill bs=1M count=50 2>/dev/null; tail -f /dev/null"]
     resources:
       limits:
         memory: "10Mi"

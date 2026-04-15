@@ -40,4 +40,20 @@ spec:
       ports:
       - protocol: TCP
         port: 6443
+    # PostgreSQL (in-namespace)
+    - to:
+      - podSelector:
+          matchLabels:
+            app: {{ include "sre-agent.fullname" . }}-postgresql
+      ports:
+      - protocol: TCP
+        port: 5432
+    # MCP server (in-namespace)
+    - to:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/component: mcp-server
+      ports:
+      - protocol: TCP
+        port: 8081
 {{- end }}

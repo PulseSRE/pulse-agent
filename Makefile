@@ -1,4 +1,4 @@
-.PHONY: lint format type-check test verify test-all evals helm-lint release sync-token
+.PHONY: lint format type-check test verify test-all evals helm-lint release sync-token clean
 
 lint:
 	python3 -m ruff check sre_agent/ tests/
@@ -78,6 +78,12 @@ sync-token:
 		echo "  ⚠️ Secret $$SECRET_NAME not found in namespace $$NS"; \
 		echo "  Try: helm upgrade ... to recreate the secret"; \
 	fi
+
+clean:
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	rm -rf .mypy_cache .pytest_cache .ruff_cache build dist *.egg-info
+	rm -f pulse_agent_audit.log
+	@echo "Cleaned build artifacts."
 
 release:
 	@test -n "$(VERSION)" || (echo "Usage: make release VERSION=x.y.z" && exit 1)
