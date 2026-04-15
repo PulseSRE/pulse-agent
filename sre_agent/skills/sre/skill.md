@@ -27,6 +27,7 @@ requires_tools:
 handoff_to:
   view_designer: [dashboard, view, create view, build view, overview dashboard]
   security: [scan, rbac, vulnerability, compliance, audit security, scc]
+  plan_builder: [create a skill, build a skill, new skill, create a plan, build a plan, custom skill]
 trigger_patterns:
   - "pod.*crash|crashloop|restart.*loop"
   - "deploy.*fail|rollout.*stuck"

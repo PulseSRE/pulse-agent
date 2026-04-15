@@ -1236,6 +1236,12 @@ def build_config_from_skill(skill: Skill, query: str = "") -> dict:
         # Strip write tools entirely — prevents calling dangerous tools without confirmation.
         tool_map = {n: t for n, t in tool_map.items() if n not in WRITE_TOOL_NAMES}
 
+    # plan_builder always gets skill management tools regardless of TF-IDF prediction
+    if skill.name == "plan_builder":
+        for name in _SELF_DESCRIBE_TOOLS:
+            if name in all_tools and name not in tool_map:
+                tool_map[name] = all_tools[name]
+
     tool_defs = [t.to_dict() for t in tool_map.values()]
     write_tools = set(WRITE_TOOL_NAMES) if skill.write_tools else set()
 
