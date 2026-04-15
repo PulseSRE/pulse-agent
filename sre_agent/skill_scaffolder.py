@@ -57,6 +57,10 @@ def scaffold_skill_from_resolution(
 
     skill_name = "-".join(keywords[:3]).replace(" ", "-")
 
+    # Top tools from the resolution become requires_tools (max 8)
+    # These bypass TF-IDF prediction so the skill always has its core tools
+    required = tools_called[:8] if tools_called else []
+
     content = f"""---
 name: {skill_name}
 version: 1
@@ -67,6 +71,8 @@ categories:
 {chr(10).join(f"  - {cat}" for cat in sorted(categories))}
 write_tools: false
 priority: 5
+requires_tools:
+{chr(10).join(f"  - {t}" for t in required) if required else "  []"}
 alert_triggers: []
 cluster_components: []
 examples: []
