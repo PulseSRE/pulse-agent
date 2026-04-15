@@ -38,6 +38,7 @@ NAMESPACE="${CHAOS_NAMESPACE:-chaos-test}"
 TIMEOUT="${CHAOS_TIMEOUT:-300}"
 SCENARIO="${CHAOS_SCENARIO:-all}"
 DRY_RUN=false
+FORCE=false
 AGENT_NS="${PULSE_NAMESPACE:-openshiftpulse}"
 SCAN_INTERVAL=60
 RESULTS=()
@@ -58,6 +59,7 @@ while [[ $# -gt 0 ]]; do
     --namespace) NAMESPACE="$2"; shift 2 ;;
     --timeout) TIMEOUT="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --force) FORCE=true; shift ;;
     --agent-ns) AGENT_NS="$2"; shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
@@ -67,6 +69,39 @@ CMD=$(command -v oc 2>/dev/null || command -v kubectl 2>/dev/null)
 if [[ -z "$CMD" ]]; then
   echo -e "${RED}Error: oc or kubectl required${NC}"
   exit 1
+fi
+
+# ── Production Safety Guard ────────────────────────────────────────────
+PROTECTED_NAMESPACES="default kube-system kube-public openshift openshift-etcd openshift-apiserver openshift-controller-manager openshift-authentication openshift-console openshift-monitoring openshiftpulse"
+
+# #1: Block protected namespaces
+if [[ "$FORCE" != "true" ]]; then
+  for ns in $PROTECTED_NAMESPACES; do
+    if [[ "$NAMESPACE" == "$ns" ]]; then
+      echo -e "${RED}SAFETY: Refusing to run chaos tests in protected namespace '${NAMESPACE}'${NC}"
+      echo "Use --namespace <test-namespace> to specify a safe namespace"
+      echo "Use --force to override this check (for intentional testing)"
+      exit 1
+    fi
+  done
+
+  # Check cluster context — warn if pointed at a production cluster
+  CLUSTER_URL=$($CMD cluster-info 2>/dev/null | head -1 | grep -oP 'https://[^ ]+' || echo "unknown")
+  if echo "$CLUSTER_URL" | grep -qiE "prod|production|prd"; then
+    echo -e "${RED}SAFETY: Cluster URL contains 'prod' — refusing to run chaos tests${NC}"
+    echo "URL: ${CLUSTER_URL}"
+    echo "Use --force to override"
+    exit 1
+  fi
+fi
+
+# Warn if namespace already has pods
+existing_pods=$($CMD get pods -n "$NAMESPACE" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+if [[ "${existing_pods:-0}" -gt 0 && "$FORCE" != "true" && "$DRY_RUN" != "true" ]]; then
+  echo -e "${YELLOW}WARNING: Namespace '${NAMESPACE}' has ${existing_pods} existing pods${NC}"
+  read -p "Continue? (y/N) " -n 1 -r
+  echo
+  [[ $REPLY =~ ^[Yy]$ ]] || exit 0
 fi
 
 echo -e "${CYAN}═══ Chaos Engineering Test Harness ═══${NC}"
@@ -99,8 +134,16 @@ get_ws_token() {
   $CMD get secret pulse-ws-token -n "$AGENT_NS" -o jsonpath='{.data.token}' 2>/dev/null | base64 -d 2>/dev/null || echo ""
 }
 
+# #3: Cache agent pod name (refreshed once per scenario, not per check)
+CACHED_AGENT_POD=""
+refresh_agent_pod() {
+  CACHED_AGENT_POD=$($CMD get pods -n "$AGENT_NS" -l app.kubernetes.io/name=openshift-sre-agent --no-headers -o name 2>/dev/null | grep -v mcp | grep -v postgresql | head -1)
+}
 get_agent_pod() {
-  $CMD get pods -n "$AGENT_NS" -l app.kubernetes.io/name=openshift-sre-agent --no-headers -o name 2>/dev/null | grep -v mcp | grep -v postgresql | head -1
+  if [[ -z "$CACHED_AGENT_POD" ]]; then
+    refresh_agent_pod
+  fi
+  echo "$CACHED_AGENT_POD"
 }
 
 # Check if agent detected a finding for a category
@@ -116,9 +159,9 @@ check_finding() {
     return
   fi
 
-  # Check agent logs for findings matching category
+  # #8: Use --since instead of --tail for reliable multi-scenario detection
   local count
-  count=$($CMD logs "$pod" -n "$AGENT_NS" --tail=50 2>/dev/null | grep -c "$category" 2>/dev/null || true)
+  count=$($CMD logs "$pod" -n "$AGENT_NS" --since=5m 2>/dev/null | grep -c "$category" 2>/dev/null || true)
   echo "${count:-0}" | tr -d '[:space:]'
 }
 
@@ -167,6 +210,7 @@ score_scenario() {
 # ── Scenarios ──────────────────────────────────────────────────────────
 
 run_crashloop() {
+  refresh_agent_pod
   echo -e "\n${CYAN}Scenario 1: Crashlooping Pod${NC}"
   echo "  Deploy: pod that exits with code 1 → should CrashLoopBackOff"
 
@@ -196,6 +240,7 @@ run_crashloop() {
 }
 
 run_oom() {
+  refresh_agent_pod
   echo -e "\n${CYAN}Scenario 2: OOM Kill${NC}"
   echo "  Deploy: pod requesting 10Mi but trying to allocate 100Mi"
 
@@ -213,7 +258,7 @@ spec:
   containers:
   - name: oom
     image: busybox
-    command: ["/bin/sh", "-c", "dd if=/dev/zero of=/dev/null bs=100M"]
+    command: ["/bin/sh", "-c", "head -c 50M /dev/urandom > /dev/null; tail -f /dev/null"]
     resources:
       limits:
         memory: "10Mi"
@@ -236,6 +281,7 @@ EOF
 }
 
 run_image_pull() {
+  refresh_agent_pod
   echo -e "\n${CYAN}Scenario 3: Bad Image Pull${NC}"
   echo "  Deploy: deployment with working image → update to nonexistent tag"
 
@@ -249,7 +295,8 @@ run_image_pull() {
     --replicas=1 -n "$NAMESPACE" 2>/dev/null
 
   # Wait for healthy
-  sleep 20
+  # #4: Wait for rollout instead of arbitrary sleep
+  $CMD rollout status deployment/chaos-image -n "$NAMESPACE" --timeout=30s 2>/dev/null || true
 
   # Push bad update
   $CMD set image deployment/chaos-image httpd-24=registry.access.redhat.com/ubi9/httpd-24:nonexistent \
@@ -275,6 +322,7 @@ run_image_pull() {
 }
 
 run_cert_expiry() {
+  refresh_agent_pod
   echo -e "\n${CYAN}Scenario 4: Expired Certificate${NC}"
   echo "  Deploy: TLS secret with already-expired cert"
 
@@ -283,16 +331,19 @@ run_cert_expiry() {
     return
   fi
 
-  # Generate expired self-signed cert
-  openssl req -x509 -newkey rsa:2048 -keyout /tmp/chaos-key.pem -out /tmp/chaos-cert.pem \
-    -days -1 -nodes -subj "/CN=chaos-expired.test" 2>/dev/null || true
+  # #6: Generate expired cert — use -days 0 for portability (some openssl reject -1)
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  openssl req -x509 -newkey rsa:2048 -keyout "$tmpdir/key.pem" -out "$tmpdir/cert.pem" \
+    -days 0 -nodes -subj "/CN=chaos-expired.test" 2>/dev/null || true
 
-  if [[ -f /tmp/chaos-cert.pem ]]; then
+  if [[ -f "$tmpdir/cert.pem" ]]; then
     $CMD create secret tls chaos-expired-cert \
-      --cert=/tmp/chaos-cert.pem --key=/tmp/chaos-key.pem \
+      --cert="$tmpdir/cert.pem" --key="$tmpdir/key.pem" \
       -n "$NAMESPACE" 2>/dev/null || true
-    rm -f /tmp/chaos-key.pem /tmp/chaos-cert.pem
   fi
+  # #7: Clean temp files immediately
+  rm -rf "$tmpdir"
 
   local detected=0 diagnosed=0 remediated=0 speed=0
 
@@ -308,6 +359,7 @@ run_cert_expiry() {
 }
 
 run_resource_pressure() {
+  refresh_agent_pod
   echo -e "\n${CYAN}Scenario 5: Resource Quota Exhaustion${NC}"
   echo "  Deploy: ResourceQuota with 1 pod max, then deploy 3 replicas"
 

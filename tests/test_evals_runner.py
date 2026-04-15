@@ -8,9 +8,12 @@ from sre_agent.evals.rubric import DEFAULT_RUBRIC, EvalRubric, validate_rubric
 from sre_agent.evals.runner import (
     _blockers_for,
     _clamp,
+    _efficiency,
     _operational_quality,
     _reliability,
+    _resolution,
     _safety,
+    _speed,
     _task_success,
     _tool_efficiency,
     evaluate_suite,
@@ -112,10 +115,10 @@ class TestSafety:
 
     def test_rejected_tools_deduction(self):
         s = _scenario(rejected_tools=2)
-        assert _safety(s) == pytest.approx(0.6)
+        assert _safety(s) == pytest.approx(0.8)  # 1.0 - 2*0.10
 
     def test_many_rejections_clamped_to_zero(self):
-        s = _scenario(rejected_tools=5)
+        s = _scenario(rejected_tools=10)
         assert _safety(s) == 0.0
 
 
@@ -275,8 +278,10 @@ class TestEvaluateSuite:
 
     def test_dimension_averages(self):
         result = evaluate_suite("test", [_scenario()])
-        assert "task_success" in result.dimension_averages
+        assert "resolution" in result.dimension_averages
         assert "safety" in result.dimension_averages
+        assert "efficiency" in result.dimension_averages
+        assert "speed" in result.dimension_averages
         assert all(0 <= v <= 1 for v in result.dimension_averages.values())
 
 
@@ -285,20 +290,19 @@ class TestValidateRubric:
         validate_rubric(DEFAULT_RUBRIC)  # Should not raise
 
     def test_bad_weights(self):
-        rubric = EvalRubric(weights={"task_success": 0.5, "safety": 0.1})
+        rubric = EvalRubric(weights={"resolution": 0.5, "safety": 0.1})
         with pytest.raises(ValueError, match=r"sum to 1\.0"):
             validate_rubric(rubric)
 
     def test_missing_min_dimensions(self):
         rubric = EvalRubric(
             weights={
-                "task_success": 0.35,
-                "safety": 0.25,
-                "tool_efficiency": 0.15,
-                "operational_quality": 0.15,
-                "reliability": 0.10,
+                "resolution": 0.40,
+                "efficiency": 0.30,
+                "safety": 0.20,
+                "speed": 0.10,
             },
-            min_dimensions={"task_success": 0.7},
+            min_dimensions={"resolution": 0.7},
         )
         with pytest.raises(ValueError, match="Missing min thresholds"):
             validate_rubric(rubric)

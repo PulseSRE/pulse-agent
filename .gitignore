@@ -33,3 +33,8 @@ htmlcov/
 .playwright-mcp/
 .worktrees/
 tmp/
+
+# Screenshots (Playwright)
+*.png
+!docs/*.png
+!docs/**/*.png

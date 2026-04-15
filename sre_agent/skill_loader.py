@@ -875,8 +875,14 @@ _SELF_DESCRIBE_KEYWORDS = {
     "tools",
     "explain",
     "create skill",
+    "create a skill",
     "edit skill",
+    "skill prompt",
     "delete skill",
+    "_skill",
+    "clone skill",
+    "clone the",
+    "from template",
     "recipes",
     "runbooks",
     "components",
@@ -914,7 +920,7 @@ for _cat_name, _cat_config in TOOL_CATEGORIES.items():
 # Tool risk levels — derived from WRITE_TOOLS + known high-risk operations
 _TOOL_RISK_LEVELS: dict[str, str] = {}  # populated lazily
 
-MAX_TOOL_BUDGET = 15  # hard cap on tools per agent turn
+MAX_TOOL_BUDGET = 50  # hard cap on tools per agent turn
 
 
 def get_tool_risk_level(tool_name: str) -> str:
@@ -1083,11 +1089,14 @@ def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "s
 
     ordered = _reorder_deprioritized(filtered, deprioritized)
 
-    # Enforce tool budget — keep ALWAYS_INCLUDE + top tools by relevance
+    # Enforce tool budget — keep ALWAYS_INCLUDE + self-describe + top tools by relevance
+    protected = ALWAYS_INCLUDE | (
+        _SELF_DESCRIBE_TOOLS if any(kw in query.lower() for kw in _SELF_DESCRIBE_KEYWORDS) else set()
+    )
     if len(ordered) > MAX_TOOL_BUDGET:
-        always = [t for t in ordered if t.name in ALWAYS_INCLUDE]
-        rest = [t for t in ordered if t.name not in ALWAYS_INCLUDE]
-        budget_remaining = MAX_TOOL_BUDGET - len(always)
+        always = [t for t in ordered if t.name in protected]
+        rest = [t for t in ordered if t.name not in protected]
+        budget_remaining = max(MAX_TOOL_BUDGET - len(always), 0)
         ordered = always + rest[:budget_remaining]
         logger.info(
             "Tool budget enforced: %d → %d tools (budget=%d) for mode=%s",
