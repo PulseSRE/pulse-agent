@@ -892,6 +892,22 @@ def get_tool_category(tool_name: str) -> str | None:
     return _TOOL_CATEGORY_MAP.get(tool_name)
 
 
+def get_tool_skills(tool_name: str) -> list[str]:
+    """Return which skills use this tool based on category overlap."""
+    if not _skills:
+        load_skills()
+
+    tool_cat = _TOOL_CATEGORY_MAP.get(tool_name)
+    if not tool_cat:
+        return []
+
+    result = []
+    for skill_name, skill in _skills.items():
+        if tool_cat in skill.categories:
+            result.append(skill_name)
+    return result
+
+
 # Map orchestrator modes to relevant tool categories
 MODE_CATEGORIES: dict[str, list[str] | None] = {
     "sre": ["diagnostics", "workloads", "networking", "storage", "monitoring", "operations", "gitops"],
