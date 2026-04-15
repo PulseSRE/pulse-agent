@@ -68,6 +68,11 @@ async def memory_runbooks(limit: int = Query(20, ge=1, le=100), _auth=Depends(ve
     if not manager:
         return {"runbooks": []}
     runbooks = manager.store.list_runbooks()[:limit]
+    # Normalize trigger_keywords from space-separated string to array
+    for rb in runbooks:
+        kw = rb.get("trigger_keywords", "")
+        if isinstance(kw, str):
+            rb["trigger_keywords"] = kw.split() if kw else []
     return {"runbooks": runbooks}
 
 

@@ -219,6 +219,29 @@ class TestMemoryEndpoints:
         r = api_client.get("/memory/runbooks", headers=api_headers)
         assert r.status_code == 200
 
+    def test_memory_runbooks_trigger_keywords_normalized(self, api_client, api_headers, monkeypatch):
+        """trigger_keywords must be an array, never a raw string (GH fix for .map crash)."""
+        fake_runbooks = [
+            {"name": "rb1", "trigger_keywords": "crashloop oom restart", "tool_sequence": []},
+            {"name": "rb2", "trigger_keywords": "", "tool_sequence": []},
+            {"name": "rb3", "trigger_keywords": ["already", "an", "array"], "tool_sequence": []},
+        ]
+
+        class FakeStore:
+            def list_runbooks(self):
+                return [dict(r) for r in fake_runbooks]
+
+        class FakeManager:
+            store = FakeStore()
+
+        monkeypatch.setattr("sre_agent.memory.get_manager", lambda: FakeManager())
+        r = api_client.get("/memory/runbooks", headers=api_headers)
+        assert r.status_code == 200
+        rbs = r.json()["runbooks"]
+        assert rbs[0]["trigger_keywords"] == ["crashloop", "oom", "restart"]
+        assert rbs[1]["trigger_keywords"] == []
+        assert rbs[2]["trigger_keywords"] == ["already", "an", "array"]
+
     def test_memory_incidents(self, api_client, api_headers):
         r = api_client.get("/memory/incidents", headers=api_headers)
         assert r.status_code == 200

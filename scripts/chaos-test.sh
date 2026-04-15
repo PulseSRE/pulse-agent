@@ -41,6 +41,8 @@ DRY_RUN=false
 FORCE=false
 AGENT_NS="${PULSE_NAMESPACE:-openshiftpulse}"
 SCAN_INTERVAL=60
+FINDINGS_FILE="/tmp/chaos-findings-$$.jsonl"
+WS_CLIENT_PID=""
 RESULTS=()
 TOTAL_SCORE=0
 TOTAL_MAX=0
@@ -121,6 +123,7 @@ setup_namespace() {
 
 cleanup_namespace() {
   echo -e "${YELLOW}Cleaning up ${NAMESPACE}...${NC}"
+  stop_ws_client
   # Delete individual resources first (faster than waiting for namespace)
   $CMD delete deployment --all -n "$NAMESPACE" --wait=false 2>/dev/null || true
   $CMD delete pod --all -n "$NAMESPACE" --grace-period=0 --force 2>/dev/null || true
@@ -128,10 +131,96 @@ cleanup_namespace() {
   $CMD delete resourcequota --all -n "$NAMESPACE" 2>/dev/null || true
   # Then delete namespace
   $CMD delete namespace "$NAMESPACE" --wait=false 2>/dev/null || true
+  rm -f "$FINDINGS_FILE"
 }
 
 get_ws_token() {
   $CMD get secret pulse-ws-token -n "$AGENT_NS" -o jsonpath='{.data.token}' 2>/dev/null | base64 --decode 2>/dev/null || echo ""
+}
+
+get_agent_svc_url() {
+  # Build the in-cluster service URL for the agent
+  local svc_name
+  svc_name=$($CMD get svc -n "$AGENT_NS" -l app.kubernetes.io/name=openshift-sre-agent -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+  if [[ -z "$svc_name" ]]; then
+    # Fallback: try port-forward from the pod
+    echo ""
+    return
+  fi
+  echo "${svc_name}.${AGENT_NS}.svc:8080"
+}
+
+# ── WebSocket Client ──────────────────────────────────────────────────
+
+start_ws_client() {
+  local token
+  token=$(get_ws_token)
+  if [[ -z "$token" ]]; then
+    echo -e "${RED}Error: Could not retrieve WS token from secret pulse-ws-token${NC}"
+    return 1
+  fi
+
+  # Get agent service — try in-cluster first, fall back to port-forward
+  local agent_host
+  agent_host=$(get_agent_svc_url)
+
+  if [[ -n "$agent_host" ]]; then
+    local ws_url="ws://${agent_host}/ws/monitor"
+  else
+    # Port-forward to the agent pod for out-of-cluster access
+    local pod
+    pod=$($CMD get pods -n "$AGENT_NS" -l app.kubernetes.io/name=openshift-sre-agent --no-headers -o name 2>/dev/null | grep -v mcp | grep -v postgresql | head -1)
+    if [[ -z "$pod" ]]; then
+      echo -e "${RED}Error: Could not find agent pod${NC}"
+      return 1
+    fi
+    # Start port-forward in background
+    $CMD port-forward "$pod" -n "$AGENT_NS" 18080:8080 &>/dev/null &
+    local pf_pid=$!
+    sleep 2
+    if ! kill -0 "$pf_pid" 2>/dev/null; then
+      echo -e "${RED}Error: Port-forward failed${NC}"
+      return 1
+    fi
+    # Track port-forward PID for cleanup
+    WS_PORT_FORWARD_PID=$pf_pid
+    local ws_url="ws://localhost:18080/ws/monitor"
+  fi
+
+  # Clear previous findings
+  > "$FINDINGS_FILE"
+
+  echo -e "${CYAN}Starting WebSocket monitor client...${NC}"
+  echo -e "  URL: ${ws_url}"
+
+  python3 "$(dirname "$0")/chaos-ws-client.py" \
+    --url "$ws_url" \
+    --token "$token" \
+    --output "$FINDINGS_FILE" \
+    --trust-level 3 \
+    --auto-fix-categories "crashloop,image_pull" &
+  WS_CLIENT_PID=$!
+  sleep 3
+
+  if ! kill -0 "$WS_CLIENT_PID" 2>/dev/null; then
+    echo -e "${RED}Error: WebSocket client failed to start${NC}"
+    WS_CLIENT_PID=""
+    return 1
+  fi
+  echo -e "  ${GREEN}Connected (PID: ${WS_CLIENT_PID})${NC}"
+}
+
+stop_ws_client() {
+  if [[ -n "$WS_CLIENT_PID" ]]; then
+    kill "$WS_CLIENT_PID" 2>/dev/null || true
+    wait "$WS_CLIENT_PID" 2>/dev/null || true
+    WS_CLIENT_PID=""
+  fi
+  if [[ -n "${WS_PORT_FORWARD_PID:-}" ]]; then
+    kill "$WS_PORT_FORWARD_PID" 2>/dev/null || true
+    wait "$WS_PORT_FORWARD_PID" 2>/dev/null || true
+    WS_PORT_FORWARD_PID=""
+  fi
 }
 
 # #3: Cache agent pod name (refreshed once per scenario, not per check)
@@ -146,35 +235,44 @@ get_agent_pod() {
   echo "$CACHED_AGENT_POD"
 }
 
-# Check if agent detected a finding for a category
+# Check if agent detected a finding matching a pattern (via WS findings file)
 check_finding() {
-  local category="$1"
-  local token
-  token=$(get_ws_token)
-  local pod
-  pod=$(get_agent_pod)
+  local pattern="$1"
 
-  if [[ -z "$pod" ]]; then
+  if [[ ! -f "$FINDINGS_FILE" ]]; then
     echo "0"
     return
   fi
 
-  # #8: Use --since instead of --tail for reliable multi-scenario detection
   local count
-  count=$($CMD logs "$pod" -n "$AGENT_NS" --since=5m 2>/dev/null | grep -c "$category" 2>/dev/null || true)
+  count=$(grep -cE "$pattern" "$FINDINGS_FILE" 2>/dev/null || true)
   echo "${count:-0}" | tr -d '[:space:]'
 }
 
-# Wait for agent to detect something
-wait_for_detection() {
+# Check if an action_report was received for a category
+check_remediation() {
   local category="$1"
+
+  if [[ ! -f "$FINDINGS_FILE" ]]; then
+    echo "0"
+    return
+  fi
+
+  local count
+  count=$(grep '"type".*"action_report"' "$FINDINGS_FILE" 2>/dev/null | grep -cE "$category" 2>/dev/null || true)
+  echo "${count:-0}" | tr -d '[:space:]'
+}
+
+# Wait for agent to detect something via WebSocket findings
+wait_for_detection() {
+  local pattern="$1"
   local max_wait="$2"
   local elapsed=0
 
   echo -n "  Waiting for detection"
   while [[ $elapsed -lt $max_wait ]]; do
     local found
-    found=$(check_finding "$category")
+    found=$(check_finding "$pattern")
     if [[ "$found" -gt 0 ]]; then
       echo -e " ${GREEN}detected (${elapsed}s)${NC}"
       return 0
@@ -213,7 +311,6 @@ score_scenario() {
 # ── Scenarios ──────────────────────────────────────────────────────────
 
 run_crashloop() {
-  refresh_agent_pod
   echo -e "\n${CYAN}Scenario 1: Crashlooping Pod${NC}"
   echo "  Deploy: pod that exits with code 1 → should CrashLoopBackOff"
 
@@ -227,13 +324,17 @@ run_crashloop() {
 
   local detected=0 diagnosed=0 remediated=0 speed=0
 
-  if wait_for_detection "crashloop\|CrashLoopBackOff\|chaos-crashloop" "$TIMEOUT"; then
+  if wait_for_detection "crashloop|CrashLoopBackOff|chaos-crashloop" "$TIMEOUT"; then
     detected=1
     speed=1
-    # Check if investigation ran
+    # Check if investigation report was received
     local inv_count
-    inv_count=$($CMD logs "$(get_agent_pod)" -n "$AGENT_NS" --tail=100 2>/dev/null | grep -c "investigation\|diagnose\|triage" || echo "0")
-    [[ $inv_count -gt 0 ]] && diagnosed=1
+    inv_count=$(check_finding "investigation_report|diagnos")
+    [[ "$inv_count" -gt 0 ]] && diagnosed=1
+    # Check if auto-fix action was taken
+    local fix_count
+    fix_count=$(check_remediation "crashloop")
+    [[ "$fix_count" -gt 0 ]] && remediated=1
   fi
 
   # Cleanup
@@ -243,9 +344,8 @@ run_crashloop() {
 }
 
 run_oom() {
-  refresh_agent_pod
   echo -e "\n${CYAN}Scenario 2: OOM Kill${NC}"
-  echo "  Deploy: pod requesting 10Mi but trying to allocate 100Mi"
+  echo "  Deploy: pod requesting 10Mi but trying to allocate 50Mi (restarts to stay visible)"
 
   if $DRY_RUN; then
     echo "  [dry-run] Would create OOM pod"
@@ -270,12 +370,12 @@ EOF
 
   local detected=0 diagnosed=0 remediated=0 speed=0
 
-  if wait_for_detection "oom\|OOMKilled\|chaos-oom" "$TIMEOUT"; then
+  if wait_for_detection "oom|OOMKilled|chaos-oom" "$TIMEOUT"; then
     detected=1
     speed=1
     local inv_count
-    inv_count=$($CMD logs "$(get_agent_pod)" -n "$AGENT_NS" --tail=100 2>/dev/null | grep -c "oom\|memory\|OOM" || echo "0")
-    [[ $inv_count -gt 0 ]] && diagnosed=1
+    inv_count=$(check_finding "investigation_report|diagnos|OOM|memory")
+    [[ "$inv_count" -gt 0 ]] && diagnosed=1
   fi
 
   $CMD delete pod chaos-oom -n "$NAMESPACE" --wait=false 2>/dev/null || true
@@ -284,7 +384,6 @@ EOF
 }
 
 run_image_pull() {
-  refresh_agent_pod
   echo -e "\n${CYAN}Scenario 3: Bad Image Pull${NC}"
   echo "  Deploy: deployment with working image → update to nonexistent tag"
 
@@ -298,7 +397,6 @@ run_image_pull() {
     --replicas=1 -n "$NAMESPACE" 2>/dev/null
 
   # Wait for healthy
-  # #4: Wait for rollout instead of arbitrary sleep
   $CMD rollout status deployment/chaos-image -n "$NAMESPACE" --timeout=30s 2>/dev/null || true
 
   # Push bad update
@@ -307,16 +405,16 @@ run_image_pull() {
 
   local detected=0 diagnosed=0 remediated=0 speed=0
 
-  if wait_for_detection "image_pull\|ImagePullBackOff\|ErrImagePull\|chaos-image" "$TIMEOUT"; then
+  if wait_for_detection "image_pull|ImagePullBackOff|ErrImagePull|chaos-image" "$TIMEOUT"; then
     detected=1
     speed=1
     local inv_count
-    inv_count=$($CMD logs "$(get_agent_pod)" -n "$AGENT_NS" --tail=100 2>/dev/null | grep -c "image\|pull\|rollback" || echo "0")
-    [[ $inv_count -gt 0 ]] && diagnosed=1
-    # Check if rollback happened
-    local revision
-    revision=$($CMD rollout history deployment/chaos-image -n "$NAMESPACE" 2>/dev/null | tail -2 | head -1 | awk '{print $1}')
-    [[ -n "$revision" && "$revision" -gt 2 ]] && remediated=1
+    inv_count=$(check_finding "investigation_report|diagnos|image|pull")
+    [[ "$inv_count" -gt 0 ]] && diagnosed=1
+    # Check if auto-fix rollback action was taken
+    local fix_count
+    fix_count=$(check_remediation "image_pull")
+    [[ "$fix_count" -gt 0 ]] && remediated=1
   fi
 
   $CMD delete deployment chaos-image -n "$NAMESPACE" --wait=false 2>/dev/null || true
@@ -325,7 +423,6 @@ run_image_pull() {
 }
 
 run_cert_expiry() {
-  refresh_agent_pod
   echo -e "\n${CYAN}Scenario 4: Expired Certificate${NC}"
   echo "  Deploy: TLS secret with already-expired cert"
 
@@ -350,7 +447,7 @@ run_cert_expiry() {
 
   local detected=0 diagnosed=0 remediated=0 speed=0
 
-  if wait_for_detection "cert\|expir\|certificate\|chaos-expired" "$TIMEOUT"; then
+  if wait_for_detection "cert|expir|certificate|chaos-expired" "$TIMEOUT"; then
     detected=1
     speed=1
     diagnosed=1  # cert expiry is self-evident
@@ -362,7 +459,6 @@ run_cert_expiry() {
 }
 
 run_resource_pressure() {
-  refresh_agent_pod
   echo -e "\n${CYAN}Scenario 5: Resource Quota Exhaustion${NC}"
   echo "  Deploy: ResourceQuota with 1 pod max, then deploy 3 replicas"
 
@@ -386,7 +482,7 @@ EOF
 
   local detected=0 diagnosed=0 remediated=0 speed=0
 
-  if wait_for_detection "quota\|pending\|Pending\|chaos-quota" "$TIMEOUT"; then
+  if wait_for_detection "quota|pending|Pending|chaos-quota" "$TIMEOUT"; then
     detected=1
     speed=1
     diagnosed=1
@@ -403,6 +499,16 @@ EOF
 trap cleanup_namespace EXIT
 
 setup_namespace
+
+# Start WebSocket client to trigger monitor scanning
+if [[ "$DRY_RUN" != "true" ]]; then
+  if ! start_ws_client; then
+    echo -e "${RED}Failed to start WebSocket monitor client — detection will fall back to log grep${NC}"
+  fi
+  # Wait for first scan cycle to complete
+  echo -e "${CYAN}Waiting for initial scan cycle...${NC}"
+  sleep 5
+fi
 
 case $SCENARIO in
   crashloop)       run_crashloop ;;
