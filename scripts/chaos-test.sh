@@ -112,8 +112,8 @@ check_finding() {
 
   # Check agent logs for findings matching category
   local count
-  count=$($CMD logs "$pod" -n "$AGENT_NS" --tail=50 2>/dev/null | grep -c "$category" || echo "0")
-  echo "$count"
+  count=$($CMD logs "$pod" -n "$AGENT_NS" --tail=50 2>/dev/null | grep -c "$category" 2>/dev/null || true)
+  echo "${count:-0}" | tr -d '[:space:]'
 }
 
 # Wait for agent to detect something
