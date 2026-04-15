@@ -125,10 +125,21 @@ class PlanRuntime:
                                 branch_value,
                             )
 
-            # Check approval gates — skip phases requiring approval (log and mark as needs_escalation)
+            # Check approval gates — skip phases requiring approval or using high-risk skills
             approved_ready = []
             for phase in ready:
-                if phase.approval_required:
+                # Check skill risk level
+                needs_approval = phase.approval_required
+                try:
+                    from .skill_loader import get_skill
+
+                    skill_def = get_skill(phase.skill_name)
+                    if skill_def and skill_def.risk_level == "high":
+                        needs_approval = True
+                except Exception:
+                    pass
+
+                if needs_approval:
                     logger.info("Phase '%s' requires approval — marking as needs_escalation", phase.id)
                     output = SkillOutput(
                         skill_id=phase.skill_name,
@@ -395,6 +406,22 @@ class PlanRuntime:
 
         if prior_context:
             parts.append(f"\n{prior_context}")
+
+        # Inject few-shot examples from skill definition
+        try:
+            from .skill_loader import get_skill
+
+            skill_def = get_skill(phase.skill_name)
+            if skill_def and skill_def.examples:
+                parts.append("\n## Examples (correct vs wrong approach)")
+                for ex in skill_def.examples[:2]:
+                    parts.append(f"Scenario: {ex.get('scenario', '')}")
+                    parts.append(f"  Correct: {ex.get('correct', '')}")
+                    parts.append(f"  Wrong: {ex.get('wrong', '')}")
+            if skill_def and skill_def.success_criteria:
+                parts.append(f"\nSuccess criteria: {skill_def.success_criteria}")
+        except Exception:
+            pass
 
         parts.append("\nInvestigate and produce structured findings.")
 

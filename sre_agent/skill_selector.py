@@ -308,46 +308,70 @@ class SkillSelector:
         return {name: score / max_score for name, score in raw_scores.items()}
 
     def _score_alert_taxonomy(self, query: str) -> dict[str, float]:
-        """Channel 2: Match alert names and scanner categories to skills."""
+        """Channel 2: Match alert names and scanner categories to skills.
+
+        Uses skill-defined alert_triggers first, then falls back to hardcoded maps.
+        """
         q = query.lower()
         scores: dict[str, float] = {}
 
-        # Check alert taxonomy prefixes
-        for prefix, skill in _ALERT_TAXONOMY.items():
-            if prefix in q:
-                scores[skill] = max(scores.get(skill, 0), 0.8)
+        # Skill-defined alert triggers (highest priority)
+        for skill_name, skill in self._skills.items():
+            for trigger in skill.alert_triggers:
+                if trigger.lower() in q:
+                    scores[skill_name] = max(scores.get(skill_name, 0), 0.9)
 
-        # Check scanner categories
-        for category, skill in _CATEGORY_SKILL.items():
-            if category in q:
+        # Fallback: hardcoded alert taxonomy prefixes
+        for prefix, skill in _ALERT_TAXONOMY.items():
+            if prefix in q and skill not in scores:
                 scores[skill] = max(scores.get(skill, 0), 0.7)
+
+        # Fallback: scanner categories
+        for category, skill in _CATEGORY_SKILL.items():
+            if category in q and skill not in scores:
+                scores[skill] = max(scores.get(skill, 0), 0.6)
 
         return scores
 
     def _score_component_tags(self, query: str) -> dict[str, float]:
-        """Channel 3: Extract K8s resource types from query, match against skill categories."""
+        """Channel 3: Extract K8s resource types from query, match against skill data.
+
+        Uses skill-defined cluster_components first, then category overlap.
+        """
         matches = _K8S_RESOURCES.findall(query.lower())
         if not matches:
             return {}
 
-        # Collect categories from matched resources
+        matched_resources = {m.lower() for m in matches}
+
+        # Score by skill-defined cluster_components (direct match, highest signal)
+        scores: dict[str, float] = {}
+        for skill_name, skill in self._skills.items():
+            if skill.cluster_components:
+                skill_comps = {c.lower() for c in skill.cluster_components}
+                overlap = len(matched_resources & skill_comps)
+                if overlap > 0:
+                    scores[skill_name] = max(
+                        scores.get(skill_name, 0),
+                        overlap / max(len(matched_resources), len(skill_comps)),
+                    )
+
+        # Fallback: category overlap from resource→category map
         matched_categories: set[str] = set()
         for resource in matches:
             cats = _RESOURCE_CATEGORY_MAP.get(resource.lower(), [])
             matched_categories.update(cats)
 
-        if not matched_categories:
-            return {}
-
-        # Score each skill by category overlap
-        scores: dict[str, float] = {}
-        for skill_name, skill in self._skills.items():
-            if not skill.categories:
-                continue
-            skill_cats = set(skill.categories)
-            overlap = len(matched_categories & skill_cats)
-            if overlap > 0:
-                scores[skill_name] = overlap / max(len(matched_categories), len(skill_cats))
+        if matched_categories:
+            for skill_name, skill in self._skills.items():
+                if skill_name in scores:
+                    continue  # already scored by cluster_components
+                if not skill.categories:
+                    continue
+                skill_cats = set(skill.categories)
+                overlap = len(matched_categories & skill_cats)
+                if overlap > 0:
+                    scores[skill_name] = overlap / max(len(matched_categories), len(skill_cats))
 
         return scores
 
@@ -508,9 +532,11 @@ class SkillSelector:
 
         return fused
 
-    def detect_conflicts(self, tools_offered: list[str]) -> list[dict]:
-        """Check for conflicting tools in the offered set."""
+    def detect_conflicts(self, tools_offered: list[str], selected_skills: list[str] | None = None) -> list[dict]:
+        """Check for conflicting tools and skills."""
         conflicts: list[dict] = []
+
+        # Tool-level conflicts (hardcoded)
         tool_set = set(tools_offered)
         for a, b in HARD_CONFLICTS:
             if a in tool_set and b in tool_set:
@@ -518,6 +544,22 @@ class SkillSelector:
         for a, b in SOFT_CONFLICTS:
             if a in tool_set and b in tool_set:
                 conflicts.append({"type": "soft", "pair": [a, b], "action": "warn_agent"})
+
+        # Skill-level conflicts (from skill.conflicts_with)
+        if selected_skills:
+            for skill_name in selected_skills:
+                skill = self._skills.get(skill_name)
+                if skill and skill.conflicts_with:
+                    for conflict in skill.conflicts_with:
+                        if conflict in selected_skills:
+                            conflicts.append(
+                                {
+                                    "type": "skill_conflict",
+                                    "pair": [skill_name, conflict],
+                                    "action": "warn_agent",
+                                }
+                            )
+
         return conflicts
 
     def _compute_threshold(self, context: dict | None) -> float:
