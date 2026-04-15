@@ -35,6 +35,28 @@ investigation_framework: |
   3. Identify overcommitted or underutilized namespaces
   4. Forecast exhaustion timeline using Prometheus trends
   5. Recommend scaling actions (add nodes, right-size requests, HPA)
+alert_triggers:
+  - KubeHPAMaxedOut
+  - KubeQuotaExceeded
+  - NodeMemoryHighUtilization
+cluster_components:
+  - node
+  - hpa
+  - resourcequota
+  - limitrange
+examples:
+  - scenario: "HPA at max replicas during peak traffic"
+    correct: "Check current utilization vs limits, forecast growth, recommend new max or node addition"
+    wrong: "Just increase maxReplicas without checking if nodes can handle it"
+success_criteria: "Resource headroom > 20% for all requested dimensions"
+risk_level: low
+conflicts_with: []
+supported_components:
+  - chart
+  - metric_card
+  - data_table
+  - bar_list
+  - progress_list
 configurable:
   - forecast_horizon:
       type: enum

@@ -67,6 +67,13 @@ categories:
 {chr(10).join(f"  - {cat}" for cat in sorted(categories))}
 write_tools: false
 priority: 5
+alert_triggers: []
+cluster_components: []
+examples: []
+success_criteria: ""
+risk_level: low
+conflicts_with: []
+supported_components: []
 generated_by: auto
 reviewed: false
 ---

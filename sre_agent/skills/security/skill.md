@@ -37,6 +37,33 @@ investigation_framework: |
   4. Check pod security standards compliance
   5. Verify network policies exist and are effective
   6. Report findings with severity and remediation steps
+alert_triggers:
+  - PodSecurityViolation
+  - RBACPermissionEscalation
+  - CertificateExpiring
+  - NetworkPolicyMissing
+cluster_components:
+  - scc
+  - clusterrole
+  - rolebinding
+  - networkpolicy
+  - secret
+  - certificate
+examples:
+  - scenario: "Overpermissive ClusterRole with wildcard verbs"
+    correct: "Identify exact permissions needed, recommend scoped Role instead"
+    wrong: "Delete the ClusterRole immediately"
+  - scenario: "Pod running as root without securityContext"
+    correct: "Report finding with severity, suggest runAsNonRoot + drop ALL capabilities"
+    wrong: "Ignore because it's in a non-production namespace"
+success_criteria: "Security posture score improved, no critical findings remaining"
+risk_level: low
+conflicts_with: []
+supported_components:
+  - data_table
+  - status_list
+  - badge_list
+  - key_value
 configurable:
   - communication_style:
       type: enum

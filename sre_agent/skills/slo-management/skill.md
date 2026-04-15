@@ -29,6 +29,22 @@ investigation_framework: |
   3. Calculate error budget remaining and burn rate
   4. Determine alert level (ok/warning/critical)
   5. Recommend actions if budget is depleting
+alert_triggers:
+  - SLOBurnRateHigh
+  - ErrorBudgetExhausted
+cluster_components:
+  - service
+examples:
+  - scenario: "Error budget at 15% remaining"
+    correct: "Query Prometheus for current burn rate, identify contributing errors, recommend freeze or remediation"
+    wrong: "Just report the number without context or recommendations"
+success_criteria: "SLO status clearly communicated with actionable recommendations"
+risk_level: low
+conflicts_with: []
+supported_components:
+  - metric_card
+  - chart
+  - progress_list
 ---
 
 ## SLO Management

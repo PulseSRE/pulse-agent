@@ -25,6 +25,16 @@ trigger_patterns:
   - "build.*skill|create.*skill|new.*skill"
   - "build.*runbook|create.*runbook"
   - "investigation.*strategy|how.*investigate"
+alert_triggers: []
+cluster_components: []
+examples:
+  - scenario: "User asks to build a skill for database troubleshooting"
+    correct: "Ask about specific database, common issues, then call create_skill with proper frontmatter"
+    wrong: "Create a generic skill without understanding the domain"
+success_criteria: "Skill created with valid frontmatter, keywords, and investigation framework"
+risk_level: low
+conflicts_with: []
+supported_components: []
 ---
 
 ## Security

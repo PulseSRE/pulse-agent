@@ -1,6 +1,6 @@
 """Tests for log fingerprint extraction."""
 
-from sre_agent.log_fingerprinter import fingerprint_text, fingerprint_finding
+from sre_agent.log_fingerprinter import fingerprint_finding, fingerprint_text
 
 
 class TestFingerprintText:

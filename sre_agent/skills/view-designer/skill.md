@@ -46,6 +46,36 @@ investigation_framework: |
   3. Gather data with namespace_summary or cluster_metrics
   4. Build the dashboard with create_dashboard
   5. Use relationship_tree for dependency maps, not status_list
+alert_triggers: []
+cluster_components: []
+examples:
+  - scenario: "User asks for a CPU monitoring dashboard"
+    correct: "Use plan_dashboard, then namespace_summary for data, then create_dashboard with charts"
+    wrong: "Return a text description of what the dashboard would look like"
+  - scenario: "User asks to add a widget to existing dashboard"
+    correct: "Read current view, add the widget, preserve existing layout"
+    wrong: "Create a new dashboard from scratch"
+success_criteria: "Dashboard renders with real data, no empty widgets"
+risk_level: low
+conflicts_with: []
+supported_components:
+  - data_table
+  - chart
+  - metric_card
+  - info_card_grid
+  - status_list
+  - badge_list
+  - bar_list
+  - progress_list
+  - donut_chart
+  - node_map
+  - resource_counts
+  - summary_bar
+  - key_value
+  - relationship_tree
+  - tabs
+  - grid
+  - section
 configurable:
   - preferred_layout:
       type: enum

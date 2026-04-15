@@ -369,6 +369,13 @@ def create_skill(
             "sre": ["fix", "remediate", "restart", "scale", "apply"],
             "view_designer": ["dashboard", "view", "create view"],
         },
+        "alert_triggers": [],
+        "cluster_components": [],
+        "examples": [],
+        "success_criteria": "",
+        "risk_level": "low",
+        "conflicts_with": [],
+        "supported_components": [],
     }
 
     yaml_str = yaml.dump(frontmatter, default_flow_style=False, sort_keys=False)

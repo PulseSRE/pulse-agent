@@ -25,6 +25,19 @@ investigation_framework: |
   4. Calculate blast radius from dependency graph
   5. Document actions taken during resolution
   6. Recommend prevention measures
+alert_triggers: []
+cluster_components: []
+examples:
+  - scenario: "Crashloop resolved via rollback"
+    correct: "Reconstruct timeline, identify root cause (bad image), document blast radius, recommend CI checks"
+    wrong: "Just say 'the pod was restarted and it's fine now'"
+success_criteria: "Postmortem includes timeline, root cause, contributing factors, prevention recommendations"
+risk_level: low
+conflicts_with: []
+supported_components:
+  - status_list
+  - key_value
+  - data_table
 ---
 
 ## Security

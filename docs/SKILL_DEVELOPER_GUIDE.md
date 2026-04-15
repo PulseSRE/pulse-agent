@@ -97,6 +97,13 @@ You are a Kubernetes capacity planning specialist...
 | `skip_component_hints` | boolean | no | false | Skip component rendering hints in the system prompt. Useful for skills that produce text-only output (no dashboards or charts). |
 | `display_name` | string | no | (derived from `name`) | Human-friendly name shown in the Toolbox UI and skill badges (e.g., `"SLO Management"` instead of `"slo-management"`). |
 | `icon` | string | no | `"bot"` | Lucide icon name for UI display (e.g., `"shield"`, `"activity"`, `"database"`). See [lucide.dev/icons](https://lucide.dev/icons) for available icons. |
+| `alert_triggers` | list[string] | no | [] | Exact Prometheus/Alertmanager alert names that should route to this skill (e.g., `KubePodCrashLooping`, `NodeNotReady`). |
+| `cluster_components` | list[string] | no | [] | Kubernetes component types this skill operates on (e.g., `pod`, `node`, `hpa`, `scc`). Used for intent routing. |
+| `examples` | list[object] | no | [] | Few-shot examples as `{scenario, correct, wrong}` dicts. Demonstrates good vs bad responses for the skill's domain. |
+| `success_criteria` | string | no | "" | Measurable resolution condition (e.g., "All affected resources healthy, no recurring alerts for 5 minutes"). |
+| `risk_level` | string | no | "low" | Risk level: `low`, `medium`, or `high`. High-risk skills trigger an approval gate before execution. |
+| `conflicts_with` | list[string] | no | [] | Names of skills that conflict with this one (mutually exclusive routing). |
+| `supported_components` | list[string] | no | [] | UI component types this skill can render (e.g., `data_table`, `chart`, `metric_card`). Used by the frontend for layout hints. |
 
 ### Categories
 

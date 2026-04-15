@@ -47,6 +47,41 @@ investigation_framework: |
   4. Query Prometheus for metric anomalies
   5. Determine root cause and blast radius
   6. Recommend targeted fix (not blind restarts)
+alert_triggers:
+  - KubePodCrashLooping
+  - KubePodNotReady
+  - KubeDeploymentReplicasMismatch
+  - NodeNotReady
+  - NodeDiskPressure
+  - NodeMemoryPressure
+  - etcd_disk_wal_fsync_duration_seconds
+cluster_components:
+  - pod
+  - deployment
+  - node
+  - service
+  - statefulset
+  - daemonset
+  - hpa
+  - pvc
+examples:
+  - scenario: "Pod crashlooping with OOMKilled"
+    correct: "Check memory limits, review container resource requests, examine logs for memory leak"
+    wrong: "Delete the pod immediately without investigating cause"
+  - scenario: "Node NotReady with disk pressure"
+    correct: "Check disk usage, identify large files/logs, drain if needed"
+    wrong: "Force reboot the node"
+success_criteria: "All affected resources healthy, no recurring alerts for 5 minutes"
+risk_level: medium
+conflicts_with: []
+supported_components:
+  - data_table
+  - status_list
+  - chart
+  - metric_card
+  - key_value
+  - log_viewer
+  - relationship_tree
 configurable:
   - communication_style:
       type: enum

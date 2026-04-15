@@ -51,6 +51,13 @@ class Skill:
     display_name: str = ""
     icon: str = ""
     builtin: bool = True
+    alert_triggers: list[str] = field(default_factory=list)  # exact alert names that route here
+    cluster_components: list[str] = field(default_factory=list)  # K8s component types (etcd, ingress, etc)
+    examples: list[dict] = field(default_factory=list)  # few-shot [{scenario, correct, wrong}]
+    success_criteria: str = ""  # measurable resolution condition
+    risk_level: str = "low"  # low | medium | high — high triggers approval gate
+    conflicts_with: list[str] = field(default_factory=list)  # conflicting skill names
+    supported_components: list[str] = field(default_factory=list)  # UI component types this skill renders
     generated_by: str = ""
     reviewed: bool = True
 
@@ -73,6 +80,13 @@ class Skill:
             "degraded": self.degraded,
             "degraded_reason": self.degraded_reason,
             "prompt_length": len(self.system_prompt),
+            "alert_triggers": self.alert_triggers,
+            "cluster_components": self.cluster_components,
+            "examples": self.examples,
+            "success_criteria": self.success_criteria,
+            "risk_level": self.risk_level,
+            "conflicts_with": self.conflicts_with,
+            "supported_components": self.supported_components,
             "generated_by": self.generated_by,
             "reviewed": self.reviewed,
         }
@@ -166,6 +180,13 @@ def _parse_skill_md(path: Path) -> Skill | None:
         display_name=meta.get("display_name", ""),
         icon=meta.get("icon", ""),
         builtin=is_builtin,
+        alert_triggers=meta.get("alert_triggers", []),
+        cluster_components=meta.get("cluster_components", []),
+        examples=meta.get("examples", []),
+        success_criteria=meta.get("success_criteria", ""),
+        risk_level=meta.get("risk_level", "low"),
+        conflicts_with=meta.get("conflicts_with", []),
+        supported_components=meta.get("supported_components", []),
         generated_by=meta.get("generated_by", ""),
         reviewed=meta.get("reviewed", True),
     )
