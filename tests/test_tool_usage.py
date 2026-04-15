@@ -456,10 +456,8 @@ class TestQueryUsage:
 class TestGetUsageStats:
     def setup_method(self):
         self.db = _make_test_db()
-        db2 = Database(_TEST_DB_URL)
-        db2.execute("DELETE FROM schema_migrations WHERE version >= 2")
-        db2.commit()
-        db2.close()
+        self.db.execute("DELETE FROM schema_migrations WHERE version >= 2")
+        self.db.commit()
         set_database(self.db)
         run_migrations(self.db)
         _seed_usage(self.db)

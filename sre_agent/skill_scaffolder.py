@@ -114,6 +114,13 @@ def scaffold_plan_template(
 
         import yaml
 
+        from .plan_templates import get_template
+
+        # Don't overwrite existing templates for this incident type
+        if get_template(incident_type):
+            logger.info("Plan template already exists for '%s', skipping scaffold", incident_type)
+            return None
+
         templates_dir = Path(__file__).parent / "plan_templates"
         if not templates_dir.exists():
             logger.warning("Plan templates directory not found")

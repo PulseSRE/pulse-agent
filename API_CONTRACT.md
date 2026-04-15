@@ -79,7 +79,7 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 ```json
 {
   "protocol": "2",
-  "agent": "2.2.0",
+  "agent": "2.3.0",
   "tools": 122,
   "skills": 7,
   "features": ["component_specs", "ws_token_auth", "rate_limiting", "monitor", "fix_history", "predictions"]
@@ -953,7 +953,8 @@ The UI sends a `GET /version` request before connecting. If the agent's `protoco
 
 | UI Version | Agent Version | Protocol | Status |
 |------------|--------------|----------|--------|
-| v5.16.2+ | v2.2.0 | 2 | Current |
+| v6.2.0 | v2.3.0 | 2 | Current |
+| v5.16.2+ | v2.2.0 | 2 | Compatible |
 | v5.16.2+ | v2.1.0 | 2 | Compatible |
 | v5.16.2+ | v2.0.0 | 2 | Compatible |
 | v5.16.2+ | v1.13.1 | 2 | Compatible |

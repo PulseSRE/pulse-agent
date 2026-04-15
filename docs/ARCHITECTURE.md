@@ -1,6 +1,6 @@
 # Pulse Agent Architecture
 
-Comprehensive architecture reference for Pulse Agent v2.2.0, Protocol v2.
+Comprehensive architecture reference for Pulse Agent v2.3.0, Protocol v2.
 
 **Last updated:** 2026-04-10
 

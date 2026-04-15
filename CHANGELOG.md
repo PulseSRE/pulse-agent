@@ -2,7 +2,7 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
-## Unreleased (2026-04-14)
+## [2.3.0] - 2026-04-14
 
 ### ORCA UI Surfaces
 - **Postmortems tab** — Auto-generated postmortem reports with timeline, root cause, blast radius, and prevention recommendations in the Incident Center.

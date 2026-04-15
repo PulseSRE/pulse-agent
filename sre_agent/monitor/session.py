@@ -604,6 +604,35 @@ class MonitorSession:
                     except Exception as e:
                         logger.warning("Failed to store investigation: %s", e)
 
+                # Auto-scaffold skill from novel flat investigations (no plan template matched)
+                if not plan_ran and result.get("confidence", 0) >= 0.75:
+                    try:
+                        from ..skill_scaffolder import (
+                            save_scaffolded_skill,
+                            scaffold_plan_template,
+                            scaffold_skill_from_resolution,
+                        )
+
+                        skill_content = scaffold_skill_from_resolution(
+                            query=finding.get("title", ""),
+                            tools_called=["proactive_investigation"],
+                            investigation_summary=result.get("summary", ""),
+                            root_cause=result.get("suspectedCause", "unknown"),
+                            confidence=result.get("confidence", 0),
+                        )
+                        tokens = finding.get("title", "unknown").lower().split()[:3]
+                        skill_name = "-".join(t for t in tokens if t.isalnum())[:40] or "auto-skill"
+                        save_scaffolded_skill(skill_content, skill_name)
+                        scaffold_plan_template(
+                            skill_name=skill_name,
+                            plan_phases=["triage", "diagnose", "remediate", "verify"],
+                            incident_type=finding.get("category", "unknown"),
+                            confidence=result.get("confidence", 0),
+                        )
+                        logger.info("Scaffolded skill '%s' from novel flat investigation", skill_name)
+                    except Exception:
+                        logger.debug("Skill scaffolding from flat investigation failed", exc_info=True)
+
             except TimeoutError:
                 report["error"] = f"Investigation timed out after {timeout_seconds}s"
             except Exception as e:

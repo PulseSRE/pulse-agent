@@ -60,6 +60,16 @@ def load_templates() -> dict[str, SkillPlan]:
                 logger.warning("Plan template '%s' has validation errors: %s", path.name, errors)
                 continue
 
+            # Auto-generated templates must not override built-in templates
+            if plan.incident_type in _templates and data.get("generated_by") == "auto":
+                logger.debug(
+                    "Skipping auto-generated template '%s' — built-in '%s' already covers incident_type '%s'",
+                    path.name,
+                    _templates[plan.incident_type].id,
+                    plan.incident_type,
+                )
+                continue
+
             _templates[plan.incident_type] = plan
             logger.info("Loaded plan template: %s (%s, %d phases)", plan.name, plan.incident_type, len(plan.phases))
 

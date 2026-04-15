@@ -1,0 +1,33 @@
+id: auto-pod-crashing
+name: Pod Crashing
+incident_type: crashloop
+max_total_duration: 1800
+generated_by: auto
+confidence: 0.9
+phases:
+- id: triage
+  skill_name: sre
+  required: true
+  timeout_seconds: 120
+  runs: on_success
+- id: diagnose
+  skill_name: sre
+  required: true
+  timeout_seconds: 120
+  runs: on_success
+  depends_on:
+  - triage
+- id: remediate
+  skill_name: sre
+  required: true
+  timeout_seconds: 120
+  runs: on_success
+  depends_on:
+  - diagnose
+- id: verify
+  skill_name: sre
+  required: true
+  timeout_seconds: 120
+  runs: on_success
+  depends_on:
+  - remediate
