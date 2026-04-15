@@ -55,6 +55,9 @@ class MonitorSession:
         self._scan_lock = asyncio.Lock()  # H1: prevent concurrent scans
         self._last_security_followup: float = 0.0  # cooldown tracker
         self._recent_fix_ids: set[str] = set()  # finding IDs that were auto-fixed (for resolution attribution)
+        # Improvement flywheel timers
+        self._last_daily_run: float = 0.0
+        self._last_weekly_run: float = 0.0
         # Noise learning: track findings that appear then quickly disappear
         self._transient_counts: dict[str, int] = {}  # finding_key -> count of transient appearances
         self._noise_threshold = get_settings().noise_threshold
@@ -1044,6 +1047,62 @@ class MonitorSession:
         await self.process_verifications(all_findings)
 
         await self.process_handoffs()
+
+        # Improvement flywheel — runs on schedule alongside scans
+        await self._run_flywheel()
+
+    async def _run_flywheel(self) -> None:
+        """Improvement flywheel — daily and weekly maintenance tasks."""
+        now = time.time()
+
+        # Daily (every 24h): recompute weights, update success rates, identify gaps
+        if now - self._last_daily_run > 86400:
+            self._last_daily_run = now
+            try:
+                from ..selector_learning import (
+                    identify_skill_gaps,
+                    prune_low_performers,
+                    recompute_channel_weights,
+                )
+
+                # Recompute channel weights from selection outcomes
+                new_weights = await asyncio.to_thread(recompute_channel_weights, 7)
+                if new_weights:
+                    logger.info("Daily flywheel: recomputed channel weights: %s", new_weights)
+
+                # Identify skill gaps (recurring queries with no good match)
+                gaps = await asyncio.to_thread(identify_skill_gaps, 30)
+                if gaps:
+                    logger.info("Daily flywheel: %d skill gaps identified", len(gaps))
+
+                # Flag low-performing skills (>30% override rate)
+                flagged = await asyncio.to_thread(prune_low_performers, 30)
+                if flagged:
+                    logger.warning("Daily flywheel: flagged low performers: %s", flagged)
+
+            except Exception:
+                logger.debug("Daily flywheel failed", exc_info=True)
+
+        # Weekly (every 7d): invalidate caches, recalibrate
+        if now - self._last_weekly_run > 604800:
+            self._last_weekly_run = now
+            try:
+                # Invalidate semantic embedding cache (catches skill updates)
+                from ..skill_loader import _get_selector
+
+                selector = _get_selector()
+                selector._skill_token_cache = None
+                logger.info("Weekly flywheel: invalidated embedding cache")
+
+                # Log a prompt audit for tracking
+                from ..intelligence import compute_intelligence_sections
+
+                sections = await asyncio.to_thread(compute_intelligence_sections)
+                if sections:
+                    logger.info("Weekly flywheel: intelligence sections computed (%d sections)", len(sections))
+
+            except Exception:
+                logger.debug("Weekly flywheel failed", exc_info=True)
 
     async def process_handoffs(self) -> None:
         """Process agent-to-agent handoff requests from the context bus."""
