@@ -98,10 +98,12 @@ async def get_tools_usage_stats(
 
 @router.get("/tools/usage/chains")
 async def get_tools_usage_chains(_auth=Depends(verify_token)):
-    """Discovered tool call chains (common sequences)."""
-    from ..tool_chains import discover_chains
+    """Discovered tool call chains — bigrams (2-tool) and trigrams (3-tool workflows)."""
+    from ..tool_chains import discover_chains, discover_trigrams
 
-    return discover_chains()
+    result = discover_chains()
+    result["trigrams"] = discover_trigrams()
+    return result
 
 
 @router.get("/tools/usage")

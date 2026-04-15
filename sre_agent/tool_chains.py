@@ -1,6 +1,6 @@
 """Tool chain intelligence — discovers common tool sequences and generates hints.
 
-Layer 1: Chain Discovery — mines tool_usage for frequent bigrams.
+Layer 1: Chain Discovery — mines tool_usage for frequent bigrams and trigrams.
 Layer 2: Next-Tool Hints — injects suggestions into the system prompt.
 """
 
@@ -81,6 +81,68 @@ def discover_chains(
         return {"bigrams": [], "total_sessions_analyzed": 0}
 
 
+def discover_trigrams(
+    *,
+    min_frequency: int = 3,
+    limit: int = 15,
+) -> list[dict]:
+    """Discover frequent 3-tool sequences from tool_usage.
+
+    Returns sequences like [list_pods → describe_pod → get_pod_logs] with
+    frequency and probability (how often tool_c follows the A→B pair).
+    """
+    try:
+        from .db import get_database
+
+        db = get_database()
+
+        rows = db.fetchall(
+            """
+            WITH ordered AS (
+                SELECT session_id, tool_name,
+                       LAG(tool_name, 1) OVER (PARTITION BY session_id ORDER BY turn_number, id) AS prev_1,
+                       LAG(tool_name, 2) OVER (PARTITION BY session_id ORDER BY turn_number, id) AS prev_2
+                FROM tool_usage
+                WHERE status = 'success'
+            ),
+            trigram_counts AS (
+                SELECT prev_2 AS tool_a, prev_1 AS tool_b, tool_name AS tool_c,
+                       COUNT(*) AS frequency
+                FROM ordered
+                WHERE prev_1 IS NOT NULL AND prev_2 IS NOT NULL
+                GROUP BY prev_2, prev_1, tool_name
+                HAVING COUNT(*) >= %s
+            ),
+            pair_totals AS (
+                SELECT prev_2 AS tool_a, prev_1 AS tool_b, COUNT(*) AS total
+                FROM ordered
+                WHERE prev_1 IS NOT NULL AND prev_2 IS NOT NULL
+                GROUP BY prev_2, prev_1
+            )
+            SELECT t.tool_a, t.tool_b, t.tool_c, t.frequency,
+                   ROUND(t.frequency::numeric / p.total, 4) AS probability
+            FROM trigram_counts t
+            JOIN pair_totals p ON t.tool_a = p.tool_a AND t.tool_b = p.tool_b
+            ORDER BY t.frequency DESC
+            LIMIT %s
+            """,
+            (min_frequency, limit),
+        )
+
+        return [
+            {
+                "sequence": [row["tool_a"], row["tool_b"], row["tool_c"]],
+                "frequency": row["frequency"],
+                "probability": float(row["probability"]),
+            }
+            for row in (rows or [])
+        ]
+
+    except Exception:
+        logger.debug("Trigram discovery failed", exc_info=True)
+        return []
+
+
 def refresh_chain_hints(
     *,
     min_probability: float | None = None,
@@ -139,6 +201,13 @@ def get_chain_hints_text(max_hints: int = 5) -> str:
 
     if not lines:
         return ""
+
+    # Add trigram workflows if available
+    trigrams = discover_trigrams(min_frequency=3, limit=3)
+    for tri in trigrams:
+        if tri["probability"] >= 0.3:
+            seq = " → ".join(tri["sequence"])
+            lines.append(f"- Common workflow: {seq} ({int(tri['probability'] * 100)}%)")
 
     return "\n## Tool Usage Patterns\n" + "\n".join(lines)
 
