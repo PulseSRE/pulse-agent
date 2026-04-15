@@ -56,6 +56,20 @@ python3 -m pytest tests/ -k "test_crashloop" -v      # by name pattern
 python3 -m pytest tests/ -x                           # stop on first failure
 make test                                             # shorthand (pytest -q)
 make verify                                           # lint + type-check + test
+make test-all                                         # verify + deterministic evals (release, core, safety, prompt audit)
+make test-everything                                  # verify + ALL 11 eval suites (includes LLM judge — needs API key)
+make evals                                            # deterministic evals only
+make evals-full                                       # all evals including LLM-judged suites
+```
+
+### Run Everything
+
+```bash
+# Fast — unit tests + deterministic evals (~70s, no API key needed)
+make test-all
+
+# Full — unit tests + ALL eval suites including LLM judge (~5min, needs API key)
+make test-everything
 ```
 
 ### Eval Framework

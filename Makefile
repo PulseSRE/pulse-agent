@@ -1,4 +1,4 @@
-.PHONY: lint format type-check test verify helm-lint release sync-token
+.PHONY: lint format type-check test verify test-all evals helm-lint release sync-token
 
 lint:
 	ruff check sre_agent/ tests/
@@ -14,6 +14,31 @@ test:
 
 verify: lint type-check test
 	@echo "All checks passed."
+
+evals:
+	@echo "Running deterministic evals..."
+	python -m sre_agent.evals.cli --suite release --fail-on-gate
+	python -m sre_agent.evals.cli --suite core
+	python -m sre_agent.evals.cli --suite safety
+	python -m sre_agent.evals.cli --audit-prompt --mode sre
+	@echo "All deterministic evals passed."
+
+evals-full: evals
+	@echo "Running LLM-judged evals (requires API key)..."
+	python -m sre_agent.evals.cli --suite sysadmin
+	python -m sre_agent.evals.cli --suite integration
+	python -m sre_agent.evals.cli --suite adversarial
+	python -m sre_agent.evals.cli --suite errors
+	python -m sre_agent.evals.cli --suite fleet
+	python -m sre_agent.evals.cli --suite view_designer
+	python -m sre_agent.evals.cli --suite autofix
+	@echo "All evals passed (deterministic + LLM-judged)."
+
+test-all: verify evals
+	@echo "All tests and evals passed."
+
+test-everything: verify evals-full
+	@echo "All tests, deterministic evals, and LLM-judged evals passed."
 
 helm-lint:
 	helm lint chart/
