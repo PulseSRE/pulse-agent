@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v2.3.0, Protocol v2, 122 tools (86 native + 36 MCP), 7 skills (built-in: sre, security, view_designer, capacity_planner, plan-builder, postmortem, slo-management), 18 scanners, 1689 tests, 73 PromQL recipes, 11 eval suites, 98 scenarios, 98 eval prompts. 36 modules (k8s_tools/11, monitor/11, api/15, plus decorators.py, tool_predictor.py) — no file over 910 lines. Python 3.11+, Mypy clean (0 errors), ruff clean. Migration version 016 (slo_definitions). Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings) and pre-route handoff in skill classifier. Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence. Adaptive tool selection: TF-IDF + LLM fallback + chain expansion. ORCA multi-signal skill selector (6-channel fusion, 5 active by default), phased plan execution, dependency graph, auto-postmortems, SLO registry. ALWAYS_INCLUDE trimmed from 12 to 5. Release gate: 98.1% (release suite avg).
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v2.3.0, Protocol v2, 122 tools (86 native + 36 MCP), 7 skills (built-in: sre, security, view_designer, capacity_planner, plan-builder, postmortem, slo-management), 18 scanners, tests, 73 PromQL recipes, 11 eval suites, 98 scenarios, 98 eval prompts. 36 modules (k8s_tools/11, monitor/11, api/15, plus decorators.py, tool_predictor.py) — no file over 910 lines. Python 3.11+, Mypy clean (0 errors), ruff clean. Migration version 016 (slo_definitions). Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings) and pre-route handoff in skill classifier. Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence. Adaptive tool selection: TF-IDF + LLM fallback + chain expansion. ORCA multi-signal skill selector (6-channel fusion, 5 active by default), phased plan execution, dependency graph, auto-postmortems, SLO registry. ALWAYS_INCLUDE trimmed from 12 to 5. Release gate: 98.1% (release suite avg).
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -38,7 +38,7 @@ python -m sre_agent.main security     # Security scanner
 pulse-agent-api                       # FastAPI on port 8080
 
 # Tests
-python3 -m pytest tests/ -v           # all tests (~1689 tests)
+python3 -m pytest tests/ -v           # all tests (~tests)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
 make verify                                    # lint + type-check + test\nmake chaos-test                                # chaos engineering (5 scenarios, needs cluster)
 

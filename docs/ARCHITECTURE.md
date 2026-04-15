@@ -77,7 +77,7 @@ React/TypeScript frontend (OpenShift Pulse) providing the user interface.
 |--------|-------|
 | Tools | 122 (86 native + 36 MCP) across 36 modules + MCP servers |
 | Scanners | 17 (12 core + 5 audit) |
-| Tests | 1,689 |
+| Tests | See badge in README |
 | PromQL Recipes | 73 across 16 categories |
 | Eval Prompts | 98 |
 | Protocol Version | 2 |
@@ -1798,4 +1798,4 @@ Key decisions made during development and the reasoning behind them.
 
 ---
 
-*122 tools (86 native + 36 MCP) -- 18 scanners -- 10 runbooks -- 73 PromQL recipes -- 98 eval prompts -- 1,689 tests -- Protocol v2*
+*122 tools (86 native + 36 MCP) -- 18 scanners -- 10 runbooks -- 73 PromQL recipes -- 98 eval prompts -- tests -- Protocol v2*

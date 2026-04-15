@@ -301,7 +301,7 @@ Consolidated management page with 8 tabs:
 
 ```bash
 pip install -e '.[test]'
-python3 -m pytest tests/ -v           # All 1,689 tests
+python3 -m pytest tests/ -v           # Full test suite
 python3 -m pytest tests/test_foo.py   # Single file
 make verify                           # Lint + type-check + tests
 ```
