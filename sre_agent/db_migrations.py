@@ -174,6 +174,13 @@ def _migrate_017_plan_executions(db: Database) -> None:
     db.executescript(PLAN_EXECUTIONS_SCHEMA)
 
 
+def _migrate_018_user_events(db: Database) -> None:
+    """Add user_events table for session analytics."""
+    from .db_schema import USER_EVENTS_SCHEMA
+
+    db.executescript(USER_EVENTS_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -194,10 +201,3 @@ MIGRATIONS = [
     (17, "plan_executions", _migrate_017_plan_executions),
     (18, "user_events", _migrate_018_user_events),
 ]
-
-
-def _migrate_018_user_events(db: Database) -> None:
-    """Add user_events table for session analytics."""
-    from .db_schema import USER_EVENTS_SCHEMA
-
-    db.executescript(USER_EVENTS_SCHEMA)
