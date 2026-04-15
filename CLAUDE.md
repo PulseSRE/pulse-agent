@@ -56,7 +56,7 @@ make release VERSION=1.6.0            # bump version everywhere, commit, tag
 # Deploy (OpenShift) — uses umbrella script in UI repo
 cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh   # builds UI + Agent, pushes to Quay, Helm upgrade
 cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --dry-run  # preview without applying
-cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --skip-build  # redeploy with existing images
+cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --set agent.mcp.enabled=true  # deploy with MCP enabled
 cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --set agent.mcp.enabled=true  # deploy with MCP enabled
 ```
 
