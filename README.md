@@ -2,9 +2,9 @@
 
 <p>
   <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v2.2.0"><img src="https://img.shields.io/badge/release-v2.2.0-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-111_(75+36_MCP)-10b981?style=for-the-badge" alt="Tools">
+  <img src="https://img.shields.io/badge/tools-122_(86+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/scanners-17-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-1666-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1676-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/PromQL%20recipes-73-10b981?style=for-the-badge" alt="PromQL Recipes">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
@@ -117,7 +117,7 @@ Pulse Agent connects directly to your cluster's Kubernetes API and uses Claude O
 - **Column sort, toggle, per-column filters** — Full table controls via settings panel
 
 ### Eval Scoring & Self-Improving Evals
-- **9 Eval Suites, 70 Scenarios** — Deterministic eval framework covering release gating, safety, integration, adversarial, errors, fleet, sysadmin, core, and view designer scenarios
+- **11 Eval Suites, 98 Scenarios** — Deterministic eval framework covering release gating, safety, integration, adversarial, errors, fleet, sysadmin, core, view designer, autofix, and selector scenarios
 - **98 Eval Prompts** — Mapped to expected tool calls across SRE, security, view designer, and cross-agent modes. CI enforced: adding a new tool without an eval prompt fails the test suite
 - **Adaptive Tool Selection** — TF-IDF prediction + Haiku LLM fallback + co-occurrence expansion. Current release gate: **98.1%** average
 - **Regression Gate** — CI blocks release if eval gate score drops below threshold
@@ -421,7 +421,7 @@ Built-in optimizations for getting the most out of Claude (`PULSE_AGENT_HARNESS=
 
 | Feature | What It Does | Impact |
 |---------|-------------|--------|
-| **Dynamic Tool Selection** | Categorizes 111 tools into 8 groups, loads only relevant ones per query (via `skill_loader.py`) | 111->15-25 tools, faster + cheaper |
+| **Dynamic Tool Selection** | Categorizes 122 tools into 8 groups, loads only relevant ones per query (via `skill_loader.py`) | 122->15-25 tools, faster + cheaper |
 | **Prompt Caching** | Marks system prompt + runbooks with `cache_control: ephemeral` | ~90% cost reduction on context |
 | **Cluster Context Injection** | Pre-fetches node count, namespaces, OCP version, failing pods, firing alerts | Saves 2-3 tool calls per query |
 | **Component Rendering Hints** | Guides Claude to focus on analysis, not data formatting | Cleaner responses |
@@ -740,7 +740,7 @@ python -m pytest tests/ -v
 
 See [TESTING.md](TESTING.md) for test conventions, fixtures, and coverage targets.
 
-1,666 tests covering all tools, all 17 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, PromQL recipes, view validation, layout engine, intelligence loop, token tracking, tool prediction, and the memory system. All tests run without a cluster or API key (fully mocked).
+1,676 tests covering all tools, all 17 scanner functions, agent loop safety mechanisms, error classification, error tracking, config validation, unit parsing, orchestrator, context bus, handoff tools, component hint coverage, showcase eval scenarios, PromQL recipes, view validation, layout engine, intelligence loop, token tracking, tool prediction, and the memory system. All tests run without a cluster or API key (fully mocked).
 
 ## Evaluation Framework
 
@@ -809,12 +809,14 @@ Suites:
 - `errors` — error handling and recovery (5 scenarios)
 - `fleet` — multi-cluster operations (5 scenarios)
 - `sysadmin` — real-world sysadmin queries (20 scenarios)
+- `autofix` — auto-fix decision accuracy (5 scenarios)
+- `selector` — skill routing and tool selection (23 scenarios)
 - `outcomes` — compares current vs baseline action outcomes from fix history telemetry
 
 ---
 
 <p align="center">
-  <strong>111 tools (75 native + 36 MCP)</strong> &bull; <strong>17 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>98 eval prompts</strong> &bull; <strong>1,666 tests</strong> &bull; <strong>Protocol v2</strong>
+  <strong>122 tools (86 native + 36 MCP)</strong> &bull; <strong>17 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>98 eval prompts</strong> &bull; <strong>1,676 tests</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

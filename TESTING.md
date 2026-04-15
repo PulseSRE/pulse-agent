@@ -38,7 +38,7 @@ Testing philosophy: deterministic tests run on every commit at zero cost. LLM-ju
               |  Per-skill evals.yaml scenarios    |      Tool selection per skill domain.
               +-----------------------------------+
             +---------------------------------------+
-            |          Unit Tests (1666)             |   <- every PR and push
+            |          Unit Tests (1676)             |   <- every PR and push
             |  Tools, scanners, API, config, memory  |      Fast, deterministic, mocked K8s.
             +---------------------------------------+
 ```
@@ -50,7 +50,7 @@ All commands run from the project root (`/Users/amobrem/ali/pulse-agent`).
 ### Unit Tests
 
 ```bash
-python3 -m pytest tests/ -v                          # all 1666 tests
+python3 -m pytest tests/ -v                          # all 1676 tests
 python3 -m pytest tests/test_k8s_tools.py -v         # single file
 python3 -m pytest tests/ -k "test_crashloop" -v      # by name pattern
 python3 -m pytest tests/ -x                           # stop on first failure
@@ -103,7 +103,7 @@ python -m sre_agent.evals.weekly_digest_cli --current-days 7 --baseline-days 7 \
 
 ### Coverage
 
-1666 pytest tests across 40+ test files in `tests/`. Major coverage areas:
+1676 pytest tests across 40+ test files in `tests/`. Major coverage areas:
 
 | Area | Test files | What they cover |
 |------|-----------|-----------------|
@@ -213,7 +213,7 @@ sre_agent/evals/
 
 ### Scenario Suites
 
-9 suites, 70 total scenarios:
+11 suites, 98 total scenarios:
 
 | Suite | Scenarios | Purpose | Gating? |
 |-------|-----------|---------|---------|
@@ -226,6 +226,8 @@ sre_agent/evals/
 | `errors` | 5 | Error handling and recovery | No |
 | `fleet` | 5 | Multi-cluster operations | No |
 | `sysadmin` | 20 | Real-world sysadmin queries | No |
+| `autofix` | 5 | Auto-fix decision accuracy | No |
+| `selector` | 23 | Skill routing and tool selection | No |
 
 Scenario data files: `sre_agent/evals/scenarios_data/*.json`
 
@@ -364,7 +366,9 @@ Each skill package can include an `evals.yaml` file with scenarios specific to t
 | Security | `sre_agent/skills/security/evals.yaml` | Prompt + expected tools + mentions |
 | View Designer | `sre_agent/skills/view-designer/evals.yaml` | Prompt + expected tools + mentions |
 | Capacity Planner | `sre_agent/skills/capacity-planner/evals.yaml` | Prompt + expected tools + mentions |
-| Postgres Troubleshooter | `sre_agent/skills/postgres-troubleshooter/evals.yaml` | Prompt + expected tools + mentions |
+| Plan Builder | `sre_agent/skills/plan-builder/evals.yaml` | Prompt + expected tools + mentions |
+| Postmortem | `sre_agent/skills/postmortem/evals.yaml` | Prompt + expected tools + mentions |
+| SLO Management | `sre_agent/skills/slo-management/evals.yaml` | Prompt + expected tools + mentions |
 
 ### Skill Eval Format
 
@@ -793,7 +797,7 @@ All eval prompts mapped to expected tool calls. Used for evaluating agent tool s
 | show me cluster KPI metrics | `cluster_metrics` | Cluster metrics |
 | give me a namespace summary for staging | `namespace_summary` | Namespace summary |
 
-### Skill-Bundled (23 prompts across 5 skills)
+### Skill-Bundled (23+ prompts across 7 skills)
 
 Defined in `sre_agent/skills/*/evals.yaml`. Auto-registered as eval suites.
 
@@ -803,7 +807,9 @@ Defined in `sre_agent/skills/*/evals.yaml`. Auto-registered as eval suites.
 | security | 5 | "scan for RBAC vulnerabilities" |
 | view_designer | 6 | "create a monitoring dashboard" |
 | capacity_planner | 6 | "will we run out of CPU in the next week?" |
-| postgres_troubleshooter | — | "why is my database connection failing?" |
+| plan-builder | — | "investigate this crashloop with a phased plan" |
+| postmortem | — | "generate a postmortem for the last incident" |
+| slo-management | — | "show me current SLO burn rates" |
 
 ### Tools Excluded from Eval
 

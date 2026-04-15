@@ -2,6 +2,62 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## Unreleased (2026-04-14)
+
+### ORCA UI Surfaces
+- **Postmortems tab** — Auto-generated postmortem reports with timeline, root cause, blast radius, and prevention recommendations in the Incident Center.
+- **Topology view** — Dependency graph visualization with blast radius analysis at `/topology` (Impact Analysis).
+- **Plans tab** — View, edit, and delete investigation plan templates from the Toolbox Skills section.
+- **SLOs tab** — CRUD for SLO definitions with live Prometheus burn-rate queries (`GET /slo`, `POST /slo`, `DELETE /slo/{service}/{slo_type}`).
+
+### Analytics Restructured
+- **Agent Intelligence section** — Unified analytics view with routing decisions, fix strategies, and learning feed.
+- **Fix strategy effectiveness** — `GET /analytics/fix-strategies` shows per-category+tool success rates.
+- **Learning feed** — `GET /analytics/learning` surfaces weight updates, scaffolded skills, and routing decisions.
+
+### Unified Routing
+- **Orchestrator delegates to ORCA selector** — ~200 lines of duplicate keyword routing removed from `orchestrator.py`. The ORCA 5-channel selector is now the single routing authority.
+
+### Unified Layout Engine
+- **Backend-authoritative layout** — Layout engine now owns all positioning with optional frontend hint support. Eliminates layout drift between backend generation and frontend rendering.
+
+### Plan CRUD
+- **Plan template management** — `PUT /plan-templates/{type}` and `DELETE /plan-templates/{type}` endpoints for editing and deleting plan templates from the UI.
+
+### SLO Management
+- **SLO registry** — `slo_registry.py` provides CRUD operations with live Prometheus burn-rate integration. Persisted to `slo_definitions` table (migration 016).
+
+### Skill Enrichment
+- **All skills have trigger_patterns, tool_sequences, investigation_framework** — Every built-in skill now declares regex trigger patterns, named tool sequences for phased execution, and structured investigation methodology.
+
+### Live Investigation Phases
+- **`investigation_progress` WebSocket event** — Real-time phase updates during multi-phase investigations. Each phase reports status (pending/running/complete/failed/skipped), skill name, summary, and confidence.
+
+### Deploy Risk Badges
+- **Change risk scoring** — `change_risk.py` correlates recent changes with incidents. Findings display deploy risk badges in the UI.
+
+### Skill Badges
+- **Tool catalog badges** — Tools in the catalog show which skill(s) they belong to.
+
+### Node Dedup in Dependency Graph
+- **Topology deduplication** — Duplicate nodes in the dependency graph are merged, reducing visual noise in large clusters.
+
+### Tool Renames
+- **`describe_agent` / `describe_tools`** — Self-description tools renamed for clarity (previously `self_describe` / `self_describe_tools`).
+
+### Code Review Fixes
+- **Crash bug** — Fixed null pointer in plan runtime when investigation has no phases.
+- **SQL precedence** — Fixed operator precedence in selector learning weight query.
+- **Duplicate computation** — Eliminated redundant burn-rate calculation in SLO status endpoint.
+- **O(n^2) BFS** — Fixed quadratic performance in dependency graph traversal.
+
+### New Key Files
+- `slo_registry.py` — SLO definition CRUD with live Prometheus burn rates
+- `change_risk.py` — Deploy risk scoring for findings
+- `plan_runtime.py` — Phased investigation plan execution engine
+- `skill_scaffolder.py` — AI-generated skill packages from usage patterns
+- `selector_learning.py` — ORCA selector weight learning from feedback signals
+
 ## v2.2.0 (2026-04-12)
 
 ### Adaptive Tool Selection Engine

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v2.2.0, Protocol v2, 111 tools (75 native + 36 MCP), 8 skills (built-in: sre, security, view_designer, capacity_planner, postgres_troubleshooter, plan-builder, postmortem, slo-management), 17 scanners, 1666 tests, 73 PromQL recipes, 11 eval suites, 98 scenarios, 98 eval prompts. 36 modules (k8s_tools/11, monitor/10, api/12, plus decorators.py, tool_predictor.py) — no file over 910 lines. Python 3.12, Mypy clean (0 errors), ruff clean. Migration version 016 (slo_definitions). Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings) and pre-route handoff in skill classifier. Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence. Adaptive tool selection: TF-IDF + LLM fallback + chain expansion. ORCA multi-signal skill selector (5-channel fusion), phased plan execution, dependency graph, auto-postmortems, SLO registry. ALWAYS_INCLUDE trimmed from 12 to 5. Release gate: 98.1% (release suite avg).
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v2.2.0, Protocol v2, 122 tools (86 native + 36 MCP), 7 skills (built-in: sre, security, view_designer, capacity_planner, plan-builder, postmortem, slo-management), 17 scanners, 1676 tests, 73 PromQL recipes, 11 eval suites, 98 scenarios, 98 eval prompts. 36 modules (k8s_tools/11, monitor/10, api/12, plus decorators.py, tool_predictor.py) — no file over 910 lines. Python 3.12, Mypy clean (0 errors), ruff clean. Migration version 016 (slo_definitions). Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings) and pre-route handoff in skill classifier. Centralized Pydantic config (no raw os.environ). Generative views: tools return component specs for rich UI rendering, user-scoped custom dashboards with share/clone. Tool usage tracking: full audit log with chain intelligence. Adaptive tool selection: TF-IDF + LLM fallback + chain expansion. ORCA multi-signal skill selector (5-channel fusion), phased plan execution, dependency graph, auto-postmortems, SLO registry. ALWAYS_INCLUDE trimmed from 12 to 5. Release gate: 98.1% (release suite avg).
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -38,7 +38,7 @@ python -m sre_agent.main security     # Security scanner
 pulse-agent-api                       # FastAPI on port 8080
 
 # Tests
-python3 -m pytest tests/ -v           # all tests (~1520 tests)
+python3 -m pytest tests/ -v           # all tests (~1676 tests)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
 make verify                                    # lint + type-check + test
 
@@ -191,6 +191,11 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `self_tools.py` — 12 self-description + 4 skill management + 3 K8s API introspection tools
 - `prompt_log.py` — prompt logging (hash, sections, tokens, version tracking) for observability and debugging
 - `component_registry.py` — data-driven component hints from registry (replaces hardcoded hints in harness)
+- `slo_registry.py` — SLO definition CRUD, live Prometheus burn-rate queries, persistence to `slo_definitions` table
+- `change_risk.py` — deploy risk scoring for findings (correlates recent changes with incidents)
+- `plan_runtime.py` — phased investigation plan execution engine (plan templates, phase lifecycle, progress events)
+- `skill_scaffolder.py` — AI-generated skill packages from conversation patterns and usage data
+- `selector_learning.py` — ORCA selector weight learning from feedback signals (routing decisions, overrides, outcomes)
 
 **Frontend:** `/toolbox` consolidates tools, skills, MCP, components, usage, analytics into single page.
 

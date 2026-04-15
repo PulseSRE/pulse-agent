@@ -89,6 +89,14 @@ You are a Kubernetes capacity planning specialist...
 | `requires_tools` | list[string] | no | [] | Tools that must exist for this skill to load. Missing tools mark skill as degraded. |
 | `handoff_to` | map[string, list[string]] | no | {} | Skills this skill can hand off to, with trigger keywords. |
 | `configurable` | list[object] | no | [] | User-adjustable preferences (see User Preferences section). |
+| `trigger_patterns` | list[string] | no | [] | Regex patterns that trigger this skill via the ORCA selector's keyword channel. More precise than `keywords` for complex intent matching. |
+| `tool_sequences` | map[string, list[string]] | no | {} | Named tool call sequences for common workflows (e.g., `diagnose: [list_pods, describe_pod, get_pod_logs]`). Used by the plan runtime for phased execution. |
+| `investigation_framework` | string (multiline) | no | "" | Structured investigation methodology injected into the prompt. Defines the step-by-step approach the agent follows for this skill's domain. |
+| `generated_by` | string | no | "" | Set to `"auto"` for AI-generated skills (created by `skill_scaffolder.py`). Empty for human-created skills. |
+| `reviewed` | boolean | no | true | Set to `false` for AI-generated skills pending human review. Unreviewed skills display a badge in the Toolbox UI. |
+| `skip_component_hints` | boolean | no | false | Skip component rendering hints in the system prompt. Useful for skills that produce text-only output (no dashboards or charts). |
+| `display_name` | string | no | (derived from `name`) | Human-friendly name shown in the Toolbox UI and skill badges (e.g., `"SLO Management"` instead of `"slo-management"`). |
+| `icon` | string | no | `"bot"` | Lucide icon name for UI display (e.g., `"shield"`, `"activity"`, `"database"`). See [lucide.dev/icons](https://lucide.dev/icons) for available icons. |
 
 ### Categories
 

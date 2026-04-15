@@ -64,6 +64,13 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/plan-templates` | token | List investigation plan templates |
 | `GET` | `/plan-templates/{type}` | token | Get a single plan template by incident type |
 | `GET` | `/fix-history/resolutions` | token | Recent resolution outcomes with verification status (query: `days`, `limit`) |
+| `GET` | `/slo` | token | Current SLO status with live Prometheus burn rates |
+| `POST` | `/slo` | token | Register new SLO definition |
+| `DELETE` | `/slo/{service}/{slo_type}` | token | Remove SLO definition |
+| `GET` | `/analytics/fix-strategies` | token | Fix strategy effectiveness per category+tool (query: `days` 1-365) |
+| `GET` | `/analytics/learning` | token | Agent learning feed: weight updates, scaffolded skills, routing decisions (query: `days` 1-365) |
+| `PUT` | `/plan-templates/{type}` | token | Update plan template phases/timeouts |
+| `DELETE` | `/plan-templates/{type}` | token | Delete auto-generated plan templates |
 
 **Authentication:** Token-authenticated endpoints accept `Authorization: Bearer <token>` header or `?token=<token>` query parameter. The token is `PULSE_AGENT_WS_TOKEN`. Unauthenticated requests return 401.
 
@@ -73,13 +80,13 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 {
   "protocol": "2",
   "agent": "2.2.0",
-  "tools": 111,
-  "skills": 8,
+  "tools": 122,
+  "skills": 7,
   "features": ["component_specs", "ws_token_auth", "rate_limiting", "monitor", "fix_history", "predictions"]
 }
 ```
 
-The `agent` version is read dynamically from the installed package metadata. The `tools` count is the sum of SRE + Security tools.
+The `agent` version is read dynamically from the installed package metadata. The `tools` count is dynamic from the package — the sum of all registered native tools plus discovered MCP tools at startup.
 
 ### `/health` Response
 
@@ -781,6 +788,56 @@ Emitted after each scan cycle completes. Includes per-scanner timing, findings c
   "pageSize": 20
 }
 ```
+
+#### `investigation_progress` — Live investigation phase updates
+
+Emitted during multi-phase investigations to show real-time progress of each phase (tool calls, skill transitions, etc.).
+
+```json
+{
+  "type": "investigation_progress",
+  "findingId": "f-abc123",
+  "phases": [
+    {
+      "id": "phase-1",
+      "status": "complete",
+      "skill_name": "sre",
+      "summary": "Gathered pod logs and events",
+      "confidence": 0.85
+    },
+    {
+      "id": "phase-2",
+      "status": "running",
+      "skill_name": "security",
+      "summary": "Scanning RBAC permissions",
+      "confidence": 0.0
+    },
+    {
+      "id": "phase-3",
+      "status": "pending",
+      "skill_name": "sre",
+      "summary": "",
+      "confidence": 0.0
+    }
+  ],
+  "planId": "plan-abc123",
+  "planName": "Crashloop Investigation",
+  "timestamp": 1711540800
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `findingId` | `string` | ID of the finding being investigated |
+| `phases` | `array` | Ordered list of investigation phases |
+| `phases[].id` | `string` | Phase identifier |
+| `phases[].status` | `string` | Phase status: `"pending"`, `"running"`, `"complete"`, `"failed"`, `"skipped"` |
+| `phases[].skill_name` | `string` | Skill executing this phase |
+| `phases[].summary` | `string` | Human-readable phase summary (empty while pending) |
+| `phases[].confidence` | `number` | Confidence score (0.0–1.0) for phase result |
+| `planId` | `string` | Investigation plan identifier |
+| `planName` | `string` | Human-readable plan name |
+| `timestamp` | `number` | Unix timestamp |
 
 #### `skill_activity` — Active skill change or handoff
 
