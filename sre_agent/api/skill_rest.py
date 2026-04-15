@@ -92,7 +92,6 @@ async def get_skill(name: str, _auth=Depends(verify_token)):
         ("skill.md", "raw_content"),
         ("evals.yaml", "evals_content"),
         ("mcp.yaml", "mcp_content"),
-        ("layouts.yaml", "layouts_content"),
         ("components.yaml", "components_content"),
     ]:
         filepath = skill.path / filename

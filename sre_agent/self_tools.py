@@ -310,7 +310,7 @@ def create_skill(
     Present the proposed name, keywords, and prompt for approval first.
 
     Args:
-        name: Skill name (lowercase, underscores, e.g., 'postgres_troubleshooter').
+        name: Skill name (lowercase, underscores, e.g., 'capacity_planner').
         description: One-line description of what the skill does.
         keywords: Comma-separated routing keywords (e.g., 'postgres, database, pg, replication').
         prompt: The system prompt body — what the agent should know and do.
@@ -436,7 +436,7 @@ def edit_skill(name: str, content: str):
     IMPORTANT: Always show the user the proposed changes before calling this.
 
     Args:
-        name: Name of the skill to edit (e.g., 'sre', 'security', 'postgres_troubleshooter').
+        name: Name of the skill to edit (e.g., 'sre', 'security', 'capacity_planner').
         content: Full new skill.md content including YAML frontmatter (--- delimiters).
     """
     import shutil
