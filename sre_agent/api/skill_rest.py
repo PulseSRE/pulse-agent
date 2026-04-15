@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 import shutil
 from datetime import UTC, datetime
@@ -443,7 +444,6 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
 
     Expects: {"toolsets": ["core", "config", "helm", ...]}
     """
-    import time
 
     toolsets = body.get("toolsets", [])
     if not toolsets or not isinstance(toolsets, list):
@@ -502,7 +502,7 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
         # Wait for rollout — detect crashloop and revert if needed
         healthy = False
         for attempt in range(20):
-            time.sleep(2)
+            await asyncio.sleep(2)
             dep = apps.read_namespaced_deployment(deploy_name, ns)
 
             # Check for successful rollout
@@ -573,7 +573,7 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
             )
 
         # Give MCP server time to fully initialize after becoming ready
-        time.sleep(3)
+        await asyncio.sleep(3)
 
         # Reconnect MCP client to pick up new tools
         from ..mcp_client import disconnect_all

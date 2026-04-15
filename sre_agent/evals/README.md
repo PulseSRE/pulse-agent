@@ -6,7 +6,7 @@ Deterministic and LLM-judged eval framework for scoring agent quality and gating
 
 ## Scenario Suites
 
-9 suites covering 70 total scenarios:
+11 suites covering 98 total scenarios:
 
 | Suite | Scenarios | Purpose |
 |-------|-----------|---------|

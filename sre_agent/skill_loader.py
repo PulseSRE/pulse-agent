@@ -379,13 +379,18 @@ _llm_cache: dict[str, tuple[str, float]] = {}  # query_hash → (skill_name, tim
 _LLM_CACHE_TTL = 300  # 5 minutes
 _LLM_CACHE_MAX = 100
 
-# Last routing decision — stores confidence info for analytics/debugging
-_last_routing_decision: dict = {}
+# Last routing decision — per-context to prevent cross-session corruption
+import contextvars
+
+_last_routing_decision_var: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "_last_routing_decision", default=None
+)
 
 
 def get_last_routing_decision() -> dict | None:
     """Return the last routing decision, or None if no routing has occurred."""
-    return dict(_last_routing_decision) if _last_routing_decision else None
+    d = _last_routing_decision_var.get()
+    return dict(d) if d else None
 
 
 _selector = None  # SkillSelector | None — lazy-initialized
@@ -449,9 +454,8 @@ def classify_query(query: str, *, context: dict | None = None) -> Skill:
         best_skill = handoff_target
         result.skill_name = handoff_target.name
 
-    # Update _last_routing_decision for backward compat
-    _last_routing_decision.clear()
-    _last_routing_decision.update(
+    # Update _last_routing_decision for backward compat (per-context)
+    _last_routing_decision_var.set(
         {
             "skill_name": result.skill_name,
             "keyword_score": int(result.fused_scores.get(result.skill_name, 0) * 10),
