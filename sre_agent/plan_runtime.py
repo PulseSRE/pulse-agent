@@ -138,7 +138,7 @@ class PlanRuntime:
                     if skill_def and skill_def.risk_level == "high":
                         needs_approval = True
                 except Exception:
-                    pass
+                    logger.debug("Could not check risk level for skill '%s'", phase.skill_name, exc_info=True)
 
                 if needs_approval:
                     logger.info("Phase '%s' requires approval — marking as needs_escalation", phase.id)
@@ -354,8 +354,8 @@ class PlanRuntime:
                     risk_flags=data.get("risk_flags", []),
                     confidence=float(data.get("confidence", 0.7)),
                 )
-            except (json.JSONDecodeError, ValueError):
-                pass
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.debug("Could not parse structured output for phase '%s': %s", phase.id, e)
 
         # Fallback: use raw response text
         return SkillOutput(
@@ -480,7 +480,7 @@ class PlanRuntime:
                     threshold = float(match.group(1))
                     return output.confidence >= threshold
             except Exception:
-                pass
+                logger.debug("Failed to parse confidence condition '%s'", condition, exc_info=True)
 
         # PromQL conditions: "p99_latency < 500ms"
         try:
@@ -490,7 +490,7 @@ class PlanRuntime:
             if isinstance(result, str) and "error" not in result.lower():
                 return True  # query succeeded = condition met
         except Exception:
-            pass
+            logger.debug("Success condition PromQL check failed for '%s'", condition, exc_info=True)
 
         # Default: consider met if output status is complete
         return output.status == "complete"
@@ -580,7 +580,7 @@ class PlanRuntime:
             if skill_def and skill_def.success_criteria:
                 parts.append(f"\nSuccess criteria: {skill_def.success_criteria}")
         except Exception:
-            pass
+            logger.debug("Could not inject skill examples for phase '%s'", phase.id, exc_info=True)
 
         parts.append("\nInvestigate and produce structured findings.")
 

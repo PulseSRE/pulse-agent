@@ -946,7 +946,7 @@ def _populate_risk_levels() -> None:
             else:
                 _TOOL_RISK_LEVELS[tool] = "low"
     except Exception:
-        pass
+        logger.debug("Failed to populate tool risk levels", exc_info=True)
 
 
 def get_tool_avg_latency(tool_name: str) -> int:
@@ -1231,7 +1231,7 @@ def _build_component_hint(skill: Skill, tool_names: list[str]) -> str:
                     desc = spec.get("description", "")
                     hint += f"\n{name} — {desc}"
         except Exception:
-            pass
+            logger.debug("Failed to load custom components for skill '%s'", skill.name, exc_info=True)
 
     return hint
 

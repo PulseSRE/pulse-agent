@@ -214,7 +214,7 @@ def record_turn(
                 tools_offered=tools_offered,
             )
         except Exception:
-            pass
+            logger.debug("Tool learning failed", exc_info=True)
 
         # Feed skill selector feedback
         try:
@@ -241,7 +241,7 @@ def record_turn(
                     tools_offered=tools_offered,
                 )
         except Exception:
-            pass
+            logger.debug("Selector feedback recording failed", exc_info=True)
 
         logger.debug(
             f"Recorded turn: session={session_id}, turn={turn_number}, skill={routing_skill}, score={routing_score}"
