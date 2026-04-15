@@ -1,0 +1,29 @@
+# Certificate Expiry Plan Template
+# Handles TLS certificates nearing or past expiration
+
+id: cert-expiry-v1
+name: Certificate Expiry Investigation
+incident_type: cert_expiry
+max_total_duration: 600  # 10 minutes
+
+phases:
+  - id: triage
+    skill_name: sre
+    required: true
+    timeout_seconds: 120
+    produces: [severity, affected_certs, namespaces, days_until_expiry]
+
+  - id: diagnose
+    skill_name: sre
+    required: true
+    depends_on: [triage]
+    timeout_seconds: 180
+    produces: [cert_details, issuer, auto_rotation_enabled, impact_assessment, confidence]
+
+  - id: verify
+    skill_name: sre
+    required: true
+    depends_on: [diagnose]
+    timeout_seconds: 120
+    runs: always
+    produces: [cert_status, rotation_plan, resolution_confirmed]

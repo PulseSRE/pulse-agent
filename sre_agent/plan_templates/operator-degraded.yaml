@@ -1,0 +1,29 @@
+# Degraded Operator Plan Template
+# Handles ClusterOperators in Degraded or Unavailable state
+
+id: operator-degraded-v1
+name: Degraded Operator Investigation
+incident_type: operators
+max_total_duration: 900  # 15 minutes
+
+phases:
+  - id: triage
+    skill_name: sre
+    required: true
+    timeout_seconds: 120
+    produces: [severity, operator_name, operator_status, conditions]
+
+  - id: diagnose
+    skill_name: sre
+    required: true
+    depends_on: [triage]
+    timeout_seconds: 300
+    produces: [root_cause, degraded_reason, affected_components, recent_events, confidence]
+
+  - id: verify
+    skill_name: sre
+    required: true
+    depends_on: [diagnose]
+    timeout_seconds: 120
+    runs: always
+    produces: [operator_status, all_available, resolution_confirmed]

@@ -3,7 +3,7 @@
 
 id: node-pressure-v1
 name: Node Pressure Resolution
-incident_type: node-pressure
+incident_type: nodes
 max_total_duration: 1200  # 20 minutes
 
 phases:

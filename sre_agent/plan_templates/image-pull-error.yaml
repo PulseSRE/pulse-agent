@@ -1,0 +1,37 @@
+# Image Pull Error Plan Template
+# Handles ImagePullBackOff and ErrImagePull failures
+
+id: image-pull-error-v1
+name: Image Pull Error Resolution
+incident_type: image_pull
+max_total_duration: 600  # 10 minutes
+
+phases:
+  - id: triage
+    skill_name: sre
+    required: true
+    timeout_seconds: 120
+    produces: [severity, affected_pods, namespace, image_ref, error_message]
+
+  - id: diagnose
+    skill_name: sre
+    required: true
+    depends_on: [triage]
+    timeout_seconds: 180
+    produces: [root_cause, image_exists, registry_reachable, tag_valid, confidence]
+
+  - id: remediate
+    skill_name: sre
+    required: false
+    depends_on: [diagnose]
+    timeout_seconds: 300
+    approval_required: false
+    produces: [fix_applied, fix_type, rollback_applied]
+
+  - id: verify
+    skill_name: sre
+    required: true
+    depends_on: [remediate]
+    timeout_seconds: 120
+    runs: always
+    produces: [pod_status, image_pulled, resolution_confirmed]

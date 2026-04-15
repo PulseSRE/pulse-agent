@@ -1412,7 +1412,7 @@ triage → diagnose → [branch: db/pod/network] → remediate → verify → po
 **Live WebSocket updates:** During plan execution, `investigation_progress` events emitted per phase via monitor WebSocket. UI shows inline phase progress on active findings (triage ✓ → diagnose ● → remediate ○).
 
 **Plan Templates (`plan_templates/*.yaml`):**
-6 pre-defined + auto-generated. Loaded at startup, hot-reloaded on change.
+10 pre-defined + auto-generated. Loaded at startup, hot-reloaded on change.
 - `crashloop-resolution` — triage → diagnose → remediate → verify
 - `oom-investigation` — triage → memory analysis → patch → verify
 - `node-pressure` — triage → node diagnostics → drain/cordon → verify

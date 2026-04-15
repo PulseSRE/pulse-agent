@@ -375,17 +375,59 @@ class MonitorSession:
                 on_phase_complete=_on_complete,
             )
 
-            # Generate postmortem
+            # Generate postmortem from all phase outputs
             if result.phase_outputs:
                 try:
                     from ..postmortem import Postmortem, save_postmortem
 
-                    diagnose_out = result.phase_outputs.get("diagnose") or result.phase_outputs.get("triage")
+                    triage_out = result.phase_outputs.get("triage")
+                    diagnose_out = (
+                        result.phase_outputs.get("diagnose")
+                        or result.phase_outputs.get("node_diagnostics")
+                        or result.phase_outputs.get("change_analysis")
+                    )
+
+                    # Build timeline from phase summaries
+                    timeline_parts = []
+                    for pid, out in result.phase_outputs.items():
+                        if out.evidence_summary:
+                            timeline_parts.append(f"[{pid}] {out.evidence_summary}")
+                    timeline = "\n".join(timeline_parts)
+
+                    # Extract root cause from diagnose phase
+                    root_cause = ""
+                    if diagnose_out and diagnose_out.evidence_summary:
+                        root_cause = diagnose_out.evidence_summary
+                    elif triage_out and triage_out.evidence_summary:
+                        root_cause = triage_out.evidence_summary
+
+                    # Collect actions taken across all phases
+                    all_actions = []
+                    for out in result.phase_outputs.values():
+                        all_actions.extend(out.actions_taken)
+
+                    # Collect risk flags as contributing factors
+                    risk_flags = []
+                    for out in result.phase_outputs.values():
+                        risk_flags.extend(out.risk_flags)
+
+                    # Build prevention recommendations from open questions + risk flags
+                    prevention = []
+                    for out in result.phase_outputs.values():
+                        for q in out.open_questions:
+                            prevention.append(f"Investigate: {q}")
+                    if not prevention and root_cause:
+                        prevention.append(f"Monitor for recurrence of: {root_cause}")
+
                     pm = Postmortem(
                         id=f"pm-{finding.get('id', 'unknown')}",
                         incident_type=finding.get("category", ""),
                         plan_id=template.id,
-                        root_cause=diagnose_out.evidence_summary if diagnose_out else "",
+                        timeline=timeline,
+                        root_cause=root_cause,
+                        contributing_factors=risk_flags[:5],
+                        actions_taken=all_actions[:10],
+                        prevention=prevention[:5],
                         confidence=max((o.confidence for o in result.phase_outputs.values()), default=0),
                         generated_at=int(time.time() * 1000),
                     )

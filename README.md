@@ -47,16 +47,20 @@ Complex incidents are resolved through multi-phase plans that progress through s
 
 ### Plan Templates
 
-6 built-in plan templates cover the most common incident types:
+10 built-in plan templates cover the most common incident types:
 
-| Template | Incident Type | Phases |
-|----------|---------------|--------|
-| `crashloop-resolution` | CrashLoopBackOff pods | triage, diagnose, remediate, verify |
-| `oom-investigation` | OOM-killed containers | triage, diagnose, remediate, verify |
-| `node-pressure` | Node CPU/memory/disk pressure | triage, diagnose, remediate, verify |
-| `deployment-failure` | Failed rollouts | triage, diagnose, remediate, verify |
-| `security-incident` | Security posture issues | triage, diagnose, remediate, verify |
-| `latency-degradation` | Service latency spikes | triage, diagnose, remediate, verify |
+| Template | Scanner Category | Phases |
+|----------|-----------------|--------|
+| `crashloop-resolution` | `crashloop` | triage, diagnose, remediate, verify |
+| `oom-investigation` | `oom` | triage, diagnose, remediate, verify |
+| `node-pressure` | `nodes` | triage, node_diagnostics, drain_cordon, verify |
+| `deployment-failure` | `workloads` | triage, change_analysis, rollback_decision, verify |
+| `image-pull-error` | `image_pull` | triage, diagnose, remediate, verify |
+| `scheduling-failure` | `scheduling` | triage, diagnose, remediate, verify |
+| `cert-expiry` | `cert_expiry` | triage, diagnose, verify |
+| `operator-degraded` | `operators` | triage, diagnose, verify |
+| `security-incident` | `security` | triage, diagnose, remediate, verify |
+| `latency-degradation` | `latency` | triage, diagnose, remediate, verify |
 
 When no template matches, the plan builder skill dynamically constructs a plan from the query context.
 
@@ -347,7 +351,7 @@ sre_agent/
   selector_learning.py Batch weight recomputation from outcomes
   skill_scaffolder.py  Auto-scaffold skills from novel resolutions
   skill_plan.py        Phased plan data structures
-  plan_templates/      6 YAML plan templates (crashloop, OOM, node-pressure, ...)
+  plan_templates/      10 YAML plan templates (crashloop, OOM, nodes, workloads, image_pull, ...)
   postmortem.py        Auto-postmortem from plan outputs
   slo_registry.py      SLO/SLI registry with burn rates
   dependency_graph.py  Live K8s resource dependency graph

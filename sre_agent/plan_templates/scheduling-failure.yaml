@@ -1,0 +1,37 @@
+# Scheduling Failure Plan Template
+# Handles pods stuck in Pending state due to resource constraints or affinity rules
+
+id: scheduling-failure-v1
+name: Scheduling Failure Resolution
+incident_type: scheduling
+max_total_duration: 600  # 10 minutes
+
+phases:
+  - id: triage
+    skill_name: sre
+    required: true
+    timeout_seconds: 120
+    produces: [severity, affected_pods, namespace, pending_duration]
+
+  - id: diagnose
+    skill_name: sre
+    required: true
+    depends_on: [triage]
+    timeout_seconds: 180
+    produces: [root_cause, scheduler_reason, node_capacity, resource_requests, confidence]
+
+  - id: remediate
+    skill_name: sre
+    required: false
+    depends_on: [diagnose]
+    timeout_seconds: 300
+    approval_required: true
+    produces: [fix_applied, fix_type]
+
+  - id: verify
+    skill_name: sre
+    required: true
+    depends_on: [remediate]
+    timeout_seconds: 120
+    runs: always
+    produces: [pod_status, scheduled_node, resolution_confirmed]
