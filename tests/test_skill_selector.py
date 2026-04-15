@@ -209,10 +209,14 @@ class TestTemporalChannel:
         scores = selector._score_temporal("pods crashing after deploy")
         assert "sre" in scores and scores["sre"] > 0
 
-    def test_no_temporal(self):
+    def test_no_temporal_keywords(self):
         skills = {"sre": _mock_skill("sre", ["diagnostics"])}
         selector = SkillSelector(skills)
-        assert selector._score_temporal("check pods") == {}
+        scores = selector._score_temporal("check pods")
+        # Without temporal keywords, scores may still have time-of-day signal
+        # but should NOT have the high 0.7+ temporal-keyword boost
+        for v in scores.values():
+            assert v < 0.5  # off-hours gives max 0.4
 
 
 class TestConflictDetection:

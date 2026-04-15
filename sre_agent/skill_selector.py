@@ -37,11 +37,11 @@ class SelectionResult:
 
 # Default channel weights (sum to 1.0)
 DEFAULT_WEIGHTS: dict[str, float] = {
-    "keyword": 0.30,
+    "keyword": 0.25,
     "component": 0.20,
     "historical": 0.20,
     "taxonomy": 0.10,
-    "temporal": 0.05,
+    "temporal": 0.10,  # state-aware: cluster changes + time-of-day
     "semantic": 0.15,  # TF-IDF cosine; activate via PULSE_AGENT_EMBEDDING_CHANNEL=1
 }
 
@@ -446,18 +446,69 @@ class SkillSelector:
         return {k: v / max_score for k, v in skill_scores.items()}
 
     def _score_temporal(self, query: str) -> dict[str, float]:
-        """Channel 5: Detect temporal context (recent changes) and boost relevant skills."""
-        q = query.lower()
-        has_temporal = any(kw in q for kw in _TEMPORAL_KEYWORDS)
-        if not has_temporal:
-            return {}
+        """Channel 5: State-aware temporal context — cluster changes + time signals.
 
-        # Boost skills with operations-related categories
+        Uses 3 signals:
+        1. Query text temporal keywords (existing)
+        2. Recent cluster changes (deployments, scaling in last 15min)
+        3. Time-of-day awareness (off-hours = more likely incident)
+        """
         scores: dict[str, float] = {}
-        for skill_name, skill in self._skills.items():
-            cats = set(skill.categories) if skill.categories else set()
-            if cats & {"operations", "workloads", "diagnostics"}:
-                scores[skill_name] = 0.6
+
+        # Signal 1: Query text temporal keywords
+        q = query.lower()
+        has_temporal_text = any(kw in q for kw in _TEMPORAL_KEYWORDS)
+
+        # Signal 2: Recent cluster changes (cached, non-blocking)
+        recent_deploys = 0
+        try:
+            from .dependency_graph import get_dependency_graph
+
+            graph = get_dependency_graph()
+            # If graph was refreshed recently, cluster is being scanned
+            if graph._last_refresh and (time.time() - graph._last_refresh) < 120:
+                # Check for recent deployments via cached findings
+                try:
+                    from .db import get_database
+
+                    db = get_database()
+                    row = db.fetchone(
+                        "SELECT COUNT(*) as cnt FROM findings "
+                        "WHERE category = 'audit_deployment' "
+                        "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '15 minutes')::BIGINT * 1000"
+                    )
+                    recent_deploys = row["cnt"] if row else 0
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Signal 3: Time-of-day awareness
+        from datetime import UTC, datetime
+
+        hour = datetime.now(UTC).hour
+        is_off_hours = hour < 6 or hour > 22
+
+        # Score based on combined signals
+        if recent_deploys > 0:
+            # Recent deployment + problem = likely deploy-related
+            for skill_name, skill in self._skills.items():
+                cats = set(skill.categories) if skill.categories else set()
+                if cats & {"operations", "workloads", "diagnostics"}:
+                    scores[skill_name] = 0.8
+
+        if has_temporal_text:
+            # Explicit temporal keywords in query
+            for skill_name, skill in self._skills.items():
+                cats = set(skill.categories) if skill.categories else set()
+                if cats & {"operations", "workloads", "diagnostics"}:
+                    scores[skill_name] = max(scores.get(skill_name, 0), 0.7)
+
+        if is_off_hours and not scores:
+            # Off-hours queries are more likely incidents
+            scores["sre"] = 0.4
+            scores["security"] = 0.3
+
         return scores
 
     def _score_semantic_embedding(self, query: str) -> dict[str, float]:
