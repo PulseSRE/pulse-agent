@@ -507,6 +507,96 @@ async def get_kpi_dashboard(
             "status": "pass" if agent_incidents == 0 else "fail",
         }
 
+        # 8. Time-to-Resolution (finding detected → verified fixed)
+        ttr_row = database.fetchone(
+            "SELECT AVG(a.timestamp - f.timestamp) / 1000 as avg_seconds "
+            "FROM actions a JOIN findings f ON a.finding_id = f.id "
+            "WHERE a.status = 'completed' "
+            "AND a.verification_status = 'verified' "
+            "AND a.timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000",
+            (days,),
+        )
+        ttr_seconds = int(ttr_row["avg_seconds"] or 0) if ttr_row else 0
+        kpis["time_to_resolution"] = {
+            "label": "Time to Resolution",
+            "value": ttr_seconds,
+            "unit": "seconds",
+            "target": 600,
+            "status": "pass" if ttr_seconds <= 600 else "warn" if ttr_seconds <= 1800 else "fail",
+            "description": "Finding detected → fix verified",
+        }
+
+        # 9. Self-heal rate (findings that resolved without any action)
+        self_heal_row = database.fetchone(
+            "SELECT "
+            "COUNT(*) FILTER (WHERE resolved = 1 AND id NOT IN (SELECT finding_id FROM actions WHERE finding_id IS NOT NULL)) AS self_healed, "
+            "COUNT(*) FILTER (WHERE resolved = 1) AS total_resolved "
+            "FROM findings "
+            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000",
+            (days,),
+        )
+        self_heal_rate = (
+            round((self_heal_row["self_healed"] or 0) / max(self_heal_row["total_resolved"] or 1, 1), 3)
+            if self_heal_row
+            else 0
+        )
+        kpis["self_heal_rate"] = {
+            "label": "Self-Heal Rate",
+            "value": self_heal_rate,
+            "unit": "ratio",
+            "target": None,
+            "status": "info",
+            "description": "Findings that resolved without agent intervention",
+        }
+
+        # 10. Token cost per resolution
+        token_cost_row = database.fetchone(
+            "SELECT AVG(total_tokens) as avg_tokens FROM ("
+            "  SELECT pe.finding_id, "
+            "  SUM(COALESCE((phase->>'evidence_length')::int, 0)) as total_tokens "
+            "  FROM plan_executions pe, jsonb_array_elements(pe.phase_details) as phase "
+            "  WHERE pe.status IN ('complete', 'partial') "
+            "  AND pe.timestamp > NOW() - INTERVAL '%s days' "
+            "  AND pe.finding_id IS NOT NULL AND pe.finding_id != '' "
+            "  GROUP BY pe.finding_id"
+            ") sub",
+            (days,),
+        )
+        avg_tokens = int(token_cost_row["avg_tokens"] or 0) if token_cost_row else 0
+        kpis["tokens_per_resolution"] = {
+            "label": "Evidence per Resolution",
+            "value": avg_tokens,
+            "unit": "chars",
+            "target": 5000,
+            "status": "pass" if avg_tokens <= 5000 else "warn" if avg_tokens <= 10000 else "fail",
+            "description": "Average evidence gathered per incident resolution",
+        }
+
+        # 11. Routing accuracy (% of routing decisions not overridden by user)
+        override_row = database.fetchone(
+            "SELECT "
+            "COUNT(*) FILTER (WHERE routing_skill IS NOT NULL AND feedback = 'positive') AS confirmed, "
+            "COUNT(*) FILTER (WHERE routing_skill IS NOT NULL AND feedback = 'negative') AS rejected, "
+            "COUNT(*) FILTER (WHERE routing_skill IS NOT NULL) AS total "
+            "FROM tool_turns "
+            "WHERE timestamp > NOW() - INTERVAL '%s days'",
+            (days,),
+        )
+        if override_row and (override_row["total"] or 0) > 0:
+            routing_accuracy = round(
+                (override_row["total"] - (override_row["rejected"] or 0)) / override_row["total"], 3
+            )
+        else:
+            routing_accuracy = 1.0
+        kpis["routing_accuracy"] = {
+            "label": "Routing Accuracy",
+            "value": routing_accuracy,
+            "unit": "ratio",
+            "target": 0.95,
+            "status": "pass" if routing_accuracy >= 0.95 else "warn" if routing_accuracy >= 0.85 else "fail",
+            "description": "Skill routing decisions not rejected by user feedback",
+        }
+
     except Exception as e:
         logger.debug("KPI computation failed: %s", e)
 
