@@ -86,6 +86,12 @@ setup_namespace() {
 
 cleanup_namespace() {
   echo -e "${YELLOW}Cleaning up ${NAMESPACE}...${NC}"
+  # Delete individual resources first (faster than waiting for namespace)
+  $CMD delete deployment --all -n "$NAMESPACE" --wait=false 2>/dev/null || true
+  $CMD delete pod --all -n "$NAMESPACE" --grace-period=0 --force 2>/dev/null || true
+  $CMD delete secret --all -n "$NAMESPACE" 2>/dev/null || true
+  $CMD delete resourcequota --all -n "$NAMESPACE" 2>/dev/null || true
+  # Then delete namespace
   $CMD delete namespace "$NAMESPACE" --wait=false 2>/dev/null || true
 }
 
