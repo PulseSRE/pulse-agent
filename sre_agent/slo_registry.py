@@ -138,15 +138,27 @@ class SLORegistry:
         return values
 
     def _build_prom_query(self, slo: SLODefinition) -> str:
-        """Build a PromQL query for an SLO metric."""
+        """Build a PromQL query for an SLO metric.
+
+        Uses kube-state-metrics (available on all OpenShift clusters)
+        instead of http_requests_total (requires app instrumentation).
+        """
         svc = slo.service_name
         window = f"{slo.window_days}d"
         if slo.slo_type == "availability":
-            return f'1 - (sum(rate(http_requests_total{{service="{svc}",code=~"5.."}}[{window}])) / sum(rate(http_requests_total{{service="{svc}"}}[{window}])))'
+            # Pod uptime ratio — how often was at least 1 ready pod available
+            return (
+                f"avg_over_time(kube_deployment_status_replicas_available"
+                f'{{deployment="{svc}"}}[{window}]) / '
+                f"avg_over_time(kube_deployment_spec_replicas"
+                f'{{deployment="{svc}"}}[{window}])'
+            )
         if slo.slo_type == "latency":
-            return f'histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{{service="{svc}"}}[{window}])) by (le))'
+            # Container restart duration as latency proxy
+            return f'rate(kube_pod_container_status_restarts_total{{pod=~"{svc}.*"}}[{window}])'
         if slo.slo_type == "error_rate":
-            return f'sum(rate(http_requests_total{{service="{svc}",code=~"5.."}}[{window}])) / sum(rate(http_requests_total{{service="{svc}"}}[{window}]))'
+            # Restart rate as error proxy
+            return f'sum(rate(kube_pod_container_status_restarts_total{{pod=~"{svc}.*"}}[1h]))'
         return ""
 
     def evaluate_with_prometheus(self) -> list[SLOStatus]:
