@@ -386,6 +386,144 @@ async def rest_list_scanners(_auth=Depends(verify_token)):
     return {"scanners": [{"id": k, **v} for k, v in SCANNER_REGISTRY.items()]}
 
 
+@router.get("/kpi")
+async def get_kpi_dashboard(
+    days: int = Query(7, ge=1, le=90),
+    _auth=Depends(verify_token),
+):
+    """Operational KPIs — 9 metrics aligned with ORCA targets."""
+    from .. import db
+
+    kpis: dict[str, dict] = {}
+
+    try:
+        database = db.get_database()
+
+        # 1. MTTD — Mean Time to Detect (scan interval proxy)
+        from ..config import get_settings
+
+        kpis["mttd"] = {
+            "label": "Mean Time to Detect",
+            "value": get_settings().scan_interval,
+            "unit": "seconds",
+            "target": 30,
+            "status": "pass" if get_settings().scan_interval <= 60 else "fail",
+        }
+
+        # 2. MTTR — Mean Time to Remediate
+        mttr_row = database.fetchone(
+            "SELECT AVG(duration_ms) as avg_ms FROM actions "
+            "WHERE status = 'completed' "
+            "AND timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
+            (days,),
+        )
+        mttr_seconds = int((mttr_row["avg_ms"] or 0) / 1000) if mttr_row else 0
+        kpis["mttr"] = {
+            "label": "Mean Time to Remediate",
+            "value": mttr_seconds,
+            "unit": "seconds",
+            "target": 300,
+            "status": "pass" if mttr_seconds <= 300 else "warn" if mttr_seconds <= 600 else "fail",
+        }
+
+        # 3. Auto-remediation success rate
+        fix_row = database.fetchone(
+            "SELECT COUNT(*) FILTER (WHERE status = 'completed') AS good, "
+            "COUNT(*) AS total FROM actions "
+            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
+            (days,),
+        )
+        fix_rate = round(fix_row["good"] / max(fix_row["total"], 1), 3) if fix_row else 0
+        kpis["auto_fix_success"] = {
+            "label": "Auto-Remediation Success",
+            "value": fix_rate,
+            "unit": "ratio",
+            "target": 0.85,
+            "status": "pass" if fix_rate >= 0.85 else "warn" if fix_rate >= 0.70 else "fail",
+        }
+
+        # 4. False positive rate (noise)
+        noise_row = database.fetchone(
+            "SELECT COUNT(*) FILTER (WHERE noise_score > 0.7) AS noise, "
+            "COUNT(*) AS total FROM findings "
+            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
+            (days,),
+        )
+        fp_rate = round(noise_row["noise"] / max(noise_row["total"], 1), 3) if noise_row else 0
+        kpis["false_positive_rate"] = {
+            "label": "False Positive Rate",
+            "value": fp_rate,
+            "unit": "ratio",
+            "target": 0.02,
+            "status": "pass" if fp_rate <= 0.02 else "warn" if fp_rate <= 0.05 else "fail",
+        }
+
+        # 5. Selector recall@5 (from latest eval or selection log)
+        selector_row = database.fetchone(
+            "SELECT COUNT(*) FILTER (WHERE skill_overridden IS NULL) AS correct, "
+            "COUNT(*) AS total FROM skill_selection_log "
+            "WHERE session_id != '__weight_snapshot__' "
+            "AND timestamp > NOW() - INTERVAL '%s days'",
+            (days,),
+        )
+        recall = round(selector_row["correct"] / max(selector_row["total"], 1), 3) if selector_row else 0
+        kpis["selector_recall"] = {
+            "label": "Selector Recall",
+            "value": recall,
+            "unit": "ratio",
+            "target": 0.92,
+            "status": "pass" if recall >= 0.92 else "warn" if recall >= 0.85 else "fail",
+        }
+
+        # 6. Selector latency p99
+        latency_row = database.fetchone(
+            "SELECT PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY selection_ms) AS p99 "
+            "FROM skill_selection_log "
+            "WHERE session_id != '__weight_snapshot__' "
+            "AND timestamp > NOW() - INTERVAL '%s days'",
+            (days,),
+        )
+        p99_ms = int(latency_row["p99"] or 0) if latency_row else 0
+        kpis["selector_latency_p99"] = {
+            "label": "Selector Latency p99",
+            "value": p99_ms,
+            "unit": "ms",
+            "target": 80,
+            "status": "pass" if p99_ms <= 80 else "warn" if p99_ms <= 200 else "fail",
+        }
+
+        # 7. Agent-caused incidents (actions with status='rolled_back')
+        rollback_row = database.fetchone(
+            "SELECT COUNT(*) as cnt FROM actions WHERE status = 'rolled_back' "
+            "AND timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
+            (days,),
+        )
+        agent_incidents = rollback_row["cnt"] if rollback_row else 0
+        kpis["agent_caused_incidents"] = {
+            "label": "Agent-Caused Incidents",
+            "value": agent_incidents,
+            "unit": "count",
+            "target": 0,
+            "status": "pass" if agent_incidents == 0 else "fail",
+        }
+
+    except Exception as e:
+        logger.debug("KPI computation failed: %s", e)
+
+    # Count pass/warn/fail
+    statuses = [k["status"] for k in kpis.values()]
+    return {
+        "kpis": kpis,
+        "summary": {
+            "pass": statuses.count("pass"),
+            "warn": statuses.count("warn"),
+            "fail": statuses.count("fail"),
+            "total": len(kpis),
+        },
+        "days": days,
+    }
+
+
 @router.get("/monitor/capabilities")
 async def monitor_capabilities(_auth=Depends(verify_token)):
     """Expose monitor trust/capability limits so UI can align controls."""
