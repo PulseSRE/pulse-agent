@@ -312,11 +312,17 @@ async def rest_log_counts(
     import asyncio
     import re
 
+    from fastapi.responses import JSONResponse
+
     from ..k8s_client import get_core_client, safe
+    from ..k8s_tools.validators import _validate_k8s_namespace
+
+    ns_err = _validate_k8s_namespace(namespace)
+    if ns_err:
+        return JSONResponse(status_code=400, content={"error": ns_err})
 
     core = get_core_client()
 
-    # List pods matching the selector
     pods_result = safe(
         lambda: core.list_namespaced_pod(
             namespace,
@@ -331,9 +337,7 @@ async def rest_log_counts(
 
     async def _count_pod(pod_name: str) -> tuple[str, int]:
         try:
-            logs = await asyncio.to_thread(
-                lambda: safe(lambda: core.read_namespaced_pod_log(pod_name, namespace, tail_lines=tail_lines))
-            )
+            logs = await asyncio.to_thread(core.read_namespaced_pod_log, pod_name, namespace, tail_lines=tail_lines)
             if isinstance(logs, str) and compiled:
                 return (pod_name, len(compiled.findall(logs)))
             return (pod_name, 0)

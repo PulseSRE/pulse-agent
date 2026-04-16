@@ -90,6 +90,9 @@ def create_live_table(
     if not k8s_sources:
         return "At least one K8s datasource is required to provide base table rows."
 
+    if len(k8s_sources) > 5:
+        return "Maximum 5 K8s datasources per table."
+
     # Fetch initial snapshot from the first K8s datasource for the text summary.
     # The frontend will set up watches for all K8s datasources independently.
     first = k8s_sources[0]
