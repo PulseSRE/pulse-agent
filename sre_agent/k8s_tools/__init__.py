@@ -20,6 +20,7 @@ __all__ = [
     "_K8S_NAME_RE",
     "_KIND_PLURAL_MAP",
     "_SHORT_NAMES",
+    "_build_k8s_datasource",
     "_fetch_table_rows",
     "_infer_column_type",
     "_metric_names_cache",
@@ -131,6 +132,7 @@ from .diagnostics import (
 from .generic import (
     _KIND_PLURAL_MAP,
     _SHORT_NAMES,
+    _build_k8s_datasource,
     _fetch_table_rows,
     _infer_column_type,
     _resolve_plural,

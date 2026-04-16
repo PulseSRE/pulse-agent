@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from .. import k8s_client as _kc
 from ..decorators import beta_tool
 from ..errors import ToolError
+from .generic import _build_k8s_datasource
 from .validators import MAX_RESULTS, _validate_k8s_name, _validate_k8s_namespace
 
 
@@ -67,6 +68,7 @@ def list_deployments(namespace: str = "default"):
                 {"id": "age", "header": "Age"},
             ],
             "rows": rows,
+            "datasources": [_build_k8s_datasource("deployments", namespace, group="apps")],
         }
         if rows
         else None

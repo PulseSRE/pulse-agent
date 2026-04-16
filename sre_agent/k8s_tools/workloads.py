@@ -7,6 +7,7 @@ from kubernetes.client.rest import ApiException
 from .. import k8s_client as _kc
 from ..decorators import beta_tool
 from ..errors import ToolError
+from .generic import _build_k8s_datasource
 from .validators import MAX_RESULTS
 
 
@@ -64,6 +65,7 @@ def list_statefulsets(namespace: str = "default"):
                 {"id": "age", "header": "Age"},
             ],
             "rows": rows,
+            "datasources": [_build_k8s_datasource("statefulsets", namespace, group="apps")],
         }
         if rows
         else None
@@ -127,6 +129,7 @@ def list_daemonsets(namespace: str = "default"):
                 {"id": "age", "header": "Age"},
             ],
             "rows": rows,
+            "datasources": [_build_k8s_datasource("daemonsets", namespace, group="apps")],
         }
         if rows
         else None
@@ -354,6 +357,7 @@ def list_hpas(namespace: str = "default"):
                 {"id": "age", "header": "Age"},
             ],
             "rows": rows,
+            "datasources": [_build_k8s_datasource("horizontalpodautoscalers", namespace, group="autoscaling")],
         }
         if rows
         else None

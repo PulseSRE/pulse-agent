@@ -146,6 +146,35 @@ def _resolve_plural(kind: str) -> str:
     return lower + "s"
 
 
+def _build_k8s_datasource(
+    resource: str,
+    namespace: str = "",
+    group: str = "",
+    version: str = "v1",
+    label_selector: str = "",
+    field_selector: str = "",
+) -> dict[str, Any]:
+    """Build a K8s datasource entry for live table frontend watches."""
+    resource, group = _resolve_short_name(resource, group)
+    ds: dict[str, Any] = {
+        "type": "k8s",
+        "id": f"{resource}-{namespace or 'cluster'}",
+        "label": f"{resource.title()} in {namespace or 'cluster'}",
+        "resource": resource,
+    }
+    if group:
+        ds["group"] = group
+    if version != "v1":
+        ds["version"] = version
+    if namespace:
+        ds["namespace"] = namespace
+    if label_selector:
+        ds["labelSelector"] = label_selector
+    if field_selector:
+        ds["fieldSelector"] = field_selector
+    return ds
+
+
 def _fetch_table_rows(
     resource: str,
     namespace: str = "",
@@ -301,7 +330,8 @@ def _fetch_table_rows(
     if has_owner:
         col_defs.append({"id": "owner", "header": "Owner", "type": "text"})
 
-    return {"columns": col_defs, "rows": rows, "gvr": gvr}
+    datasource = _build_k8s_datasource(resource, namespace, group, version, label_selector, field_selector)
+    return {"columns": col_defs, "rows": rows, "gvr": gvr, "datasource": datasource}
 
 
 @beta_tool
@@ -363,6 +393,7 @@ def list_resources(
         "description": f"{'Filtered' if label_selector else 'All'} {resource_resolved} in {namespace or 'cluster'}",
         "columns": col_defs,
         "rows": rows,
+        "datasources": [result["datasource"]],
     }
     return (text, component)
 

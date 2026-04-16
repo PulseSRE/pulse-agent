@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from .. import k8s_client as _kc
 from ..decorators import beta_tool
 from ..errors import ToolError
+from .generic import _build_k8s_datasource
 from .validators import MAX_RESULTS, _validate_k8s_name, _validate_k8s_namespace
 
 MAX_TAIL_LINES = 1000
@@ -78,6 +79,9 @@ def list_pods(namespace: str = "default", label_selector: str = "", field_select
                 {"id": "logs", "header": "Logs"},
             ],
             "rows": rows,
+            "datasources": [
+                _build_k8s_datasource("pods", namespace, label_selector=label_selector, field_selector=field_selector)
+            ],
         }
         if rows
         else None

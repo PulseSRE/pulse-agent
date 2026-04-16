@@ -8,6 +8,7 @@ from typing import Any
 from .. import k8s_client as _kc
 from ..decorators import beta_tool
 from ..errors import ToolError
+from .generic import _build_k8s_datasource
 from .validators import _validate_k8s_name
 
 
@@ -66,6 +67,7 @@ def list_nodes():
                 {"id": "age", "header": "Age"},
             ],
             "rows": rows,
+            "datasources": [_build_k8s_datasource("nodes")],
         }
         if rows
         else None
