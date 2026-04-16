@@ -96,12 +96,12 @@ def _resolve_height(hint: str | None, default: int, component: dict) -> int:
         default = max(6, 2 + len(items) * 4)  # Scale with child count
     elif kind == "grid":
         items = component.get("items", [])
-        cols = component.get("columns", 2)
+        cols = component.get("columns", 4)
         rows = max(1, math.ceil(len(items) / cols))
         if any(item.get("kind") == "metric_card" for item in items):
-            default = 1 + rows * 3
+            default = min(8, 1 + rows * 3)
         else:
-            default = 1 + rows * 4
+            default = min(12, 1 + rows * 4)
     elif kind == "bar_list":
         items = len(component.get("items", []))
         default = 2 + min(items, 8) if items else 4
