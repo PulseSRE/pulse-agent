@@ -848,6 +848,7 @@ TOOL_CATEGORIES = {
             "layout",
             "topology",
             "dependency graph",
+            "live table",
         ],
         "tools": [
             "plan_dashboard",
@@ -867,6 +868,7 @@ TOOL_CATEGORIES = {
             "clone_dashboard",
             "critique_view",
             "optimize_view",
+            "create_live_table",
             # Data tools needed for dashboard content
             "get_prometheus_query",
             "discover_metrics",
