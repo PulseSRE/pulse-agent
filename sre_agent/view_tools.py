@@ -1102,8 +1102,12 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
     from . import db
     from .layout_engine import compute_layout
 
-    def _apply_positions(widgets: list[dict]) -> list[dict]:
-        """Run layout engine and merge positions back into widget dicts."""
+    def _apply_positions(widgets: list[dict]) -> tuple[list[dict], dict]:
+        """Run layout engine and merge positions back into widget dicts.
+
+        Returns (updated_widgets, positions_map) — both the merged layout
+        and the separate positions dict for the frontend.
+        """
         positions = compute_layout(widgets)
         result = []
         for i, w in enumerate(widgets):
@@ -1111,7 +1115,7 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
             if i in positions:
                 updated.update(positions[i])
             result.append(updated)
-        return result
+        return result, positions
 
     owner = get_current_user()
     view = db.get_view(view_id, owner)
@@ -1127,8 +1131,8 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
 
     if strategy == "reflow":
         # Just re-run layout engine on existing widgets
-        positioned = _apply_positions(layout)
-        db.update_view(view_id, owner, layout=positioned)
+        positioned, positions = _apply_positions(layout)
+        db.update_view(view_id, owner, layout=positioned, positions=positions)
         return _signal(
             "view_updated",
             f"Re-flowed {len(positioned)} widgets with semantic layout engine.",
@@ -1138,8 +1142,8 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
     if strategy == "compact":
         # Strip positions and let the engine repack from scratch
         stripped = [{k: v for k, v in w.items() if k not in ("x", "y", "w", "h")} for w in layout]
-        positioned = _apply_positions(stripped)
-        db.update_view(view_id, owner, layout=positioned)
+        positioned, positions = _apply_positions(stripped)
+        db.update_view(view_id, owner, layout=positioned, positions=positions)
         return _signal(
             "view_updated",
             f"Compacted {len(positioned)} widgets — removed gaps and re-packed.",
@@ -1192,8 +1196,8 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
         )
         reordered.extend(group_widgets)
 
-    positioned = _apply_positions(reordered)
-    db.update_view(view_id, owner, layout=positioned)
+    positioned, positions = _apply_positions(reordered)
+    db.update_view(view_id, owner, layout=positioned, positions=positions)
 
     group_summary = ", ".join(f"{name} ({len(ws)})" for name, ws in groups.items() if ws)
     return _signal(
