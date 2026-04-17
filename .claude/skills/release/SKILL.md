@@ -168,19 +168,23 @@ cd /Users/amobrem/ali/OpenshiftPulse
 
 Generate the frontend CHANGELOG the same way (git log since last tag).
 
-**Step 4e: Update GitHub Pages**
+**Step 4e: Update GitHub Pages (both repos)**
 
-The docs site at https://alimobrem.github.io/pulse-agent/ is served from `/docs`
-on main branch. Update version and counts in:
+Both repos have docs sites served from `/docs` on main branch:
+- https://alimobrem.github.io/pulse-agent/ (backend)
+- https://alimobrem.github.io/OpenshiftPulse/ (frontend)
 
-```bash
-# docs/index.html — update version, tool count, and meta descriptions
-sed -i '' "s/v[0-9]\+\.[0-9]\+\.[0-9]\+/v<version>/g" docs/index.html
-# Also update tool counts, skill counts, etc. in the HTML
-```
+**Backend** (`/Users/amobrem/ali/pulse-agent/docs/index.html`):
+- Update version strings (v2.X.X → v<version>)
+- Update tool count, scenario count in meta descriptions
+- Verify by reading the file
 
-Verify the page looks right by reading `docs/index.html` and checking all
-version strings and counts match the new release.
+**Frontend** (`/Users/amobrem/ali/OpenshiftPulse/docs/index.html`):
+- Update version in the hero section (`.version` div)
+- Update agent version reference and tool count in features section
+- Verify by reading the file
+
+Both pages auto-deploy when pushed to main — no manual publish needed.
 
 **Step 4f: Commit doc updates in both repos**
 ```bash
