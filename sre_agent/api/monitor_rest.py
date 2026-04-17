@@ -724,7 +724,7 @@ async def get_topology(
     # Build risk scores for deployments
     risk_scores: dict[str, int] = {}
     try:
-        from ..change_risk import score_finding_risk
+        from ..change_risk import score_deployment_change
 
         risk_findings = db.fetchall(
             "SELECT resources, category FROM findings "
@@ -732,11 +732,15 @@ async def get_topology(
             "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '2 hours')::BIGINT * 1000"
         )
         for f in risk_findings or []:
-            risk = score_finding_risk(f)
             for res_str in (f.get("resources") or "").split(","):
                 res_str = res_str.strip()
-                if res_str:
-                    risk_scores[res_str] = risk.get("score", 0)
+                if not res_str:
+                    continue
+                parts = res_str.split("/", 1)
+                ns = parts[0] if len(parts) == 2 else ""
+                name = parts[1] if len(parts) == 2 else parts[0]
+                assessment = score_deployment_change(deployment_name=name, namespace=ns)
+                risk_scores[res_str] = assessment.score
     except Exception:
         pass
 
@@ -817,7 +821,12 @@ async def get_blast_radius(
     from ..dependency_graph import get_dependency_graph
 
     graph = get_dependency_graph()
-    downstream = graph.downstream_blast_radius(node_id)
+    parts = node_id.split(":", 2)
+    if len(parts) == 3:
+        kind, ns, name = parts
+    else:
+        kind, ns, name = node_id, "", ""
+    downstream = graph.downstream_blast_radius(kind, ns, name)
 
     # Build tree structure grouped by impact type
     tree: list[dict] = []

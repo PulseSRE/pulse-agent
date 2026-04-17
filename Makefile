@@ -7,7 +7,7 @@ format:
 	python3 -m ruff format sre_agent/ tests/
 
 type-check:
-	python3 -m mypy sre_agent/ --ignore-missing-imports --exclude 'sre_agent/skills'
+	python3 -m mypy sre_agent/
 
 test:
 	python3 -m pytest tests/ -q
