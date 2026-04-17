@@ -299,13 +299,10 @@ start_ws_client() {
     return 1
   fi
 
-  # Get agent service — try in-cluster first, fall back to port-forward
-  local agent_host
-  agent_host=$(get_agent_svc_url)
-
-  if [[ -n "$agent_host" ]]; then
-    local ws_url="ws://${agent_host}/ws/monitor"
-  else
+  # Always use port-forward for WebSocket — in-cluster DNS doesn't resolve
+  # from local machines, and port-forward works everywhere.
+  local ws_url=""
+  {
     # Port-forward to the agent pod for out-of-cluster access
     local pod
     pod=$($CMD get pods -n "$AGENT_NS" -l app.kubernetes.io/name=openshift-sre-agent --no-headers -o name 2>/dev/null | grep -v mcp | grep -v postgresql | head -1)
@@ -323,8 +320,8 @@ start_ws_client() {
     fi
     # Track port-forward PID for cleanup
     WS_PORT_FORWARD_PID=$pf_pid
-    local ws_url="ws://localhost:18080/ws/monitor"
-  fi
+    ws_url="ws://localhost:18080/ws/monitor"
+  }
 
   # Clear previous findings
   > "$FINDINGS_FILE"
