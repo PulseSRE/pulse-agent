@@ -252,11 +252,6 @@ except: print('error')
   echo ""
 }
 
-# Run preflight unless dry-run
-if [[ "$DRY_RUN" != "true" ]]; then
-  preflight_check || exit 1
-fi
-
 # ── Helpers ────────────────────────────────────────────────────────────
 
 setup_namespace() {
@@ -639,6 +634,11 @@ EOF
 }
 
 # ── Main ───────────────────────────────────────────────────────────────
+
+# Run preflight unless dry-run — must be after helper function definitions
+if [[ "$DRY_RUN" != "true" ]]; then
+  preflight_check || exit 1
+fi
 
 trap cleanup_namespace EXIT
 
