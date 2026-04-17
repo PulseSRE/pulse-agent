@@ -502,6 +502,21 @@ class MonitorSession:
                         incident_type=finding.get("category", "unknown"),
                         confidence=conf,
                     )
+
+                    # Auto-generate eval scenario + fixture
+                    try:
+                        from ..eval_scaffolder import scaffold_eval_from_plan
+
+                        scaffold_eval_from_plan(
+                            skill_name=skill_name,
+                            finding=finding,
+                            plan_result=result,
+                            tools_called=tools,
+                            confidence=conf,
+                            duration_seconds=result.total_duration_ms / 1000.0,
+                        )
+                    except Exception:
+                        logger.debug("Eval scaffolding from plan failed", exc_info=True)
             except Exception:
                 logger.debug("Skill scaffolding failed", exc_info=True)
 
@@ -743,6 +758,18 @@ class MonitorSession:
                             confidence=result.get("confidence", 0),
                         )
                         logger.info("Scaffolded skill '%s' from novel flat investigation", skill_name)
+
+                        # Auto-generate eval scenario (no fixture for flat path)
+                        try:
+                            from ..eval_scaffolder import scaffold_eval_from_investigation
+
+                            scaffold_eval_from_investigation(
+                                skill_name=skill_name,
+                                finding=finding,
+                                investigation_result=result,
+                            )
+                        except Exception:
+                            logger.debug("Eval scaffolding from investigation failed", exc_info=True)
                     except Exception:
                         logger.debug("Skill scaffolding from flat investigation failed", exc_info=True)
 
