@@ -739,3 +739,116 @@ class TestReadinessSummary:
     def test_requires_auth(self, api_client):
         r = api_client.get("/analytics/readiness")
         assert r.status_code == 401
+
+
+# ── Session Analytics ─────────────────────────────────────────────────────
+
+
+class TestSessionAnalytics:
+    def test_returns_session_data_with_summary(self, api_client, api_headers):
+        """Test that sessions endpoint returns summary totals and breakdowns."""
+        mock_db = MagicMock()
+        mock_db.fetchone.side_effect = [
+            {"total_views": 180, "total_sessions": 25, "unique_pages": 8},
+            {"total_queries": 42},
+            {"avg_ms": 35200},
+        ]
+        mock_db.fetchall.side_effect = [
+            [{"page": "/pulse", "views": 50, "sessions": 20}],
+            [{"page": "/pulse", "avg_ms": 45300, "sample_count": 18}],
+            [{"page": "/incidents", "queries": 15}],
+            [{"suggestion": "Show crashlooping pods", "clicks": 8}],
+            [{"feature": "chart_edit", "uses": 12}],
+        ]
+
+        with patch("sre_agent.db.get_database", return_value=mock_db):
+            r = api_client.get("/analytics/sessions?days=7", headers=api_headers)
+
+        assert r.status_code == 200
+        data = r.json()
+
+        assert "summary" in data
+        assert data["summary"]["total_sessions"] == 25
+        assert data["summary"]["total_page_views"] == 180
+        assert data["summary"]["unique_pages"] == 8
+        assert data["summary"]["total_queries"] == 42
+        assert data["summary"]["avg_duration_seconds"] == 35.2
+
+        assert len(data["pages"]) == 1
+        assert data["pages"][0]["page"] == "/pulse"
+        assert data["pages"][0]["views"] == 50
+
+        assert len(data["time_on_page"]) == 1
+        assert data["time_on_page"][0]["avg_seconds"] == 45.3
+
+        assert len(data["agent_queries_by_page"]) == 1
+        assert data["agent_queries_by_page"][0]["queries"] == 15
+
+        assert len(data["top_suggestions"]) == 1
+        assert data["top_suggestions"][0]["clicks"] == 8
+
+        assert len(data["feature_usage"]) == 1
+        assert data["feature_usage"][0]["uses"] == 12
+
+        assert data["days"] == 7
+
+    def test_empty_session_data(self, api_client, api_headers):
+        """Test that empty data returns zero summary and empty arrays."""
+        mock_db = MagicMock()
+        mock_db.fetchone.side_effect = [
+            {"total_views": 0, "total_sessions": 0, "unique_pages": 0},
+            {"total_queries": 0},
+            {"avg_ms": None},
+        ]
+        mock_db.fetchall.side_effect = [[], [], [], [], []]
+
+        with patch("sre_agent.db.get_database", return_value=mock_db):
+            r = api_client.get("/analytics/sessions", headers=api_headers)
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["summary"]["total_sessions"] == 0
+        assert data["summary"]["total_page_views"] == 0
+        assert data["summary"]["avg_duration_seconds"] == 0
+        assert data["pages"] == []
+        assert data["time_on_page"] == []
+
+    def test_requires_auth(self, api_client):
+        """Test that the endpoint requires authentication."""
+        r = api_client.get("/analytics/sessions")
+        assert r.status_code == 401
+
+    def test_custom_days_parameter(self, api_client, api_headers):
+        """Test that days parameter is passed through to queries."""
+        mock_db = MagicMock()
+        mock_db.fetchone.side_effect = [
+            {"total_views": 0, "total_sessions": 0, "unique_pages": 0},
+            {"total_queries": 0},
+            {"avg_ms": None},
+        ]
+        mock_db.fetchall.side_effect = [[], [], [], [], []]
+
+        with patch("sre_agent.db.get_database", return_value=mock_db):
+            r = api_client.get("/analytics/sessions?days=30", headers=api_headers)
+
+        assert r.status_code == 200
+        assert r.json()["days"] == 30
+
+    def test_validates_days_range(self, api_client, api_headers):
+        """Test that days parameter validates range (1-90)."""
+        r = api_client.get("/analytics/sessions?days=0", headers=api_headers)
+        assert r.status_code == 422
+
+        r = api_client.get("/analytics/sessions?days=91", headers=api_headers)
+        assert r.status_code == 422
+
+    def test_db_exception_returns_fallback(self, api_client, api_headers):
+        """Test that database errors return graceful fallback with summary."""
+        with patch("sre_agent.db.get_database", side_effect=Exception("DB down")):
+            r = api_client.get("/analytics/sessions", headers=api_headers)
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["summary"]["total_sessions"] == 0
+        assert data["summary"]["total_page_views"] == 0
+        assert data["pages"] == []

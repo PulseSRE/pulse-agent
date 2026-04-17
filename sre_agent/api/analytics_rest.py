@@ -598,6 +598,28 @@ async def session_analytics(
 
         db = get_database()
 
+        # Summary totals
+        summary_row = db.fetchone(
+            "SELECT COUNT(*) as total_views, "
+            "COUNT(DISTINCT session_id) as total_sessions, "
+            "COUNT(DISTINCT page) as unique_pages "
+            "FROM user_events WHERE event_type = 'page_view' "
+            "AND timestamp > NOW() - INTERVAL '%s days'",
+            (days,),
+        )
+        total_queries_row = db.fetchone(
+            "SELECT COUNT(*) as total_queries "
+            "FROM user_events WHERE event_type = 'agent_query' "
+            "AND timestamp > NOW() - INTERVAL '%s days'",
+            (days,),
+        )
+        avg_duration_row = db.fetchone(
+            "SELECT AVG((data->>'duration_ms')::int) as avg_ms "
+            "FROM user_events WHERE event_type = 'page_leave' "
+            "AND timestamp > NOW() - INTERVAL '%s days'",
+            (days,),
+        )
+
         # Top pages by visit count
         page_rows = db.fetchall(
             "SELECT page, COUNT(*) as views, COUNT(DISTINCT session_id) as sessions "
@@ -645,6 +667,13 @@ async def session_analytics(
         )
 
         return {
+            "summary": {
+                "total_sessions": (summary_row["total_sessions"] if summary_row else 0),
+                "total_page_views": (summary_row["total_views"] if summary_row else 0),
+                "unique_pages": (summary_row["unique_pages"] if summary_row else 0),
+                "total_queries": (total_queries_row["total_queries"] if total_queries_row else 0),
+                "avg_duration_seconds": round((avg_duration_row["avg_ms"] or 0) / 1000, 1) if avg_duration_row else 0,
+            },
             "pages": [dict(r) for r in (page_rows or [])],
             "time_on_page": [
                 {"page": r["page"], "avg_seconds": round((r["avg_ms"] or 0) / 1000, 1), "samples": r["sample_count"]}
@@ -658,6 +687,13 @@ async def session_analytics(
     except Exception:
         logger.debug("Session analytics failed", exc_info=True)
         return {
+            "summary": {
+                "total_sessions": 0,
+                "total_page_views": 0,
+                "unique_pages": 0,
+                "total_queries": 0,
+                "avg_duration_seconds": 0,
+            },
             "pages": [],
             "time_on_page": [],
             "agent_queries_by_page": [],
