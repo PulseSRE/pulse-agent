@@ -1,0 +1,97 @@
+{
+  "suite_name": "capacity_planner",
+  "description": "Capacity planning scenarios — resource forecasting, right-sizing, HPA tuning",
+  "scenarios": [
+    {
+      "scenario_id": "capacity_forecast_quota_exhaustion",
+      "category": "sre",
+      "description": "Forecast when namespace quota will be exhausted based on growth trends.",
+      "tool_calls": [
+        "get_resource_quotas",
+        "forecast_quota_exhaustion",
+        "get_prometheus_query"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 85,
+      "user_confirmed_resolution": true,
+      "final_response": "Production namespace CPU quota will be exhausted in approximately 12 days based on current growth rate of 0.8 cores/day. Current usage is 14.5 of 20 cores (72%). Recommend requesting a quota increase to 30 cores or right-sizing the top 3 consumers.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "capacity_rightsizing_recommendations",
+      "category": "sre",
+      "description": "Identify over-provisioned workloads and recommend right-sized resource requests.",
+      "tool_calls": [
+        "get_resource_recommendations",
+        "get_pod_metrics",
+        "get_prometheus_query"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 95,
+      "user_confirmed_resolution": true,
+      "final_response": "Found 5 over-provisioned deployments wasting 8.2 CPU cores and 12Gi memory. Top offender: cache-service requests 4 cores but averages 0.3 cores (92% waste). Recommended reducing requests to p95 usage + 20% headroom, saving 6.5 cores cluster-wide.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "capacity_hpa_tuning",
+      "category": "sre",
+      "description": "Analyze HPA behavior and recommend optimal scaling parameters.",
+      "tool_calls": [
+        "list_hpas",
+        "analyze_hpa_thrashing",
+        "get_prometheus_query",
+        "get_events"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 90,
+      "user_confirmed_resolution": true,
+      "final_response": "HPA api-gateway is thrashing (14 scale events/hour) because CPU target 50% is too aggressive. Recommended: raise target to 70%, set stabilizationWindowSeconds to 300, and increase minReplicas from 2 to 4 based on baseline traffic patterns.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "capacity_node_headroom_analysis",
+      "category": "sre",
+      "description": "Analyze node capacity headroom and identify nodes at risk of pressure.",
+      "tool_calls": [
+        "list_nodes",
+        "get_node_metrics",
+        "get_prometheus_query"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 75,
+      "user_confirmed_resolution": true,
+      "final_response": "2 of 6 worker nodes are at risk: worker-2 at 91% memory (1.2Gi headroom), worker-5 at 87% CPU (1.9 cores headroom). At current growth, worker-2 will hit MemoryPressure within 3 days. Recommend adding 1 worker node or migrating cache workloads to dedicated pool.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "capacity_namespace_cost_comparison",
+      "category": "sre",
+      "description": "Compare resource consumption across namespaces for cost attribution.",
+      "tool_calls": [
+        "get_prometheus_query",
+        "list_namespaces",
+        "get_resource_quotas"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 70,
+      "user_confirmed_resolution": true,
+      "final_response": "Top 3 namespaces by resource consumption: production (14.5 CPU, 48Gi mem, 38 pods), staging (4.2 CPU, 16Gi mem, 12 pods), monitoring (3.8 CPU, 22Gi mem, 15 pods). Production consumes 64% of cluster resources. Staging is 3.5x over-provisioned relative to its workload.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    }
+  ]
+}

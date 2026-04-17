@@ -1,0 +1,92 @@
+{
+  "suite_name": "slo_management",
+  "description": "SLO management scenarios — define SLOs, check burn rates, error budget tracking",
+  "scenarios": [
+    {
+      "scenario_id": "slo_check_burn_rates",
+      "category": "sre",
+      "description": "Check current SLO burn rates across services.",
+      "tool_calls": [
+        "get_prometheus_query",
+        "list_deployments"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 65,
+      "user_confirmed_resolution": true,
+      "final_response": "SLO burn rates: checkout-service availability at 99.92% (target 99.9%, burn rate 0.8x — healthy), payment-api latency p99 at 450ms (target 500ms, burn rate 0.9x — close to budget), auth-service error rate at 0.15% (target 0.1%, burn rate 1.5x — BURNING). Auth-service will exhaust error budget in 8 days at current rate.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "slo_define_availability",
+      "category": "sre",
+      "description": "Define a new availability SLO for a service.",
+      "tool_calls": [
+        "get_prometheus_query",
+        "list_deployments"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 55,
+      "user_confirmed_resolution": true,
+      "final_response": "Defined availability SLO for checkout-service: target 99.9% over 30-day window. Current availability is 99.95% — within target. Error budget: 43.2 minutes/month remaining (28.8 minutes consumed). PromQL: 1 - (sum(rate(http_requests_total{service='checkout',code=~'5..'}[30d])) / sum(rate(http_requests_total{service='checkout'}[30d]))). SLO registered and will be tracked on the SLO dashboard.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "slo_error_budget_exhaustion",
+      "category": "sre",
+      "description": "Investigate a service that has nearly exhausted its error budget.",
+      "tool_calls": [
+        "get_prometheus_query",
+        "get_firing_alerts",
+        "get_events",
+        "get_pod_logs"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 100,
+      "user_confirmed_resolution": true,
+      "final_response": "Auth-service has consumed 92% of its monthly error budget (target 99.9% availability). The burn rate spiked to 3.2x normal at 06:00 UTC during a certificate rotation that caused 4 minutes of connection failures. Current availability is 99.87% — below target. Recommend: freeze non-critical deploys, investigate remaining error sources, and set up burn rate alerting at 2x threshold.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "slo_latency_target",
+      "category": "sre",
+      "description": "Define and evaluate a latency SLO with percentile targets.",
+      "tool_calls": [
+        "get_prometheus_query"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 50,
+      "user_confirmed_resolution": true,
+      "final_response": "Defined latency SLO for payment-api: p99 response time under 500ms. Current p99 is 420ms (16% headroom). Burn rate 0.84x — healthy. Historical: p99 breached 500ms twice in the last 30 days (both during batch reconciliation at 02:00 UTC). Recommendation: consider excluding batch endpoints from the SLO or raising the target to 750ms for batch routes.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "slo_multi_service_summary",
+      "category": "sre",
+      "description": "Provide a summary of all SLOs across services with actionable priorities.",
+      "tool_calls": [
+        "get_prometheus_query",
+        "list_deployments"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 80,
+      "user_confirmed_resolution": true,
+      "final_response": "SLO summary across 4 services: 3 healthy, 1 at risk. Checkout (99.95% avail, green), Payment (420ms p99, green), Frontend (99.97% avail, green), Auth (99.87% avail, RED — below 99.9% target). Priority action: auth-service error budget at 8% remaining. Secondary: payment-api approaching latency target during peak hours. No action needed on checkout or frontend.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    }
+  ]
+}

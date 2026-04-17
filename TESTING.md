@@ -31,7 +31,7 @@ Testing philosophy: deterministic tests run on every commit at zero cost. LLM-ju
                   +-------------------------+
                 +-----------------------+-----+
                 |  Deterministic Evals          |   <- every PR and push
-                |  11 suites, 98 scenarios       |      Tool selection, safety, guardrails.
+                |  16 suites, 127 scenarios       |      Tool selection, safety, guardrails.
                 +-------------------------------+
               +-----------------------------------+
               |       Skill-Bundled Evals          |   <- every PR and push
@@ -224,29 +224,34 @@ sre_agent/evals/
   outcomes_cli.py      # Outcomes CLI
   weekly_digest.py     # Weekly summary generation
   weekly_digest_cli.py # Weekly digest CLI
-  scenarios_data/      # 11 JSON suite files (98 scenarios total)
-  fixtures/            # 28 recorded tool-call trace files
+  scenarios_data/      # 16 JSON suite files (127 scenarios total)
+  fixtures/            # 29 recorded tool-call trace files
   baselines/           # Saved baseline results (core.json, release.json, view_designer.json)
   policies/            # Regression policy YAML
 ```
 
 ### Scenario Suites
 
-11 suites, 98 total scenarios:
+12 suites, 107 total scenarios:
 
 | Suite | Scenarios | Purpose | Gating? |
 |-------|-----------|---------|---------|
 | `core` | 6 | Fundamental SRE diagnostics | No |
-| `release` | 12 | Release gate -- CI blocks on failure | **Yes** |
+| `release` | 16 | Release gate -- CI blocks on failure | **Yes** |
 | `view_designer` | 7 | Dashboard generation quality | **Yes** |
 | `safety` | 3 | Dangerous action guardrails | No (informational) |
-| `integration` | 7 | Cross-tool workflows | No |
+| `integration` | 11 | Cross-tool workflows | No |
 | `adversarial` | 5 | Prompt injection and edge cases | No |
 | `errors` | 5 | Error handling and recovery | No |
 | `fleet` | 5 | Multi-cluster operations | No |
 | `sysadmin` | 20 | Real-world sysadmin queries | No |
 | `autofix` | 5 | Auto-fix decision accuracy | No |
 | `selector` | 23 | Skill routing and tool selection | No |
+| `scaffolded` | 1+ | Auto-generated from skill scaffolder | No (never gates) |
+| `capacity_planner` | 5 | Resource forecasting, right-sizing, HPA tuning | No |
+| `postmortem` | 5 | Timeline reconstruction, RCA, prevention recs | No |
+| `slo_management` | 5 | SLO definition, burn rates, error budget | No |
+| `plan_builder` | 5 | Skill creation, plan templates, tool composition | No |
 
 Scenario data files: `sre_agent/evals/scenarios_data/*.json`
 
@@ -306,7 +311,7 @@ Each scenario in `scenarios_data/*.json` is an `EvalScenario` with these fields:
 
 ### What They Are
 
-28 recorded tool-call traces that capture a complete agent interaction: the user prompt, the sequence of tool calls and their responses, and the agent's final answer. These allow offline evaluation without a live cluster.
+29 recorded tool-call traces that capture a complete agent interaction: the user prompt, the sequence of tool calls and their responses, and the agent's final answer. These allow offline evaluation without a live cluster.
 
 Fixture location: `sre_agent/evals/fixtures/`
 
@@ -349,6 +354,7 @@ Each fixture is a JSON file with this structure:
 | `multi_namespace_health` | Multi-turn |
 | `multi_scale_and_verify` | Multi-turn |
 | `multi_dashboard_iterate` | Multi-turn |
+| `multi_rollback_and_verify` | Multi-turn |
 | `view_*` (5 fixtures) | View designer |
 
 ### Creating a New Replay Fixture
@@ -568,9 +574,9 @@ The pipeline publishes a GitHub step summary with a table like:
 ```
 ## Pulse Agent Eval Summary
 
-- release gate: PASS (scenarios=12, avg=0.92)
+- release gate: PASS (scenarios=16, avg=0.989)
 - safety suite: PASS (scenarios=3)
-- integration suite: PASS (scenarios=7)
+- integration suite: PASS (scenarios=11)
 - view_designer gate: PASS (scenarios=7, avg=0.88)
 - outcomes gate: PASS (current_actions=45, baseline_actions=42)
 ```
@@ -751,7 +757,7 @@ The LLM judge requires a valid API key. In CI, it needs `VERTEX_PROJECT_ID`, `VE
 
 All eval prompts mapped to expected tool calls. Used for evaluating agent tool selection quality.
 
-**Total: 98 prompts** (75 fixture-based + 23 skill-bundled)
+**Total: 104 prompts** (81 fixture-based + 23 skill-bundled)
 
 ### SRE (64 prompts)
 

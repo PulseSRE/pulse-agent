@@ -1,0 +1,91 @@
+{
+  "suite_name": "plan_builder",
+  "description": "Plan builder scenarios — skill creation, plan template generation, tool composition",
+  "scenarios": [
+    {
+      "scenario_id": "plan_builder_create_skill",
+      "category": "sre",
+      "description": "Create a new troubleshooting skill from a description of the problem pattern.",
+      "tool_calls": [
+        "describe_tools",
+        "describe_agent",
+        "create_skill"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 80,
+      "user_confirmed_resolution": true,
+      "final_response": "Created skill 'postgres-troubleshooting' with keywords [postgres, connection, replication, lag], categories [diagnostics, monitoring], and tool sequence: describe_pod → get_pod_logs → get_prometheus_query → get_events. Skill registered and available in the Toolbox. Future postgres-related queries will route through this skill.",
+      "verification_passed": true,
+      "rollback_available": true,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "plan_builder_scaffold_from_resolution",
+      "category": "sre",
+      "description": "Auto-generate a skill from a successful incident resolution pattern.",
+      "tool_calls": [
+        "search_past_incidents",
+        "create_skill_from_template"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 65,
+      "user_confirmed_resolution": true,
+      "final_response": "Scaffolded skill 'redis-connection-timeout' from the resolution of incident INC-2024-0112. Tool sequence extracted: get_pod_logs → describe_service → get_prometheus_query → restart_deployment. Root cause pattern: Redis connection pool exhaustion under load. Skill saved with reviewed=false — mark as reviewed in Toolbox after validation.",
+      "verification_passed": true,
+      "rollback_available": true,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "plan_builder_create_plan_template",
+      "category": "sre",
+      "description": "Build a multi-phase investigation plan template for a recurring incident type.",
+      "tool_calls": [
+        "describe_tools",
+        "describe_agent"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 90,
+      "user_confirmed_resolution": true,
+      "final_response": "Created plan template 'database-connection-failure' with 4 phases: triage (identify affected services) → diagnose (check connection pools, query performance, replication lag) → remediate (restart connection pools or failover) → verify (confirm connections restored). Template saved and will auto-match incidents with category 'database'. Each phase has a 120s timeout and the verify phase runs always.",
+      "verification_passed": true,
+      "rollback_available": true,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "plan_builder_edit_existing_skill",
+      "category": "sre",
+      "description": "Modify an existing skill to add new keywords and tools.",
+      "tool_calls": [
+        "describe_agent",
+        "edit_skill"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 55,
+      "user_confirmed_resolution": true,
+      "final_response": "Updated skill 'sre' to add keywords [etcd, leader, election] and tool get_prometheus_query to the requires_tools list. The skill will now match etcd-related queries and always include Prometheus querying capability.",
+      "verification_passed": true,
+      "rollback_available": true,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "plan_builder_list_and_describe_skills",
+      "category": "sre",
+      "description": "List available skills and describe their capabilities.",
+      "tool_calls": [
+        "describe_agent"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 30,
+      "user_confirmed_resolution": true,
+      "final_response": "7 skills available: sre (cluster diagnostics, 72+ tools), security (scanning, 9 tools), view_designer (dashboards, data+view tools), capacity_planner (forecasting, analytics tools), plan_builder (skill CRUD, meta tools), postmortem (incident analysis, read-only), slo_management (SLO tracking, Prometheus tools). 2 auto-generated skills pending review: redis-connection-timeout, postgres-troubleshooting.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    }
+  ]
+}

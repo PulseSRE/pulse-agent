@@ -1,0 +1,103 @@
+{
+  "suite_name": "postmortem",
+  "description": "Postmortem generation scenarios — timeline reconstruction, root cause analysis, prevention recommendations",
+  "scenarios": [
+    {
+      "scenario_id": "postmortem_crashloop_incident",
+      "category": "sre",
+      "description": "Generate postmortem from a crashloop incident with clear root cause.",
+      "tool_calls": [
+        "list_pods",
+        "get_pod_logs",
+        "get_events",
+        "describe_deployment"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 110,
+      "user_confirmed_resolution": true,
+      "final_response": "Postmortem: At 14:02 a ConfigMap update introduced an invalid DB_POOL_SIZE value ('twenty' instead of integer). This caused api-server pods to fail validation on startup, entering CrashLoopBackOff at 14:04. Blast radius: 3 replicas of api-server in production. Root cause: missing input validation in config parsing. Resolution: ConfigMap reverted at 14:15. Prevention: add schema validation for ConfigMaps, require staging rollout before production.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "postmortem_oom_incident",
+      "category": "sre",
+      "description": "Generate postmortem from an OOM kill incident with memory analysis.",
+      "tool_calls": [
+        "describe_pod",
+        "get_pod_logs",
+        "get_events",
+        "get_prometheus_query"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 120,
+      "user_confirmed_resolution": true,
+      "final_response": "Postmortem: Worker pods began OOM-killing at 03:00 UTC during nightly batch processing. Memory usage spiked from 180Mi baseline to 512Mi (exceeding 256Mi limit) because batch job loaded entire dataset into memory instead of streaming. Blast radius: 4 worker pods, 2000 queued jobs delayed by 45 minutes. Root cause: unbounded in-memory collection in batch processor. Prevention: implement streaming pagination, set memory limit to 512Mi with monitoring alert at 80%.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "postmortem_node_failure",
+      "category": "sre",
+      "description": "Generate postmortem from a node failure affecting multiple workloads.",
+      "tool_calls": [
+        "list_nodes",
+        "describe_node",
+        "get_events",
+        "list_pods",
+        "get_firing_alerts"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 140,
+      "user_confirmed_resolution": true,
+      "final_response": "Postmortem: Worker-3 became NotReady at 09:30 due to kubelet crash from disk pressure (ephemeral storage at 99%). 12 pods were evicted and rescheduled across remaining nodes, causing 8 minutes of degraded service. Contributing factor: fluentd logging agent accumulated 45Gi of buffered logs. Root cause: log rotation was disabled after a configuration drift. Prevention: enforce log rotation limits via DaemonSet config, add disk usage alerting at 80%.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "postmortem_deployment_rollout_failure",
+      "category": "sre",
+      "description": "Generate postmortem from a failed deployment rollout with rollback.",
+      "tool_calls": [
+        "describe_deployment",
+        "get_pod_logs",
+        "get_events",
+        "list_pods"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 100,
+      "user_confirmed_resolution": true,
+      "final_response": "Postmortem: Deployment checkout-service v5.0.0 rolled out at 15:00 but new pods failed readiness probes because the payments-v2 API endpoint was removed. Blast radius: checkout flow unavailable for 12 minutes until rollback to v4.9.0 at 15:12. Root cause: breaking API change deployed without dependency coordination. Prevention: add integration tests for cross-service contracts, implement canary deployments with automated rollback.",
+      "verification_passed": true,
+      "rollback_available": true,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "postmortem_with_contributing_factors",
+      "category": "sre",
+      "description": "Generate postmortem with multiple contributing factors and cascading failures.",
+      "tool_calls": [
+        "get_firing_alerts",
+        "correlate_incident",
+        "get_events",
+        "get_pod_logs",
+        "describe_deployment"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 150,
+      "user_confirmed_resolution": true,
+      "final_response": "Postmortem: Cascading failure starting at 11:00. Primary: database connection pool exhausted due to slow query from unindexed table scan. Secondary: api-server pods queued connections, hitting memory limits and OOM-killing. Tertiary: HPA scaled to max replicas but new pods also OOM'd. Blast radius: full API outage for 25 minutes. Contributing factors: missing query index, no connection pool timeout, HPA scaling into the same failure. Prevention: add database query performance monitoring, set connection pool timeouts, implement circuit breaker between API and database layers.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 1,
+      "transient_failures": 1
+    }
+  ]
+}
