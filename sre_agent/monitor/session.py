@@ -109,6 +109,15 @@ class MonitorSession:
         fixes_this_cycle = 0
         MAX_FIXES_PER_CYCLE = 3
 
+        fixable = [f for f in findings if f.get("autoFixable")]
+        logger.info(
+            "Auto-fix: %d/%d findings are auto-fixable, trust=%d, categories=%s",
+            len(fixable),
+            len(findings),
+            self.trust_level,
+            self.auto_fix_categories,
+        )
+
         for finding in findings:
             if fixes_this_cycle >= MAX_FIXES_PER_CYCLE:
                 logger.info(
@@ -126,7 +135,10 @@ class MonitorSession:
             # Trust level 3: only fix categories in self.auto_fix_categories
             # Trust level 4: fix ALL auto-fixable findings
             if self.trust_level == 3 and category not in self.auto_fix_categories:
+                logger.info("Auto-fix: skipping %s (category %s not in allowed list)", finding.get("title"), category)
                 continue
+
+            logger.info("Auto-fix: attempting fix for %s (category=%s)", finding.get("title"), category)
 
             # Compute resource key early — needed by both targeted and blunt fix paths
             resources = finding.get("resources", [])

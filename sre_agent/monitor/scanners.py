@@ -315,6 +315,7 @@ def scan_oom_killed_pods(pods=None) -> list[dict]:
                             title=f"Pod {name} OOMKilled",
                             summary=f"Container '{cs.name}' was OOMKilled (exit code {last.terminated.exit_code})",
                             resources=[{"kind": "Pod", "name": name, "namespace": ns}],
+                            auto_fixable=True,
                         )
                     )
     except Exception as e:

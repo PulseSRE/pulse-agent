@@ -334,7 +334,7 @@ start_ws_client() {
     --token "$token" \
     --output "$FINDINGS_FILE" \
     --trust-level 3 \
-    --auto-fix-categories "crashloop,image_pull" &
+    --auto-fix-categories "crashloop,image_pull,oom" &
   WS_CLIENT_PID=$!
   sleep 3
 
