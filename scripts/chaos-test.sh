@@ -113,6 +113,150 @@ echo -e "Scenario:   ${SCENARIO}"
 echo -e "Agent NS:   ${AGENT_NS}"
 echo ""
 
+# ── Preflight Checks ──────────────────────────────────────────────────
+# Validates all prerequisites before running any scenarios.
+# Fixes what it can automatically, fails fast on what it can't.
+
+preflight_check() {
+  local failed=0
+  echo -e "${CYAN}Running preflight checks...${NC}"
+
+  # 1. Cluster connectivity
+  if ! $CMD cluster-info &>/dev/null; then
+    echo -e "  ${RED}✗ Not logged in to cluster${NC}"
+    echo "    Fix: oc login <cluster-url> --username <user> --password <pass>"
+    return 1
+  fi
+  echo -e "  ${GREEN}✓ Cluster connected${NC}"
+
+  # 2. Agent pod running
+  local agent_pod
+  agent_pod=$($CMD get pods -n "$AGENT_NS" -l app.kubernetes.io/name=openshift-sre-agent --no-headers -o name 2>/dev/null | grep -v mcp | grep -v postgresql | head -1)
+  if [[ -z "$agent_pod" ]]; then
+    echo -e "  ${RED}✗ Agent pod not found in namespace '${AGENT_NS}'${NC}"
+    echo "    Fix: Deploy the agent first — cd OpenshiftPulse && ./deploy/deploy.sh"
+    return 1
+  fi
+  echo -e "  ${GREEN}✓ Agent pod: ${agent_pod}${NC}"
+
+  # 3. Agent listening on 8080
+  local port_check
+  port_check=$($CMD exec -n "$AGENT_NS" "$agent_pod" -c sre-agent -- python3 -c "import socket; s=socket.socket(); s.settimeout(1); r=s.connect_ex(('127.0.0.1',8080)); print(r); s.close()" 2>/dev/null || echo "999")
+  if [[ "$port_check" != "0" ]]; then
+    echo -e "  ${RED}✗ Agent not listening on port 8080${NC}"
+    echo "    Fix: Check agent logs — oc logs $agent_pod -n $AGENT_NS -c sre-agent"
+    failed=1
+  else
+    echo -e "  ${GREEN}✓ Agent listening on 8080${NC}"
+  fi
+
+  # 4. WS token available
+  local ws_token
+  ws_token=$(get_ws_token)
+  if [[ -z "$ws_token" ]]; then
+    echo -e "  ${RED}✗ WS token not found (secret pulse-ws-token)${NC}"
+    echo "    Fix: Redeploy — the deploy script auto-generates the token"
+    failed=1
+  else
+    echo -e "  ${GREEN}✓ WS token available${NC}"
+  fi
+
+  # 5. Monitor enabled (check health endpoint)
+  local health
+  health=$($CMD exec -n "$AGENT_NS" "$agent_pod" -c sre-agent -- python3 -c "
+import urllib.request, json
+try:
+    r = urllib.request.urlopen('http://localhost:8080/health', timeout=5)
+    d = json.loads(r.read())
+    print(d.get('status', 'unknown'))
+except: print('error')
+" 2>/dev/null || echo "error")
+  if [[ "$health" != "ok" ]]; then
+    echo -e "  ${YELLOW}⚠ Agent health check: ${health}${NC}"
+    echo "    Monitor might not be running — findings may not be detected"
+    # Don't fail — agent might still work
+  else
+    echo -e "  ${GREEN}✓ Agent healthy (monitor active)${NC}"
+  fi
+
+  # 6. chaos-ws-client.py exists
+  local client_script="$(dirname "$0")/chaos-ws-client.py"
+  if [[ ! -f "$client_script" ]]; then
+    echo -e "  ${RED}✗ WebSocket client not found: ${client_script}${NC}"
+    failed=1
+  else
+    echo -e "  ${GREEN}✓ WebSocket client found${NC}"
+  fi
+
+  # 7. Python websockets module available
+  if ! python3 -c "import websockets" 2>/dev/null; then
+    echo -e "  ${YELLOW}⚠ Python 'websockets' module not installed — installing...${NC}"
+    pip3 install websockets --quiet 2>/dev/null
+    if ! python3 -c "import websockets" 2>/dev/null; then
+      echo -e "  ${RED}✗ Failed to install websockets module${NC}"
+      failed=1
+    else
+      echo -e "  ${GREEN}✓ websockets module installed${NC}"
+    fi
+  else
+    echo -e "  ${GREEN}✓ Python websockets available${NC}"
+  fi
+
+  # 8. Can create namespace (test RBAC)
+  if ! $CMD auth can-i create namespaces &>/dev/null; then
+    echo -e "  ${RED}✗ No permission to create namespaces${NC}"
+    echo "    Fix: Log in as cluster-admin or grant namespace creation rights"
+    failed=1
+  else
+    echo -e "  ${GREEN}✓ Can create namespaces${NC}"
+  fi
+
+  # 9. Can create deployments in chaos namespace
+  if ! $CMD auth can-i create deployments -n "$NAMESPACE" &>/dev/null 2>/dev/null; then
+    # Namespace might not exist yet — check against default
+    if ! $CMD auth can-i create deployments &>/dev/null; then
+      echo -e "  ${YELLOW}⚠ Cannot verify deployment creation permissions${NC}"
+    else
+      echo -e "  ${GREEN}✓ Can create deployments${NC}"
+    fi
+  else
+    echo -e "  ${GREEN}✓ Can create deployments in ${NAMESPACE}${NC}"
+  fi
+
+  # 10. Port-forward test
+  echo -e "  Testing port-forward..."
+  $CMD port-forward "$agent_pod" -n "$AGENT_NS" 18080:8080 &>/dev/null &
+  local pf_pid=$!
+  sleep 3
+  if kill -0 "$pf_pid" 2>/dev/null; then
+    local pf_test
+    pf_test=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${ws_token}" http://localhost:18080/health 2>/dev/null || echo "000")
+    kill "$pf_pid" 2>/dev/null; wait "$pf_pid" 2>/dev/null || true
+    if [[ "$pf_test" == "200" ]]; then
+      echo -e "  ${GREEN}✓ Port-forward works (HTTP 200)${NC}"
+    else
+      echo -e "  ${YELLOW}⚠ Port-forward connected but health returned HTTP ${pf_test}${NC}"
+    fi
+  else
+    echo -e "  ${RED}✗ Port-forward failed${NC}"
+    echo "    Fix: Check if another port-forward is using 18080, or restart the agent pod"
+    failed=1
+  fi
+
+  echo ""
+  if [[ $failed -ne 0 ]]; then
+    echo -e "${RED}Preflight failed — fix the issues above before running chaos tests${NC}"
+    return 1
+  fi
+  echo -e "${GREEN}All preflight checks passed${NC}"
+  echo ""
+}
+
+# Run preflight unless dry-run
+if [[ "$DRY_RUN" != "true" ]]; then
+  preflight_check || exit 1
+fi
+
 # ── Helpers ────────────────────────────────────────────────────────────
 
 setup_namespace() {
