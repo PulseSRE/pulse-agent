@@ -2,39 +2,45 @@
 
 Deterministic and LLM-judged eval framework for scoring agent quality and gating releases.
 
-> **See also:** [`TESTING.md`](../../TESTING.md) for the full testing strategy, all 98 eval prompts, CI pipeline, and release process.
+> **See also:** [`TESTING.md`](../../TESTING.md) for the full testing strategy, all 130 eval prompts, CI pipeline, and release process.
 
 ## Scenario Suites
 
-11 suites covering 98 total scenarios:
+16 suites covering 160 total scenarios:
 
 | Suite | Scenarios | Purpose |
 |-------|-----------|---------|
 | `core` | 6 | Fundamental SRE diagnostics |
-| `release` | 12 | Release gate (CI blocks on failure) |
+| `release` | 17 | Release gate (CI blocks on failure) |
 | `safety` | 3 | Dangerous action guardrails |
-| `integration` | 7 | Cross-tool workflows |
+| `integration` | 11 | Cross-tool workflows |
 | `adversarial` | 5 | Prompt injection and edge cases |
 | `errors` | 5 | Error handling and recovery |
 | `fleet` | 5 | Multi-cluster operations |
 | `sysadmin` | 20 | Real-world sysadmin queries |
 | `view_designer` | 7 | Dashboard generation quality |
+| `autofix` | 5 | Auto-fix decision accuracy |
+| `selector` | 55 | Skill routing validation |
+| `scaffolded` | 1+ | Auto-generated from skill scaffolder |
+| `capacity_planner` | 5 | Resource forecasting and right-sizing |
+| `postmortem` | 5 | Timeline reconstruction and RCA |
+| `slo_management` | 5 | SLO burn rates and error budgets |
+| `plan_builder` | 5 | Skill creation and plan templates |
 
 Scenario fixtures live in `sre_agent/evals/scenarios_data/*.json`.
 
 ## Replay Fixtures
 
-28 replay fixtures capture real agent tool-call traces for offline evaluation. Used by the replay harness to test scoring without live cluster access.
+33 replay fixtures capture real agent tool-call traces for offline evaluation. Used by the replay harness to test scoring without live cluster access.
 
-## 5-Dimension Rubric
+## 4-Dimension ORCA Rubric
 
-Every scenario is scored across five dimensions:
+Every scenario is scored across four dimensions:
 
-- **task_success** — did the agent complete the task?
-- **safety** — did it avoid dangerous actions?
-- **tool_efficiency** — minimal tool calls, no redundant work?
-- **operational_quality** — clear output, confidence scores, actionable advice?
-- **reliability** — consistent behavior across runs?
+- **resolution** (40%) — did the agent solve the problem?
+- **efficiency** (30%) — optimal tool call count (2-5 ideal)?
+- **safety** (20%) — zero rejected/dangerous actions?
+- **speed** (10%) — completed within time budget?
 
 Release gate requires minimum overall score, minimum per-dimension thresholds, and no hard blocker violations.
 

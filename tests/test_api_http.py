@@ -316,3 +316,116 @@ class TestChatHistoryAPI:
     def test_unauthorized(self, api_client):
         r = api_client.get("/chat/sessions")
         assert r.status_code in (401, 403, 503)
+
+
+# ── SLO Registration Validation ───────────────────────────────────────────
+
+
+class TestSLORegistration:
+    def test_valid_slo(self, api_client, api_headers):
+        r = api_client.post(
+            "/slo",
+            headers=api_headers,
+            json={
+                "service": "checkout",
+                "type": "availability",
+                "target": 99.9,
+                "window_days": 30,
+                "description": "Checkout service availability",
+            },
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "registered"
+        assert data["service"] == "checkout"
+        assert data["type"] == "availability"
+
+    def test_invalid_slo_type(self, api_client, api_headers):
+        r = api_client.post(
+            "/slo",
+            headers=api_headers,
+            json={"service": "api", "type": "throughput", "target": 99.9},
+        )
+        assert r.status_code == 422
+        assert "slo_type must be one of" in r.json()["detail"]
+
+    def test_target_out_of_range_high(self, api_client, api_headers):
+        r = api_client.post(
+            "/slo",
+            headers=api_headers,
+            json={"service": "api", "type": "availability", "target": 100.0},
+        )
+        assert r.status_code == 422
+        assert "target" in r.json()["detail"]
+
+    def test_target_out_of_range_low(self, api_client, api_headers):
+        r = api_client.post(
+            "/slo",
+            headers=api_headers,
+            json={"service": "api", "type": "latency", "target": 0.0},
+        )
+        assert r.status_code == 422
+        assert "target" in r.json()["detail"]
+
+    def test_target_not_a_number(self, api_client, api_headers):
+        r = api_client.post(
+            "/slo",
+            headers=api_headers,
+            json={"service": "api", "type": "availability", "target": "high"},
+        )
+        assert r.status_code == 422
+        assert "target" in r.json()["detail"]
+
+    def test_window_days_too_large(self, api_client, api_headers):
+        r = api_client.post(
+            "/slo",
+            headers=api_headers,
+            json={"service": "api", "type": "error_rate", "target": 1.0, "window_days": 365},
+        )
+        assert r.status_code == 422
+        assert "window_days" in r.json()["detail"]
+
+    def test_window_days_zero(self, api_client, api_headers):
+        r = api_client.post(
+            "/slo",
+            headers=api_headers,
+            json={"service": "api", "type": "availability", "target": 99.9, "window_days": 0},
+        )
+        assert r.status_code == 422
+        assert "window_days" in r.json()["detail"]
+
+    def test_window_days_not_a_number(self, api_client, api_headers):
+        r = api_client.post(
+            "/slo",
+            headers=api_headers,
+            json={"service": "api", "type": "availability", "target": 99.9, "window_days": "monthly"},
+        )
+        assert r.status_code == 422
+        assert "window_days" in r.json()["detail"]
+
+    def test_missing_service_name(self, api_client, api_headers):
+        r = api_client.post(
+            "/slo",
+            headers=api_headers,
+            json={"type": "availability", "target": 99.9},
+        )
+        assert r.status_code == 400
+        assert "service name" in r.json()["detail"]
+
+    def test_all_valid_slo_types(self, api_client, api_headers):
+        for slo_type in ("availability", "latency", "error_rate"):
+            r = api_client.post(
+                "/slo",
+                headers=api_headers,
+                json={"service": f"svc-{slo_type}", "type": slo_type, "target": 99.5},
+            )
+            assert r.status_code == 200, f"Failed for slo_type={slo_type}"
+
+    def test_target_negative(self, api_client, api_headers):
+        r = api_client.post(
+            "/slo",
+            headers=api_headers,
+            json={"service": "api", "type": "availability", "target": -5.0},
+        )
+        assert r.status_code == 422
+        assert "target" in r.json()["detail"]

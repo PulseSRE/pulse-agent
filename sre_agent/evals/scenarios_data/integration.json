@@ -185,6 +185,42 @@
       "rollback_available": false
     },
     {
+      "scenario_id": "integration_warning_events_triage",
+      "category": "sre",
+      "description": "Triage cluster warning events and identify actionable patterns.",
+      "tool_calls": [
+        "get_events",
+        "list_pods",
+        "describe_pod"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 65,
+      "user_confirmed_resolution": true,
+      "final_response": "14 warning events in the last hour, grouped into 3 patterns: 4x FailedMount (secret not found in openshift-monitoring), 6x BackOff (crashlooping alertmanager pods), 4x FailedScheduling (insufficient memory on worker-2). Recommended: fix the missing secret first (blocks monitoring stack), then address node memory pressure.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_auth_anomaly_detection",
+      "category": "security",
+      "description": "Detect authentication anomalies and assess unauthorized access risk.",
+      "tool_calls": [
+        "get_events",
+        "scan_rbac_risks",
+        "get_recent_changes"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 70,
+      "user_confirmed_resolution": true,
+      "final_response": "Detected 3 authentication anomalies: 12 failed API auth attempts from IP 10.0.5.99 in 5 minutes (possible brute force), 1 successful auth with a service account not used in 90 days (stale credential), and 2 token refresh failures from the CI pipeline. Recommended: rotate the stale SA credential immediately, investigate the failed auth source, and check CI token expiry.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": false
+    },
+    {
       "scenario_id": "integration_all_component_types_view",
       "category": "sre",
       "description": "Create a view that uses every component type available.",

@@ -107,6 +107,14 @@ class DependencyGraph:
     def get_node(self, key: str) -> ResourceNode | None:
         return self._nodes.get(key)
 
+    def get_nodes(self) -> dict[str, ResourceNode]:
+        """Return a read-only view of all nodes (key → ResourceNode)."""
+        return dict(self._nodes)
+
+    def get_edges(self) -> list[ResourceEdge]:
+        """Return a copy of all edges."""
+        return list(self._edges)
+
     def clear(self) -> None:
         self._nodes.clear()
         self._edges.clear()

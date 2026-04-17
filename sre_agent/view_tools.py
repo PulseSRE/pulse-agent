@@ -1264,7 +1264,7 @@ def get_topology_graph(namespace: str = ""):
     except Exception:
         pass
 
-    for key, node in graph._nodes.items():
+    for key, node in graph.get_nodes().items():
         if namespace and node.namespace != namespace:
             continue
         resource_key = f"{node.kind}:{node.namespace}:{node.name}"
@@ -1280,7 +1280,7 @@ def get_topology_graph(namespace: str = ""):
         )
 
     node_ids = {n["id"] for n in nodes}
-    for edge in graph._edges:
+    for edge in graph.get_edges():
         if edge.source in node_ids and edge.target in node_ids:
             edges.append(
                 {

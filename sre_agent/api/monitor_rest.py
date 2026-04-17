@@ -755,7 +755,7 @@ async def get_topology(
     except Exception:
         pass
 
-    for key, node in graph._nodes.items():
+    for key, node in graph.get_nodes().items():
         if namespace and node.namespace != namespace:
             continue
 
@@ -781,7 +781,7 @@ async def get_topology(
         nodes.append(node_data)
 
     node_ids = {n["id"] for n in nodes}
-    for edge in graph._edges:
+    for edge in graph.get_edges():
         if edge.source in node_ids and edge.target in node_ids:
             edges.append(
                 {
@@ -822,12 +822,12 @@ async def get_blast_radius(
     # Build tree structure grouped by impact type
     tree: list[dict] = []
     for dep_id in downstream:
-        dep_node = graph._nodes.get(dep_id)
+        dep_node = graph.get_node(dep_id)
         if not dep_node:
             continue
         # Find the edge connecting to this node
         edge_label = ""
-        for e in graph._edges:
+        for e in graph.get_edges():
             if e.source == node_id and e.target == dep_id:
                 edge_label = e.relationship
                 break
@@ -886,22 +886,51 @@ async def get_slo_status(_auth=Depends(verify_token)):
     }
 
 
+_VALID_SLO_TYPES = {"availability", "latency", "error_rate"}
+
+
 @router.post("/slo")
 async def register_slo(request: Request, _auth=Depends(verify_token)):
     """Register a new SLO definition."""
     from ..slo_registry import SLODefinition, get_slo_registry
 
     body = await request.json()
+
+    service_name = body.get("service", "")
+    if not service_name:
+        raise HTTPException(status_code=400, detail="service name required")
+
+    # Validate slo_type
+    slo_type = body.get("type", "")
+    if slo_type not in _VALID_SLO_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"slo_type must be one of: {', '.join(sorted(_VALID_SLO_TYPES))}",
+        )
+
+    # Validate target (must be a float in (0.0, 100.0) exclusive)
+    try:
+        target = float(body.get("target", ""))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="target must be a number between 0.0 and 100.0 (exclusive)")
+    if target <= 0.0 or target >= 100.0:
+        raise HTTPException(status_code=422, detail="target must be between 0.0 and 100.0 (exclusive)")
+
+    # Validate window_days (positive integer, max 90)
+    try:
+        window_days = int(body.get("window_days", 30))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="window_days must be a positive integer (max 90)")
+    if window_days < 1 or window_days > 90:
+        raise HTTPException(status_code=422, detail="window_days must be between 1 and 90")
+
     slo = SLODefinition(
-        service_name=body.get("service", ""),
-        slo_type=body.get("type", "availability"),
-        target=float(body.get("target", 0.999)),
-        window_days=int(body.get("window_days", 30)),
+        service_name=service_name,
+        slo_type=slo_type,
+        target=target,
+        window_days=window_days,
         description=body.get("description", ""),
     )
-
-    if not slo.service_name:
-        raise HTTPException(status_code=400, detail="service name required")
 
     registry = get_slo_registry()
     registry.register(slo)

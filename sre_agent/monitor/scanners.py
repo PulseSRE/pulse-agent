@@ -500,17 +500,19 @@ def scan_slo_burn_rate() -> list[dict]:
             severity = "critical" if s.alert_level == "critical" else "warning"
             budget_pct = round(s.error_budget_remaining * 100)
             findings.append(
-                {
-                    "severity": severity,
-                    "category": "slo_burn",
-                    "title": f"SLO {s.alert_level}: {s.definition.service_name} {s.definition.slo_type}",
-                    "summary": (
+                _make_finding(
+                    severity=severity,
+                    category="slo_burn",
+                    title=f"SLO {s.alert_level}: {s.definition.service_name} {s.definition.slo_type}",
+                    summary=(
                         f"{s.definition.service_name} {s.definition.slo_type} SLO "
                         f"({s.definition.target:.1%} target) has {budget_pct}% error budget remaining. "
                         f"Burn rate: {s.burn_rate:.2%}."
                     ),
-                    "resources": [{"kind": "Service", "name": s.definition.service_name}],
-                }
+                    resources=[{"kind": "Service", "name": s.definition.service_name}],
+                    auto_fixable=False,
+                    confidence=0.9 if s.alert_level == "critical" else 0.75,
+                )
             )
 
         return findings
