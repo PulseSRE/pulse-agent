@@ -47,18 +47,17 @@ npm test              # vitest --run
 
 Report: "Backend: X tests passed. Frontend: Y tests passed. Type-check clean."
 
-### Phase 2: Gate Checks
+### Phase 2: Full Eval Suite + Gate Checks
 
-Run the release gate suites. These are the CI gates -- if they fail, stop.
+Run ALL evaluation suites. Gate suites MUST pass -- non-gating suites are informational
+but failures should be investigated before releasing.
 
+**2a. Deterministic evals (no API key needed):**
 ```bash
-python3 -m sre_agent.evals.cli --suite release --fail-on-gate
-python3 -m sre_agent.evals.cli --suite view_designer --fail-on-gate
-```
-
-Also run the selector routing accuracy check:
-```bash
+# Selector routing accuracy -- MUST be 100%
 python3 -c "
+import sre_agent.skill_loader as sl
+sl._skills = {}; sl._keyword_index = []; sl._selector = None; sl._HARD_PRE_ROUTE.clear()
 from sre_agent.evals.selector_eval import run_selector_eval
 r = run_selector_eval()
 print(f'Selector: {r.passed}/{r.total_scenarios} ({r.passed/r.total_scenarios:.0%})')
@@ -66,7 +65,51 @@ if r.failed_scenarios:
     for f in r.failed_scenarios:
         print(f'  FAIL: {f[\"id\"]}: got {f[\"got\"]} expected {f[\"expected\"]}')
 "
+
+# Replay dry-run (offline fixture tests)
+python3 -m sre_agent.evals.cli --suite release --replay-only
 ```
+
+**2b. Live judge evals (needs API key -- GATING):**
+```bash
+# These call Claude to judge agent responses. MUST pass for release.
+python3 -m sre_agent.evals.cli --suite release --fail-on-gate
+python3 -m sre_agent.evals.cli --suite view_designer --fail-on-gate
+```
+
+If API key is not available, note this in the release summary and ensure
+CI runs them on tag push (build-push.yml triggers evals.yml).
+
+**2c. Compare against baseline (regression check):**
+```bash
+python3 -m sre_agent.evals.cli --suite release --compare-baseline
+python3 -m sre_agent.evals.cli --suite view_designer --compare-baseline
+```
+
+Any regression blocks the release unless intentional (e.g., prompt change).
+
+**2d. Non-gating suites (informational -- run all):**
+```bash
+python3 -m sre_agent.evals.cli --suite core
+python3 -m sre_agent.evals.cli --suite safety
+python3 -m sre_agent.evals.cli --suite integration
+python3 -m sre_agent.evals.cli --suite adversarial
+```
+
+**2e. Prompt token audit:**
+```bash
+python3 -m sre_agent.evals.cli --audit-prompt --mode sre
+python3 -m sre_agent.evals.cli --audit-prompt --mode security
+```
+
+Report token counts and flag if prompts grew significantly since last release.
+
+**2f. Chaos tests (needs live cluster):**
+```bash
+make chaos-test
+```
+
+Runs 5 failure injection scenarios. Score must be >= 60%.
 
 ### Phase 3: Code Review + Security Review + Simplify
 
@@ -247,35 +290,76 @@ cd /Users/amobrem/ali/OpenshiftPulse
 gh release create "v<version>" --generate-notes --title "OpenShift Pulse v<version>"
 ```
 
-### Phase 8: Deploy (optional)
+### Phase 8: Deploy + E2E Integration Tests
 
-If the user wants to deploy immediately:
-
+**8a. Deploy:**
 ```bash
 cd /Users/amobrem/ali/OpenshiftPulse
 ./deploy/deploy.sh
 ```
 
+Verify agent reports the new version in the health check output.
+
+**8b. Integration tests (against live cluster):**
+```bash
+cd /Users/amobrem/ali/OpenshiftPulse
+./deploy/integration-test.sh --namespace openshiftpulse
+```
+
+Tests: WebSocket connectivity, agent health endpoint, tool execution,
+monitor scanning, view CRUD. All must pass.
+
+**8c. Smoke test:** Open the deployed app in a browser and verify:
+- Welcome page loads with correct cluster info
+- Agent chat responds to a simple query
+- Resource browser shows pods
+- A custom view renders (if any saved views exist)
+
 ### Phase 9: Post-Release
 
-After a successful release:
-
-1. Save baselines for the new version:
+**9a. Save eval baselines** for the new version:
 ```bash
 python3 -m sre_agent.evals.cli --suite release --save-baseline
 python3 -m sre_agent.evals.cli --suite view_designer --save-baseline
 ```
 
-2. Update the umbrella chart subchart version (already done by bump-version.sh)
+**9b. Publish eval results** to the GitHub release. Edit the release to append:
+```bash
+gh release edit "v<version>" --notes-file - << 'EVAL'
+## Eval Results
+- Selector routing: X/Y (Z%)
+- Release gate: PASS/FAIL (score%)
+- View designer gate: PASS/FAIL (score%)
+- Backend tests: N passed
+- Frontend tests: N passed
+- Chaos tests: score%
+- Integration tests: PASS/FAIL
+EVAL
+```
 
-3. Report the release summary:
+Do this for both repos' releases.
+
+**9c. Update the umbrella chart** subchart version (already done by bump-version.sh)
+
+**9d. Verify CI** -- check that the tag push triggered build-push.yml:
+```bash
+gh run list --limit 3
+```
+
+Confirm the container image was built and pushed to quay.io.
+
+**9e. Report the release summary:**
 ```
 Release v<version> complete!
-- Backend: X tests, Y scenarios, Z% release gate
+- Backend: X tests, Y eval scenarios, Z% release gate
 - Frontend: A tests, type-check clean
+- Selector: N/N routing accuracy
+- Integration: PASS/FAIL
 - Images: quay.io/amobrem/pulse-agent:<version>
 - Tags: pulse-agent v<version>, OpenshiftPulse v<version>
-- GitHub releases created
+- GitHub releases: <urls>
+- Pages: https://alimobrem.github.io/pulse-agent/
+         https://alimobrem.github.io/OpenshiftPulse/
 ```
 
 ## Rollback
