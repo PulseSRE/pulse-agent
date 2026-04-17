@@ -233,30 +233,26 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
     if not time_range:
         time_range = "1h"
 
-    query_params: dict[str, str] = {"query": query}
+    import time as _time
 
-    if time_range:
-        import time as _time
+    _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    try:
+        unit = time_range[-1]
+        amount = int(time_range[:-1])
+        seconds = amount * _UNITS.get(unit, 3600)
+    except (ValueError, IndexError):
+        seconds = 3600
 
-        _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-        try:
-            unit = time_range[-1]
-            amount = int(time_range[:-1])
-            seconds = amount * _UNITS.get(unit, 3600)
-        except (ValueError, IndexError):
-            seconds = 3600
+    now = int(_time.time())
+    step = max(60, seconds // 120)
+    query_params: dict[str, str] = {
+        "query": query,
+        "start": str(now - seconds),
+        "end": str(now),
+        "step": str(step),
+    }
 
-        now = int(_time.time())
-        step = max(60, seconds // 120)
-        query_params.update(
-            {
-                "start": str(now - seconds),
-                "end": str(now),
-                "step": str(step),
-            }
-        )
-
-    endpoint = "api/v1/query_range" if time_range else "api/v1/query"
+    endpoint = "api/v1/query_range"
 
     try:
         data = prometheus_request(endpoint, params=query_params, timeout=15)
