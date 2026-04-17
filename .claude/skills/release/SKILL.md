@@ -168,7 +168,21 @@ cd /Users/amobrem/ali/OpenshiftPulse
 
 Generate the frontend CHANGELOG the same way (git log since last tag).
 
-**Step 4e: Commit doc updates in both repos**
+**Step 4e: Update GitHub Pages**
+
+The docs site at https://alimobrem.github.io/pulse-agent/ is served from `/docs`
+on main branch. Update version and counts in:
+
+```bash
+# docs/index.html — update version, tool count, and meta descriptions
+sed -i '' "s/v[0-9]\+\.[0-9]\+\.[0-9]\+/v<version>/g" docs/index.html
+# Also update tool counts, skill counts, etc. in the HTML
+```
+
+Verify the page looks right by reading `docs/index.html` and checking all
+version strings and counts match the new release.
+
+**Step 4f: Commit doc updates in both repos**
 ```bash
 # Backend
 cd /Users/amobrem/ali/pulse-agent
