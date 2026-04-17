@@ -68,21 +68,26 @@ if r.failed_scenarios:
 "
 ```
 
-### Phase 3: Code Review
+### Phase 3: Code Review + Security Review + Simplify
 
-Review changes since the last release tag:
-
+**3a. Code review** -- review changes since the last release tag:
 ```bash
 LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "HEAD~20")
 git log --oneline $LAST_TAG..HEAD
-```
-
-Use the pre-commit-reviewer agent to review the diff:
-```bash
 git diff $LAST_TAG..HEAD --stat
 ```
 
-Flag any concerns before proceeding.
+Use the pre-commit-reviewer agent to review the diff. Flag concerns.
+
+**3b. Security review** -- run `/security-review` on the changes since the last tag.
+Focus on new endpoints, auth changes, input validation, and injection risks.
+Any HIGH severity finding blocks the release.
+
+**3c. Simplify** -- run `/simplify` on recently changed files to catch:
+- Unused imports, dead code
+- Duplicated logic that should be shared
+- Efficiency issues (memory leaks, O(n) lookups, unnecessary re-renders)
+- Fix all issues before proceeding.
 
 ### Phase 4: Update All Documentation
 

@@ -2,6 +2,40 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [2.4.0] - 2026-04-17
+
+### Features
+- Multi-datasource live tables — K8s watches + PromQL metrics + log enrichment
+- All K8s table tools emit datasources for live rendering
+- ResourceTable shared component — unified rendering for live and static tables
+- Chart editor modal — edit PromQL, title, axes, legend, thresholds, time range
+- Chart threshold lines — warning (amber) and critical (red) reference lines
+- Cross-chart hover synchronization in custom views
+- Global time range selector for custom views (1h/6h/24h/3d/7d)
+- Persist chart customizations to saved views
+- Inline row actions — open detail, YAML, logs, delete with confirmation
+- Column auto-detect for resources without enhancers
+- Plans drawer (matches skills pattern)
+- Topology graph component with Add to View
+- Clickable component cards with detail drawer
+- ORCA hard pre-route rules (55/55 routing accuracy)
+- Release skill for coordinated dual-repo releases
+- Chaos test WebSocket client + topology health overlay
+
+### Fixes
+- ORCA routing: hard pre-route before typo correction
+- API group resolution for plural resource names
+- Namespace "ALL" normalized for frontend watches
+- optimize_view saves both layout and positions
+- Dynamic table heights based on row count
+- view_designer requires_tools includes editing tools
+- tool_sequence crash in MemoryView
+- K8s API proxy uses SA token
+
+### Tests
+- 43 new tests (topology, live table, useMultiSourceTable, ResourceTable, layout)
+- 55 routing eval scenarios (100% pass)
+
 ## [2.3.0] - 2026-04-14
 
 ### ORCA UI Surfaces
