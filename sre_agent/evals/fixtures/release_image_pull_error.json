@@ -1,0 +1,16 @@
+{
+    "name": "release_image_pull_error",
+    "prompt": "Several pods in the frontend namespace are stuck in ImagePullBackOff. Diagnose and resolve.",
+    "recorded_responses": {
+        "list_pods": "frontend/web-ui-5c8d9e7f2-abc12  Status=Pending  Restarts=0  Age=20m  (ImagePullBackOff)\nfrontend/web-ui-5c8d9e7f2-def34  Status=Pending  Restarts=0  Age=20m  (ImagePullBackOff)\nfrontend/web-ui-5c8d9e7f2-ghi56  Status=Pending  Restarts=0  Age=20m  (ImagePullBackOff)\nfrontend/cdn-proxy-4a3b2c1d-jkl78  Status=Running  Restarts=0  Age=7d",
+        "describe_pod": "{\"name\": \"web-ui-5c8d9e7f2-abc12\", \"namespace\": \"frontend\", \"status\": \"Pending\", \"containers\": [{\"name\": \"web-ui\", \"image\": \"registry.internal.corp/frontend/web-ui:v3.2.0\", \"ready\": false, \"state\": \"waiting\", \"reason\": \"ImagePullBackOff\"}], \"conditions\": [{\"type\": \"Ready\", \"status\": \"False\"}], \"recent_events\": [{\"type\": \"Warning\", \"reason\": \"Failed\", \"message\": \"Failed to pull image: unauthorized: authentication required\", \"age\": \"2m\"}, {\"type\": \"Warning\", \"reason\": \"Failed\", \"message\": \"Error: ImagePullBackOff\", \"age\": \"1m\"}]}",
+        "get_events": "20m ago  Warning  Failed       Pod/web-ui-5c8d9e7f2-abc12  Failed to pull image: unauthorized: authentication required\n20m ago  Warning  Failed       Pod/web-ui-5c8d9e7f2-def34  Failed to pull image: unauthorized: authentication required\n15m ago  Normal   Scheduled    Pod/web-ui-5c8d9e7f2-ghi56  Successfully assigned frontend/web-ui\n10m ago  Warning  Failed       Pod/web-ui-5c8d9e7f2-ghi56  Failed to pull image: unauthorized: authentication required",
+        "restart_deployment": "{\"status\": \"success\", \"message\": \"Deployment web-ui restarted successfully\", \"replicas\": {\"desired\": 3, \"ready\": 3}}"
+    },
+    "expected": {
+        "should_mention": ["ImagePullBackOff", "unauthorized", "authentication", "registry", "pull secret"],
+        "should_use_tools": ["describe_pod", "get_events"],
+        "should_not_use_tools": ["delete_pod", "scale_deployment"],
+        "max_tool_calls": 8
+    }
+}

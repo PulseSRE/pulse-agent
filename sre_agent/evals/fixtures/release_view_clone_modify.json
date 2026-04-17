@@ -1,0 +1,16 @@
+{
+    "name": "release_view_clone_modify",
+    "prompt": "Clone the production overview dashboard, remove the network latency widget, and add a memory pressure chart. Save it as 'Staging Overview'.",
+    "recorded_responses": {
+        "list_views": "[{\"id\": \"view-prod-001\", \"title\": \"Production Overview\", \"owner\": \"admin\", \"widgets\": 6, \"created\": \"2024-01-01\"}, {\"id\": \"view-sec-002\", \"title\": \"Security Posture\", \"owner\": \"admin\", \"widgets\": 4, \"created\": \"2024-01-05\"}]",
+        "clone_dashboard": "{\"status\": \"success\", \"view_id\": \"view-stg-003\", \"title\": \"Production Overview (Copy)\", \"widgets\": 6, \"cloned_from\": \"view-prod-001\"}",
+        "remove_widget_from_view": "{\"status\": \"success\", \"view_id\": \"view-stg-003\", \"removed_widget\": \"network-latency-chart\", \"remaining_widgets\": 5}",
+        "create_dashboard": "{\"status\": \"success\", \"view_id\": \"view-stg-003\", \"title\": \"Staging Overview\", \"widgets\": 6, \"added\": \"memory-pressure-chart\"}"
+    },
+    "expected": {
+        "should_mention": ["clone", "Staging Overview", "network latency", "memory"],
+        "should_use_tools": ["clone_dashboard", "remove_widget_from_view"],
+        "should_not_use_tools": ["delete_dashboard"],
+        "max_tool_calls": 8
+    }
+}

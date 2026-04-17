@@ -1,0 +1,17 @@
+{
+    "name": "release_rollback_bad_deployment",
+    "prompt": "The checkout service deployment broke after the last rollout. Roll it back to the last working version.",
+    "recorded_responses": {
+        "list_deployments": "staging/checkout-service  Ready=0/3  Age=45m  Image=checkout:v4.1.0\nstaging/payment-gateway  Ready=2/2  Age=5d  Image=payment:v2.0.1",
+        "describe_deployment": "{\"name\": \"checkout-service\", \"namespace\": \"staging\", \"replicas\": {\"desired\": 3, \"ready\": 0, \"unavailable\": 3}, \"strategy\": \"RollingUpdate\", \"containers\": [{\"name\": \"checkout\", \"image\": \"checkout:v4.1.0\"}], \"conditions\": [{\"type\": \"Available\", \"status\": \"False\", \"reason\": \"MinimumReplicasUnavailable\"}], \"revision\": 4, \"revisionHistory\": [{\"revision\": 3, \"image\": \"checkout:v4.0.2\", \"created\": \"2024-01-10\"}, {\"revision\": 4, \"image\": \"checkout:v4.1.0\", \"created\": \"2024-01-15\"}]}",
+        "get_pod_logs": "2024-01-15T14:30:01Z [ERROR] NullPointerException in CheckoutHandler.processOrder()\n2024-01-15T14:30:01Z [ERROR] java.lang.NullPointerException: Cannot invoke method on null reference\n2024-01-15T14:30:01Z [FATAL] Application failed to start. Shutting down.",
+        "rollback_deployment": "{\"status\": \"success\", \"message\": \"Deployment checkout-service rolled back to revision 3\", \"image\": \"checkout:v4.0.2\", \"replicas\": {\"desired\": 3, \"ready\": 3}}",
+        "list_pods": "staging/checkout-service-7b5d9f8c4-abc12  Status=Running  Restarts=0  Age=30s\nstaging/checkout-service-7b5d9f8c4-def34  Status=Running  Restarts=0  Age=28s\nstaging/checkout-service-7b5d9f8c4-ghi56  Status=Running  Restarts=0  Age=25s"
+    },
+    "expected": {
+        "should_mention": ["rollback", "v4.0.2", "NullPointer"],
+        "should_use_tools": ["describe_deployment", "rollback_deployment"],
+        "should_not_use_tools": ["delete_pod", "scale_deployment", "apply_yaml"],
+        "max_tool_calls": 8
+    }
+}

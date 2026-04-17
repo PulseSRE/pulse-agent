@@ -220,6 +220,83 @@
       "rollback_available": false,
       "retry_attempts": 0,
       "transient_failures": 0
+    },
+    {
+      "scenario_id": "release_rollback_bad_deployment",
+      "category": "sre",
+      "description": "Rollback a broken deployment to last known good revision with verification.",
+      "tool_calls": [
+        "list_deployments",
+        "describe_deployment",
+        "get_pod_logs",
+        "rollback_deployment",
+        "list_pods"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 78,
+      "user_confirmed_resolution": true,
+      "final_response": "Deployment checkout-service was rolled back to revision 3 because the latest image introduced a null pointer crash on startup. All 3 replicas are now healthy on the previous image tag.",
+      "verification_passed": true,
+      "rollback_available": true,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "release_cross_agent_handoff",
+      "category": "sre",
+      "description": "SRE triage hands off to security scan when RBAC misconfiguration is the root cause.",
+      "tool_calls": [
+        "list_pods",
+        "get_pod_logs",
+        "get_events",
+        "request_security_scan"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 105,
+      "user_confirmed_resolution": true,
+      "final_response": "Pods were failing because the service account lacked permissions to read ConfigMaps after a recent RBAC change. Handed off to security agent which confirmed the role binding was removed. Recommended restoring the binding with least-privilege scope.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "release_image_pull_error_resolution",
+      "category": "sre",
+      "description": "Diagnose and resolve image pull errors across multiple pods.",
+      "tool_calls": [
+        "list_pods",
+        "describe_pod",
+        "get_events",
+        "restart_deployment"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 70,
+      "user_confirmed_resolution": true,
+      "final_response": "Image pull failures were caused by an expired registry credential. After the pull secret was updated, a rolling restart restored all pods. Verified all replicas are pulling the correct image and running.",
+      "verification_passed": true,
+      "rollback_available": true,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "release_view_clone_and_modify",
+      "category": "sre",
+      "description": "Clone an existing dashboard and modify it by removing and adding widgets.",
+      "tool_calls": [
+        "list_views",
+        "clone_dashboard",
+        "remove_widget_from_view",
+        "create_dashboard"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 95,
+      "user_confirmed_resolution": true,
+      "final_response": "Cloned the production overview dashboard, removed the network latency widget, and added a memory pressure chart. The new dashboard is saved as 'Staging Overview' and accessible from Views.",
+      "verification_passed": true,
+      "rollback_available": true,
+      "retry_attempts": 0,
+      "transient_failures": 0
     }
   ],
   "description": "End-to-end SRE and security scenarios that must pass before shipping a release"
