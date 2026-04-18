@@ -920,52 +920,54 @@ def _get_finding_from_db(finding_id: str) -> dict | None:
 
 
 @router.get("/incidents/{finding_id}/impact")
-async def get_finding_impact(finding_id: str, _auth=Depends(verify_token)):
+async def get_finding_impact(
+    finding_id: str,
+    kind: str = Query("", description="Resource kind (fallback if finding not in DB)"),
+    name: str = Query("", description="Resource name"),
+    namespace: str = Query("", description="Resource namespace"),
+    _auth=Depends(verify_token),
+):
     """Blast radius and dependency analysis for a single finding."""
     from fastapi.responses import JSONResponse
 
     from ..dependency_graph import get_dependency_graph
 
-    finding = _get_finding_from_db(finding_id)
-    if not finding:
-        return JSONResponse(status_code=404, content={"error": "Finding not found"})
+    res_kind, res_ns, res_name = kind, namespace, name
 
-    # Extract the first resource from the finding
-    resources_raw = finding.get("resources") or finding.get("resource") or ""
-    kind, ns, name = "", "", ""
+    if not res_kind:
+        finding = _get_finding_from_db(finding_id)
+        if finding:
+            resources_raw = finding.get("resources") or finding.get("resource") or ""
+            if isinstance(resources_raw, str):
+                try:
+                    import json as _json
 
-    # resources may be a JSON list or a comma-separated string
-    if isinstance(resources_raw, str):
-        try:
-            import json as _json
+                    parsed = _json.loads(resources_raw)
+                    if isinstance(parsed, list) and parsed:
+                        first = parsed[0]
+                        res_kind = first.get("kind", "")
+                        res_ns = first.get("namespace", "")
+                        res_name = first.get("name", "")
+                except (ValueError, TypeError):
+                    first_str = resources_raw.split(",")[0].strip()
+                    if first_str:
+                        sep = ":" if ":" in first_str else "/"
+                        parts = first_str.split(sep, 2)
+                        if len(parts) == 3:
+                            res_kind, res_ns, res_name = parts
 
-            parsed = _json.loads(resources_raw)
-            if isinstance(parsed, list) and parsed:
-                first = parsed[0]
-                kind = first.get("kind", "")
-                ns = first.get("namespace", "")
-                name = first.get("name", "")
-        except (ValueError, TypeError):
-            # Fall back to comma-separated "Kind:ns:name" or "Kind/ns/name"
-            first_str = resources_raw.split(",")[0].strip()
-            if first_str:
-                sep = ":" if ":" in first_str else "/"
-                parts = first_str.split(sep, 2)
-                if len(parts) == 3:
-                    kind, ns, name = parts
-
-    if not kind:
+    if not res_kind:
         return JSONResponse(
             status_code=404,
             content={"error": "Finding has no parseable resource for impact analysis"},
         )
 
-    affected_resource = {"kind": kind, "name": name, "namespace": ns}
+    affected_resource = {"kind": res_kind, "name": res_name, "namespace": res_ns}
 
     try:
         graph = get_dependency_graph()
-        downstream_ids = graph.downstream_blast_radius(kind, ns, name)
-        upstream_ids = graph.upstream_dependencies(kind, ns, name)
+        downstream_ids = graph.downstream_blast_radius(res_kind, res_ns, res_name)
+        upstream_ids = graph.upstream_dependencies(res_kind, res_ns, res_name)
     except Exception:
         downstream_ids = []
         upstream_ids = []
@@ -990,15 +992,16 @@ async def get_finding_impact(finding_id: str, _auth=Depends(verify_token)):
 
 
 @router.get("/incidents/{finding_id}/learning")
-async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
+async def get_finding_learning(
+    finding_id: str,
+    category: str = Query("", description="Finding category (fallback if finding not in DB)"),
+    _auth=Depends(verify_token),
+):
     """Aggregate all learning artifacts linked to a finding."""
-    from fastapi.responses import JSONResponse
-
-    finding = _get_finding_from_db(finding_id)
-    if not finding:
-        return JSONResponse(status_code=404, content={"error": "Finding not found"})
-
-    category = finding.get("category") or ""
+    cat = category
+    if not cat:
+        finding = _get_finding_from_db(finding_id)
+        cat = (finding.get("category") or "") if finding else ""
 
     from pathlib import Path
 
@@ -1009,32 +1012,32 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
 
     # (a) Scaffolded skill
     result["scaffolded_skill"] = None
-    if category:
+    if cat:
         try:
-            skill_path = base_dir / "skills" / category / "skill.md"
+            skill_path = base_dir / "skills" / cat / "skill.md"
             if skill_path.exists():
                 content = skill_path.read_text(encoding="utf-8")
                 if "generated_by:" in content and "auto" in content:
                     result["scaffolded_skill"] = {
-                        "name": category,
-                        "path": f"sre_agent/skills/{category}/skill.md",
+                        "name": cat,
+                        "path": f"sre_agent/skills/{cat}/skill.md",
                     }
         except OSError:
             pass
 
     # (b) Scaffolded plan template
     result["scaffolded_plan"] = None
-    if category:
+    if cat:
         try:
             import yaml
 
-            plan_path = base_dir / "plan_templates" / f"{category}.yaml"
+            plan_path = base_dir / "plan_templates" / f"{cat}.yaml"
             if plan_path.exists():
                 data = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
                 if data:
                     result["scaffolded_plan"] = {
-                        "name": data.get("name", category),
-                        "incident_type": data.get("incident_type", category),
+                        "name": data.get("name", cat),
+                        "incident_type": data.get("incident_type", cat),
                         "phases": len(data.get("phases", [])),
                     }
         except (OSError, ValueError):
@@ -1042,13 +1045,13 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
 
     # (c) Scaffolded eval
     result["scaffolded_eval"] = None
-    if category:
+    if cat:
         try:
             scaffolded_path = base_dir / "evals" / "scenarios_data" / "scaffolded.json"
             if scaffolded_path.exists():
                 scenarios = json.loads(scaffolded_path.read_text(encoding="utf-8"))
                 for sc in scenarios:
-                    if category in sc.get("scenario_id", ""):
+                    if cat in sc.get("scenario_id", ""):
                         result["scaffolded_eval"] = {
                             "scenario_id": sc["scenario_id"],
                             "tool_calls": len(sc.get("tool_calls", sc.get("expected_tools", []))),
@@ -1060,12 +1063,12 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
     # (d) Learned runbook + (e) Detected patterns — single store instance
     result["learned_runbook"] = None
     result["detected_patterns"] = None
-    if category:
+    if cat:
         try:
             from ..memory.store import IncidentStore
 
             store = IncidentStore()
-            runbooks = store.find_runbooks(category, limit=1)
+            runbooks = store.find_runbooks(cat, limit=1)
             if runbooks:
                 rb = runbooks[0]
                 tool_seq = rb.get("tool_sequence", "[]")
@@ -1076,7 +1079,7 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
                     "success_count": rb.get("success_count", 0),
                     "tool_sequence": [t.get("tool", t) if isinstance(t, dict) else t for t in tool_seq][:10],
                 }
-            patterns = store.search_patterns(category, limit=5)
+            patterns = store.search_patterns(cat, limit=5)
             if patterns:
                 result["detected_patterns"] = [
                     {
@@ -1087,7 +1090,7 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
                     for p in patterns
                 ]
         except Exception:
-            logger.debug("Failed to query memory store for category %s", category)
+            logger.debug("Failed to query memory store for category %s", cat)
 
     # (f) Confidence delta + (g) Weight impact — batched DB access
     result["confidence_delta"] = None
@@ -1116,7 +1119,7 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
                     "delta": round(after_conf - before_conf, 2),
                 }
 
-        if category:
+        if cat:
             weight_row = db.fetchone(
                 "SELECT channel_weights FROM skill_selection_log "
                 "WHERE session_id = '__weight_snapshot__' "
