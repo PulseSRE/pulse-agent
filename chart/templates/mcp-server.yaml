@@ -34,22 +34,32 @@ spec:
           ports:
             - containerPort: 8081
               name: sse
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: sse
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
           readinessProbe:
             httpGet:
               path: /healthz
               port: sse
-            initialDelaySeconds: 3
             periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /healthz
               port: sse
-            initialDelaySeconds: 10
             periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
           resources:
             requests:
               cpu: 50m
-              memory: 64Mi
+              memory: 128Mi
             limits:
               cpu: 200m
               memory: 256Mi
