@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel as _BaseModel
 
 from ..config import get_settings
 from ..monitor import (
@@ -873,6 +874,322 @@ async def get_blast_radius(
         "affected": len(tree),
         "resources": tree,
     }
+
+
+# ── Incident Center ──────────────────────────────────────────────────────
+
+
+def _parse_dep_id(graph, dep_id: str) -> dict:
+    """Parse a dependency graph key into a structured resource dict.
+
+    Tries ``graph.get_node()`` first; falls back to splitting the ID string
+    (format ``Kind/namespace/name``).
+    """
+    node = graph.get_node(dep_id)
+    if node:
+        return {"id": dep_id, "kind": node.kind, "name": node.name, "namespace": node.namespace}
+    parts = dep_id.split("/", 2)
+    if len(parts) == 3:
+        return {"id": dep_id, "kind": parts[0], "name": parts[2], "namespace": parts[1]}
+    return {"id": dep_id, "kind": dep_id, "name": "", "namespace": ""}
+
+
+def _get_finding_from_db(finding_id: str) -> dict | None:
+    """Look up a finding by ID from the database.  Returns ``None`` if missing."""
+    try:
+        from ..db import get_database
+
+        db = get_database()
+        row = db.fetchone("SELECT * FROM findings WHERE id = ?", (finding_id,))
+        return dict(row) if row else None
+    except Exception:
+        return None
+
+
+@router.get("/incidents/{finding_id}/impact")
+async def get_finding_impact(finding_id: str, _auth=Depends(verify_token)):
+    """Blast radius and dependency analysis for a single finding."""
+    from fastapi.responses import JSONResponse
+
+    from ..dependency_graph import get_dependency_graph
+
+    finding = _get_finding_from_db(finding_id)
+    if not finding:
+        return JSONResponse(status_code=404, content={"error": "Finding not found"})
+
+    # Extract the first resource from the finding
+    resources_raw = finding.get("resources") or finding.get("resource") or ""
+    kind, ns, name = "", "", ""
+
+    # resources may be a JSON list or a comma-separated string
+    if isinstance(resources_raw, str):
+        try:
+            import json as _json
+
+            parsed = _json.loads(resources_raw)
+            if isinstance(parsed, list) and parsed:
+                first = parsed[0]
+                kind = first.get("kind", "")
+                ns = first.get("namespace", "")
+                name = first.get("name", "")
+        except (ValueError, TypeError):
+            # Fall back to comma-separated "Kind:ns:name" or "Kind/ns/name"
+            first_str = resources_raw.split(",")[0].strip()
+            if first_str:
+                sep = ":" if ":" in first_str else "/"
+                parts = first_str.split(sep, 2)
+                if len(parts) == 3:
+                    kind, ns, name = parts
+
+    if not kind:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Finding has no parseable resource for impact analysis"},
+        )
+
+    affected_resource = {"kind": kind, "name": name, "namespace": ns}
+
+    try:
+        graph = get_dependency_graph()
+        downstream_ids = graph.downstream_blast_radius(kind, ns, name)
+        upstream_ids = graph.upstream_dependencies(kind, ns, name)
+    except Exception:
+        downstream_ids = []
+        upstream_ids = []
+
+    blast_radius = [_parse_dep_id(graph, d) for d in downstream_ids]
+    upstream_deps = [_parse_dep_id(graph, u) for u in upstream_ids]
+
+    affected_pods = sum(1 for r in blast_radius if r.get("kind") == "Pod")
+    namespaces = {r.get("namespace", "") for r in blast_radius if r.get("namespace")}
+    scope = "cross-namespace" if len(namespaces) > 1 else "namespace-scoped"
+    risk_level = "high" if len(downstream_ids) > 10 else "medium" if len(downstream_ids) > 3 else "low"
+
+    return {
+        "finding_id": finding_id,
+        "affected_resource": affected_resource,
+        "blast_radius": blast_radius,
+        "upstream_dependencies": upstream_deps,
+        "affected_pods": affected_pods,
+        "scope": scope,
+        "risk_level": risk_level,
+    }
+
+
+@router.get("/incidents/{finding_id}/learning")
+async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
+    """Aggregate all learning artifacts linked to a finding."""
+    from fastapi.responses import JSONResponse
+
+    finding = _get_finding_from_db(finding_id)
+    if not finding:
+        return JSONResponse(status_code=404, content={"error": "Finding not found"})
+
+    category = finding.get("category") or ""
+
+    result: dict[str, Any] = {"finding_id": finding_id}
+
+    # (a) Scaffolded skill
+    result["scaffolded_skill"] = None
+    if category:
+        try:
+            from pathlib import Path
+
+            skill_path = Path(__file__).parent.parent / "skills" / category / "skill.md"
+            if skill_path.exists():
+                content = skill_path.read_text(encoding="utf-8")
+                if "generated_by:" in content and "auto" in content:
+                    result["scaffolded_skill"] = {
+                        "name": category,
+                        "path": f"sre_agent/skills/{category}/skill.md",
+                    }
+        except Exception:
+            pass
+
+    # (b) Scaffolded plan template
+    result["scaffolded_plan"] = None
+    if category:
+        try:
+            from pathlib import Path
+
+            import yaml
+
+            plan_path = Path(__file__).parent.parent / "plan_templates" / f"{category}.yaml"
+            if plan_path.exists():
+                data = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
+                if data:
+                    result["scaffolded_plan"] = {
+                        "name": data.get("name", category),
+                        "incident_type": data.get("incident_type", category),
+                        "phases": len(data.get("phases", [])),
+                    }
+        except Exception:
+            pass
+
+    # (c) Scaffolded eval
+    result["scaffolded_eval"] = None
+    if category:
+        try:
+            from pathlib import Path
+
+            scaffolded_path = Path(__file__).parent.parent / "evals" / "scenarios_data" / "scaffolded.json"
+            if scaffolded_path.exists():
+                scenarios = json.loads(scaffolded_path.read_text(encoding="utf-8"))
+                for sc in scenarios:
+                    if category in sc.get("scenario_id", ""):
+                        result["scaffolded_eval"] = {
+                            "scenario_id": sc["scenario_id"],
+                            "tool_calls": len(sc.get("tool_calls", sc.get("expected_tools", []))),
+                        }
+                        break
+        except Exception:
+            pass
+
+    # (d) Learned runbook
+    result["learned_runbook"] = None
+    if category:
+        try:
+            from ..memory.store import IncidentStore
+
+            store = IncidentStore()
+            runbooks = store.find_runbooks(category, limit=1)
+            if runbooks:
+                rb = runbooks[0]
+                tool_seq = rb.get("tool_sequence", "[]")
+                if isinstance(tool_seq, str):
+                    tool_seq = json.loads(tool_seq)
+                result["learned_runbook"] = {
+                    "name": rb.get("name", ""),
+                    "success_count": rb.get("success_count", 0),
+                    "tool_sequence": [t.get("tool", t) if isinstance(t, dict) else t for t in tool_seq][:10],
+                }
+        except Exception:
+            pass
+
+    # (e) Detected patterns
+    result["detected_patterns"] = None
+    if category:
+        try:
+            from ..memory.store import IncidentStore
+
+            store = IncidentStore()
+            patterns = store.search_patterns(category, limit=5)
+            if patterns:
+                result["detected_patterns"] = [
+                    {
+                        "type": p.get("pattern_type", ""),
+                        "description": p.get("description", ""),
+                        "frequency": p.get("frequency", 0),
+                    }
+                    for p in patterns
+                ]
+        except Exception:
+            pass
+
+    # (f) Confidence delta
+    result["confidence_delta"] = None
+    try:
+        from ..db import get_database
+
+        db = get_database()
+        inv_row = db.fetchone(
+            "SELECT confidence FROM investigations WHERE finding_id = ? ORDER BY timestamp DESC LIMIT 1",
+            (finding_id,),
+        )
+        if inv_row and inv_row.get("confidence") is not None:
+            before_conf = float(inv_row["confidence"])
+            # Check if there's a verification with updated confidence
+            ver_row = db.fetchone(
+                "SELECT verification_status FROM actions WHERE finding_id = ? AND verification_status IS NOT NULL "
+                "ORDER BY timestamp DESC LIMIT 1",
+                (finding_id,),
+            )
+            if ver_row:
+                after_conf = (
+                    min(1.0, before_conf + 0.05) if ver_row["verification_status"] == "verified" else before_conf
+                )
+                result["confidence_delta"] = {
+                    "before": round(before_conf, 2),
+                    "after": round(after_conf, 2),
+                    "delta": round(after_conf - before_conf, 2),
+                }
+    except Exception:
+        pass
+
+    # (g) Weight impact
+    result["weight_impact"] = None
+    if category:
+        try:
+            from ..db import get_database
+
+            db = get_database()
+            weight_row = db.fetchone(
+                "SELECT channel_weights FROM skill_selection_log "
+                "WHERE session_id = '__weight_snapshot__' "
+                "ORDER BY timestamp DESC LIMIT 1"
+            )
+            if weight_row and weight_row.get("channel_weights"):
+                weights = weight_row["channel_weights"]
+                if isinstance(weights, str):
+                    weights = json.loads(weights)
+                # Find the channel with the largest delta from default
+                from ..skill_selector import DEFAULT_WEIGHTS
+
+                best_ch = None
+                best_delta = 0.0
+                for ch, w in weights.items():
+                    default = DEFAULT_WEIGHTS.get(ch, 0.0)
+                    delta = abs(w - default)
+                    if delta > best_delta:
+                        best_delta = delta
+                        best_ch = ch
+                if best_ch and best_delta > 0.001:
+                    result["weight_impact"] = {
+                        "channel": best_ch,
+                        "old_weight": round(DEFAULT_WEIGHTS.get(best_ch, 0.0), 4),
+                        "new_weight": round(weights.get(best_ch, 0.0), 4),
+                    }
+        except Exception:
+            pass
+
+    return result
+
+
+class _SimulateRequest(_BaseModel):
+    tool: str
+    input: dict = {}
+    target_resource: dict | None = None
+
+
+@router.post("/monitor/simulate")
+async def simulate_with_blast_radius(body: _SimulateRequest, _auth=Depends(verify_token)):
+    """Simulate a tool action and enrich with fix blast radius analysis."""
+    from ..monitor.investigations import simulate_action
+
+    sim = simulate_action(body.tool, body.input)
+
+    fix_blast_radius: list[dict] = []
+    fix_upstream_deps: list[dict] = []
+
+    if body.target_resource:
+        kind = body.target_resource.get("kind", "")
+        ns = body.target_resource.get("namespace", "")
+        name = body.target_resource.get("name", "")
+        if kind and name:
+            try:
+                from ..dependency_graph import get_dependency_graph
+
+                graph = get_dependency_graph()
+                downstream_ids = graph.downstream_blast_radius(kind, ns, name)
+                upstream_ids = graph.upstream_dependencies(kind, ns, name)
+                fix_blast_radius = [_parse_dep_id(graph, d) for d in downstream_ids]
+                fix_upstream_deps = [_parse_dep_id(graph, u) for u in upstream_ids]
+            except Exception:
+                pass
+
+    sim["fixBlastRadius"] = fix_blast_radius
+    sim["fixUpstreamDeps"] = fix_upstream_deps
+    return sim
 
 
 # ── Plan Templates ─────────────────────────────────────────────────────────
