@@ -529,10 +529,10 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
             metric = r.get("metric", {})
             label = _extract_label(metric, i)
             values = r.get("values", [])
-            data = [[int(float(ts) * 1000), float(val)] for ts, val in values if not math.isnan(float(val))]
+            points = [[int(float(ts) * 1000), float(val)] for ts, val in values if not math.isnan(float(val))]
             latest = values[-1][1] if values else "?"
             lines.append(f"{label} = {latest} (latest of {len(values)} samples)")
-            series.append({"label": label, "data": data, "color": _CHART_COLORS[i % len(_CHART_COLORS)]})
+            series.append({"label": label, "data": points, "color": _CHART_COLORS[i % len(_CHART_COLORS)]})
 
         if len(results) > 10:
             lines.append(f"... and {len(results) - 10} more series (truncated to top 10 for chart)")
