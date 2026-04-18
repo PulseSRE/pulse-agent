@@ -896,13 +896,13 @@ def _parse_dep_id(graph, dep_id: str) -> dict:
 
 def _get_finding_from_db(finding_id: str) -> dict | None:
     """Look up a finding by ID from the database.  Returns ``None`` if missing."""
-    try:
-        from ..db import get_database
+    from ..db import get_database
 
+    try:
         db = get_database()
-        row = db.fetchone("SELECT * FROM findings WHERE id = ?", (finding_id,))
-        return dict(row) if row else None
+        return db.fetchone("SELECT * FROM findings WHERE id = ?", (finding_id,))
     except Exception:
+        logger.debug("Failed to fetch finding %s", finding_id)
         return None
 
 
@@ -987,15 +987,18 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
 
     category = finding.get("category") or ""
 
+    from pathlib import Path
+
+    from ..db import get_database
+
     result: dict[str, Any] = {"finding_id": finding_id}
+    base_dir = Path(__file__).parent.parent
 
     # (a) Scaffolded skill
     result["scaffolded_skill"] = None
     if category:
         try:
-            from pathlib import Path
-
-            skill_path = Path(__file__).parent.parent / "skills" / category / "skill.md"
+            skill_path = base_dir / "skills" / category / "skill.md"
             if skill_path.exists():
                 content = skill_path.read_text(encoding="utf-8")
                 if "generated_by:" in content and "auto" in content:
@@ -1003,18 +1006,16 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
                         "name": category,
                         "path": f"sre_agent/skills/{category}/skill.md",
                     }
-        except Exception:
+        except OSError:
             pass
 
     # (b) Scaffolded plan template
     result["scaffolded_plan"] = None
     if category:
         try:
-            from pathlib import Path
-
             import yaml
 
-            plan_path = Path(__file__).parent.parent / "plan_templates" / f"{category}.yaml"
+            plan_path = base_dir / "plan_templates" / f"{category}.yaml"
             if plan_path.exists():
                 data = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
                 if data:
@@ -1023,16 +1024,14 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
                         "incident_type": data.get("incident_type", category),
                         "phases": len(data.get("phases", [])),
                     }
-        except Exception:
+        except (OSError, ValueError):
             pass
 
     # (c) Scaffolded eval
     result["scaffolded_eval"] = None
     if category:
         try:
-            from pathlib import Path
-
-            scaffolded_path = Path(__file__).parent.parent / "evals" / "scenarios_data" / "scaffolded.json"
+            scaffolded_path = base_dir / "evals" / "scenarios_data" / "scaffolded.json"
             if scaffolded_path.exists():
                 scenarios = json.loads(scaffolded_path.read_text(encoding="utf-8"))
                 for sc in scenarios:
@@ -1042,11 +1041,12 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
                             "tool_calls": len(sc.get("tool_calls", sc.get("expected_tools", []))),
                         }
                         break
-        except Exception:
+        except (OSError, ValueError):
             pass
 
-    # (d) Learned runbook
+    # (d) Learned runbook + (e) Detected patterns — single store instance
     result["learned_runbook"] = None
+    result["detected_patterns"] = None
     if category:
         try:
             from ..memory.store import IncidentStore
@@ -1063,16 +1063,6 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
                     "success_count": rb.get("success_count", 0),
                     "tool_sequence": [t.get("tool", t) if isinstance(t, dict) else t for t in tool_seq][:10],
                 }
-        except Exception:
-            pass
-
-    # (e) Detected patterns
-    result["detected_patterns"] = None
-    if category:
-        try:
-            from ..memory.store import IncidentStore
-
-            store = IncidentStore()
             patterns = store.search_patterns(category, limit=5)
             if patterns:
                 result["detected_patterns"] = [
@@ -1084,13 +1074,11 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
                     for p in patterns
                 ]
         except Exception:
-            pass
+            logger.debug("Failed to query memory store for category %s", category)
 
     # (f) Confidence delta
     result["confidence_delta"] = None
     try:
-        from ..db import get_database
-
         db = get_database()
         inv_row = db.fetchone(
             "SELECT confidence FROM investigations WHERE finding_id = ? ORDER BY timestamp DESC LIMIT 1",
@@ -1098,7 +1086,6 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
         )
         if inv_row and inv_row.get("confidence") is not None:
             before_conf = float(inv_row["confidence"])
-            # Check if there's a verification with updated confidence
             ver_row = db.fetchone(
                 "SELECT verification_status FROM actions WHERE finding_id = ? AND verification_status IS NOT NULL "
                 "ORDER BY timestamp DESC LIMIT 1",
@@ -1114,14 +1101,12 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
                     "delta": round(after_conf - before_conf, 2),
                 }
     except Exception:
-        pass
+        logger.debug("Failed to compute confidence delta for %s", finding_id)
 
     # (g) Weight impact
     result["weight_impact"] = None
     if category:
         try:
-            from ..db import get_database
-
             db = get_database()
             weight_row = db.fetchone(
                 "SELECT channel_weights FROM skill_selection_log "
@@ -1132,7 +1117,6 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
                 weights = weight_row["channel_weights"]
                 if isinstance(weights, str):
                     weights = json.loads(weights)
-                # Find the channel with the largest delta from default
                 from ..skill_selector import DEFAULT_WEIGHTS
 
                 best_ch = None
@@ -1150,7 +1134,7 @@ async def get_finding_learning(finding_id: str, _auth=Depends(verify_token)):
                         "new_weight": round(weights.get(best_ch, 0.0), 4),
                     }
         except Exception:
-            pass
+            logger.debug("Failed to compute weight impact for %s", finding_id)
 
     return result
 
