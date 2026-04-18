@@ -481,6 +481,12 @@ def _init_hard_pre_route() -> None:
             ),
             (re.compile(r"(slo\b|service\s+level|error\s+budget|burn\s+rate)", re.IGNORECASE), "slo_management"),
             (re.compile(r"(capacity\s+plan|forecast|projection|right.?siz)", re.IGNORECASE), "capacity_planner"),
+            (
+                re.compile(
+                    r"(since\s+(the\s+)?upgrade|after\s+(the\s+)?upgrade|post.?upgrade|unstable)", re.IGNORECASE
+                ),
+                "sre",
+            ),
         ]
     )
     # Then skill-defined trigger_patterns (lower priority)
