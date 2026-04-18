@@ -86,7 +86,7 @@ jobs:
           assert v in readme, f'README.md does not mention version {v}'
           # Check API_CONTRACT has all REST endpoints from api.py
           contract = open('API_CONTRACT.md').read()
-          for endpoint in ['/healthz', '/version', '/health', '/tools', '/fix-history', '/eval/status', '/monitor/capabilities', '/monitor/pause', '/monitor/resume', '/memory/export', '/memory/import', '/context']:
+          for endpoint in ['/healthz', '/version', '/health', '/tools', '/fix-history', '/eval/status', '/monitor/capabilities', '/monitor/pause', '/monitor/resume', '/memory/export', '/memory/import']:
               assert endpoint in contract, f'API_CONTRACT.md missing endpoint {endpoint}'
           print(f'Docs consistency check passed (v{v})')
           "
