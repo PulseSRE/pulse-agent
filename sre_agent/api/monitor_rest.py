@@ -418,12 +418,19 @@ async def get_kpi_dashboard(
             (days,),
         )
         mttr_seconds = int((mttr_row["avg_ms"] or 0) / 1000) if mttr_row else 0
+        has_remediations = mttr_row and mttr_row["avg_ms"] is not None
         kpis["mttr"] = {
             "label": "Mean Time to Remediate",
             "value": mttr_seconds,
             "unit": "seconds",
             "target": 300,
-            "status": "pass" if mttr_seconds <= 300 else "warn" if mttr_seconds <= 600 else "fail",
+            "status": "info"
+            if not has_remediations
+            else "pass"
+            if mttr_seconds <= 300
+            else "warn"
+            if mttr_seconds <= 600
+            else "fail",
         }
 
         # 3. Auto-remediation success rate
@@ -433,13 +440,21 @@ async def get_kpi_dashboard(
             "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
             (days,),
         )
-        fix_rate = round(fix_row["good"] / max(fix_row["total"], 1), 3) if fix_row else 0
+        fix_total = fix_row["total"] if fix_row else 0
+        fix_rate = round(fix_row["good"] / max(fix_total, 1), 3) if fix_row else 0
         kpis["auto_fix_success"] = {
             "label": "Auto-Remediation Success",
             "value": fix_rate,
             "unit": "ratio",
             "target": 0.85,
-            "status": "pass" if fix_rate >= 0.85 else "warn" if fix_rate >= 0.70 else "fail",
+            "status": "info"
+            if fix_total == 0
+            else "pass"
+            if fix_rate >= 0.85
+            else "warn"
+            if fix_rate >= 0.70
+            else "fail",
+            "sample_count": fix_total,
         }
 
         # 4. False positive rate (noise)
