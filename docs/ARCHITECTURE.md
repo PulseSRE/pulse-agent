@@ -1422,7 +1422,7 @@ Replaces keyword-only routing with 6-channel weighted fusion (5 active by defaul
 1. **Keyword** (0.30) — direct keyword + skill name matching, normalized 0.0-1.0
 2. **Component Tags** (0.20) — regex-extract K8s resource types (Pod, Deployment, Service, etc.), match against skill categories
 3. **Historical** (0.20) — token→skill frequency from `skill_usage` table, 5-min cache
-4. **Semantic** (0.15) — TF-IDF cosine similarity against skill descriptions + keywords. Activate with `PULSE_AGENT_EMBEDDING_CHANNEL=1`
+4. **Semantic** (0.15) — TF-IDF cosine similarity against skill descriptions + keywords
 5. **Alert Taxonomy** (0.10) — alert name prefixes (kube→sre, rbac→security) + scanner categories
 6. **Temporal** (0.05) — recent deploy/change keywords boost operations skills
 

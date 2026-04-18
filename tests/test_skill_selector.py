@@ -308,7 +308,12 @@ class TestRecordOutcome:
 
 
 class TestSemanticEmbedding:
-    def test_disabled_by_default(self):
+    def test_returns_scores(self):
         selector = SkillSelector({"sre": _mock_skill("sre")})
         scores = selector._score_semantic_embedding("check pods")
+        assert isinstance(scores, dict)
+
+    def test_empty_query(self):
+        selector = SkillSelector({"sre": _mock_skill("sre")})
+        scores = selector._score_semantic_embedding("")
         assert scores == {}

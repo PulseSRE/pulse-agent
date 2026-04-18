@@ -169,6 +169,20 @@ def main() -> None:
             Path(args.output).write_text(_format_audit(audit, args.format) + "\n", encoding="utf-8")
         return
 
+    # Selector suite — deterministic routing accuracy, no fixtures
+    if args.suite == "selector":
+        from .selector_eval import format_selector_eval, run_selector_eval
+
+        sel_result = run_selector_eval()
+        rendered = format_selector_eval(sel_result)
+        print(rendered)
+        if args.output:
+            Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+            Path(args.output).write_text(rendered + "\n", encoding="utf-8")
+        if args.fail_on_gate and sel_result.recall_at_5 < 0.90:
+            sys.exit(1)
+        return
+
     scenarios = load_suite(args.suite)
     result = evaluate_suite(args.suite, scenarios)
 

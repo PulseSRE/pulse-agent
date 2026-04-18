@@ -1198,7 +1198,10 @@ class MonitorSession:
                 # Recompute channel weights from selection outcomes
                 new_weights = await asyncio.to_thread(recompute_channel_weights, 7)
                 if new_weights:
-                    logger.info("Daily flywheel: recomputed channel weights: %s", new_weights)
+                    from ..skill_loader import _get_selector
+
+                    _get_selector()._weights = new_weights
+                    logger.info("Daily flywheel: applied learned channel weights: %s", new_weights)
 
                 # Identify skill gaps (recurring queries with no good match)
                 gaps = await asyncio.to_thread(identify_skill_gaps, 30)

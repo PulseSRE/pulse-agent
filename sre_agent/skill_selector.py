@@ -14,7 +14,6 @@ Channels:
 from __future__ import annotations
 
 import logging
-import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -42,7 +41,7 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "historical": 0.20,
     "taxonomy": 0.10,
     "temporal": 0.10,  # state-aware: cluster changes + time-of-day
-    "semantic": 0.15,  # TF-IDF cosine; activate via PULSE_AGENT_EMBEDDING_CHANNEL=1
+    "semantic": 0.15,  # TF-IDF cosine similarity against skill descriptions + keywords
 }
 
 # K8s resource types for component tag extraction
@@ -218,7 +217,7 @@ class SkillSelector:
         # Channel 5: Temporal context
         channel_scores["temporal"] = self._score_temporal(query)
 
-        # Channel 6: Semantic embedding (stub, behind feature flag)
+        # Channel 6: Semantic embedding
         channel_scores["semantic"] = self._score_semantic_embedding(query)
 
         # Inject SLO context if available
@@ -531,15 +530,11 @@ class SkillSelector:
         return scores
 
     def _score_semantic_embedding(self, query: str) -> dict[str, float]:
-        """Channel 6 (optional): Semantic similarity via TF-IDF cosine.
+        """Channel 6: Semantic similarity via TF-IDF cosine.
 
-        Requires PULSE_AGENT_EMBEDDING_CHANNEL=1 to activate.
         Compares query tokens against cached skill description + keyword tokens.
         Lightweight — no external model needed.
         """
-        if not os.environ.get("PULSE_AGENT_EMBEDDING_CHANNEL"):
-            return {}
-
         import math
 
         # Build skill token sets (cached on first call)
