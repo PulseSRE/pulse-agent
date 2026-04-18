@@ -32,11 +32,11 @@ Run in parallel where possible:
 
 **Backend (pulse-agent):**
 ```bash
-python3 -m pytest tests/ -v                    # all tests must pass
-python3 -m mypy sre_agent/ --no-error-summary  # zero type errors
-python3 -m ruff check sre_agent/ tests/        # zero lint errors
-python3 -m ruff format --check sre_agent/ tests/  # formatting clean
+make test-everything   # lint + type-check + pytest + ALL eval suites (deterministic + LLM-judged)
 ```
+
+This runs `make verify` (ruff lint, ruff format, mypy, pytest) followed by `make evals-full`
+(core, safety, sysadmin, integration, adversarial, errors suites + prompt audit).
 
 **Frontend (OpenshiftPulse):**
 ```bash
@@ -45,7 +45,14 @@ npm run type-check    # tsc --noEmit
 npm test              # vitest --run
 ```
 
-Report: "Backend: X tests passed. Frontend: Y tests passed. Type-check clean."
+Report: "Backend: X tests passed. Frontend: Y tests passed. Type-check clean. Evals: all passed."
+
+**Post-release CI check** -- after pushing, always verify CI passes:
+```bash
+gh run list --limit 3          # check backend CI
+cd /Users/amobrem/ali/OpenshiftPulse && gh run list --limit 3  # check frontend CI
+```
+If CI fails, fix immediately and push before proceeding.
 
 ### Phase 2: Full Eval Suite + Gate Checks
 
