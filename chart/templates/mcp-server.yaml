@@ -8,6 +8,12 @@ metadata:
     app.kubernetes.io/component: mcp-server
 spec:
   replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
   selector:
     matchLabels:
       {{- include "sre-agent.selectorLabels" . | nindent 6 }}
