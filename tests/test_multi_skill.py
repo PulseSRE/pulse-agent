@@ -266,6 +266,73 @@ def test_last_selection_result_contextvar_isolation(set_orca_result):
     assert get_last_selection_result() is result
 
 
+# --- run_parallel_skills ---
+
+
+def _parallel_skill_patches(mock_client, create_called=True):
+    """Common patches for run_parallel_skills tests."""
+    return (
+        patch("sre_agent.agent.create_client", return_value=mock_client),
+        patch("sre_agent.agent.run_agent_streaming", return_value="test output"),
+        patch(
+            "sre_agent.skill_loader.build_config_from_skill",
+            return_value={
+                "system_prompt": "",
+                "tool_defs": [],
+                "tool_map": {},
+                "write_tools": set(),
+            },
+        ),
+    )
+
+
+def test_run_parallel_skills_creates_client_when_none():
+    """run_parallel_skills must create an API client when None is passed."""
+    import asyncio
+
+    from sre_agent.plan_runtime import run_parallel_skills
+
+    mock_client = MagicMock()
+    p1, p2, p3 = _parallel_skill_patches(mock_client)
+
+    with p1 as mock_create, p2, p3:
+        result = asyncio.run(
+            run_parallel_skills(
+                primary=_mock_skill("sre"),
+                secondary=_mock_skill("security"),
+                query="test",
+                messages=[],
+                client=None,
+            )
+        )
+        mock_create.assert_called_once()
+        assert result.primary_output == "test output"
+        assert result.secondary_output == "test output"
+
+
+def test_run_parallel_skills_uses_provided_client():
+    """run_parallel_skills should not create a client when one is provided."""
+    import asyncio
+
+    from sre_agent.plan_runtime import run_parallel_skills
+
+    mock_client = MagicMock()
+    p1, p2, p3 = _parallel_skill_patches(mock_client)
+
+    with p1 as mock_create, p2, p3:
+        result = asyncio.run(
+            run_parallel_skills(
+                primary=_mock_skill("sre"),
+                secondary=_mock_skill("security"),
+                query="test",
+                messages=[],
+                client=mock_client,
+            )
+        )
+        mock_create.assert_not_called()
+        assert result.primary_output == "test output"
+
+
 # --- Empty output guard ---
 
 
