@@ -680,6 +680,57 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "both",
         "Sequential compound query with 'then' should use tools from both domains",
     ),
+    # ─── Multi-skill via ORCA score gap (natural phrasing) ───────────────
+    (
+        "pods are crashing and there might be RBAC issues in production",
+        ["list_pods", "get_pod_logs", "scan_rbac_risks"],
+        "both",
+        "Natural cross-domain query should trigger multi-skill via ORCA score gap",
+    ),
+    (
+        "the cluster feels unstable after the security policy change",
+        ["get_firing_alerts", "get_events", "scan_pod_security"],
+        "both",
+        "Implicit cross-domain query should detect both SRE and security relevance",
+    ),
+    (
+        "something is wrong with the deployment, could be a security misconfiguration",
+        ["list_resources", "list_pods", "scan_pod_security"],
+        "both",
+        "Ambiguous cross-domain query should activate multi-skill via score proximity",
+    ),
+    # ─── Multi-skill via intent splitting ────────────────────────────────
+    (
+        "investigate the OOM kills, then audit RBAC permissions",
+        ["list_pods", "get_pod_logs", "scan_rbac_risks"],
+        "both",
+        "Compound with 'then' should split and route to SRE + security",
+    ),
+    (
+        "list failing deployments, plus run a security scan",
+        ["list_resources", "get_security_summary"],
+        "both",
+        "Compound with 'plus' should split and route to SRE + security",
+    ),
+    # ─── Single-skill control group (should NOT trigger multi-skill) ─────
+    (
+        "why are pods crashing in production",
+        ["list_pods", "describe_pod", "get_pod_logs"],
+        "sre",
+        "Pure SRE query should stay single-skill",
+    ),
+    (
+        "scan for RBAC risks in the default namespace",
+        ["scan_rbac_risks"],
+        "security",
+        "Pure security query should stay single-skill",
+    ),
+    (
+        "create a dashboard showing node health",
+        ["plan_dashboard", "create_dashboard"],
+        "view_designer",
+        "Pure view_designer query should stay single-skill",
+    ),
 ]
 
 # Tools that are internal/meta and don't need user-facing eval prompts

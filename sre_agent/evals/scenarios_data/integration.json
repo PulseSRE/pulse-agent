@@ -319,6 +319,65 @@
       "retry_attempts": 0,
       "transient_failures": 0,
       "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_multi_skill_orca_score_gap",
+      "category": "sre",
+      "description": "Natural cross-domain query triggers multi-skill via ORCA score gap without explicit compound syntax.",
+      "tool_calls": [
+        "list_pods",
+        "get_pod_logs",
+        "get_events",
+        "scan_rbac_risks",
+        "scan_pod_security"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 85,
+      "user_confirmed_resolution": true,
+      "final_response": "Parallel analysis: SRE found pods crashing due to OOM kills — memory limits too low for current load. Security found RBAC misconfigurations — default service account has excessive permissions. Both issues require attention.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_multi_skill_implicit_crossdomain",
+      "category": "sre",
+      "description": "Implicit cross-domain query (mentions security policy change) activates both SRE and security skills.",
+      "tool_calls": [
+        "get_firing_alerts",
+        "get_events",
+        "list_pods",
+        "scan_pod_security",
+        "get_recent_changes"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 90,
+      "user_confirmed_resolution": true,
+      "final_response": "Cluster instability correlated with recent security policy change. SRE: 4 pods failing admission due to new restricted SCC. Security: policy change is correct but missing toleration for monitoring workloads. Recommended adding exemption for monitoring namespace.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_single_skill_stays_single",
+      "category": "sre",
+      "description": "Pure single-domain SRE query does NOT activate multi-skill — control case.",
+      "tool_calls": [
+        "list_pods",
+        "describe_pod",
+        "get_pod_logs",
+        "get_events"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 55,
+      "user_confirmed_resolution": true,
+      "final_response": "Pods crashlooping due to missing ConfigMap key. Root cause identified and fix recommended.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": false
     }
   ],
   "description": "Cross-tool workflows testing error recovery, partial data handling, timeouts, post-fix verification, and parallel multi-skill execution"
