@@ -234,6 +234,16 @@ class MonitorSession:
 
             # Unfixable by automation — route to human review queue
             if targeted_plan and targeted_plan.strategy == "require_human_review":
+                try:
+                    _db = get_database()
+                    existing = _db.fetchone(
+                        "SELECT id FROM actions WHERE finding_id = ? AND tool = ? AND status = ?",
+                        (finding["id"], "require_human_review", "proposed"),
+                    )
+                    if existing:
+                        continue
+                except Exception:
+                    pass
                 action_report = _make_action_report(
                     finding_id=finding["id"],
                     tool="require_human_review",
@@ -1218,7 +1228,7 @@ class MonitorSession:
                 if new_weights:
                     from ..skill_loader import _get_selector
 
-                    _get_selector()._weights = new_weights
+                    _get_selector().set_weights(new_weights)
                     logger.info("Daily flywheel: applied learned channel weights: %s", new_weights)
 
                 # Identify skill gaps (recurring queries with no good match)
@@ -1242,7 +1252,7 @@ class MonitorSession:
                 from ..skill_loader import _get_selector
 
                 selector = _get_selector()
-                selector._skill_token_cache = None
+                selector.invalidate_skill_token_cache()
                 logger.info("Weekly flywheel: invalidated embedding cache")
 
                 # Log a prompt audit for tracking

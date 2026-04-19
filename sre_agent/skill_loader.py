@@ -1418,7 +1418,16 @@ def _build_capabilities_hint(tool_names: set[str]) -> str:
             "Call `list_runbooks()` to see available playbooks. Runbooks are also auto-matched to your queries."
         )
 
-    return "\n\n".join(sections)
+    _MAX_HINT_CHARS = 4000
+    result = "\n\n".join(sections)
+    if len(result) > _MAX_HINT_CHARS:
+        truncated = result[:_MAX_HINT_CHARS]
+        last_nl = truncated.rfind("\n")
+        if last_nl > _MAX_HINT_CHARS // 2:
+            truncated = truncated[:last_nl]
+        omitted = len(sections) - truncated.count("## ")
+        result = truncated + f"\n... ({omitted} more tool sections omitted)"
+    return result
 
 
 def _build_mcp_hint(tool_names: list[str]) -> str:

@@ -196,6 +196,14 @@ class SkillSelector:
         except Exception:
             pass
 
+    def set_weights(self, weights: dict[str, float]) -> None:
+        """Replace channel weights. Use this instead of mutating _weights directly."""
+        self._weights = dict(weights)
+
+    def invalidate_skill_token_cache(self) -> None:
+        """Clear the semantic embedding cache so it rebuilds on next query."""
+        self._skill_token_cache = None
+
     def select(self, query: str, *, context: dict | None = None) -> SelectionResult:
         """Run all active channels, fuse scores, return best skill."""
         start = time.monotonic()

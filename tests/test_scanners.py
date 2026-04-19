@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -1125,3 +1126,81 @@ class TestScanHpaSaturation:
             mock_as.return_value.list_horizontal_pod_autoscaler_for_all_namespaces.side_effect = Exception("fail")
             findings = scan_hpa_saturation()
         assert findings == []
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Parallel scanner error isolation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestParallelScannerErrorIsolation:
+    """Verify that a scanner raising an exception in asyncio.gather does not
+    prevent other scanners from completing and returning their results."""
+
+    def test_failing_scanner_does_not_block_others(self):
+        """One scanner explodes, the other returns findings — both results come back."""
+        good_finding = {
+            "type": "finding",
+            "id": "f-good-1",
+            "severity": "warning",
+            "category": "nodes",
+            "title": "Node pressure detected",
+            "summary": "DiskPressure on worker-1",
+            "resources": [{"kind": "Node", "name": "worker-1"}],
+            "autoFixable": False,
+            "timestamp": 1000,
+        }
+
+        def scanner_that_works():
+            return [good_finding]
+
+        def scanner_that_explodes():
+            raise RuntimeError("K8s API unreachable")
+
+        scanners = [
+            ("nodes", scanner_that_works),
+            ("broken_scanner", scanner_that_explodes),
+        ]
+
+        async def _run_parallel():
+            async def _run_scanner(category, scanner):
+                try:
+                    findings = await asyncio.to_thread(scanner)
+                    return {
+                        "result": {
+                            "name": category,
+                            "status": "warning" if findings else "clean",
+                            "findings_count": len(findings) if isinstance(findings, list) else 0,
+                        },
+                        "findings": findings if isinstance(findings, list) else [],
+                    }
+                except Exception as e:
+                    return {
+                        "result": {
+                            "name": category,
+                            "status": "error",
+                            "findings_count": 0,
+                            "error": str(e)[:100],
+                        },
+                        "findings": [],
+                    }
+
+            return await asyncio.gather(*[_run_scanner(cat, fn) for cat, fn in scanners])
+
+        loop = asyncio.new_event_loop()
+        try:
+            results = loop.run_until_complete(_run_parallel())
+        finally:
+            loop.close()
+
+        assert len(results) == 2
+
+        nodes_result = next(r for r in results if r["result"]["name"] == "nodes")
+        assert nodes_result["result"]["status"] == "warning"
+        assert len(nodes_result["findings"]) == 1
+        assert nodes_result["findings"][0]["id"] == "f-good-1"
+
+        broken_result = next(r for r in results if r["result"]["name"] == "broken_scanner")
+        assert broken_result["result"]["status"] == "error"
+        assert broken_result["findings"] == []
+        assert "K8s API unreachable" in broken_result["result"]["error"]

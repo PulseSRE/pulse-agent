@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel as _BaseModel
+from pydantic import Field
 
 from ..config import get_settings
 from ..monitor import (
@@ -285,7 +287,7 @@ async def rest_fix_history(
         filters["since"] = since
     if search:
         filters["search"] = search
-    return get_fix_history(page=page, page_size=page_size, filters=filters or None)
+    return await asyncio.to_thread(get_fix_history, page=page, page_size=page_size, filters=filters or None)
 
 
 @router.get("/fix-history/summary")
@@ -294,7 +296,7 @@ async def rest_fix_history_summary(
     _auth=Depends(verify_token),
 ):
     """Aggregated fix history statistics for the last N days. Requires token auth."""
-    return get_fix_history_summary(days)
+    return await asyncio.to_thread(get_fix_history_summary, days)
 
 
 @router.get("/fix-history/resolutions")
@@ -352,7 +354,7 @@ async def rest_fix_history_resolutions(
 @router.get("/fix-history/{action_id}")
 async def rest_action_detail(action_id: str, _auth=Depends(verify_token)):
     """Single action detail with before/after state (Protocol v2). Requires token auth."""
-    result = get_action_detail(action_id)
+    result = await asyncio.to_thread(get_action_detail, action_id)
     if result is None:
         from fastapi.responses import JSONResponse
 
@@ -376,7 +378,7 @@ async def rest_briefing(hours: int = Query(12, ge=1, le=72), _auth=Depends(verif
     """Cluster activity briefing for the last N hours. Requires token auth."""
     from ..monitor import get_briefing
 
-    return get_briefing(hours)
+    return await asyncio.to_thread(get_briefing, hours)
 
 
 @router.get("/monitor/scanners")
@@ -400,12 +402,8 @@ async def rest_list_scanners(_auth=Depends(verify_token)):
     }
 
 
-@router.get("/kpi")
-async def get_kpi_dashboard(
-    days: int = Query(7, ge=1, le=90),
-    _auth=Depends(verify_token),
-):
-    """Operational KPIs — 9 metrics aligned with ORCA targets."""
+def _compute_kpi_dashboard_sync(days: int) -> dict:
+    """Sync helper for KPI computation — runs off the event loop via to_thread."""
     from .. import db
 
     kpis: dict[str, dict] = {}
@@ -641,6 +639,15 @@ async def get_kpi_dashboard(
         },
         "days": days,
     }
+
+
+@router.get("/kpi")
+async def get_kpi_dashboard(
+    days: int = Query(7, ge=1, le=90),
+    _auth=Depends(verify_token),
+):
+    """Operational KPIs — 9 metrics aligned with ORCA targets."""
+    return await asyncio.to_thread(_compute_kpi_dashboard_sync, days)
 
 
 @router.get("/monitor/capabilities")
@@ -1152,8 +1159,9 @@ async def get_finding_learning(
 
 
 class _SimulateRequest(_BaseModel):
+    model_config = {"populate_by_name": True}
     tool: str
-    input: dict = {}
+    tool_input: dict = Field(default={}, alias="input")
     target_resource: dict | None = None
 
 
@@ -1162,7 +1170,7 @@ async def simulate_with_blast_radius(body: _SimulateRequest, _auth=Depends(verif
     """Simulate a tool action and enrich with fix blast radius analysis."""
     from ..monitor.investigations import simulate_action
 
-    sim = simulate_action(body.tool, body.input)
+    sim = simulate_action(body.tool, body.tool_input)
 
     fix_blast_radius: list[dict] = []
     fix_upstream_deps: list[dict] = []
@@ -1806,12 +1814,8 @@ def _build_activity_events(database, days: int = 7) -> list[dict]:
         return []
 
 
-@router.get("/activity")
-async def get_agent_activity(
-    days: int = Query(7, ge=1, le=90),
-    _auth=Depends(verify_token),
-):
-    """Recent agent activity for the Overview tab."""
+def _get_agent_activity_sync(days: int) -> dict:
+    """Sync helper for activity endpoint."""
     from .. import db
 
     try:
@@ -1820,3 +1824,12 @@ async def get_agent_activity(
         return {"events": events, "period_days": days}
     except Exception:
         return {"events": [], "period_days": days}
+
+
+@router.get("/activity")
+async def get_agent_activity(
+    days: int = Query(7, ge=1, le=90),
+    _auth=Depends(verify_token),
+):
+    """Recent agent activity for the Overview tab."""
+    return await asyncio.to_thread(_get_agent_activity_sync, days)

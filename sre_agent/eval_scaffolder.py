@@ -10,11 +10,15 @@ so they never gate releases.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import re
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # type: ignore[assignment]
 
 logger = logging.getLogger("pulse_agent.eval_scaffolder")
 
@@ -45,7 +49,8 @@ def _append_scenario(scenario: dict) -> bool:
         _SCENARIOS_DIR.mkdir(parents=True, exist_ok=True)
 
         with open(_SUITE_FILE, "a+", encoding="utf-8") as fh:
-            fcntl.flock(fh, fcntl.LOCK_EX)
+            if fcntl is not None:
+                fcntl.flock(fh, fcntl.LOCK_EX)
             try:
                 fh.seek(0)
                 content = fh.read()
@@ -66,7 +71,8 @@ def _append_scenario(scenario: dict) -> bool:
                 json.dump(suite, fh, indent=2, ensure_ascii=False)
                 fh.write("\n")
             finally:
-                fcntl.flock(fh, fcntl.LOCK_UN)
+                if fcntl is not None:
+                    fcntl.flock(fh, fcntl.LOCK_UN)
 
         logger.info("Appended eval scenario: %s", scenario["scenario_id"])
         return True

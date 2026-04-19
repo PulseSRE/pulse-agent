@@ -43,6 +43,10 @@ def _build_ssl_context() -> ssl.SSLContext:
 
     # Fallback: skip verification for internal service traffic
     # This is safe for in-cluster Thanos (service-serving CA differs from SA CA)
+    logger.warning(
+        "No CA certificate found in %s — falling back to CERT_NONE (TLS verification disabled)",
+        _CA_PATHS,
+    )
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
