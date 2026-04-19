@@ -1187,11 +1187,7 @@ class TestParallelScannerErrorIsolation:
 
             return await asyncio.gather(*[_run_scanner(cat, fn) for cat, fn in scanners])
 
-        loop = asyncio.new_event_loop()
-        try:
-            results = loop.run_until_complete(_run_parallel())
-        finally:
-            loop.close()
+        results = asyncio.run(_run_parallel())
 
         assert len(results) == 2
 

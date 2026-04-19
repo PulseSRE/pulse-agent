@@ -1425,7 +1425,8 @@ def _build_capabilities_hint(tool_names: set[str]) -> str:
         last_nl = truncated.rfind("\n")
         if last_nl > _MAX_HINT_CHARS // 2:
             truncated = truncated[:last_nl]
-        omitted = len(sections) - truncated.count("## ")
+        included = truncated.count("\n\n") + 1
+        omitted = len(sections) - included
         result = truncated + f"\n... ({omitted} more tool sections omitted)"
     return result
 

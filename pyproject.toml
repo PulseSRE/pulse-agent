@@ -86,5 +86,4 @@ warn_return_any = false
 warn_unused_configs = true
 ignore_missing_imports = true
 check_untyped_defs = false
-# skills/ contains only empty __init__.py stubs and .md/.yaml data files — no real code to check
 exclude = ["sre_agent/skills/"]

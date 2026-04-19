@@ -299,7 +299,7 @@ def _execute_patch_resources(plan: FixPlan) -> tuple[str, str, str]:
 
     current_bytes = parse_memory_bytes(current_limit)
     new_bytes = current_bytes * 2
-    max_bytes = 8192 * 1024 * 1024  # 8Gi cap
+    max_bytes = parse_memory_bytes("8Gi")
     if new_bytes > max_bytes:
         raise ValueError(
             f"Cannot auto-fix OOM on {kind}/{name}: doubling {current_limit} would exceed 8Gi cap. "
