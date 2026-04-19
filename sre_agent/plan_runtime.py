@@ -712,11 +712,13 @@ async def run_parallel_skills(
     query: str,
     messages: list[dict],
     client,
+    on_progress=None,
 ) -> ParallelSkillResult:
     """Run two skills in parallel and collect both outputs.
 
-    Unlike _race_parallel, this always runs both skills to completion
-    because the synthesis layer needs both outputs.
+    Args:
+        on_progress: async callback(skill_name, event_type, data) for live
+            updates. Called from a background thread via loop.call_soon_threadsafe.
     """
     from .agent import create_client, run_agent_streaming
     from .context_bus import get_context_bus
@@ -724,6 +726,8 @@ async def run_parallel_skills(
 
     if client is None:
         client = create_client()
+
+    loop = asyncio.get_running_loop()
 
     start = time.monotonic()
     bus = get_context_bus()
@@ -738,6 +742,18 @@ async def run_parallel_skills(
         if primary_config["write_tools"] and sec_write_tools:
             sec_write_tools = set()
 
+        def _make_tool_callback(skill_name):
+            if not on_progress:
+                return None
+
+            def _on_tool(tool_name):
+                loop.call_soon_threadsafe(
+                    asyncio.ensure_future,
+                    on_progress(skill_name, "tool_use", tool_name),
+                )
+
+            return _on_tool
+
         async def _run_skill(config, skill_name, write_tools):
             try:
                 result = await asyncio.to_thread(
@@ -749,6 +765,7 @@ async def run_parallel_skills(
                     tool_map=config["tool_map"],
                     write_tools=write_tools,
                     mode=skill_name,
+                    on_tool_use=_make_tool_callback(skill_name),
                 )
                 return result if isinstance(result, str) else result[0]
             except TimeoutError:

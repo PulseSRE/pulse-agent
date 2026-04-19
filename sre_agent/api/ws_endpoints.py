@@ -502,12 +502,21 @@ async def websocket_auto_agent(websocket: WebSocket):
                         from ..plan_runtime import run_parallel_skills
                         from ..synthesis import synthesize_parallel_outputs
 
+                        async def _on_skill_progress(skill_name, event_type, data):
+                            try:
+                                await websocket.send_json(
+                                    {"type": "skill_progress", "skill": skill_name, "status": event_type, "tool": data}
+                                )
+                            except Exception:
+                                pass
+
                         parallel_result = await run_parallel_skills(
                             primary=skill,
                             secondary=secondary_skill,
                             query=content,
                             messages=messages,
                             client=None,
+                            on_progress=_on_skill_progress,
                         )
 
                         from ..skill_selector import get_last_selection_result
