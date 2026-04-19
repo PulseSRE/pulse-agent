@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.svg" alt="Pulse Agent" width="120" height="120">
+</p>
+
 # Pulse Agent
 
 <p>
