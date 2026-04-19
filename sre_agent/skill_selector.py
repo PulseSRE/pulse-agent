@@ -32,6 +32,69 @@ class SelectionResult:
     conflicts: list[dict] = field(default_factory=list)
     selection_ms: int = 0
     source: str = "orca"  # "orca" | "fallback"
+    secondary_skill: str | None = None
+
+
+@dataclass
+class TemporalSignal:
+    """Cluster state signals for temporal channel scoring."""
+
+    recent_deploys: list[dict]
+    time_of_day: str  # "business_hours" | "off_hours" | "weekend"
+    active_incidents: int
+
+
+_temporal_signal_cache: dict = {"signal": None, "time": 0.0}
+
+
+def _build_temporal_signal(cache_ttl: int = 60) -> TemporalSignal:
+    now = time.monotonic()
+    cached = _temporal_signal_cache.get("signal")
+    cached_time = _temporal_signal_cache.get("time", 0.0)
+    if cached is not None and (now - cached_time) < cache_ttl:
+        return cached
+
+    recent_deploys: list[dict] = []
+    active_incidents = 0
+
+    try:
+        from .db import get_database
+
+        db = get_database()
+        row = db.fetchone(
+            "SELECT COUNT(*) as cnt FROM findings "
+            "WHERE category = 'audit_deployment' "
+            "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '30 minutes')::BIGINT * 1000"
+        )
+        deploy_count = row["cnt"] if row else 0
+        if deploy_count > 0:
+            recent_deploys = [{"count": deploy_count}]
+
+        inc_row = db.fetchone("SELECT COUNT(*) as cnt FROM findings WHERE resolved = 0 AND category NOT LIKE 'audit_%'")
+        active_incidents = inc_row["cnt"] if inc_row else 0
+    except Exception:
+        logger.debug("Temporal signal: data source unavailable", exc_info=True)
+
+    from datetime import UTC, datetime
+
+    now_utc = datetime.now(UTC)
+    hour = now_utc.hour
+    weekday = now_utc.weekday()
+    if weekday >= 5:
+        tod = "weekend"
+    elif hour < 6 or hour > 22:
+        tod = "off_hours"
+    else:
+        tod = "business_hours"
+
+    signal = TemporalSignal(
+        recent_deploys=recent_deploys,
+        time_of_day=tod,
+        active_incidents=active_incidents,
+    )
+    _temporal_signal_cache["signal"] = signal
+    _temporal_signal_cache["time"] = now
+    return signal
 
 
 # Default channel weights (sum to 1.0)
@@ -278,8 +341,31 @@ class SkillSelector:
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
 
+        # Detect secondary skill via score gap
+        secondary = None
+        try:
+            from .config import get_settings
+
+            _ms = get_settings()
+            if _ms.multi_skill and fused:
+                sorted_skills = sorted(fused.items(), key=lambda x: x[1], reverse=True)
+                if len(sorted_skills) >= 2:
+                    gap = sorted_skills[0][1] - sorted_skills[1][1]
+                    if gap <= _ms.multi_skill_threshold:
+                        candidate = sorted_skills[1][0]
+                        best_obj = self._skills.get(best_name)
+                        cand_obj = self._skills.get(candidate)
+                        if best_obj and cand_obj:
+                            has_conflict = candidate in (best_obj.conflicts_with or []) or best_name in (
+                                cand_obj.conflicts_with or []
+                            )
+                            if not has_conflict:
+                                secondary = candidate
+        except Exception:
+            pass
+
         if best_score >= threshold and best_name in self._skills:
-            return SelectionResult(
+            result = SelectionResult(
                 skill_name=best_name,
                 fused_scores=fused,
                 channel_scores=channel_scores,
@@ -287,10 +373,13 @@ class SkillSelector:
                 conflicts=conflicts,
                 selection_ms=elapsed_ms,
                 source="orca",
+                secondary_skill=secondary,
             )
+            self.last_result = result
+            return result
 
         # Below threshold — fallback
-        return SelectionResult(
+        result = SelectionResult(
             skill_name=best_name if best_name in self._skills else "sre",
             fused_scores=fused,
             channel_scores=channel_scores,
@@ -298,7 +387,10 @@ class SkillSelector:
             conflicts=conflicts,
             selection_ms=elapsed_ms,
             source="fallback",
+            secondary_skill=secondary,
         )
+        self.last_result = result
+        return result
 
     def _score_keywords(self, query: str) -> dict[str, float]:
         """Channel 1: Keyword scoring — ported from classify_query logic."""
@@ -471,69 +563,41 @@ class SkillSelector:
         max_score = max(skill_scores.values())
         return {k: v / max_score for k, v in skill_scores.items()}
 
+    def _get_temporal_signal(self) -> TemporalSignal:
+        from .config import get_settings
+
+        ttl = get_settings().temporal_cache_ttl
+        return _build_temporal_signal(cache_ttl=ttl)
+
     def _score_temporal(self, query: str) -> dict[str, float]:
-        """Channel 5: State-aware temporal context — cluster changes + time signals.
-
-        Uses 3 signals:
-        1. Query text temporal keywords (existing)
-        2. Recent cluster changes (deployments, scaling in last 15min)
-        3. Time-of-day awareness (off-hours = more likely incident)
-        """
+        """Channel 5: State-aware temporal context — cluster changes + time signals."""
         scores: dict[str, float] = {}
+        signal = self._get_temporal_signal()
 
-        # Signal 1: Query text temporal keywords
         q = query.lower()
         has_temporal_text = any(kw in q for kw in _TEMPORAL_KEYWORDS)
 
-        # Signal 2: Recent cluster changes (cached, non-blocking)
-        recent_deploys = 0
-        try:
-            from .dependency_graph import get_dependency_graph
-
-            graph = get_dependency_graph()
-            # If graph was refreshed recently, cluster is being scanned
-            if graph._last_refresh and (time.time() - graph._last_refresh) < 120:
-                # Check for recent deployments via cached findings
-                try:
-                    from .db import get_database
-
-                    db = get_database()
-                    row = db.fetchone(
-                        "SELECT COUNT(*) as cnt FROM findings "
-                        "WHERE category = 'audit_deployment' "
-                        "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '15 minutes')::BIGINT * 1000"
-                    )
-                    recent_deploys = row["cnt"] if row else 0
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        # Signal 3: Time-of-day awareness
-        from datetime import UTC, datetime
-
-        hour = datetime.now(UTC).hour
-        is_off_hours = hour < 6 or hour > 22
-
-        # Score based on combined signals
-        if recent_deploys > 0:
-            # Recent deployment + problem = likely deploy-related
+        if signal.recent_deploys:
             for skill_name, skill in self._skills.items():
                 cats = set(skill.categories) if skill.categories else set()
                 if cats & {"operations", "workloads", "diagnostics"}:
                     scores[skill_name] = 0.8
+            scores["postmortem"] = max(scores.get("postmortem", 0), 0.15)
+
+        if signal.active_incidents > 0:
+            scores["sre"] = max(scores.get("sre", 0), 0.2)
 
         if has_temporal_text:
-            # Explicit temporal keywords in query
             for skill_name, skill in self._skills.items():
                 cats = set(skill.categories) if skill.categories else set()
                 if cats & {"operations", "workloads", "diagnostics"}:
                     scores[skill_name] = max(scores.get(skill_name, 0), 0.7)
 
-        if is_off_hours and not scores:
-            # Off-hours queries are more likely incidents
-            scores["sre"] = 0.4
-            scores["security"] = 0.3
+        if signal.time_of_day in ("off_hours", "weekend"):
+            scores["slo-management"] = max(scores.get("slo-management", 0), 0.1)
+            if not scores:
+                scores["sre"] = 0.4
+                scores["security"] = 0.3
 
         return scores
 

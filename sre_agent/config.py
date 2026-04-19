@@ -80,6 +80,14 @@ class PulseAgentSettings(BaseSettings):
     def get_trusted_registries(self) -> list[str]:
         return [s.strip() for s in self.trusted_registries.split(",") if s.strip()]
 
+    # Temporal channel
+    temporal_cache_ttl: int = 60
+
+    # Multi-skill parallel execution
+    multi_skill: bool = True
+    multi_skill_threshold: float = 0.15
+    multi_skill_max: int = 2
+
     # Tool chain intelligence
     chain_hints: bool = True
     chain_min_probability: float = 0.6
