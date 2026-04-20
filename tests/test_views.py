@@ -602,7 +602,7 @@ def mock_k8s():
 class TestCritiqueView:
     def test_empty_view_scores_low(self):
         db_module.save_view("alice", "cv-crit1", "Empty", "", [])
-        from sre_agent.view_critic import critique_view
+        from sre_agent.quality_engine import critique_view
 
         result = critique_view.call({"view_id": "cv-crit1"})
         assert "0/" in result or "1/" in result or "2/" in result
@@ -624,7 +624,7 @@ class TestCritiqueView:
         db_module.save_view(
             "alice", "cv-crit2", "Full View", "", layout, positions={0: {"x": 0, "y": 0, "w": 4, "h": 2}}
         )
-        from sre_agent.view_critic import critique_view
+        from sre_agent.quality_engine import critique_view
 
         result = critique_view.call({"view_id": "cv-crit2"})
         assert "passes quality" in result.lower() or "/10" in result
@@ -635,13 +635,13 @@ class TestCritiqueView:
             {"kind": "data_table", "title": "Pods", "columns": [], "rows": []},
         ]
         db_module.save_view("alice", "cv-crit3", "No Charts", "", layout)
-        from sre_agent.view_critic import critique_view
+        from sre_agent.quality_engine import critique_view
 
         result = critique_view.call({"view_id": "cv-crit3"})
         assert "NO CHART" in result
 
     def test_nonexistent_view(self):
-        from sre_agent.view_critic import critique_view
+        from sre_agent.quality_engine import critique_view
 
         result = critique_view.call({"view_id": "cv-nope"})
         assert "not found" in result.lower()

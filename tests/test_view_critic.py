@@ -9,7 +9,7 @@ import pytest
 from sre_agent import db as db_module
 from sre_agent.db import Database, reset_database, set_database
 from sre_agent.db_schema import ALL_SCHEMAS
-from sre_agent.view_critic import critique_view
+from sre_agent.quality_engine import critique_view
 
 # ---------------------------------------------------------------------------
 # Fixtures

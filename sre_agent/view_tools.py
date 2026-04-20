@@ -7,6 +7,7 @@ import json
 import uuid
 
 from .decorators import beta_tool
+from .quality_engine import critique_view
 from .tool_registry import register_tool
 
 # Structured signal prefix — tools return this instead of magic string markers.
@@ -754,7 +755,7 @@ register_tool(add_widget_to_view)
 register_tool(emit_component)
 
 # Exported list for view_designer agent
-from .view_critic import critique_view
+# (critique_view already imported at top)
 
 # Import mutation tools module to register tools
 from .view_mutations import (
