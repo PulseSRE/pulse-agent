@@ -112,10 +112,8 @@ async def get_topology(
         pass
 
     cluster_scoped = {"Node", "HPA"}
+    temp_nodes: list[dict] = []
     for key, node in graph.get_nodes().items():
-        if namespace and node.namespace != namespace:
-            if not (kind_set and node.kind in kind_set and node.kind in cluster_scoped):
-                continue
         if kind_set and node.kind not in kind_set:
             continue
 
@@ -155,7 +153,19 @@ async def get_topology(
             else:
                 node_data["group"] = node.labels.get(group_by, "unlabeled")
 
-        nodes.append(node_data)
+        temp_nodes.append(node_data)
+
+    # Namespace filtering: filter nodes and edges to requested namespace
+    if namespace:
+        # Include nodes in the requested namespace, plus cluster-scoped kinds if explicitly requested
+        nodes = [
+            n
+            for n in temp_nodes
+            if n.get("namespace", "") == namespace
+            or (n.get("namespace", "") == "" and kind_set and n.get("kind") in cluster_scoped)
+        ]
+    else:
+        nodes = temp_nodes
 
     # Metrics enrichment
     if include_metrics:
@@ -262,6 +272,7 @@ async def get_topology(
 @router.get("/topology/blast-radius")
 async def get_blast_radius(
     node_id: str = Query(..., description="Node ID from topology graph"),
+    namespace: str = Query("", description="Filter results to namespace (optional)"),
     _auth=Depends(verify_token),
 ):
     """Compute blast radius tree for a selected node — 'What if this goes down?'"""
@@ -280,6 +291,9 @@ async def get_blast_radius(
     for dep_id in downstream:
         dep_node = graph.get_node(dep_id)
         if not dep_node:
+            continue
+        # Namespace filtering
+        if namespace and dep_node.namespace != namespace and dep_node.namespace != "":
             continue
         # Find the edge connecting to this node
         edge_label = ""

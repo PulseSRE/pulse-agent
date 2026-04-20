@@ -866,10 +866,10 @@ def get_topology_graph(
 
     # Cluster-scoped kinds (namespace="") should pass namespace filter when explicitly requested
     cluster_scoped = {"Node", "HPA"}
+
+    # Build initial node list (before namespace filtering in edges)
+    temp_nodes: list[dict] = []
     for key, node in graph.get_nodes().items():
-        if namespace and node.namespace != namespace:
-            if not (kind_set and node.kind in kind_set and node.kind in cluster_scoped):
-                continue
         if kind_set and node.kind not in kind_set:
             continue
         resource_key = f"{node.kind}:{node.namespace}:{node.name}"
@@ -898,7 +898,19 @@ def get_topology_graph(
                     node_dict["group"] = parent_node or "unscheduled"
             else:
                 node_dict["group"] = node.labels.get(group_by, "unlabeled")
-        nodes.append(node_dict)
+        temp_nodes.append(node_dict)
+
+    # Namespace filtering: filter nodes and edges to requested namespace
+    if namespace:
+        # Include nodes in the requested namespace, plus cluster-scoped kinds if explicitly requested
+        nodes = [
+            n
+            for n in temp_nodes
+            if n.get("namespace", "") == namespace
+            or (n.get("namespace", "") == "" and kind_set and n.get("kind") in cluster_scoped)
+        ]
+    else:
+        nodes = temp_nodes
 
     # Cap group sizes
     if group_by:
