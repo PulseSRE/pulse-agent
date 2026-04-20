@@ -1,8 +1,12 @@
 """Live Kubernetes resource dependency graph.
 
 Builds an in-memory graph from K8s API data:
-- Nodes: Pods, Deployments, Services, Routes, PVCs, ConfigMaps, Secrets, Nodes
-- Edges: ownerReferences, service selectors, volume mounts, env-from refs
+- Nodes: Pods, Deployments, StatefulSets, DaemonSets, Jobs, CronJobs,
+  Services, Ingresses, Routes, HPAs, NetworkPolicies, ServiceAccounts,
+  PVCs, ConfigMaps, Secrets, Nodes, HelmReleases
+- Edges: ownerReferences, service selectors, volume mounts, ingress backends,
+  route backends, HPA scale targets, network policy selectors, service accounts,
+  helm instance labels, node scheduling
 - Refreshed every scan cycle, stored as adjacency dict
 
 Used by: skill selector (topology-aware routing), fix planner (blast radius),
@@ -36,7 +40,7 @@ class ResourceEdge:
 
     source: str  # "kind/namespace/name"
     target: str  # "kind/namespace/name"
-    relationship: str  # "owns", "selects", "mounts", "references"
+    relationship: str  # owns, selects, mounts, references, uses, routes_to, applies_to, scales, manages, schedules
 
 
 def _resource_key(kind: str, namespace: str, name: str) -> str:
@@ -126,11 +130,12 @@ class DependencyGraph:
         """Refresh the graph from live K8s API data."""
         try:
             from .errors import ToolError
-            from .k8s_client import get_apps_client, get_core_client, safe
+            from .k8s_client import get_apps_client, get_core_client, get_custom_client, safe
 
             self.clear()
             core = get_core_client()
             apps = get_apps_client()
+            custom = get_custom_client()
 
             # Deployments
             deploys = safe(lambda: apps.list_deployment_for_all_namespaces())
@@ -141,6 +146,40 @@ class DependencyGraph:
                     labels = dict(d.metadata.labels or {})
                     self.add_node("Deployment", ns, name, labels)
 
+            # StatefulSets
+            statefulsets = safe(lambda: apps.list_stateful_set_for_all_namespaces())
+            if not isinstance(statefulsets, ToolError):
+                for ss in statefulsets.items:
+                    self.add_node(
+                        "StatefulSet", ss.metadata.namespace, ss.metadata.name, dict(ss.metadata.labels or {})
+                    )
+
+            # DaemonSets
+            daemonsets = safe(lambda: apps.list_daemon_set_for_all_namespaces())
+            if not isinstance(daemonsets, ToolError):
+                for ds in daemonsets.items:
+                    self.add_node("DaemonSet", ds.metadata.namespace, ds.metadata.name, dict(ds.metadata.labels or {}))
+
+            # Jobs
+            try:
+                from kubernetes import client as k8s_client
+
+                batch = k8s_client.BatchV1Api()
+                jobs = safe(lambda: batch.list_job_for_all_namespaces())
+                if not isinstance(jobs, ToolError):
+                    for j in jobs.items:
+                        self.add_node("Job", j.metadata.namespace, j.metadata.name, dict(j.metadata.labels or {}))
+
+                # CronJobs
+                cronjobs = safe(lambda: batch.list_cron_job_for_all_namespaces())
+                if not isinstance(cronjobs, ToolError):
+                    for cj in cronjobs.items:
+                        self.add_node(
+                            "CronJob", cj.metadata.namespace, cj.metadata.name, dict(cj.metadata.labels or {})
+                        )
+            except Exception:
+                logger.debug("Batch API unavailable for topology", exc_info=True)
+
             # Pods with owner references
             pods = safe(lambda: core.list_pod_for_all_namespaces())
             if not isinstance(pods, ToolError):
@@ -150,16 +189,15 @@ class DependencyGraph:
                     labels = dict(p.metadata.labels or {})
                     pod_key = self.add_node("Pod", ns, name, labels)
 
-                    # Owner references
+                    # Owner references (handles Deployment, ReplicaSet, StatefulSet, DaemonSet, Job, etc.)
                     for ref in p.metadata.owner_references or []:
-                        # Nodes are cluster-scoped — always use empty namespace
                         owner_ns = "" if ref.kind == "Node" else ns
                         owner_key = _resource_key(ref.kind, owner_ns, ref.name)
                         if owner_key not in self._nodes:
                             self.add_node(ref.kind, owner_ns, ref.name)
                         self.add_edge(owner_key, pod_key, "owns")
 
-                    # Volume mounts → PVC
+                    # Volume mounts → PVC, ConfigMap, Secret
                     for vol in p.spec.volumes or []:
                         if vol.persistent_volume_claim:
                             pvc_key = self.add_node("PVC", ns, vol.persistent_volume_claim.claim_name)
@@ -171,6 +209,12 @@ class DependencyGraph:
                             sec_key = self.add_node("Secret", ns, vol.secret.secret_name)
                             self.add_edge(pod_key, sec_key, "references")
 
+                    # ServiceAccount
+                    sa_name = getattr(p.spec, "service_account_name", None)
+                    if sa_name:
+                        sa_key = self.add_node("ServiceAccount", ns, sa_name)
+                        self.add_edge(pod_key, sa_key, "uses")
+
             # Services → pod selectors
             services = safe(lambda: core.list_service_for_all_namespaces())
             if not isinstance(services, ToolError):
@@ -179,11 +223,95 @@ class DependencyGraph:
                     name = svc.metadata.name
                     svc_key = self.add_node("Service", ns, name)
                     selector = svc.spec.selector or {}
-                    # Find pods matching this service selector
                     for pod_key, node in self._nodes.items():
                         if node.kind == "Pod" and node.namespace == ns:
                             if all(node.labels.get(k) == v for k, v in selector.items()):
                                 self.add_edge(svc_key, pod_key, "selects")
+
+            # Ingresses → Service backends
+            try:
+                from kubernetes import client as k8s_client
+
+                networking = k8s_client.NetworkingV1Api()
+                ingresses = safe(lambda: networking.list_ingress_for_all_namespaces())
+                if not isinstance(ingresses, ToolError):
+                    for ing in ingresses.items:
+                        ns = ing.metadata.namespace
+                        ing_key = self.add_node("Ingress", ns, ing.metadata.name)
+                        for rule in ing.spec.rules or []:
+                            if rule.http:
+                                for path in rule.http.paths or []:
+                                    backend = getattr(path, "backend", None)
+                                    if backend and backend.service:
+                                        svc_key = _resource_key("Service", ns, backend.service.name)
+                                        if svc_key in self._nodes:
+                                            self.add_edge(ing_key, svc_key, "routes_to")
+
+                # NetworkPolicies → pod selectors
+                netpols = safe(lambda: networking.list_network_policy_for_all_namespaces())
+                if not isinstance(netpols, ToolError):
+                    for np in netpols.items:
+                        ns = np.metadata.namespace
+                        np_key = self.add_node("NetworkPolicy", ns, np.metadata.name)
+                        selector = (np.spec.pod_selector.match_labels or {}) if np.spec.pod_selector else {}
+                        for pod_key, node in self._nodes.items():
+                            if node.kind == "Pod" and node.namespace == ns:
+                                if all(node.labels.get(k) == v for k, v in selector.items()):
+                                    self.add_edge(np_key, pod_key, "applies_to")
+            except Exception:
+                logger.debug("Networking API unavailable for topology", exc_info=True)
+
+            # OpenShift Routes → Service backends
+            try:
+                routes = safe(lambda: custom.list_cluster_custom_object("route.openshift.io", "v1", "routes"))
+                if not isinstance(routes, ToolError):
+                    for r in routes.get("items", []):
+                        ns = r["metadata"]["namespace"]
+                        route_key = self.add_node("Route", ns, r["metadata"]["name"])
+                        svc_name = r.get("spec", {}).get("to", {}).get("name", "")
+                        if svc_name:
+                            svc_key = _resource_key("Service", ns, svc_name)
+                            if svc_key in self._nodes:
+                                self.add_edge(route_key, svc_key, "routes_to")
+            except Exception:
+                logger.debug("OpenShift Route API unavailable", exc_info=True)
+
+            # HPAs → scale targets
+            try:
+                from kubernetes import client as k8s_client
+
+                autoscaling = k8s_client.AutoscalingV2Api()
+                hpas = safe(lambda: autoscaling.list_horizontal_pod_autoscaler_for_all_namespaces())
+                if not isinstance(hpas, ToolError):
+                    for hpa in hpas.items:
+                        ns = hpa.metadata.namespace
+                        hpa_key = self.add_node("HPA", ns, hpa.metadata.name)
+                        ref = hpa.spec.scale_target_ref
+                        if ref:
+                            target_key = _resource_key(ref.kind, ns, ref.name)
+                            if target_key in self._nodes:
+                                self.add_edge(hpa_key, target_key, "scales")
+            except Exception:
+                logger.debug("Autoscaling API unavailable for topology", exc_info=True)
+
+            # Helm releases (stored as Secrets with owner=helm label)
+            try:
+                secrets = safe(lambda: core.list_secret_for_all_namespaces(label_selector="owner=helm"))
+                if not isinstance(secrets, ToolError):
+                    for s in secrets.items:
+                        labels = dict(s.metadata.labels or {})
+                        release_name = labels.get("name", "")
+                        if release_name and labels.get("status") == "deployed":
+                            ns = s.metadata.namespace
+                            helm_key = self.add_node("HelmRelease", ns, release_name, labels)
+                            for node_key, node in self._nodes.items():
+                                if (
+                                    node.namespace == ns
+                                    and node.labels.get("app.kubernetes.io/instance") == release_name
+                                ):
+                                    self.add_edge(helm_key, node_key, "manages")
+            except Exception:
+                logger.debug("Helm release discovery unavailable", exc_info=True)
 
             # Nodes
             nodes = safe(lambda: core.list_node())
