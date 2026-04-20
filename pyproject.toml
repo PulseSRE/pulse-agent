@@ -65,6 +65,7 @@ ignore = [
     "SIM102", # nested if (readability preference)
     "SIM105", # contextlib.suppress (readability preference)
     "SIM108", # ternary operator (readability preference)
+    "SIM117", # nested with (readability preference in tests)
     "TC001",  # move app imports to TYPE_CHECKING block (too pedantic)
     "TC003",  # move stdlib imports to TYPE_CHECKING block (too pedantic)
     "RUF005", # unpacking instead of concatenation (readability preference)

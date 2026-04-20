@@ -60,11 +60,7 @@ def update_view_widgets(
     owner = get_current_user()
     view = db.get_view(view_id, owner)
     if not view:
-        view = db.get_view(view_id)  # Fallback without owner filter
-    if not view:
         return f"View '{view_id}' not found."
-    # Use the view's actual owner for updates (identity may differ across sessions)
-    owner = view.get("owner", owner)
 
     # Helper for params_json parsing (used by mutation actions below)
     def _parse_params() -> dict | str:
@@ -310,11 +306,8 @@ def remove_widget_from_view(view_id: str, widget_title: str):
     owner = get_current_user()
     view = db.get_view(view_id, owner)
     if not view:
-        view = db.get_view(view_id)
-    if not view:
         return f"View '{view_id}' not found."
 
-    owner = view.get("owner", owner)
     layout = view.get("layout", [])
     search = widget_title.lower()
 
@@ -357,11 +350,6 @@ def undo_view_change(view_id: str, version: int = -1):
         version = versions[0]["version"]
 
     result = db.restore_view_version(view_id, owner, version)
-    if not result:
-        # Fallback: try with view's actual owner
-        view = db.get_view(view_id)
-        if view:
-            result = db.restore_view_version(view_id, view.get("owner", owner), version)
     if not result:
         return f"Could not restore version {version}. View not found."
     return _signal("view_updated", f"Restored view to version {version}.", view_id=view_id)
@@ -439,10 +427,7 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
     owner = get_current_user()
     view = db.get_view(view_id, owner)
     if not view:
-        view = db.get_view(view_id)
-    if not view:
         return f"View '{view_id}' not found."
-    owner = view.get("owner", owner)
 
     layout = view.get("layout", [])
     if not layout:
