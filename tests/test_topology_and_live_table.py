@@ -244,7 +244,7 @@ class TestTopologyFiltering:
         for node in component["nodes"]:
             assert "group" in node
             if node["kind"] == "Node":
-                assert node["group"] == ""
+                assert node["group"] == "cluster-scoped"
             else:
                 assert node["group"] == "production"
 
