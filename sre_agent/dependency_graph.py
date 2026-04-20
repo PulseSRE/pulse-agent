@@ -162,6 +162,18 @@ class DependencyGraph:
                         "StatefulSet", ss.metadata.namespace, ss.metadata.name, dict(ss.metadata.labels or {})
                     )
 
+            # ReplicaSets (explicit — ownerReferences link to Deployment)
+            replicasets = safe(lambda: apps.list_replica_set_for_all_namespaces())
+            if not isinstance(replicasets, ToolError):
+                for rs in replicasets.items:
+                    ns = rs.metadata.namespace
+                    rs_key = self.add_node("ReplicaSet", ns, rs.metadata.name, dict(rs.metadata.labels or {}))
+                    for ref in rs.metadata.owner_references or []:
+                        owner_key = _resource_key(ref.kind, ns, ref.name)
+                        if owner_key not in self._nodes:
+                            self.add_node(ref.kind, ns, ref.name)
+                        self.add_edge(owner_key, rs_key, "owns")
+
             # DaemonSets
             daemonsets = safe(lambda: apps.list_daemon_set_for_all_namespaces())
             if not isinstance(daemonsets, ToolError):
@@ -174,7 +186,13 @@ class DependencyGraph:
                 jobs = safe(lambda: batch.list_job_for_all_namespaces())
                 if not isinstance(jobs, ToolError):
                     for j in jobs.items:
-                        self.add_node("Job", j.metadata.namespace, j.metadata.name, dict(j.metadata.labels or {}))
+                        ns = j.metadata.namespace
+                        job_key = self.add_node("Job", ns, j.metadata.name, dict(j.metadata.labels or {}))
+                        for ref in j.metadata.owner_references or []:
+                            owner_key = _resource_key(ref.kind, ns, ref.name)
+                            if owner_key not in self._nodes:
+                                self.add_node(ref.kind, ns, ref.name)
+                            self.add_edge(owner_key, job_key, "owns")
 
                 # CronJobs
                 cronjobs = safe(lambda: batch.list_cron_job_for_all_namespaces())

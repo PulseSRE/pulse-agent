@@ -34,7 +34,7 @@ _KIND_MAP: dict[str, tuple[str, int, int]] = {
     "donut_chart": ("chart", 2, 10),
     "resource_counts": ("kpi_group", 4, 4),
     "summary_bar": ("kpi_group", 4, 3),
-    "topology": ("chart", 4, 16),
+    "topology": ("chart", 4, 24),
 }
 
 # Width hint vocabulary
