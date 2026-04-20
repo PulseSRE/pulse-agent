@@ -87,4 +87,6 @@ warn_return_any = false
 warn_unused_configs = true
 ignore_missing_imports = true
 check_untyped_defs = false
+# Skills excluded: directory names contain hyphens (capacity-planner, view-designer, etc.)
+# which are invalid Python package names. Skills are loaded dynamically by skill_loader.py.
 exclude = ["sre_agent/skills/"]

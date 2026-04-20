@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from ..db import get_database
@@ -156,7 +157,13 @@ def get_briefing(hours: int = 12) -> dict:
                 scan_pending_pods,
             )
 
-            for scanner in [scan_crashlooping_pods, scan_pending_pods, scan_oom_killed_pods, scan_firing_alerts]:
+            scanners: list[Callable[[], list[dict]]] = [
+                scan_crashlooping_pods,
+                scan_pending_pods,
+                scan_oom_killed_pods,
+                scan_firing_alerts,
+            ]
+            for scanner in scanners:
                 try:
                     current_findings.extend(scanner())
                 except Exception as e:
@@ -174,12 +181,13 @@ def get_briefing(hours: int = 12) -> dict:
                 scan_memory_pressure_forecast,
             )
 
-            for scanner in [
+            trend_scanners: list[Callable[[], list[dict]]] = [
                 scan_memory_pressure_forecast,
                 scan_disk_pressure_forecast,
                 scan_hpa_exhaustion_trend,
                 scan_error_rate_acceleration,
-            ]:
+            ]
+            for scanner in trend_scanners:
                 try:
                     trend_findings.extend(scanner())
                 except Exception as e:
