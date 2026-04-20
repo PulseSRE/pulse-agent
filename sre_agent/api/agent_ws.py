@@ -160,7 +160,7 @@ class SkillExecutor:
         full_response = await asyncio.to_thread(
             run_agent_streaming,
             client=client,
-            messages=list(messages),
+            messages=messages if not skill_tag else list(messages),
             system_prompt=effective_system,
             tool_defs=config["tool_defs"],
             tool_map=config["tool_map"],
