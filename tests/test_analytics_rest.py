@@ -72,7 +72,7 @@ class TestFixHistorySummary:
             "trend": {"current_week": 25, "previous_week": 17, "delta": 8},
         }
 
-        with patch("sre_agent.api.monitor_rest.get_fix_history_summary", return_value=mock_summary):
+        with patch("sre_agent.api.fix_rest.get_fix_history_summary", return_value=mock_summary):
             r = api_client.get("/fix-history/summary", headers=api_headers)
 
         assert r.status_code == 200
@@ -98,7 +98,7 @@ class TestFixHistorySummary:
             "trend": {"current_week": 0, "previous_week": 0, "delta": 0},
         }
 
-        with patch("sre_agent.api.monitor_rest.get_fix_history_summary", return_value=mock_empty):
+        with patch("sre_agent.api.fix_rest.get_fix_history_summary", return_value=mock_empty):
             r = api_client.get("/fix-history/summary", headers=api_headers)
 
         assert r.status_code == 200
@@ -126,7 +126,7 @@ class TestFixHistorySummary:
             "trend": {"current_week": 5, "previous_week": 5, "delta": 0},
         }
 
-        with patch("sre_agent.api.monitor_rest.get_fix_history_summary") as mock_fn:
+        with patch("sre_agent.api.fix_rest.get_fix_history_summary") as mock_fn:
             mock_fn.return_value = mock_summary
             r = api_client.get("/fix-history/summary?days=30", headers=api_headers)
 

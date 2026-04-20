@@ -42,7 +42,7 @@ def api_client(pulse_token, monkeypatch):
 class TestFixHistorySummaryVerification:
     def test_summary_includes_verification_counts(self):
         from sre_agent import db
-        from sre_agent.api.monitor_rest import get_fix_history_summary
+        from sre_agent.api.fix_rest import get_fix_history_summary
 
         database = db.get_database()
 
@@ -85,7 +85,7 @@ class TestFixHistorySummaryVerification:
             database.execute("DELETE FROM actions WHERE id IN (?, ?, ?, ?)", ("a1", "a2", "a3", "a4"))
 
     def test_summary_verification_empty(self):
-        from sre_agent.api.monitor_rest import get_fix_history_summary
+        from sre_agent.api.fix_rest import get_fix_history_summary
 
         result = get_fix_history_summary(days=7)
 

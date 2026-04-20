@@ -23,6 +23,7 @@ from .analytics_rest import router as analytics_router
 from .auth import verify_token
 from .chat_rest import router as chat_router
 from .eval_rest import router as eval_router
+from .fix_rest import router as fix_router
 from .memory_rest import router as memory_router
 from .monitor_rest import router as monitor_router
 from .scanner_rest import router as scanner_router
@@ -118,6 +119,7 @@ PROTOCOL_VERSION = "2"
 app.include_router(tools_router)
 app.include_router(monitor_router)
 app.include_router(scanner_router)
+app.include_router(fix_router)
 app.include_router(memory_router)
 app.include_router(eval_router)
 app.include_router(views_router)
