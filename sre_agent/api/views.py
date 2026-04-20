@@ -20,46 +20,6 @@ logger = logging.getLogger("pulse_agent.api")
 router = APIRouter()
 
 
-@router.get("/topology")
-async def rest_topology(
-    namespace: str = "",
-    kinds: str = "",
-    relationships: str = "",
-    layout_hint: str = "",
-    include_metrics: bool = False,
-    group_by: str = "",
-    _auth=Depends(verify_token),
-):
-    """Fetch topology graph directly (no agent). Used by perspective pills.
-
-    Read-only endpoint — bypasses agent confirmation gate intentionally.
-    Do not use this pattern for write operations.
-    """
-    from ..view_tools import get_topology_graph_raw
-
-    logger.info(
-        "Topology REST: namespace=%s kinds=%s relationships=%s layout_hint=%s include_metrics=%s group_by=%s",
-        namespace,
-        kinds,
-        relationships,
-        layout_hint,
-        include_metrics,
-        group_by,
-    )
-    result = get_topology_graph_raw(
-        namespace=namespace,
-        kinds=kinds,
-        relationships=relationships,
-        layout_hint=layout_hint,
-        include_metrics=include_metrics,
-        group_by=group_by,
-    )
-    if isinstance(result, str):
-        return {"error": result}
-    _, component = result
-    return component
-
-
 @router.get("/views")
 async def rest_list_views(owner: str = Depends(get_owner)):
     """List all views for the current user."""

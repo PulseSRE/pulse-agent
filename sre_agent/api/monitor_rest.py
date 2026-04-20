@@ -732,17 +732,44 @@ async def list_postmortems(
 @router.get("/topology")
 async def get_topology(
     namespace: str | None = Query(None),
+    kinds: str = Query(""),
+    relationships: str = Query(""),
+    layout_hint: str = Query(""),
+    include_metrics: bool = Query(False),
+    group_by: str = Query(""),
     _auth=Depends(verify_token),
 ):
-    """Return the dependency graph as nodes + edges for visualization."""
+    """Return the dependency graph as nodes + edges for visualization.
+
+    Supports perspective filtering via kinds/relationships/layout_hint params.
+    Used by the perspective quick-launch pills for instant view switching.
+    """
+    from ..view_tools import VALID_LAYOUT_HINTS, VALID_TOPOLOGY_KINDS, VALID_TOPOLOGY_RELATIONSHIPS
+
+    kind_set: set[str] | None = None
+    if kinds:
+        kind_set = {k.strip() for k in kinds.split(",") if k.strip()}
+        invalid = kind_set - VALID_TOPOLOGY_KINDS
+        if invalid:
+            return {"error": f"Invalid kinds: {', '.join(sorted(invalid))}"}
+
+    rel_set: set[str] | None = None
+    if relationships:
+        rel_set = {r.strip() for r in relationships.split(",") if r.strip()}
+        invalid = rel_set - VALID_TOPOLOGY_RELATIONSHIPS
+        if invalid:
+            return {"error": f"Invalid relationships: {', '.join(sorted(invalid))}"}
+
+    if layout_hint and layout_hint not in VALID_LAYOUT_HINTS:
+        return {"error": f"Invalid layout_hint: {layout_hint}"}
+
     from ..dependency_graph import get_dependency_graph
 
     graph = get_dependency_graph()
     nodes = []
     edges = []
 
-    # Build health status from active findings
-    finding_status: dict[str, str] = {}  # "Kind:ns:name" -> status
+    finding_status: dict[str, str] = {}
     try:
         from ..db import get_database
 
@@ -757,7 +784,6 @@ async def get_topology(
     except Exception:
         pass
 
-    # Build risk scores for deployments
     risk_scores: dict[str, int] = {}
     try:
         from ..change_risk import score_deployment_change
@@ -780,7 +806,6 @@ async def get_topology(
     except Exception:
         pass
 
-    # Recent changes (deployed in last 15 min) for pulsing indicator
     recent_changes: set[str] = set()
     try:
         recent = db.fetchall(
@@ -795,8 +820,12 @@ async def get_topology(
     except Exception:
         pass
 
+    cluster_scoped = {"Node", "HPA"}
     for key, node in graph.get_nodes().items():
         if namespace and node.namespace != namespace:
+            if not (kind_set and node.kind in kind_set and node.kind in cluster_scoped):
+                continue
+        if kind_set and node.kind not in kind_set:
             continue
 
         resource_key = f"{node.kind}:{node.namespace}:{node.name}"
@@ -817,32 +846,111 @@ async def get_topology(
             )
         if resource_key in recent_changes:
             node_data["recentlyChanged"] = True
+        if group_by:
+            if group_by == "namespace":
+                node_data["group"] = node.namespace
+            else:
+                node_data["group"] = node.labels.get(group_by, "unlabeled")
 
         nodes.append(node_data)
 
-    node_ids = {n["id"] for n in nodes}
-    for edge in graph.get_edges():
-        if edge.source in node_ids and edge.target in node_ids:
-            edges.append(
-                {
-                    "source": edge.source,
-                    "target": edge.target,
-                    "relationship": edge.relationship,
-                }
-            )
+    # Metrics enrichment
+    if include_metrics:
+        from ..dependency_graph import _fetch_metrics
 
-    # Build filtered summary (not global)
-    kinds: dict[str, int] = {}
+        node_met, pod_met = _fetch_metrics(namespace or "")
+        for n in nodes:
+            if n["kind"] == "Node":
+                m = node_met.get(n["name"])
+                if m:
+                    cpu_pct = round(m["cpu_usage_m"] * 100 / m["cpu_capacity_m"]) if m["cpu_capacity_m"] else 0
+                    mem_pct = round(m["memory_usage_b"] * 100 / m["memory_capacity_b"]) if m["memory_capacity_b"] else 0
+                    n["metrics"] = {
+                        "cpu_usage": m["cpu_usage"],
+                        "cpu_capacity": m["cpu_capacity"],
+                        "cpu_percent": cpu_pct,
+                        "memory_usage": m["memory_usage"],
+                        "memory_capacity": m["memory_capacity"],
+                        "memory_percent": mem_pct,
+                    }
+            elif n["kind"] == "Pod":
+                key = f"{n['namespace']}/{n['name']}"
+                m = pod_met.get(key)
+                if m:
+                    n["metrics"] = {
+                        "cpu_usage": m["cpu_usage"],
+                        "memory_usage": m["memory_usage"],
+                        "cpu_percent": 0,
+                        "memory_percent": 0,
+                    }
+
+    # Group size capping
+    _MAX_GROUP_SIZE = 20
+    if group_by:
+        groups: dict[str, list[dict]] = {}
+        for n in nodes:
+            g = n.get("group", "")
+            if g not in groups:
+                groups[g] = []
+            groups[g].append(n)
+        capped: list[dict] = []
+        for g, members in groups.items():
+            if len(members) <= _MAX_GROUP_SIZE:
+                capped.extend(members)
+            else:
+                capped.extend(members[:_MAX_GROUP_SIZE])
+                overflow = len(members) - _MAX_GROUP_SIZE
+                capped.append(
+                    {
+                        "id": f"_summary/{g}",
+                        "kind": "Summary",
+                        "name": f"+ {overflow} more",
+                        "namespace": members[0]["namespace"],
+                        "status": "healthy",
+                        "group": g,
+                    }
+                )
+        nodes = capped
+
+    node_ids = {n["id"] for n in nodes}
+    node_kinds = {n["kind"] for n in nodes}
+
+    for edge in graph.get_edges():
+        if edge.source not in node_ids or edge.target not in node_ids:
+            continue
+        if rel_set and edge.relationship not in rel_set:
+            continue
+        if kind_set and not rel_set:
+            src_node = graph.get_node(edge.source)
+            tgt_node = graph.get_node(edge.target)
+            if src_node and tgt_node:
+                if src_node.kind not in node_kinds or tgt_node.kind not in node_kinds:
+                    continue
+        edges.append(
+            {
+                "source": edge.source,
+                "target": edge.target,
+                "relationship": edge.relationship,
+            }
+        )
+
+    kind_counts: dict[str, int] = {}
     for n in nodes:
-        kinds[n["kind"]] = kinds.get(n["kind"], 0) + 1
+        kind_counts[n["kind"]] = kind_counts.get(n["kind"], 0) + 1
 
     return {
+        "kind": "topology",
+        "title": f"Topology — {namespace}" if namespace else "Topology",
+        "description": f"{len(nodes)} resources, {len(edges)} relationships",
+        "layout_hint": layout_hint or "top-down",
+        "include_metrics": include_metrics,
+        "group_by": group_by,
         "nodes": nodes,
         "edges": edges,
         "summary": {
             "nodes": len(nodes),
             "edges": len(edges),
-            "kinds": kinds,
+            "kinds": kind_counts,
             "last_refresh": graph._last_refresh,
         },
     }
