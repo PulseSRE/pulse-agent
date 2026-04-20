@@ -875,20 +875,33 @@ Emitted when ORCA detects that two skills should run in parallel (score gap <= t
 
 #### `skill_progress` — Individual skill status update
 
-Emitted as each parallel skill completes and when synthesis begins/completes.
+Emitted during parallel execution for tool activity, tool completion, skill completion, and synthesis phase.
 
 ```json
 {
   "type": "skill_progress",
   "skill": "sre",
-  "status": "complete"
+  "status": "tool_use",
+  "tool": "list_pods"
+}
+```
+
+```json
+{
+  "type": "skill_progress",
+  "skill": "sre",
+  "status": "tool_complete",
+  "tool": "list_pods",
+  "duration_ms": 2300
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `skill` | `string` | Skill name or `"synthesis"` for the merge step |
-| `status` | `string` | `"running"` or `"complete"` |
+| `status` | `string` | `"tool_use"`, `"tool_complete"`, `"complete"`, or `"running"` |
+| `tool` | `string?` | Tool name (present for `tool_use` and `tool_complete`) |
+| `duration_ms` | `number?` | Tool execution duration (present for `tool_complete`) |
 
 #### `done` (multi-skill extended) — Merged response with conflict metadata
 

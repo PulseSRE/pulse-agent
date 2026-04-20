@@ -502,21 +502,14 @@ async def websocket_auto_agent(websocket: WebSocket):
                         from ..plan_runtime import run_parallel_skills
                         from ..synthesis import synthesize_parallel_outputs
 
-                        async def _on_skill_progress(skill_name, event_type, data):
-                            try:
-                                await websocket.send_json(
-                                    {"type": "skill_progress", "skill": skill_name, "status": event_type, "tool": data}
-                                )
-                            except Exception:
-                                pass
-
                         parallel_result = await run_parallel_skills(
                             primary=skill,
                             secondary=secondary_skill,
                             query=content,
                             messages=messages,
                             client=None,
-                            on_progress=_on_skill_progress,
+                            websocket=websocket,
+                            session_id=session_id,
                         )
 
                         from ..skill_selector import get_last_selection_result
@@ -525,11 +518,6 @@ async def websocket_auto_agent(websocket: WebSocket):
                         if _sel:
                             parallel_result.primary_confidence = _sel.fused_scores.get(intent, 0.0)
                             parallel_result.secondary_confidence = _sel.fused_scores.get(secondary_skill.name, 0.0)
-
-                        await websocket.send_json({"type": "skill_progress", "skill": intent, "status": "complete"})
-                        await websocket.send_json(
-                            {"type": "skill_progress", "skill": secondary_skill.name, "status": "complete"}
-                        )
 
                         _p_out = parallel_result.primary_output.strip()
                         _s_out = parallel_result.secondary_output.strip()
@@ -572,11 +560,28 @@ async def websocket_auto_agent(websocket: WebSocket):
                         from ..agent import create_client as _create_synth_client
 
                         synth_client = _create_synth_client()
-                        synthesis = await synthesize_parallel_outputs(parallel_result, content, synth_client)
+
+                        async def _synth_text_delta(text: str):
+                            try:
+                                await websocket.send_json({"type": "text_delta", "text": text})
+                            except Exception:
+                                pass
+
+                        synthesis = await synthesize_parallel_outputs(
+                            parallel_result,
+                            content,
+                            synth_client,
+                            on_text_delta=_synth_text_delta,
+                        )
                         full_response = synthesis.unified_response
                         messages.append({"role": "assistant", "content": full_response})
 
-                        await websocket.send_json({"type": "text_delta", "text": full_response})
+                        # Forward buffered components from both skills
+                        for comp in parallel_result.primary_components + parallel_result.secondary_components:
+                            try:
+                                await websocket.send_json({"type": "component", "spec": comp, "tool": "parallel"})
+                            except Exception:
+                                pass
 
                         if parallel_result.primary_output:
                             bus.publish(
@@ -601,25 +606,25 @@ async def websocket_auto_agent(websocket: WebSocket):
 
                         from dataclasses import asdict
 
+                        combined_tokens = {
+                            k: parallel_result.primary_tokens.get(k, 0) + parallel_result.secondary_tokens.get(k, 0)
+                            for k in set(list(parallel_result.primary_tokens) + list(parallel_result.secondary_tokens))
+                        }
+
                         await websocket.send_json(
                             {
                                 "type": "done",
                                 "full_response": full_response,
                                 "skill_name": intent,
+                                "duration_ms": parallel_result.duration_ms,
+                                "input_tokens": combined_tokens.get("input_tokens", 0),
+                                "output_tokens": combined_tokens.get("output_tokens", 0),
                                 "multi_skill": {
                                     "skills": [intent, secondary_skill.name],
                                     "conflicts": [asdict(c) for c in synthesis.conflicts],
                                 },
                             }
                         )
-
-                        _multi_turns = getattr(websocket, "_multi_skill_turns", 0) + 1
-                        websocket._multi_skill_turns = _multi_turns  # type: ignore[attr-defined]
-                        if turn_counter > 4 and _multi_turns / turn_counter > 0.5:
-                            logger.warning(
-                                "Multi-skill rate %.0f%% exceeds 50%% — threshold may be too loose",
-                                (_multi_turns / turn_counter) * 100,
-                            )
 
                         last_mode = intent
                         continue

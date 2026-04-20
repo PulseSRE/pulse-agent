@@ -333,6 +333,60 @@ def test_run_parallel_skills_uses_provided_client():
         assert result.primary_output == "test output"
 
 
+# --- SkillExecutor ---
+
+
+def test_skill_output_dataclass():
+    from sre_agent.api.agent_ws import SkillOutput
+
+    out = SkillOutput(
+        text="hello", tools_called=["list_pods"], components=[{"kind": "table"}], token_usage={"input_tokens": 100}
+    )
+    assert out.text == "hello"
+    assert out.tools_called == ["list_pods"]
+    assert out.components == [{"kind": "table"}]
+    assert out.token_usage["input_tokens"] == 100
+
+
+def test_skill_output_defaults():
+    from sre_agent.api.agent_ws import SkillOutput
+
+    out = SkillOutput()
+    assert out.text == ""
+    assert out.tools_called == []
+    assert out.components == []
+    assert out.token_usage == {}
+
+
+def test_skill_executor_importable():
+    from sre_agent.api.agent_ws import SkillExecutor, SkillOutput
+
+    assert SkillExecutor is not None
+    assert SkillOutput is not None
+
+
+def test_parallel_result_has_token_fields():
+    from sre_agent.synthesis import ParallelSkillResult
+
+    r = ParallelSkillResult(
+        primary_output="out1",
+        secondary_output="out2",
+        primary_skill="sre",
+        secondary_skill="security",
+        primary_confidence=0.8,
+        secondary_confidence=0.7,
+        duration_ms=1000,
+        primary_tokens={"input_tokens": 500},
+        secondary_tokens={"input_tokens": 300},
+        primary_components=[{"kind": "table"}],
+        secondary_components=[],
+    )
+    assert r.primary_tokens["input_tokens"] == 500
+    assert r.secondary_tokens["input_tokens"] == 300
+    assert len(r.primary_components) == 1
+    assert len(r.secondary_components) == 0
+
+
 # --- Empty output guard ---
 
 

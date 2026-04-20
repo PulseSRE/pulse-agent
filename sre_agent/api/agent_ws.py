@@ -6,8 +6,10 @@ import asyncio
 import concurrent.futures
 import json
 import logging
+import threading
 import time
 import uuid
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ..agent import create_client, run_agent_streaming
@@ -18,6 +20,173 @@ if TYPE_CHECKING:
     from fastapi import WebSocket
 
 logger = logging.getLogger("pulse_agent.api")
+
+
+@dataclass
+class SkillOutput:
+    """Result of a single skill execution."""
+
+    text: str = ""
+    tools_called: list[str] = field(default_factory=list)
+    components: list[dict] = field(default_factory=list)
+    token_usage: dict[str, int] = field(default_factory=dict)
+
+
+class SkillExecutor:
+    """Runs a skill via run_agent_streaming with WebSocket event forwarding.
+
+    When skill_tag is empty (single-skill): full streaming to WebSocket.
+    When skill_tag is set (parallel): tool events only, text/thinking suppressed.
+    """
+
+    def __init__(self, websocket: WebSocket, session_id: str, loop: asyncio.AbstractEventLoop):
+        self.websocket = websocket
+        self.session_id = session_id
+        self.loop = loop
+
+    async def run(
+        self,
+        config: dict,
+        messages: list[dict],
+        client,
+        write_tools: set[str],
+        mode: str,
+        *,
+        skill_tag: str = "",
+        current_user: str = "anonymous",
+    ) -> SkillOutput:
+        """Run one skill and return structured output."""
+        _lock = threading.Lock()
+        tools_called: list[str] = []
+        components: list[dict] = []
+        token_usage: dict[str, int] = {}
+
+        async def _safe_send(data: dict):
+            try:
+                await self.websocket.send_json(data)
+            except Exception:
+                pass
+
+        def _schedule_send(data: dict):
+            asyncio.run_coroutine_threadsafe(_safe_send(data), self.loop)
+
+        # --- Callbacks ---
+
+        def on_text(delta: str):
+            if not skill_tag:
+                _schedule_send({"type": "text_delta", "text": delta})
+
+        def on_thinking(delta: str):
+            if not skill_tag:
+                _schedule_send({"type": "thinking_delta", "thinking": delta})
+
+        def on_tool_use(name: str):
+            with _lock:
+                tools_called.append(name)
+            if skill_tag:
+                _schedule_send({"type": "skill_progress", "skill": skill_tag, "status": "tool_use", "tool": name})
+            else:
+                _schedule_send({"type": "tool_use", "tool": name})
+
+        def on_component(name: str, spec: dict):
+            with _lock:
+                components.append(spec)
+            if not skill_tag:
+                _schedule_send({"type": "component", "spec": spec, "tool": name})
+
+        def on_usage(**kwargs):
+            with _lock:
+                for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"):
+                    token_usage[key] = token_usage.get(key, 0) + kwargs.get(key, 0)
+
+        def on_confirm(tool_name: str, tool_input: dict) -> bool:
+            if skill_tag and not write_tools:
+                logger.warning("Secondary skill '%s' attempted confirmation — denied", skill_tag)
+                return False
+            try:
+                if not _ws_alive.get(self.session_id, True):
+                    return False
+                confirm_future = asyncio.run_coroutine_threadsafe(
+                    _create_and_register_future(self.session_id, tool_name, tool_input, self.websocket),
+                    self.loop,
+                ).result(timeout=5)
+                waiter: concurrent.futures.Future[bool] = concurrent.futures.Future()
+
+                def _on_done(f):
+                    try:
+                        waiter.set_result(f.result())
+                    except Exception:
+                        waiter.set_result(False)
+
+                self.loop.call_soon_threadsafe(confirm_future.add_done_callback, _on_done)
+                approved = waiter.result(timeout=120)
+                logger.info("Confirmation resolved: tool=%s approved=%s", tool_name, approved)
+                return approved
+            except Exception as e:
+                logger.error("Confirmation failed: %s", e)
+                _schedule_send({"type": "error", "message": "Confirmation timed out or failed. Operation cancelled."})
+                return False
+            finally:
+                _pending_confirms.pop(self.session_id, None)
+
+        # Tool result handler with completion events
+        _base_tool_result_handler = _build_tool_result_handler(self.session_id, skill_tag or mode, write_tools)
+
+        def on_tool_result(info: dict):
+            _base_tool_result_handler(info)
+            if skill_tag and info.get("status") == "success":
+                _schedule_send(
+                    {
+                        "type": "skill_progress",
+                        "skill": skill_tag,
+                        "status": "tool_complete",
+                        "tool": info["tool_name"],
+                        "duration_ms": info.get("duration_ms", 0),
+                    }
+                )
+
+        # Memory augmentation (per-skill)
+        effective_system = config["system_prompt"]
+        if get_settings().memory:
+            try:
+                from ..memory import get_manager
+
+                manager = get_manager()
+                if manager:
+                    last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+                    if isinstance(last_user, str) and last_user:
+                        effective_system = manager.augment_prompt(config["system_prompt"], last_user)
+            except Exception:
+                logger.debug("Memory retrieval failed for skill %s", skill_tag or mode, exc_info=True)
+
+        # Run the agent
+        full_response = await asyncio.to_thread(
+            run_agent_streaming,
+            client=client,
+            messages=list(messages),
+            system_prompt=effective_system,
+            tool_defs=config["tool_defs"],
+            tool_map=config["tool_map"],
+            write_tools=write_tools,
+            on_text=on_text,
+            on_thinking=on_thinking,
+            on_tool_use=on_tool_use,
+            on_confirm=on_confirm,
+            on_component=on_component,
+            on_tool_result=on_tool_result,
+            on_usage=on_usage,
+            mode=skill_tag or mode,
+        )
+
+        text = full_response if isinstance(full_response, str) else full_response[0]
+
+        return SkillOutput(
+            text=text,
+            tools_called=list(tools_called),
+            components=list(components),
+            token_usage=dict(token_usage),
+        )
+
 
 # WebSocket connection liveness tracking
 _ws_alive: dict[str, bool] = {}
@@ -129,81 +298,9 @@ async def _run_agent_ws(
     client = create_client()
     ws_id = session_id
     _turn_starts[ws_id] = time.monotonic()
-
-    # Capture the running loop BEFORE entering the thread
     loop = asyncio.get_running_loop()
 
-    async def _safe_send(data: dict):
-        """Send JSON to WebSocket, swallowing errors if client disconnected."""
-        try:
-            await websocket.send_json(data)
-        except Exception:
-            pass  # Client disconnected -- expected during shutdown
-
-    def _schedule_send(data: dict):
-        """Thread-safe: schedule a WebSocket send on the event loop."""
-        asyncio.run_coroutine_threadsafe(_safe_send(data), loop)
-
-    def on_text(delta: str):
-        _schedule_send({"type": "text_delta", "text": delta})
-
-    def on_thinking(delta: str):
-        _schedule_send({"type": "thinking_delta", "thinking": delta})
-
-    session_tools: list[str] = []
-    session_components: list[dict] = []
-    turn_token_usage: dict[str, int] = {}
-
-    def on_usage(**kwargs):
-        # Accumulate tokens across iterations (agent loop may call API multiple times)
-        for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"):
-            turn_token_usage[key] = turn_token_usage.get(key, 0) + kwargs.get(key, 0)
-
-    def on_tool_use(name: str):
-        session_tools.append(name)
-        _schedule_send({"type": "tool_use", "tool": name})
-
-    def on_component(name: str, spec: dict):
-        session_components.append(spec)
-        _schedule_send({"type": "component", "spec": spec, "tool": name})
-
-    def on_confirm(tool_name: str, tool_input: dict) -> bool:
-        """Request confirmation from the web UI and block until response."""
-        try:
-            # Check if the WebSocket is still alive before waiting
-            if not _ws_alive.get(ws_id, True):
-                return False
-
-            # Create the future and send the confirm request to the UI
-            confirm_future = asyncio.run_coroutine_threadsafe(
-                _create_and_register_future(ws_id, tool_name, tool_input, websocket),
-                loop,
-            ).result(timeout=5)
-
-            # Block the agent thread -- wait for the UI to set the future result
-            waiter: concurrent.futures.Future[bool] = concurrent.futures.Future()
-
-            def _on_done(f):
-                try:
-                    waiter.set_result(f.result())
-                except Exception:
-                    waiter.set_result(False)
-
-            loop.call_soon_threadsafe(confirm_future.add_done_callback, _on_done)
-
-            approved = waiter.result(timeout=120)
-            logger.info("Confirmation resolved: tool=%s approved=%s", tool_name, approved)
-            return approved
-
-        except Exception as e:
-            logger.error("Confirmation failed: %s", e)
-            _schedule_send({"type": "error", "message": "Confirmation timed out or failed. Operation cancelled."})
-            return False
-        finally:
-            _pending_confirms.pop(ws_id, None)
-
-    # Augment system prompt with memory context and start timing
-    effective_system: str | list[dict] = system_prompt
+    # Start memory timing before agent runs
     manager = None
     if get_settings().memory:
         try:
@@ -211,34 +308,30 @@ async def _run_agent_ws(
 
             manager = get_manager()
             if manager:
-                last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
-                if isinstance(last_user, str) and last_user:
-                    effective_system = manager.augment_prompt(system_prompt, last_user)
-                manager.start_turn()  # Start timing BEFORE agent runs
-        except Exception as e:
-            logger.debug("Memory retrieval failed: %s", e)
+                manager.start_turn()
+        except Exception:
+            logger.debug("Memory manager init failed", exc_info=True)
 
-    # Build tool result recording handler
-    tool_result_handler = _build_tool_result_handler(ws_id, mode, write_tools)
-
-    # Run the blocking agent in a thread
-    full_response = await asyncio.to_thread(
-        run_agent_streaming,
-        client=client,
-        messages=messages,
-        system_prompt=effective_system,
-        tool_defs=tool_defs,
-        tool_map=tool_map,
-        write_tools=write_tools,
-        on_text=on_text,
-        on_thinking=on_thinking,
-        on_tool_use=on_tool_use,
-        on_confirm=on_confirm,
-        on_component=on_component,
-        on_tool_result=tool_result_handler,
-        on_usage=on_usage,
-        mode=mode,
+    # Run via SkillExecutor — handles callbacks, memory augmentation, tool recording
+    executor = SkillExecutor(websocket, session_id, loop)
+    config = {
+        "system_prompt": system_prompt,
+        "tool_defs": tool_defs,
+        "tool_map": tool_map,
+    }
+    output = await executor.run(
+        config,
+        messages,
+        client,
+        write_tools,
+        mode,
+        current_user=current_user,
     )
+
+    full_response = output.text
+    session_tools = output.tools_called
+    session_components = output.components
+    turn_token_usage = output.token_usage
 
     # Process structured signals from tool results -- no regex scanning needed.
     # Tools return signals as "__SIGNAL__" + JSON in their text result.

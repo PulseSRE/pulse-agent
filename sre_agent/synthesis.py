@@ -41,6 +41,10 @@ class ParallelSkillResult:
     primary_confidence: float
     secondary_confidence: float
     duration_ms: int
+    primary_tokens: dict[str, int] = field(default_factory=dict)
+    secondary_tokens: dict[str, int] = field(default_factory=dict)
+    primary_components: list[dict] = field(default_factory=list)
+    secondary_components: list[dict] = field(default_factory=list)
 
 
 _SYNTHESIS_SYSTEM = (
@@ -103,11 +107,15 @@ async def synthesize_parallel_outputs(
     result: ParallelSkillResult,
     query: str,
     client,
+    on_text_delta=None,
 ) -> SynthesisResult:
     """Merge two parallel skill outputs into a unified response.
 
     Uses Claude Sonnet for intelligent merging and conflict detection.
     Falls back to concatenation if the synthesis call fails.
+
+    Args:
+        on_text_delta: optional async callback(str) for streaming synthesis text.
     """
     try:
         import asyncio
@@ -120,15 +128,33 @@ async def synthesize_parallel_outputs(
             f"{result.secondary_output}"
         )
 
-        response = await asyncio.to_thread(
-            client.messages.create,
-            model=SYNTHESIS_MODEL,
-            max_tokens=4096,
-            system=_SYNTHESIS_SYSTEM,
-            messages=[{"role": "user", "content": user_content}],
-        )
+        if on_text_delta:
 
-        raw_text = response.content[0].text
+            def _stream_synthesis():
+                collected = []
+                with client.messages.stream(
+                    model=SYNTHESIS_MODEL,
+                    max_tokens=4096,
+                    system=_SYNTHESIS_SYSTEM,
+                    messages=[{"role": "user", "content": user_content}],
+                ) as stream:
+                    for text in stream.text_stream:
+                        collected.append(text)
+                        loop = asyncio.get_event_loop()
+                        asyncio.run_coroutine_threadsafe(on_text_delta(text), loop)
+                return "".join(collected)
+
+            raw_text = await asyncio.to_thread(_stream_synthesis)
+        else:
+            response = await asyncio.to_thread(
+                client.messages.create,
+                model=SYNTHESIS_MODEL,
+                max_tokens=4096,
+                system=_SYNTHESIS_SYSTEM,
+                messages=[{"role": "user", "content": user_content}],
+            )
+            raw_text = response.content[0].text
+
         clean_text, conflicts = _parse_conflicts(raw_text)
 
         return SynthesisResult(
@@ -142,8 +168,14 @@ async def synthesize_parallel_outputs(
 
     except Exception:
         logger.warning("Synthesis failed, falling back to concatenation", exc_info=True)
+        fallback = _build_fallback_response(result)
+        if on_text_delta:
+            try:
+                await on_text_delta(fallback)
+            except Exception:
+                pass
         return SynthesisResult(
-            unified_response=_build_fallback_response(result),
+            unified_response=fallback,
             conflicts=[],
             sources={
                 result.primary_skill: result.primary_output[:200],
