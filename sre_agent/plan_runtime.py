@@ -820,14 +820,18 @@ async def run_parallel_skills(
                     if not t.done():
                         t.cancel()
 
+            from .api.agent_ws import SkillOutput
+
             p_result = results.get(primary.name)
             s_result = results.get(secondary.name)
-            primary_output = p_result.text if p_result and hasattr(p_result, "text") else ""
-            secondary_output = s_result.text if s_result and hasattr(s_result, "text") else ""
-            primary_tokens = p_result.token_usage if p_result and hasattr(p_result, "token_usage") else {}
-            secondary_tokens = s_result.token_usage if s_result and hasattr(s_result, "token_usage") else {}
-            primary_components = p_result.components if p_result and hasattr(p_result, "components") else []
-            secondary_components = s_result.components if s_result and hasattr(s_result, "components") else []
+            p = p_result if isinstance(p_result, SkillOutput) else None
+            s = s_result if isinstance(s_result, SkillOutput) else None
+            primary_output = p.text if p else ""
+            secondary_output = s.text if s else ""
+            primary_tokens = p.token_usage if p else {}
+            secondary_tokens = s.token_usage if s else {}
+            primary_components = p.components if p else []
+            secondary_components = s.components if s else []
 
         else:
             from .agent import run_agent_streaming

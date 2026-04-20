@@ -130,7 +130,15 @@ class DependencyGraph:
         """Refresh the graph from live K8s API data."""
         try:
             from .errors import ToolError
-            from .k8s_client import get_apps_client, get_core_client, get_custom_client, safe
+            from .k8s_client import (
+                get_apps_client,
+                get_autoscaling_client,
+                get_batch_client,
+                get_core_client,
+                get_custom_client,
+                get_networking_client,
+                safe,
+            )
 
             self.clear()
             core = get_core_client()
@@ -162,9 +170,7 @@ class DependencyGraph:
 
             # Jobs
             try:
-                from kubernetes import client as k8s_client
-
-                batch = k8s_client.BatchV1Api()
+                batch = get_batch_client()
                 jobs = safe(lambda: batch.list_job_for_all_namespaces())
                 if not isinstance(jobs, ToolError):
                     for j in jobs.items:
@@ -230,9 +236,7 @@ class DependencyGraph:
 
             # Ingresses → Service backends
             try:
-                from kubernetes import client as k8s_client
-
-                networking = k8s_client.NetworkingV1Api()
+                networking = get_networking_client()
                 ingresses = safe(lambda: networking.list_ingress_for_all_namespaces())
                 if not isinstance(ingresses, ToolError):
                     for ing in ingresses.items:
@@ -278,9 +282,7 @@ class DependencyGraph:
 
             # HPAs → scale targets
             try:
-                from kubernetes import client as k8s_client
-
-                autoscaling = k8s_client.AutoscalingV2Api()
+                autoscaling = get_autoscaling_client()
                 hpas = safe(lambda: autoscaling.list_horizontal_pod_autoscaler_for_all_namespaces())
                 if not isinstance(hpas, ToolError):
                     for hpa in hpas.items:

@@ -129,7 +129,6 @@ class SkillExecutor:
             finally:
                 _pending_confirms.pop(self.session_id, None)
 
-        # Tool result handler with completion events
         _base_tool_result_handler = _build_tool_result_handler(self.session_id, skill_tag or mode, write_tools)
 
         def on_tool_result(info: dict):
@@ -145,7 +144,6 @@ class SkillExecutor:
                     }
                 )
 
-        # Memory augmentation (per-skill)
         effective_system = config["system_prompt"]
         if get_settings().memory:
             try:
@@ -159,7 +157,6 @@ class SkillExecutor:
             except Exception:
                 logger.debug("Memory retrieval failed for skill %s", skill_tag or mode, exc_info=True)
 
-        # Run the agent
         full_response = await asyncio.to_thread(
             run_agent_streaming,
             client=client,

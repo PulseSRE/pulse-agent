@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger("pulse_agent.synthesis")
 
-SYNTHESIS_MODEL = "claude-sonnet-4-6-20250514"
+SYNTHESIS_MODEL = "claude-sonnet-4-6"
 
 
 @dataclass
@@ -129,6 +129,7 @@ async def synthesize_parallel_outputs(
         )
 
         if on_text_delta:
+            _loop = asyncio.get_running_loop()
 
             def _stream_synthesis():
                 collected = []
@@ -140,8 +141,7 @@ async def synthesize_parallel_outputs(
                 ) as stream:
                     for text in stream.text_stream:
                         collected.append(text)
-                        loop = asyncio.get_event_loop()
-                        asyncio.run_coroutine_threadsafe(on_text_delta(text), loop)
+                        asyncio.run_coroutine_threadsafe(on_text_delta(text), _loop)
                 return "".join(collected)
 
             raw_text = await asyncio.to_thread(_stream_synthesis)
