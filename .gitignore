@@ -32,6 +32,7 @@ htmlcov/
 # Tools
 .playwright-mcp/
 .worktrees/
+.superpowers/
 tmp/
 
 # Screenshots (Playwright)
