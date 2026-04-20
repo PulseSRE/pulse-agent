@@ -849,6 +849,18 @@ async def get_topology(
         if group_by:
             if group_by == "namespace":
                 node_data["group"] = node.namespace
+            elif group_by == "node":
+                if node.kind == "Node":
+                    node_data["group"] = node.name
+                else:
+                    parent_node = None
+                    for edge in graph.get_edges():
+                        if edge.target == key and edge.relationship == "schedules":
+                            src = graph.get_node(edge.source)
+                            if src and src.kind == "Node":
+                                parent_node = src.name
+                                break
+                    node_data["group"] = parent_node or "unscheduled"
             else:
                 node_data["group"] = node.labels.get(group_by, "unlabeled")
 

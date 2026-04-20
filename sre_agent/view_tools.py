@@ -1397,6 +1397,18 @@ def get_topology_graph(
         if group_by:
             if group_by == "namespace":
                 node_dict["group"] = node.namespace
+            elif group_by == "node":
+                if node.kind == "Node":
+                    node_dict["group"] = node.name
+                else:
+                    parent_node = None
+                    for edge in graph.get_edges():
+                        if edge.target == key and edge.relationship == "schedules":
+                            src = graph.get_node(edge.source)
+                            if src and src.kind == "Node":
+                                parent_node = src.name
+                                break
+                    node_dict["group"] = parent_node or "unscheduled"
             else:
                 node_dict["group"] = node.labels.get(group_by, "unlabeled")
         nodes.append(node_dict)
