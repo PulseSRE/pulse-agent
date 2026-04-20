@@ -532,7 +532,9 @@ class TestNamespaceSummary:
         assert component["kind"] == "grid"
         # First item is resource_counts, then 4 metric cards
         assert component["items"][0]["kind"] == "resource_counts"
-        assert len(component["items"][0]["items"]) == 7  # pods, deps, sts, ds, svc, cm, events
+        assert (
+            len(component["items"][0]["items"]) == 11
+        )  # pods, deps, sts, ds, svc, routes, ingresses, secrets, pvcs, cm, events
         assert component["items"][1]["kind"] == "metric_card"
 
     def test_grid_layout_columns(self, mock_k8s):

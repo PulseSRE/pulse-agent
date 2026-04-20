@@ -117,6 +117,35 @@ def namespace_summary(namespace: str):
     cm_result = safe(lambda: core.list_namespaced_config_map(namespace, limit=500))
     cm_count = 0 if isinstance(cm_result, ToolError) else len(cm_result.items)
 
+    secret_result = safe(lambda: core.list_namespaced_secret(namespace, limit=500))
+    secret_count = 0 if isinstance(secret_result, ToolError) else len(secret_result.items)
+
+    pvc_result = safe(lambda: core.list_namespaced_persistent_volume_claim(namespace, limit=500))
+    pvc_count = 0 if isinstance(pvc_result, ToolError) else len(pvc_result.items)
+
+    # Routes (OpenShift) and Ingresses
+    route_count = 0
+    try:
+        from .k8s_client import get_custom_client
+
+        custom = get_custom_client()
+        routes = safe(lambda: custom.list_namespaced_custom_object("route.openshift.io", "v1", namespace, "routes"))
+        if not isinstance(routes, ToolError):
+            route_count = len(routes.get("items", []))
+    except Exception:
+        pass
+
+    ingress_count = 0
+    try:
+        from .k8s_client import get_networking_client
+
+        networking = get_networking_client()
+        ingresses = safe(lambda: networking.list_namespaced_ingress(namespace, limit=500))
+        if not isinstance(ingresses, ToolError):
+            ingress_count = len(ingresses.items)
+    except Exception:
+        pass
+
     # Warning events (last hour)
     events_result = safe(lambda: core.list_namespaced_event(namespace, field_selector="type=Warning"))
     warning_count = 0
@@ -132,6 +161,8 @@ def namespace_summary(namespace: str):
         f"{degraded_deps} degraded\n"
         f"  StatefulSets: {sts_count} | DaemonSets: {ds_count} | "
         f"Services: {svc_count} | ConfigMaps: {cm_count}\n"
+        f"  Routes: {route_count} | Ingresses: {ingress_count} | "
+        f"Secrets: {secret_count} | PVCs: {pvc_count}\n"
         f"  Warning events: {warning_count}"
     )
 
@@ -151,6 +182,10 @@ def namespace_summary(namespace: str):
             {"resource": "statefulsets", "count": sts_count, "gvr": "apps~v1~statefulsets"},
             {"resource": "daemonsets", "count": ds_count, "gvr": "apps~v1~daemonsets"},
             {"resource": "services", "count": svc_count, "gvr": "v1~services"},
+            {"resource": "routes", "count": route_count, "gvr": "route.openshift.io~v1~routes"},
+            {"resource": "ingresses", "count": ingress_count, "gvr": "networking.k8s.io~v1~ingresses"},
+            {"resource": "secrets", "count": secret_count, "gvr": "v1~secrets"},
+            {"resource": "pvcs", "count": pvc_count, "gvr": "v1~persistentvolumeclaims"},
             {"resource": "configmaps", "count": cm_count, "gvr": "v1~configmaps"},
             {
                 "resource": "events",
