@@ -170,7 +170,8 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `error_tracker.py` — thread-safe ring buffer for error aggregation
 - `runbooks.py` — 10 built-in SRE runbooks injected into system prompt
 - `memory/` — self-improving agent (PostgreSQL, pattern detection, learned runbooks)
-- `view_tools.py` — `namespace_summary` + `create_dashboard` tools for generative views
+- `view_tools.py` — `namespace_summary` + `create_dashboard` + `get_topology_graph` tools for generative views. Topology supports 5 perspectives (Physical, Logical, Network, Multi-Tenant, Helm) via `kinds`, `relationships`, `layout_hint`, `include_metrics`, `group_by` params
+- `dependency_graph.py` — live K8s resource dependency graph (17 types, 10 relationships), `_fetch_metrics()` with 30s TTL cache for metrics-server enrichment
 - `quality_engine.py` — unified dashboard validation + quality scoring (merged view_validator + view_critic)
 - `view_validator.py` — backward-compatible wrapper around quality_engine
 - `view_critic.py` — backward-compatible wrapper around quality_engine
