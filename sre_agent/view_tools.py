@@ -1285,6 +1285,7 @@ VALID_TOPOLOGY_KINDS = frozenset(
         "ServiceAccount",
         "NetworkPolicy",
         "HelmRelease",
+        "HPA",
     }
 )
 
