@@ -326,3 +326,70 @@ class TestLayoutHints:
         components = [{"kind": "status_list", "items": [{}] * 5}]
         layout = compute_layout(components)
         assert layout[0]["h"] == 6  # 2 + min(ceil(5*0.8), 8) = 2 + 4
+
+
+class TestTopologyLayout:
+    def test_topology_full_width(self):
+        components = [{"kind": "topology"}]
+        layout = compute_layout(components)
+        assert layout[0]["w"] == 4
+
+    def test_topology_height(self):
+        components = [{"kind": "topology"}]
+        layout = compute_layout(components)
+        assert layout[0]["h"] == 24
+
+    def test_topology_below_kpi(self):
+        components = [{"kind": "resource_counts"}, {"kind": "topology"}]
+        layout = compute_layout(components)
+        assert layout[0]["y"] < layout[1]["y"]
+
+    def test_topology_not_paired(self):
+        """Topology should never be half-width paired with another chart."""
+        components = [{"kind": "chart"}, {"kind": "topology"}]
+        layout = compute_layout(components)
+        assert layout[1]["w"] == 4
+
+
+class TestNamespaceDashboard:
+    """Regression tests for namespace_summary-style dashboards."""
+
+    def test_full_dashboard_no_overlap(self):
+        components = [
+            {"kind": "grid", "items": [{"kind": "metric_card"}] * 4},
+            {"kind": "chart", "series": [{"label": "cpu", "data": [[1, 2]]}]},
+            {"kind": "chart", "series": [{"label": "mem", "data": [[1, 2]]}]},
+            {"kind": "data_table", "rows": [{}] * 5},
+            {"kind": "topology"},
+        ]
+        layout = compute_layout(components)
+        occupied: set[tuple[int, int]] = set()
+        for idx in layout:
+            pos = layout[idx]
+            for dx in range(pos["w"]):
+                for dy in range(pos["h"]):
+                    cell = (pos["x"] + dx, pos["y"] + dy)
+                    assert cell not in occupied, f"Component {idx} overlaps at {cell}"
+                    occupied.add(cell)
+
+    def test_topology_has_minimum_height(self):
+        """Topology must be tall enough to render a graph without clipping."""
+        components = [
+            {"kind": "resource_counts"},
+            {"kind": "chart"},
+            {"kind": "topology"},
+        ]
+        layout = compute_layout(components)
+        topo_h = layout[2]["h"]
+        assert topo_h >= 16, f"Topology height {topo_h} too short, needs >= 16 (384px at 24px/row)"
+
+    def test_all_widget_kinds_have_entries(self):
+        """Every kind in _KIND_MAP should produce a valid layout."""
+        from sre_agent.layout_engine import _KIND_MAP
+
+        for kind in _KIND_MAP:
+            components = [{"kind": kind}]
+            layout = compute_layout(components)
+            assert 0 in layout, f"Kind '{kind}' produced no layout"
+            assert layout[0]["w"] > 0
+            assert layout[0]["h"] > 0
