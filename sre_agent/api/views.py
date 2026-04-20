@@ -199,7 +199,7 @@ async def rest_claim_shared_view(
     if int(time.time()) > expires:
         return JSONResponse(status_code=410, content={"error": "Share link has expired"})
 
-    secret = get_settings().ws_token
+    secret = os.environ.get("PULSE_SHARE_TOKEN_KEY", "") or get_settings().ws_token
     if not secret:
         return JSONResponse(status_code=503, content={"error": "Server not configured"})
     expected_sig = hmac.new(secret.encode(), f"{view_id}:{expires_str}".encode(), hashlib.sha256).hexdigest()
