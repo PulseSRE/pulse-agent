@@ -25,6 +25,7 @@ from .chat_rest import router as chat_router
 from .eval_rest import router as eval_router
 from .memory_rest import router as memory_router
 from .monitor_rest import router as monitor_router
+from .scanner_rest import router as scanner_router
 from .skill_rest import router as skill_router
 from .tools_rest import router as tools_router
 from .views import router as views_router
@@ -116,6 +117,7 @@ PROTOCOL_VERSION = "2"
 # Include REST routers
 app.include_router(tools_router)
 app.include_router(monitor_router)
+app.include_router(scanner_router)
 app.include_router(memory_router)
 app.include_router(eval_router)
 app.include_router(views_router)

@@ -241,7 +241,7 @@ class TestScannerCoverage:
             ],
         }
 
-        with patch("sre_agent.api.monitor_rest.get_scanner_coverage", return_value=mock_coverage):
+        with patch("sre_agent.api.scanner_rest.get_scanner_coverage", return_value=mock_coverage):
             r = api_client.get("/monitor/coverage", headers=api_headers)
 
         assert r.status_code == 200
@@ -269,7 +269,7 @@ class TestScannerCoverage:
             "per_scanner": [],
         }
 
-        with patch("sre_agent.api.monitor_rest.get_scanner_coverage") as mock_fn:
+        with patch("sre_agent.api.scanner_rest.get_scanner_coverage") as mock_fn:
             mock_fn.return_value = mock_coverage
             r = api_client.get("/monitor/coverage?days=30", headers=api_headers)
 
