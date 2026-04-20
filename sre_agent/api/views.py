@@ -30,10 +30,14 @@ async def rest_topology(
     group_by: str = "",
     _auth=Depends(verify_token),
 ):
-    """Fetch topology graph directly (no agent). Used by perspective pills."""
-    from ..view_tools import get_topology_graph
+    """Fetch topology graph directly (no agent). Used by perspective pills.
 
-    result = get_topology_graph(
+    Read-only endpoint — bypasses agent confirmation gate intentionally.
+    Do not use this pattern for write operations.
+    """
+    from ..view_tools import get_topology_graph_raw
+
+    result = get_topology_graph_raw(
         namespace=namespace,
         kinds=kinds,
         relationships=relationships,

@@ -1308,7 +1308,6 @@ VALID_LAYOUT_HINTS = frozenset({"top-down", "left-to-right", "grouped"})
 _MAX_GROUP_SIZE = 20
 
 
-@beta_tool
 def get_topology_graph(
     namespace: str = "",
     kinds: str = "",
@@ -1515,6 +1514,9 @@ def get_topology_graph(
 
     return (text, component)
 
+
+get_topology_graph_raw = get_topology_graph
+get_topology_graph = beta_tool(get_topology_graph)
 
 register_tool(get_topology_graph)
 
