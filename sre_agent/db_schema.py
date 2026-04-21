@@ -138,6 +138,14 @@ CREATE TABLE IF NOT EXISTS views (
     icon TEXT DEFAULT '',
     layout TEXT NOT NULL,
     positions TEXT DEFAULT '{}',
+    view_type TEXT NOT NULL DEFAULT 'custom',
+    status TEXT NOT NULL DEFAULT 'active',
+    trigger_source TEXT NOT NULL DEFAULT 'user',
+    finding_id TEXT,
+    cluster_id TEXT NOT NULL DEFAULT '',
+    claimed_by TEXT,
+    claimed_at TEXT,
+    visibility TEXT NOT NULL DEFAULT 'private',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

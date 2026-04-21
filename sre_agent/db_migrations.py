@@ -181,6 +181,27 @@ def _migrate_018_user_events(db: Database) -> None:
     db.executescript(USER_EVENTS_SCHEMA)
 
 
+def _migrate_019_agent_views(db: Database) -> None:
+    """Add agent view columns: type, status, visibility, trigger, finding, cluster, claim."""
+    for col, typ, default in [
+        ("view_type", "TEXT", "'custom'"),
+        ("status", "TEXT", "'active'"),
+        ("trigger_source", "TEXT", "'user'"),
+        ("finding_id", "TEXT", None),
+        ("cluster_id", "TEXT", "''"),
+        ("claimed_by", "TEXT", None),
+        ("claimed_at", "TEXT", None),
+        ("visibility", "TEXT", "'private'"),
+    ]:
+        try:
+            default_clause = f" DEFAULT {default}" if default else ""
+            not_null = " NOT NULL" if default else ""
+            db.execute(f"ALTER TABLE views ADD COLUMN {col} {typ}{not_null}{default_clause}")
+        except Exception:
+            pass
+    db.commit()
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -200,4 +221,5 @@ MIGRATIONS = [
     (16, "slo_definitions", _migrate_016_slo_definitions),
     (17, "plan_executions", _migrate_017_plan_executions),
     (18, "user_events", _migrate_018_user_events),
+    (19, "agent_views", _migrate_019_agent_views),
 ]
