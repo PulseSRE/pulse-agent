@@ -164,7 +164,13 @@ def list_inbox_items(
     offset: int = 0,
 ) -> dict[str, Any]:
     db = get_database()
-    exclude_statuses = "('archived', 'agent_cleared')" if status != "agent_cleared" else "('archived')"
+    if status == "agent_cleared":
+        exclude_statuses = "('archived')"
+    elif status == "__needs_attention__":
+        exclude_statuses = "('archived', 'agent_cleared', 'new', 'agent_reviewing')"
+        status = None
+    else:
+        exclude_statuses = "('archived', 'agent_cleared')"
     where_parts = [
         "(snoozed_until IS NULL OR snoozed_until <= ?)",
         f"status NOT IN {exclude_statuses}",
