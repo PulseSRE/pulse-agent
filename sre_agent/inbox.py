@@ -325,11 +325,10 @@ def claim_item(item_id: str, username: str) -> bool:
     db.commit()
     _publish_event("inbox_item_claimed", item_id, {"claimed_by": username, "claimed_at": now})
 
-    if item["status"] == "new":
-        if item["item_type"] == "task":
-            update_item_status(item_id, "in_progress")
-        elif item["item_type"] == "finding":
-            update_item_status(item_id, "acknowledged")
+    current = item["status"]
+    if current == "new":
+        update_item_status(item_id, "acknowledged")
+    # Don't auto-advance beyond acknowledged — user decides next step
 
     _generate_view_for_item(item_id, item)
 
