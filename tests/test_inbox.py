@@ -82,11 +82,11 @@ class TestInboxCRUD:
         from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
 
         item_id = create_inbox_item(_make_item())
-        ok = update_item_status(item_id, "acknowledged")
+        ok = update_item_status(item_id, "triaged")
         assert ok is True
 
         fetched = get_inbox_item(item_id)
-        assert fetched["status"] == "acknowledged"
+        assert fetched["status"] == "triaged"
 
     def test_stats(self):
         from sre_agent.inbox import create_inbox_item, get_inbox_stats
@@ -100,41 +100,35 @@ class TestInboxCRUD:
 
 
 class TestLifecycle:
-    def test_finding_valid_transitions(self):
+    def test_simplified_lifecycle(self):
+        """All item types share the same lifecycle: new → triaged → claimed → in_progress → resolved."""
+        from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
+
+        for item_type in ("finding", "task", "alert", "assessment"):
+            item_id = create_inbox_item(_make_item(item_type=item_type, title=f"{item_type} lifecycle"))
+            assert update_item_status(item_id, "triaged")
+            assert update_item_status(item_id, "claimed")
+            assert update_item_status(item_id, "in_progress")
+            assert update_item_status(item_id, "resolved")
+            assert get_inbox_item(item_id)["status"] == "resolved"
+
+    def test_invalid_transition(self):
         from sre_agent.inbox import create_inbox_item, update_item_status
 
         item_id = create_inbox_item(_make_item(item_type="finding"))
-        assert update_item_status(item_id, "acknowledged") is True
-        assert update_item_status(item_id, "investigating") is True
-        assert update_item_status(item_id, "action_taken") is True
-        assert update_item_status(item_id, "verifying") is True
-        assert update_item_status(item_id, "resolved") is True
+        assert update_item_status(item_id, "in_progress") is False
 
-    def test_finding_invalid_transition(self):
-        from sre_agent.inbox import create_inbox_item, update_item_status
+    def test_agent_pipeline_lifecycle(self):
+        """Agent pipeline: new → agent_reviewing → triaged → claimed → in_progress → resolved."""
+        from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
 
         item_id = create_inbox_item(_make_item(item_type="finding"))
-        assert update_item_status(item_id, "investigating") is False
-
-    def test_task_lifecycle(self):
-        from sre_agent.inbox import create_inbox_item, update_item_status
-
-        item_id = create_inbox_item(_make_item(item_type="task", title="Rotate certs"))
-        assert update_item_status(item_id, "in_progress") is True
-        assert update_item_status(item_id, "resolved") is True
-
-    def test_task_invalid_transition(self):
-        from sre_agent.inbox import create_inbox_item, update_item_status
-
-        item_id = create_inbox_item(_make_item(item_type="task", title="Bad transition"))
-        assert update_item_status(item_id, "investigating") is False
-
-    def test_alert_lifecycle(self):
-        from sre_agent.inbox import create_inbox_item, update_item_status
-
-        item_id = create_inbox_item(_make_item(item_type="alert", title="CPU firing"))
-        assert update_item_status(item_id, "acknowledged") is True
-        assert update_item_status(item_id, "resolved") is True
+        assert update_item_status(item_id, "agent_reviewing")
+        assert update_item_status(item_id, "triaged")
+        assert update_item_status(item_id, "claimed")
+        assert update_item_status(item_id, "in_progress")
+        assert update_item_status(item_id, "resolved")
+        assert get_inbox_item(item_id)["status"] == "resolved"
 
     def test_assessment_escalation(self):
         from sre_agent.inbox import (
@@ -145,13 +139,13 @@ class TestLifecycle:
         )
 
         item_id = create_inbox_item(_make_item(item_type="assessment", title="Memory trend"))
-        assert update_item_status(item_id, "acknowledged") is True
+        assert update_item_status(item_id, "triaged") is True
 
         finding_id = escalate_assessment(item_id)
         assert finding_id is not None
 
         old = get_inbox_item(item_id)
-        assert old["status"] == "escalated"
+        assert old["status"] == "resolved"
 
         new_finding = get_inbox_item(finding_id)
         assert new_finding["item_type"] == "finding"
@@ -282,14 +276,14 @@ class TestSnooze:
         )
 
         item_id = create_inbox_item(_make_item(title="Snooze test"))
-        update_item_status(item_id, "acknowledged")
+        update_item_status(item_id, "triaged")
 
         snooze_item(item_id, hours=0)
 
         unsnooze_expired()
 
         fetched = get_inbox_item(item_id)
-        assert fetched["status"] == "acknowledged"
+        assert fetched["status"] == "triaged"
         assert fetched["snoozed_until"] is None
 
 
@@ -330,10 +324,9 @@ class TestCleanup:
         )
 
         item_id = create_inbox_item(_make_item(title="Old resolved"))
-        update_item_status(item_id, "acknowledged")
-        update_item_status(item_id, "investigating")
-        update_item_status(item_id, "action_taken")
-        update_item_status(item_id, "verifying")
+        update_item_status(item_id, "triaged")
+        update_item_status(item_id, "claimed")
+        update_item_status(item_id, "in_progress")
         update_item_status(item_id, "resolved")
 
         from sre_agent.db import get_database
@@ -376,7 +369,7 @@ class TestAgentTool:
 
 
 class TestNoDeadEndStatuses:
-    """Every status in every item type must have at least one valid forward transition."""
+    """Every status must have at least one valid forward transition."""
 
     def test_all_statuses_have_forward_transitions(self):
         from sre_agent.inbox import VALID_TRANSITIONS
@@ -385,18 +378,27 @@ class TestNoDeadEndStatuses:
             for status, next_statuses in transitions.items():
                 assert len(next_statuses) > 0, f"{item_type}/{status} has no forward transitions — dead end!"
 
-    def test_finding_full_lifecycle_forward(self):
+    def test_unified_lifecycle_all_types(self):
+        """All 4 item types share the same transition map."""
+        from sre_agent.inbox import VALID_TRANSITIONS
+
+        types = list(VALID_TRANSITIONS.keys())
+        assert len(types) == 4
+        for t in types[1:]:
+            assert VALID_TRANSITIONS[t] == VALID_TRANSITIONS[types[0]], f"{t} has different transitions"
+
+    def test_full_lifecycle_forward(self):
         from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
 
         item_id = create_inbox_item(_make_item(item_type="finding"))
 
-        path = ["agent_reviewing", "acknowledged", "investigating", "action_taken", "verifying", "resolved"]
+        path = ["agent_reviewing", "triaged", "claimed", "in_progress", "resolved"]
         for step in path:
             ok = update_item_status(item_id, step)
-            assert ok, f"Finding could not transition to {step}"
+            assert ok, f"Could not transition to {step}"
         assert get_inbox_item(item_id)["status"] == "resolved"
 
-    def test_finding_agent_cleared_and_restore(self):
+    def test_agent_cleared_and_restore(self):
         from sre_agent.inbox import create_inbox_item, get_inbox_item, restore_item, update_item_status
 
         item_id = create_inbox_item(_make_item(item_type="finding"))
@@ -405,32 +407,6 @@ class TestNoDeadEndStatuses:
 
         assert restore_item(item_id)
         assert get_inbox_item(item_id)["status"] == "new"
-
-    def test_task_agent_reviewed_lifecycle(self):
-        from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
-
-        item_id = create_inbox_item(_make_item(item_type="task", title="Task lifecycle"))
-        assert update_item_status(item_id, "agent_reviewing")
-        assert update_item_status(item_id, "in_progress")
-        assert update_item_status(item_id, "resolved")
-        assert get_inbox_item(item_id)["status"] == "resolved"
-
-    def test_assessment_agent_cleared_and_restore(self):
-        from sre_agent.inbox import create_inbox_item, get_inbox_item, restore_item, update_item_status
-
-        item_id = create_inbox_item(_make_item(item_type="assessment", title="Assessment clear"))
-        assert update_item_status(item_id, "agent_cleared")
-        assert restore_item(item_id)
-        assert get_inbox_item(item_id)["status"] == "new"
-
-    def test_alert_agent_reviewed_lifecycle(self):
-        from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
-
-        item_id = create_inbox_item(_make_item(item_type="alert", title="Alert lifecycle"))
-        assert update_item_status(item_id, "agent_reviewing")
-        assert update_item_status(item_id, "acknowledged")
-        assert update_item_status(item_id, "resolved")
-        assert get_inbox_item(item_id)["status"] == "resolved"
 
     def test_agent_review_failed_recovery(self):
         from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
@@ -441,16 +417,16 @@ class TestNoDeadEndStatuses:
         assert update_item_status(item_id, "new")
         assert get_inbox_item(item_id)["status"] == "new"
 
-    def test_agent_review_failed_to_acknowledged(self):
+    def test_agent_review_failed_to_triaged(self):
         from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
 
         item_id = create_inbox_item(_make_item(item_type="finding", title="Failed then manual"))
         assert update_item_status(item_id, "agent_review_failed")
-        assert update_item_status(item_id, "acknowledged")
-        assert get_inbox_item(item_id)["status"] == "acknowledged"
+        assert update_item_status(item_id, "triaged")
+        assert get_inbox_item(item_id)["status"] == "triaged"
 
-    def test_claim_sets_view_status(self):
-        from sre_agent.inbox import claim_item, create_inbox_item, get_inbox_item
+    def test_claim_sets_status_and_view(self):
+        from sre_agent.inbox import claim_item, create_inbox_item, get_inbox_item, update_item_status
 
         item_id = create_inbox_item(
             _make_item(
@@ -461,9 +437,11 @@ class TestNoDeadEndStatuses:
                 },
             )
         )
+        update_item_status(item_id, "triaged")
         claim_item(item_id, "test-user")
         item = get_inbox_item(item_id)
         assert item["claimed_by"] == "test-user"
+        assert item["status"] == "claimed"
         assert item["metadata"].get("view_status") in ("generating", "ready", "failed")
 
     def test_action_plan_in_metadata(self):

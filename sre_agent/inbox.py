@@ -16,44 +16,22 @@ def _publish_event(event_type: str, item_id: str, data: dict[str, Any] | None = 
     publish_view_event(event_type, item_id, "system", data)
 
 
-# -- Status lifecycles per item type --
+# -- Simplified lifecycle: New → Triaged → Claimed → In Progress → Resolved --
+# All item types share the same transition map.
+
+_TRANSITIONS: dict[str, list[str]] = {
+    "new": ["agent_reviewing", "triaged", "agent_cleared", "agent_review_failed"],
+    "agent_reviewing": ["triaged", "agent_cleared", "agent_review_failed"],
+    "agent_review_failed": ["new", "triaged", "archived"],
+    "triaged": ["claimed", "in_progress", "new"],
+    "claimed": ["in_progress", "resolved", "archived"],
+    "in_progress": ["resolved", "archived"],
+    "resolved": ["archived"],
+    "agent_cleared": ["new", "triaged", "archived"],
+}
 
 VALID_TRANSITIONS: dict[str, dict[str, list[str]]] = {
-    "finding": {
-        "new": ["acknowledged", "agent_reviewing", "agent_cleared", "agent_review_failed"],
-        "agent_reviewing": ["acknowledged", "agent_cleared", "agent_review_failed"],
-        "agent_review_failed": ["new", "acknowledged", "archived"],
-        "acknowledged": ["investigating", "agent_reviewing", "new"],
-        "investigating": ["action_taken"],
-        "action_taken": ["verifying"],
-        "verifying": ["resolved", "investigating"],
-        "resolved": ["archived"],
-        "agent_cleared": ["new", "acknowledged", "archived"],
-    },
-    "task": {
-        "new": ["in_progress", "acknowledged", "agent_reviewing", "agent_cleared", "agent_review_failed"],
-        "agent_reviewing": ["in_progress", "acknowledged", "agent_cleared", "agent_review_failed"],
-        "agent_review_failed": ["new", "in_progress", "archived"],
-        "acknowledged": ["in_progress", "new"],
-        "in_progress": ["resolved"],
-        "resolved": ["archived"],
-        "agent_cleared": ["new", "in_progress", "archived"],
-    },
-    "alert": {
-        "new": ["acknowledged", "agent_reviewing", "agent_cleared", "agent_review_failed"],
-        "agent_reviewing": ["acknowledged", "agent_cleared", "agent_review_failed"],
-        "agent_review_failed": ["new", "acknowledged", "archived"],
-        "acknowledged": ["resolved", "new"],
-        "resolved": ["archived"],
-        "agent_cleared": ["new", "acknowledged", "archived"],
-    },
-    "assessment": {
-        "new": ["acknowledged", "agent_reviewing", "agent_cleared", "agent_review_failed"],
-        "agent_reviewing": ["acknowledged", "agent_cleared", "agent_review_failed"],
-        "agent_review_failed": ["new", "acknowledged", "archived"],
-        "acknowledged": ["escalated", "new"],
-        "agent_cleared": ["new", "acknowledged", "archived"],
-    },
+    t: dict(_TRANSITIONS) for t in ("finding", "task", "alert", "assessment")
 }
 
 SEVERITY_WEIGHTS = {"critical": 4, "warning": 2, "info": 1}
@@ -334,9 +312,8 @@ def claim_item(item_id: str, username: str) -> bool:
     _publish_event("inbox_item_claimed", item_id, {"claimed_by": username, "claimed_at": now})
 
     current = item["status"]
-    if current == "new":
-        update_item_status(item_id, "acknowledged")
-    # Don't auto-advance beyond acknowledged — user decides next step
+    if current in ("triaged", "new"):
+        update_item_status(item_id, "claimed")
 
     _generate_view_for_item(item_id, item)
 
@@ -404,7 +381,7 @@ def _generate_view_for_item(item_id: str, item: dict[str, Any]) -> None:
             description=item.get("summary", ""),
             layout=layout,
             view_type=view_type,
-            status="investigating" if view_type == "incident" else "analyzing",
+            status="active",
             trigger_source="agent",
             finding_id=item.get("finding_id") or item_id,
             visibility="team",
@@ -434,20 +411,14 @@ def _generate_view_for_item(item_id: str, item: dict[str, Any]) -> None:
 
 
 def claim_and_investigate(item_id: str, username: str) -> bool:
-    """Atomically claim an item and transition to investigating status."""
+    """Atomically claim an item and transition to in_progress."""
     item = get_inbox_item(item_id)
     if item is None:
         return False
 
     db = get_database()
     now = int(time.time())
-
-    target_status = item["status"]
-    if item["item_type"] == "finding":
-        if item["status"] == "new":
-            target_status = "acknowledged"
-        if item["status"] in ("new", "acknowledged"):
-            target_status = "investigating"
+    target_status = "in_progress" if item["status"] in ("triaged", "claimed") else "claimed"
 
     db.execute(
         "UPDATE inbox_items SET claimed_by = ?, claimed_at = ?, status = ?, updated_at = ? WHERE id = ? AND (claimed_by IS NULL OR claimed_by = ?)",
@@ -561,8 +532,8 @@ def escalate_assessment(item_id: str) -> str | None:
     db = get_database()
     now = int(time.time())
     db.execute(
-        "UPDATE inbox_items SET status = 'escalated', updated_at = ? WHERE id = ?",
-        (now, item_id),
+        "UPDATE inbox_items SET status = 'resolved', updated_at = ?, resolved_at = ? WHERE id = ?",
+        (now, now, item_id),
     )
     db.commit()
 
@@ -819,7 +790,7 @@ def _phase_a_triage() -> int:
             elif action == "investigate":
                 new_status = "agent_reviewing"
             else:
-                new_status = "acknowledged"
+                new_status = "triaged"
 
             now = int(time.time())
             db.execute(
@@ -918,7 +889,7 @@ def _phase_b_investigate() -> int:
                     new_status = "agent_cleared"
                     metadata["dismiss_reason"] = f"Investigation found no issue: {result.get('summary', '')}"
                 else:
-                    new_status = "acknowledged"
+                    new_status = "triaged"
 
                 ts = int(time.time())
                 db.execute(
@@ -941,7 +912,7 @@ def _phase_c_plan() -> int:
     db = get_database()
     rows = db.fetchall(
         """SELECT * FROM inbox_items
-        WHERE status = 'acknowledged'
+        WHERE status = 'triaged'
         AND metadata NOT LIKE ?
         ORDER BY priority_score DESC
         LIMIT 3""",
@@ -1036,9 +1007,6 @@ def resolve_finding_inbox_item(finding_id: str) -> bool:
         return False
 
     item = _deserialize_row(row)
-    if item["status"] == "verifying":
-        return update_item_status(item["id"], "resolved")
-
     now = int(time.time())
     db.execute(
         "UPDATE inbox_items SET status = 'resolved', resolved_at = ?, updated_at = ? WHERE id = ?",
@@ -1066,7 +1034,7 @@ def run_generator_cycle() -> None:
     rows = db.fetchall(
         """SELECT id, correlation_key, metadata FROM inbox_items
         WHERE item_type = 'assessment'
-        AND status IN ('new', 'acknowledged')""",
+        AND status IN ('new', 'triaged')""",
     )
     generator_rows = [r for r in rows if _deserialize_row(r).get("metadata", {}).get("generator")]
     now = int(time.time())

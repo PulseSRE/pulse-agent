@@ -118,15 +118,7 @@ async def rest_unclaim_item(item_id: str):
 
 @router.post("/inbox/{item_id}/acknowledge")
 async def rest_acknowledge_item(item_id: str):
-    ok = update_item_status(item_id, "acknowledged")
-    if not ok:
-        raise HTTPException(status_code=400, detail="Invalid status transition")
-    return {"ok": True}
-
-
-@router.post("/inbox/{item_id}/unacknowledge")
-async def rest_unacknowledge_item(item_id: str):
-    ok = update_item_status(item_id, "new")
+    ok = update_item_status(item_id, "triaged")
     if not ok:
         raise HTTPException(status_code=400, detail="Invalid status transition")
     return {"ok": True}
