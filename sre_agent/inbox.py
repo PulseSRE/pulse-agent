@@ -535,6 +535,10 @@ def prune_old_items(max_age_days: int = 30) -> int:
         (cutoff,),
     )
     db.commit()
+
+    global _last_investigate_time
+    _last_investigate_time = {k: v for k, v in _last_investigate_time.items() if v > cutoff}
+
     return cur.rowcount if hasattr(cur, "rowcount") else 0
 
 
