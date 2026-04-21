@@ -431,3 +431,55 @@ class TestNoDeadEndStatuses:
         assert update_item_status(item_id, "acknowledged")
         assert update_item_status(item_id, "resolved")
         assert get_inbox_item(item_id)["status"] == "resolved"
+
+    def test_agent_review_failed_recovery(self):
+        from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
+
+        item_id = create_inbox_item(_make_item(item_type="finding", title="Failed review"))
+        assert update_item_status(item_id, "agent_review_failed")
+        assert get_inbox_item(item_id)["status"] == "agent_review_failed"
+        assert update_item_status(item_id, "new")
+        assert get_inbox_item(item_id)["status"] == "new"
+
+    def test_agent_review_failed_to_acknowledged(self):
+        from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
+
+        item_id = create_inbox_item(_make_item(item_type="finding", title="Failed then manual"))
+        assert update_item_status(item_id, "agent_review_failed")
+        assert update_item_status(item_id, "acknowledged")
+        assert get_inbox_item(item_id)["status"] == "acknowledged"
+
+    def test_claim_sets_view_status(self):
+        from sre_agent.inbox import claim_item, create_inbox_item, get_inbox_item
+
+        item_id = create_inbox_item(
+            _make_item(
+                title="Claim with investigation",
+                metadata={
+                    "investigation_summary": "Found issue",
+                    "action_plan": [{"title": "Fix it", "status": "pending"}],
+                },
+            )
+        )
+        claim_item(item_id, "test-user")
+        item = get_inbox_item(item_id)
+        assert item["claimed_by"] == "test-user"
+        assert item["metadata"].get("view_status") in ("generating", "ready", "failed")
+
+    def test_action_plan_in_metadata(self):
+        from sre_agent.inbox import create_inbox_item, get_inbox_item
+
+        plan = [
+            {"title": "Step 1", "description": "Do thing", "tool": None, "risk": "low", "status": "pending"},
+            {
+                "title": "Step 2",
+                "description": "Do other",
+                "tool": "scale_deployment",
+                "risk": "medium",
+                "status": "pending",
+            },
+        ]
+        item_id = create_inbox_item(_make_item(title="With plan", metadata={"action_plan": plan}))
+        item = get_inbox_item(item_id)
+        assert len(item["metadata"]["action_plan"]) == 2
+        assert item["metadata"]["action_plan"][0]["status"] == "pending"

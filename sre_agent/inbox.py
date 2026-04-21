@@ -331,7 +331,85 @@ def claim_item(item_id: str, username: str) -> bool:
         elif item["item_type"] == "finding":
             update_item_status(item_id, "acknowledged")
 
+    _generate_view_for_item(item_id, item)
+
     return True
+
+
+def _generate_view_for_item(item_id: str, item: dict[str, Any]) -> None:
+    """Generate an investigation view when a user claims an item."""
+    metadata = item.get("metadata", {})
+    if not metadata.get("investigation_summary") and not metadata.get("action_plan"):
+        return
+
+    if item.get("view_id"):
+        return
+
+    try:
+        metadata["view_status"] = "generating"
+        db = get_database()
+        db.execute(
+            "UPDATE inbox_items SET metadata = ? WHERE id = ?",
+            (json.dumps(metadata), item_id),
+        )
+        db.commit()
+
+        from .view_tools import create_dashboard
+
+        title = f"Investigation: {item['title'][:60]}"
+        view_type = "incident" if item["item_type"] == "finding" else "plan"
+
+        result = create_dashboard(
+            title=title,
+            description=item.get("summary", ""),
+            view_type=view_type,
+            trigger_source="agent",
+            finding_id=item.get("finding_id") or item_id,
+            visibility="team",
+        )
+
+        view_id = None
+        if isinstance(result, tuple):
+            _, signal = result
+            if isinstance(signal, dict):
+                view_id = signal.get("view_id") or signal.get("id")
+        elif isinstance(result, str) and "cv-" in result:
+            import re as _re2
+
+            match = _re2.search(r"(cv-[a-f0-9]+)", result)
+            if match:
+                view_id = match.group(1)
+
+        if view_id:
+            metadata["view_status"] = "ready"
+            now = int(time.time())
+            db.execute(
+                "UPDATE inbox_items SET view_id = ?, metadata = ?, updated_at = ? WHERE id = ?",
+                (view_id, json.dumps(metadata), now, item_id),
+            )
+            db.commit()
+            _publish_event("inbox_item_updated", item_id, {"view_id": view_id})
+            _inbox_logger.info("Generated view %s for inbox item %s", view_id, item_id)
+        else:
+            metadata["view_status"] = "failed"
+            db.execute(
+                "UPDATE inbox_items SET metadata = ? WHERE id = ?",
+                (json.dumps(metadata), item_id),
+            )
+            db.commit()
+            _inbox_logger.warning("View generation returned no view_id for %s", item_id)
+    except Exception:
+        _inbox_logger.exception("View generation failed for %s", item_id)
+        metadata["view_status"] = "failed"
+        try:
+            db = get_database()
+            db.execute(
+                "UPDATE inbox_items SET metadata = ? WHERE id = ?",
+                (json.dumps(metadata), item_id),
+            )
+            db.commit()
+        except Exception:
+            _inbox_logger.exception("Failed to update view_status for %s", item_id)
 
 
 def claim_and_investigate(item_id: str, username: str) -> bool:
