@@ -968,7 +968,11 @@ def _phase_c_plan() -> int:
             if not match:
                 continue
 
-            plan_data = json.loads(match.group())
+            try:
+                plan_data = json.loads(match.group())
+            except json.JSONDecodeError:
+                _inbox_logger.warning("Plan JSON parse failed for %s, skipping", item["id"])
+                continue
             steps = plan_data.get("steps", [])
             if not steps:
                 continue
