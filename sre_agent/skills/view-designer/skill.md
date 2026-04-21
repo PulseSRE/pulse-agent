@@ -72,7 +72,7 @@ examples:
     wrong: "Create a new dashboard from scratch"
 success_criteria: "Dashboard renders with real data, no empty widgets"
 risk_level: low
-conflicts_with: []
+conflicts_with: [plan-builder]
 supported_components:
   - data_table
   - chart

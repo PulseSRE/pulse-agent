@@ -280,6 +280,8 @@ def classify_query_multi(query: str, *, context: dict | None = None) -> tuple:
         return primary, None
 
     secondary = _run_orca_for_secondary(query, primary, context=context)
+    if secondary and primary.conflicts_with and secondary.name in primary.conflicts_with:
+        return primary, None
     return primary, secondary
 
 
