@@ -401,12 +401,24 @@ async def _run_agent_ws(
             view_desc = sig.get("description", "")
             view_template = sig.get("template", "")
 
+            # Lifecycle fields (Phase 3B)
+            view_type = sig.get("view_type", "custom")
+            view_status = sig.get("status", "active")
+            trigger_source = sig.get("trigger_source", "user")
+            finding_id = sig.get("finding_id")
+            view_visibility = sig.get("visibility", "private")
+
             # Compute positions using semantic layout engine
             from ..layout_engine import compute_layout
 
             positions = compute_layout(session_components)
 
-            existing = _db.get_view_by_title(current_user, view_title)
+            # Dedup: finding_id match takes priority over title match
+            existing = None
+            if finding_id:
+                existing = _db.get_view_by_finding(finding_id)
+            if not existing:
+                existing = _db.get_view_by_title(current_user, view_title)
             if existing:
                 old_layout = existing.get("layout", [])
                 merged_layout = old_layout + session_components
@@ -437,18 +449,33 @@ async def _run_agent_ws(
                     "layout": merged_layout,
                     "positions": positions or {},
                     "generatedAt": int(_time.time() * 1000),
+                    "view_type": existing.get("view_type", view_type),
+                    "status": existing.get("status", view_status),
+                    "visibility": existing.get("visibility", view_visibility),
                 }
                 await websocket.send_json({"type": "view_spec", "spec": spec})
                 # Don't clear session_components -- agent may call create_dashboard again in same turn
             else:
-                _db.save_view(current_user, view_id, view_title, view_desc, session_components, positions=positions)
-                _view_updated_ids.add(view_id)
-                logger.info(
-                    "Saved new view: id=%s title=%s components=%d template=%s",
+                _db.save_view(
+                    current_user,
                     view_id,
                     view_title,
+                    view_desc,
+                    session_components,
+                    positions=positions,
+                    view_type=view_type,
+                    status=view_status,
+                    trigger_source=trigger_source,
+                    finding_id=finding_id,
+                    visibility=view_visibility,
+                )
+                _view_updated_ids.add(view_id)
+                logger.info(
+                    "Saved new view: id=%s title=%s type=%s components=%d",
+                    view_id,
+                    view_title,
+                    view_type,
                     len(session_components),
-                    view_template or "none",
                 )
                 spec = {
                     "id": view_id,
@@ -457,6 +484,11 @@ async def _run_agent_ws(
                     "layout": session_components,
                     "positions": positions or {},
                     "generatedAt": int(_time.time() * 1000),
+                    "view_type": view_type,
+                    "status": view_status,
+                    "trigger_source": trigger_source,
+                    "finding_id": finding_id,
+                    "visibility": view_visibility,
                 }
                 if view_template:
                     spec["templateId"] = view_template

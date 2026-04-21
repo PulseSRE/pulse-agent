@@ -40,24 +40,53 @@ def get_current_user() -> str:
     return _current_user_var.get()
 
 
+_INITIAL_STATUS = {
+    "custom": "active",
+    "incident": "investigating",
+    "plan": "analyzing",
+    "assessment": "analyzing",
+}
+
+
 @beta_tool
-def create_dashboard(title: str, description: str = ""):
+def create_dashboard(
+    title: str,
+    description: str = "",
+    view_type: str = "custom",
+    trigger_source: str = "user",
+    finding_id: str = "",
+    visibility: str = "",
+):
     """Create a custom dashboard view. Quality is auto-validated on save — no need to call critique_view.
 
     Layout is computed automatically based on component types.
 
     Args:
-        title: Name for the dashboard (e.g. "SRE Overview", "Node Health").
+        title: Name for the dashboard (e.g. "SRE Overview", "Incident — payment-api").
         description: Brief description of what the dashboard shows.
+        view_type: Type of view: custom, incident, plan, or assessment.
+        trigger_source: Who created it: user, monitor, or agent.
+        finding_id: Monitor finding ID that triggered this view (for dedup).
+        visibility: private (default for custom) or team (default for incident/plan/assessment).
     """
     view_id = f"cv-{uuid.uuid4().hex[:12]}"
-    kwargs = {"view_id": view_id, "title": title, "description": description}
+    status = _INITIAL_STATUS.get(view_type, "active")
+    if not visibility:
+        visibility = "team" if view_type != "custom" else "private"
+
     return _signal(
         "view_spec",
         f"Created view '{title}' with ID {view_id}. "
         f"The dashboard is now saved and visible to the user. "
         f"Tell the user: 'Here is your dashboard. Would you like any changes?'",
-        **kwargs,
+        view_id=view_id,
+        title=title,
+        description=description,
+        view_type=view_type,
+        status=status,
+        trigger_source=trigger_source,
+        finding_id=finding_id or None,
+        visibility=visibility,
     )
 
 
