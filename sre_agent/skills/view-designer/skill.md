@@ -161,6 +161,23 @@ Every dashboard should be **shaped by its topic**, not a fixed template. Never d
 
 **Key rule:** Donut/bar = instant (no `time_range`). Line/area = range (with `time_range="1h"`).
 
+## Component Selection Rules
+
+| Data Shape | Use | NOT This |
+|------------|-----|----------|
+| Boolean conditions per resource (Ready, Pressure) | `data_table` with columns per condition | `status_list` (all items look identical) |
+| Items with DIFFERENT statuses (alerts, pods) | `status_list` | `data_table` |
+| Single KPI value | `metric_card` (with `query` for sparkline) | `chart` |
+| Time-series trend | `chart` with `time_range` | `metric_card` |
+| Resource inventory | `resource_counts` or `data_table` | `status_list` |
+| Node conditions | `list_resources(resource="nodes")` → auto data_table | PromQL `kube_node_status_condition` |
+
+**Anti-patterns to avoid:**
+- `status_list` where all items have the same label or status — use `data_table` instead
+- `status_list` for PromQL boolean results — these have no meaningful labels
+- Separate `metric_card` per node/pod — use a single `data_table` or `chart` with `by (node)` grouping
+- Giant `section` with 5+ metric cards stacked vertically — use `grid` with `columns: 4` instead
+
 ## Quality Rules
 
 - 3-8 widgets, specific descriptive titles, no duplicate queries or titles

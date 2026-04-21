@@ -432,6 +432,16 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
                 if not lane.get("events"):
                     result.errors.append(f"timeline lane '{lane.get('label', '?')}' must have at least 1 event.")
 
+    elif kind == "status_list":
+        items = comp.get("items", [])
+        if items and len(items) >= 3:
+            labels = [i.get("label", "") or i.get("name", "") for i in items]
+            statuses = [i.get("status", "") for i in items]
+            if len(set(labels)) == 1 or (not any(labels) and len(set(statuses)) == 1):
+                result.warnings.append(
+                    f"status_list '{title or 'untitled'}' has identical items — consider data_table instead."
+                )
+
     elif kind == "resource_counts":
         items = comp.get("items")
         if not items:
