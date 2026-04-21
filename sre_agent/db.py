@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import sys
 import threading
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg2
@@ -281,7 +282,6 @@ def save_view(
 ) -> str | None:
     """Save a new view for a user. Returns the view ID."""
     import json
-    from datetime import UTC, datetime
 
     db = get_database()
     now = datetime.now(UTC).isoformat()
@@ -389,7 +389,6 @@ def update_view(view_id: str, owner: str, **updates) -> bool:
     Auto-saves from drag/resize should NOT create versions.
     """
     import json
-    from datetime import UTC, datetime
 
     # Only snapshot when explicitly requested (user clicks save, agent updates)
     action = updates.pop("_action", "update")
@@ -441,7 +440,6 @@ def clone_view(view_id: str, new_owner: str) -> str | None:
     """Clone a view to another user's account. Returns the new view ID."""
     import json
     import uuid
-    from datetime import UTC, datetime
 
     db = get_database()
     source = db.fetchone("SELECT * FROM views WHERE id = ?", (view_id,))
@@ -478,7 +476,6 @@ def clone_view_at_version(view_id: str, new_owner: str, version: int) -> str | N
     """Clone a view from a specific version snapshot. Returns the new view ID."""
     import json
     import uuid
-    from datetime import UTC, datetime
 
     db = get_database()
     snapshot = db.fetchone(
@@ -522,7 +519,6 @@ def clone_view_at_version(view_id: str, new_owner: str, version: int) -> str | N
 def snapshot_view(view_id: str, action: str) -> int | None:
     """Save a snapshot of the current view state before a change. Returns version number."""
     import json
-    from datetime import UTC, datetime
 
     db = get_database()
     view = db.fetchone("SELECT * FROM views WHERE id = ?", (view_id,))
@@ -602,8 +598,6 @@ def restore_view_version(view_id: str, owner: str, version: int) -> bool:
     layout = snapshot["layout"] if isinstance(snapshot["layout"], str) else json.dumps(snapshot["layout"])
     positions = snapshot["positions"] if isinstance(snapshot["positions"], str) else json.dumps(snapshot["positions"])
 
-    from datetime import UTC, datetime
-
     db.execute(
         "UPDATE views SET layout = ?, positions = ?, title = ?, description = ?, updated_at = ? WHERE id = ? AND owner = ?",
         (
@@ -681,7 +675,6 @@ _STATUS_TRANSITIONS: dict[str, dict[str, set[str]]] = {
 @_db_safe
 def transition_view_status(view_id: str, actor: str, new_status: str) -> bool:
     """Transition a view's status. Validates the transition is legal. Creates a version snapshot."""
-    from datetime import UTC, datetime
 
     db = get_database()
     row = db.fetchone("SELECT view_type, status FROM views WHERE id = ?", (view_id,))
@@ -710,7 +703,6 @@ def transition_view_status(view_id: str, actor: str, new_status: str) -> bool:
 @_db_safe
 def claim_view(view_id: str, username: str) -> bool:
     """Claim a team-visible view. Only team views can be claimed."""
-    from datetime import UTC, datetime
 
     db = get_database()
     cursor = db.execute(
@@ -738,8 +730,6 @@ _CLAIM_EXPIRY_MINUTES = 30
 
 def expire_stale_claims() -> int:
     """Clear claims older than 30 minutes. Returns count of expired claims."""
-    from datetime import UTC, datetime, timedelta
-
     db = get_database()
     cutoff = (datetime.now(UTC) - timedelta(minutes=_CLAIM_EXPIRY_MINUTES)).isoformat()
     cursor = db.execute(
@@ -797,7 +787,6 @@ def reopen_view_for_finding(finding_id: str) -> str | None:
 
     Returns the view_id if reopened, None if no matching resolved view exists.
     """
-    from datetime import UTC, datetime
 
     db = get_database()
     row = db.fetchone(
@@ -826,7 +815,6 @@ def reopen_view_for_finding(finding_id: str) -> str | None:
 @_db_safe
 def escalate_assessment_to_incident(view_id: str) -> bool:
     """Escalate an assessment view to an incident when the predicted issue materializes."""
-    from datetime import UTC, datetime
 
     db = get_database()
     row = db.fetchone(

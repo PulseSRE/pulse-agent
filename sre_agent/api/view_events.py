@@ -57,3 +57,11 @@ def get_event_bus() -> ViewEventBus:
     if _bus is None:
         _bus = ViewEventBus()
     return _bus
+
+
+def publish_view_event(event_type: str, view_id: str, actor: str, data: dict[str, Any] | None = None) -> None:
+    """Fire-and-forget publish. Silently swallows errors."""
+    try:
+        get_event_bus().publish(ViewEvent(event_type=event_type, view_id=view_id, actor=actor, data=data or {}))
+    except Exception:
+        pass
