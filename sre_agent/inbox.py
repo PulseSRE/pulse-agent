@@ -20,8 +20,9 @@ def _publish_event(event_type: str, item_id: str, data: dict[str, Any] | None = 
 
 VALID_TRANSITIONS: dict[str, dict[str, list[str]]] = {
     "finding": {
-        "new": ["acknowledged", "agent_reviewing", "agent_cleared"],
-        "agent_reviewing": ["acknowledged", "agent_cleared"],
+        "new": ["acknowledged", "agent_reviewing", "agent_cleared", "agent_review_failed"],
+        "agent_reviewing": ["acknowledged", "agent_cleared", "agent_review_failed"],
+        "agent_review_failed": ["new", "acknowledged", "archived"],
         "acknowledged": ["investigating", "agent_reviewing", "new"],
         "investigating": ["action_taken"],
         "action_taken": ["verifying"],
@@ -30,22 +31,25 @@ VALID_TRANSITIONS: dict[str, dict[str, list[str]]] = {
         "agent_cleared": ["new", "acknowledged", "archived"],
     },
     "task": {
-        "new": ["in_progress", "agent_reviewing", "agent_cleared"],
-        "agent_reviewing": ["in_progress", "agent_cleared"],
+        "new": ["in_progress", "agent_reviewing", "agent_cleared", "agent_review_failed"],
+        "agent_reviewing": ["in_progress", "agent_cleared", "agent_review_failed"],
+        "agent_review_failed": ["new", "in_progress", "archived"],
         "in_progress": ["resolved"],
         "resolved": ["archived"],
         "agent_cleared": ["new", "in_progress", "archived"],
     },
     "alert": {
-        "new": ["acknowledged", "agent_reviewing", "agent_cleared"],
-        "agent_reviewing": ["acknowledged", "agent_cleared"],
+        "new": ["acknowledged", "agent_reviewing", "agent_cleared", "agent_review_failed"],
+        "agent_reviewing": ["acknowledged", "agent_cleared", "agent_review_failed"],
+        "agent_review_failed": ["new", "acknowledged", "archived"],
         "acknowledged": ["resolved", "new"],
         "resolved": ["archived"],
         "agent_cleared": ["new", "acknowledged", "archived"],
     },
     "assessment": {
-        "new": ["acknowledged", "agent_reviewing", "agent_cleared"],
-        "agent_reviewing": ["acknowledged", "agent_cleared"],
+        "new": ["acknowledged", "agent_reviewing", "agent_cleared", "agent_review_failed"],
+        "agent_reviewing": ["acknowledged", "agent_cleared", "agent_review_failed"],
+        "agent_review_failed": ["new", "acknowledged", "archived"],
         "acknowledged": ["escalated", "new"],
         "agent_cleared": ["new", "acknowledged", "archived"],
     },
@@ -630,9 +634,10 @@ _inbox_logger = _logging.getLogger("pulse_agent.inbox")
 
 
 def agent_process_inbox() -> None:
-    """Three-phase agent pipeline: triage → investigate → recommend."""
+    """Three-phase agent pipeline: triage → investigate → plan."""
     _phase_a_triage()
     _phase_b_investigate()
+    _phase_c_plan()
 
 
 def _phase_a_triage() -> int:
@@ -718,8 +723,9 @@ def _phase_a_triage() -> int:
             _publish_event("inbox_item_updated", item["id"], {"status": new_status})
             triaged += 1
             _inbox_logger.info("Triaged %s → %s (%s)", item["id"], new_status, action)
-        except Exception as e:
-            _inbox_logger.debug("Triage failed for %s: %s", item["id"], e)
+        except Exception:
+            _inbox_logger.exception("Triage failed for %s", item["id"])
+            update_item_status(item["id"], "agent_review_failed")
 
     return triaged
 
@@ -816,11 +822,100 @@ def _phase_b_investigate() -> int:
                 _publish_event("inbox_item_updated", item["id"], {"status": new_status})
                 investigated += 1
                 _inbox_logger.info("Investigated %s → %s (confidence: %.2f)", item["id"], new_status, inv_confidence)
-        except Exception as e:
-            _inbox_logger.debug("Investigation failed for %s: %s", item["id"], e)
-            update_item_status(item["id"], "acknowledged")
+        except Exception:
+            _inbox_logger.exception("Investigation failed for %s", item["id"])
+            update_item_status(item["id"], "agent_review_failed")
 
     return investigated
+
+
+def _phase_c_plan() -> int:
+    """Generate step-by-step action plans for investigated items."""
+    db = get_database()
+    rows = db.fetchall(
+        """SELECT * FROM inbox_items
+        WHERE status = 'acknowledged'
+        AND metadata NOT LIKE ?
+        ORDER BY priority_score DESC
+        LIMIT 3""",
+        ("%action_plan%",),
+    )
+    if not rows:
+        return 0
+
+    try:
+        from .config import get_settings
+
+        model = get_settings().model
+    except Exception:
+        _inbox_logger.exception("Failed to get settings for plan generation")
+        return 0
+
+    planned = 0
+    for row in rows:
+        item = _deserialize_row(row)
+        if item.get("metadata", {}).get("action_plan"):
+            continue
+
+        investigation = item.get("metadata", {}).get("investigation_summary", "")
+        cause = item.get("metadata", {}).get("suspected_cause", "")
+        fix = item.get("metadata", {}).get("recommended_fix", "")
+        resources_str = ", ".join(f"{r['kind']}/{r['name']}" for r in item.get("resources", []))
+
+        if not investigation and not fix:
+            continue
+
+        prompt = (
+            f"Based on this investigation of '{item['title']}':\n"
+            f"- Summary: {investigation}\n"
+            f"- Suspected cause: {cause}\n"
+            f"- Recommended fix: {fix}\n"
+            f"- Resources: {resources_str or 'none'}\n"
+            f"- Namespace: {item.get('namespace') or 'cluster-wide'}\n\n"
+            f"Generate a step-by-step action plan. Each step should be concrete and actionable. "
+            f"If a step can be executed by a K8s tool, include the tool name and input. "
+            f"Reply in JSON:\n"
+            f'{{"steps": [{{"title": "...", "description": "...", "tool": "tool_name_or_null", '
+            f'"tool_input": {{}} , "risk": "low|medium|high"}}]}}'
+        )
+
+        try:
+            from .agent import create_client
+
+            client = create_client()
+            response = client.messages.create(
+                model=model, max_tokens=500, messages=[{"role": "user", "content": prompt}]
+            )
+            text = response.content[0].text.strip()
+
+            match = _re.search(r"\{.*\}", text, _re.DOTALL)
+            if not match:
+                continue
+
+            plan_data = json.loads(match.group())
+            steps = plan_data.get("steps", [])
+            if not steps:
+                continue
+
+            for step in steps:
+                step["status"] = "pending"
+
+            metadata = item.get("metadata", {})
+            metadata["action_plan"] = steps
+
+            now = int(time.time())
+            db.execute(
+                "UPDATE inbox_items SET metadata = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(metadata), now, item["id"]),
+            )
+            db.commit()
+            _publish_event("inbox_item_updated", item["id"], {"has_plan": True})
+            planned += 1
+            _inbox_logger.info("Generated %d-step plan for %s", len(steps), item["id"])
+        except Exception:
+            _inbox_logger.exception("Plan generation failed for %s", item["id"])
+
+    return planned
 
 
 def resolve_finding_inbox_item(finding_id: str) -> bool:
