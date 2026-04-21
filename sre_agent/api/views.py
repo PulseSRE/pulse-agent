@@ -38,11 +38,16 @@ router = APIRouter()
 
 
 @router.get("/views")
-async def rest_list_views(owner: str = Depends(get_owner)):
-    """List all views for the current user."""
+async def rest_list_views(
+    owner: str = Depends(get_owner),
+    view_type: str | None = Query(None),
+    visibility: str | None = Query(None),
+    exclude_status: str | None = Query(None),
+):
+    """List views with optional filtering by type, visibility, and status."""
     from .. import db
 
-    views = db.list_views(owner)
+    views = db.list_views(owner, view_type=view_type, visibility=visibility, exclude_status=exclude_status)
     return {"views": views or [], "owner": owner}
 
 
@@ -477,3 +482,62 @@ async def rest_execute_action(
             "error_message": meta.get("error_message"),
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# View Lifecycle — status transitions and claims
+# ---------------------------------------------------------------------------
+
+
+@router.post("/views/{view_id}/status")
+async def rest_transition_status(
+    view_id: str,
+    request: Request,
+    owner: str = Depends(get_owner),
+):
+    """Transition a view's status."""
+    from fastapi.responses import JSONResponse
+
+    from .. import db
+
+    body = await request.json()
+    new_status = body.get("status")
+    if not new_status:
+        return JSONResponse(status_code=400, content={"error": "Missing 'status' field"})
+
+    ok = db.transition_view_status(view_id, owner, new_status)
+    if not ok:
+        return JSONResponse(status_code=409, content={"error": "Invalid status transition"})
+    return {"transitioned": True, "view_id": view_id, "status": new_status}
+
+
+@router.post("/views/{view_id}/claim")
+async def rest_claim_view(
+    view_id: str,
+    owner: str = Depends(get_owner),
+):
+    """Claim a team view."""
+    from fastapi.responses import JSONResponse
+
+    from .. import db
+
+    ok = db.claim_view(view_id, owner)
+    if not ok:
+        return JSONResponse(status_code=409, content={"error": "Cannot claim this view"})
+    return {"claimed": True, "view_id": view_id, "claimed_by": owner}
+
+
+@router.delete("/views/{view_id}/claim")
+async def rest_unclaim_view(
+    view_id: str,
+    owner: str = Depends(get_owner),
+):
+    """Release a claim on a view."""
+    from fastapi.responses import JSONResponse
+
+    from .. import db
+
+    ok = db.unclaim_view(view_id, owner)
+    if not ok:
+        return JSONResponse(status_code=409, content={"error": "Cannot unclaim — you don't hold the claim"})
+    return {"unclaimed": True, "view_id": view_id}
