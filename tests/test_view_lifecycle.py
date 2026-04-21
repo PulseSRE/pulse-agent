@@ -227,3 +227,113 @@ class TestFindSimilarViews:
         )
         results = db_module.find_similar_views("CrashLoop in payment-api")
         assert len(results) == 0
+
+
+class TestRecurrenceHandling:
+    def test_reopen_resolved_view(self):
+        view_id = _create_incident()
+        db_module.transition_view_status(view_id, "alice", "action_taken")
+        db_module.transition_view_status(view_id, "alice", "verifying")
+        db_module.transition_view_status(view_id, "alice", "resolved")
+
+        reopened_id = db_module.reopen_view_for_finding("f-crash-1")
+        assert reopened_id == view_id
+        view = db_module.get_view(view_id)
+        assert view["status"] == "investigating"
+
+    def test_reopen_archived_view(self):
+        view_id = _create_incident()
+        db_module.transition_view_status(view_id, "alice", "action_taken")
+        db_module.transition_view_status(view_id, "alice", "verifying")
+        db_module.transition_view_status(view_id, "alice", "resolved")
+        db_module.transition_view_status(view_id, "alice", "archived")
+
+        reopened_id = db_module.reopen_view_for_finding("f-crash-1")
+        assert reopened_id == view_id
+        view = db_module.get_view(view_id)
+        assert view["status"] == "investigating"
+
+    def test_no_reopen_if_still_active(self):
+        _create_incident()
+        reopened_id = db_module.reopen_view_for_finding("f-crash-1")
+        assert reopened_id is None
+
+    def test_no_reopen_for_unknown_finding(self):
+        reopened_id = db_module.reopen_view_for_finding("nonexistent")
+        assert reopened_id is None
+
+
+class TestAssessmentEscalation:
+    def test_escalate_assessment(self):
+        db_module.save_view(
+            "alice",
+            "cv-assess",
+            "Memory Forecast",
+            "",
+            _layout(),
+            view_type="assessment",
+            status="ready",
+            visibility="team",
+        )
+        ok = db_module.escalate_assessment_to_incident("cv-assess")
+        assert ok is True
+        view = db_module.get_view("cv-assess")
+        assert view["view_type"] == "incident"
+        assert view["status"] == "investigating"
+
+    def test_cannot_escalate_non_assessment(self):
+        _create_incident()
+        ok = db_module.escalate_assessment_to_incident("cv-inc-1")
+        assert ok is False
+
+    def test_cannot_escalate_nonexistent(self):
+        ok = db_module.escalate_assessment_to_incident("nonexistent")
+        assert ok is False
+
+
+class TestExtractResolutionTools:
+    def test_extracts_action_buttons(self):
+        layout = [
+            {"kind": "metric_card", "title": "CPU", "value": "72%"},
+            {
+                "kind": "action_button",
+                "label": "Restart",
+                "action": "restart_deployment",
+                "action_input": {"name": "nginx", "namespace": "default"},
+            },
+            {
+                "kind": "action_button",
+                "label": "Scale Up",
+                "action": "scale_deployment",
+                "action_input": {"name": "nginx", "namespace": "default", "replicas": 4},
+            },
+        ]
+        db_module.save_view("alice", "cv-tools", "Test", "", layout, view_type="incident", status="resolved")
+        tools = db_module.extract_resolution_tools("cv-tools")
+        assert len(tools) == 2
+        assert tools[0]["action"] == "restart_deployment"
+        assert tools[1]["action"] == "scale_deployment"
+        assert tools[1]["action_input"]["replicas"] == 4
+
+    def test_extracts_from_nested_grid(self):
+        layout = [
+            {
+                "kind": "grid",
+                "items": [
+                    {"kind": "action_button", "label": "Fix", "action": "apply_yaml", "action_input": {}},
+                ],
+            },
+        ]
+        db_module.save_view("alice", "cv-nested", "Test", "", layout)
+        tools = db_module.extract_resolution_tools("cv-nested")
+        assert len(tools) == 1
+        assert tools[0]["action"] == "apply_yaml"
+
+    def test_empty_for_no_action_buttons(self):
+        db_module.save_view("alice", "cv-empty", "Test", "", _layout())
+        tools = db_module.extract_resolution_tools("cv-empty")
+        assert tools == []
+
+    def test_empty_for_nonexistent_view(self):
+        tools = db_module.extract_resolution_tools("nonexistent")
+        assert tools == []

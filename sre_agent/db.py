@@ -789,3 +789,97 @@ def get_view_by_finding(finding_id: str) -> dict | None:
         (finding_id,),
     )
     return _deserialize_view_row(row) if row else None
+
+
+@_db_safe
+def reopen_view_for_finding(finding_id: str) -> str | None:
+    """Reopen a resolved/archived view when its finding recurs.
+
+    Returns the view_id if reopened, None if no matching resolved view exists.
+    """
+    from datetime import UTC, datetime
+
+    db = get_database()
+    row = db.fetchone(
+        "SELECT id, status, view_type FROM views "
+        "WHERE finding_id = ? AND status IN ('resolved', 'archived') "
+        "ORDER BY updated_at DESC LIMIT 1",
+        (finding_id,),
+    )
+    if not row or row["view_type"] not in ("incident", "assessment"):
+        return None
+
+    view_id = row["id"]
+    try:
+        snapshot_view(view_id, "status:recurrence")
+    except Exception:
+        pass
+
+    db.execute(
+        "UPDATE views SET status = 'investigating', updated_at = ? WHERE id = ?",
+        (datetime.now(UTC).isoformat(), view_id),
+    )
+    db.commit()
+    return view_id
+
+
+@_db_safe
+def escalate_assessment_to_incident(view_id: str) -> bool:
+    """Escalate an assessment view to an incident when the predicted issue materializes."""
+    from datetime import UTC, datetime
+
+    db = get_database()
+    row = db.fetchone(
+        "SELECT view_type, status FROM views WHERE id = ?",
+        (view_id,),
+    )
+    if not row or row["view_type"] != "assessment":
+        return False
+
+    try:
+        snapshot_view(view_id, "escalated:assessment_to_incident")
+    except Exception:
+        pass
+
+    db.execute(
+        "UPDATE views SET view_type = 'incident', status = 'investigating', updated_at = ? WHERE id = ?",
+        (datetime.now(UTC).isoformat(), view_id),
+    )
+    db.commit()
+    return True
+
+
+def extract_resolution_tools(view_id: str) -> list[dict]:
+    """Extract action_button tool sequences from a view's layout.
+
+    Returns list of {action, action_input, label} dicts.
+    """
+    view = get_view(view_id)
+    if not view:
+        return []
+    layout = view.get("layout", [])
+    tools: list[dict] = []
+
+    def _scan(components: list[dict]) -> None:
+        for comp in components:
+            if comp.get("kind") == "action_button":
+                tools.append(
+                    {
+                        "action": comp.get("action", ""),
+                        "action_input": comp.get("action_input", {}),
+                        "label": comp.get("label", ""),
+                    }
+                )
+            for key in ("items", "components"):
+                nested = comp.get(key)
+                if isinstance(nested, list):
+                    _scan(nested)
+            tabs = comp.get("tabs")
+            if isinstance(tabs, list):
+                for tab in tabs:
+                    tab_comps = tab.get("components")
+                    if isinstance(tab_comps, list):
+                        _scan(tab_comps)
+
+    _scan(layout)
+    return tools
