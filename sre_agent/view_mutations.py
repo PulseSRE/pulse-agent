@@ -455,19 +455,6 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
             view_id=view_id,
         )
 
-    if strategy == "fit":
-        patched = []
-        for w in layout:
-            updated = {k: v for k, v in w.items() if k not in ("x", "y", "w", "h")}
-            patched.append(updated)
-        positioned, positions = _apply_positions(patched)
-        db.update_view(view_id, owner, layout=positioned, positions=positions)
-        return _signal(
-            "view_updated",
-            f"Re-fit heights for {len(positioned)} widgets based on content analysis.",
-            view_id=view_id,
-        )
-
     # strategy == "group": analyze widgets and group into sections
     groups: dict[str, list[dict]] = {}
     _TOPIC_KEYWORDS: dict[str, list[str]] = {

@@ -1093,7 +1093,7 @@ class MonitorSession:
                 }
             )
             if finding_id:
-                mark_finding_actions_resolved(finding_id)
+                asyncio.get_event_loop().run_in_executor(None, mark_finding_actions_resolved, finding_id)
 
         # Track transient findings for noise learning
         for key in stale_keys:

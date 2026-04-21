@@ -205,7 +205,7 @@ def _migrate_019_agent_views(db: Database) -> None:
 def _migrate_020_action_outcomes(db: Database) -> None:
     """Add outcome tracking to actions table for fix success rate metrics."""
     try:
-        db.execute("ALTER TABLE actions ADD COLUMN outcome TEXT NOT NULL DEFAULT 'unknown'")
+        db.execute("ALTER TABLE actions ADD COLUMN IF NOT EXISTS outcome TEXT NOT NULL DEFAULT 'unknown'")
     except Exception:
         pass
     try:
