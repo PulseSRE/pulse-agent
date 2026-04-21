@@ -467,6 +467,45 @@ CREATE INDEX IF NOT EXISTS idx_user_events_page ON user_events(page, timestamp D
 CREATE INDEX IF NOT EXISTS idx_user_events_type ON user_events(event_type);
 """
 
+INBOX_ITEMS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS inbox_items (
+    id TEXT PRIMARY KEY,
+    item_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'new',
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    severity TEXT,
+    priority_score REAL NOT NULL DEFAULT 0,
+    confidence REAL DEFAULT 0,
+    noise_score REAL DEFAULT 0,
+    namespace TEXT,
+    resources TEXT DEFAULT '[]',
+    correlation_key TEXT,
+    claimed_by TEXT,
+    claimed_at BIGINT,
+    created_by TEXT NOT NULL,
+    due_date BIGINT,
+    finding_id TEXT,
+    view_id TEXT,
+    cluster_id TEXT,
+    pinned_by TEXT DEFAULT '[]',
+    metadata TEXT DEFAULT '{}',
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL,
+    resolved_at BIGINT,
+    snoozed_until BIGINT
+);
+
+CREATE INDEX IF NOT EXISTS idx_inbox_items_status ON inbox_items (status);
+CREATE INDEX IF NOT EXISTS idx_inbox_items_type ON inbox_items (item_type);
+CREATE INDEX IF NOT EXISTS idx_inbox_items_correlation ON inbox_items (correlation_key);
+CREATE INDEX IF NOT EXISTS idx_inbox_items_cluster ON inbox_items (cluster_id);
+CREATE INDEX IF NOT EXISTS idx_inbox_items_priority ON inbox_items (priority_score DESC);
+CREATE INDEX IF NOT EXISTS idx_inbox_items_claimed_by ON inbox_items (claimed_by);
+CREATE INDEX IF NOT EXISTS idx_inbox_items_namespace ON inbox_items (namespace);
+CREATE INDEX IF NOT EXISTS idx_inbox_items_finding_id ON inbox_items (finding_id);
+"""
+
 ALL_SCHEMAS = (
     INCIDENTS_SCHEMA
     + RUNBOOKS_SCHEMA
@@ -496,4 +535,5 @@ ALL_SCHEMAS = (
     + SLO_DEFINITIONS_SCHEMA
     + PLAN_EXECUTIONS_SCHEMA
     + USER_EVENTS_SCHEMA
+    + INBOX_ITEMS_SCHEMA
 )

@@ -215,6 +215,13 @@ def _migrate_020_action_outcomes(db: Database) -> None:
     db.commit()
 
 
+def _migrate_021_inbox_items(db: Database) -> None:
+    """Create inbox_items table for unified SRE worklist."""
+    from .db_schema import INBOX_ITEMS_SCHEMA
+
+    db.executescript(INBOX_ITEMS_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -236,4 +243,5 @@ MIGRATIONS = [
     (18, "user_events", _migrate_018_user_events),
     (19, "agent_views", _migrate_019_agent_views),
     (20, "action_outcomes", _migrate_020_action_outcomes),
+    (21, "inbox_items", _migrate_021_inbox_items),
 ]
