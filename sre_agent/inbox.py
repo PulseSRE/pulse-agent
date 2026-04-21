@@ -315,12 +315,12 @@ def claim_item(item_id: str, username: str) -> bool:
     if current in ("triaged", "new"):
         update_item_status(item_id, "claimed")
 
-    _generate_view_for_item(item_id, item)
+    _generate_view_for_item(item_id, item, username)
 
     return True
 
 
-def _generate_view_for_item(item_id: str, item: dict[str, Any]) -> None:
+def _generate_view_for_item(item_id: str, item: dict[str, Any], owner: str = "system") -> None:
     """Generate an investigation view when a user claims an item."""
     metadata = item.get("metadata", {})
     if not metadata.get("investigation_summary") and not metadata.get("action_plan"):
@@ -375,7 +375,7 @@ def _generate_view_for_item(item_id: str, item: dict[str, Any]) -> None:
             )
 
         save_view(
-            owner="system",
+            owner=owner,
             view_id=view_id,
             title=title,
             description=item.get("summary", ""),
