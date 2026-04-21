@@ -449,7 +449,17 @@ def escalate_assessment(item_id: str) -> str | None:
         "created_by": "system:monitor",
         "metadata": {"escalated_from": item_id},
     }
-    return create_inbox_item(finding_item)
+    finding_id = create_inbox_item(finding_item)
+
+    metadata = item.get("metadata", {})
+    metadata["escalated_to"] = finding_id
+    db.execute(
+        "UPDATE inbox_items SET metadata = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(metadata), now, item_id),
+    )
+    db.commit()
+
+    return finding_id
 
 
 def pin_item(item_id: str, username: str) -> bool:
