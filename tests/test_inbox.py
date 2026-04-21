@@ -373,3 +373,61 @@ class TestAgentTool:
 
         result = create_inbox_task(title="Bad urgency", urgency="invalid")
         assert "error" in result.lower() or "invalid" in result.lower()
+
+
+class TestNoDeadEndStatuses:
+    """Every status in every item type must have at least one valid forward transition."""
+
+    def test_all_statuses_have_forward_transitions(self):
+        from sre_agent.inbox import VALID_TRANSITIONS
+
+        for item_type, transitions in VALID_TRANSITIONS.items():
+            for status, next_statuses in transitions.items():
+                assert len(next_statuses) > 0, f"{item_type}/{status} has no forward transitions — dead end!"
+
+    def test_finding_full_lifecycle_forward(self):
+        from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
+
+        item_id = create_inbox_item(_make_item(item_type="finding"))
+
+        path = ["agent_reviewing", "acknowledged", "investigating", "action_taken", "verifying", "resolved"]
+        for step in path:
+            ok = update_item_status(item_id, step)
+            assert ok, f"Finding could not transition to {step}"
+        assert get_inbox_item(item_id)["status"] == "resolved"
+
+    def test_finding_agent_cleared_and_restore(self):
+        from sre_agent.inbox import create_inbox_item, get_inbox_item, restore_item, update_item_status
+
+        item_id = create_inbox_item(_make_item(item_type="finding"))
+        assert update_item_status(item_id, "agent_cleared")
+        assert get_inbox_item(item_id)["status"] == "agent_cleared"
+
+        assert restore_item(item_id)
+        assert get_inbox_item(item_id)["status"] == "new"
+
+    def test_task_agent_reviewed_lifecycle(self):
+        from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
+
+        item_id = create_inbox_item(_make_item(item_type="task", title="Task lifecycle"))
+        assert update_item_status(item_id, "agent_reviewing")
+        assert update_item_status(item_id, "in_progress")
+        assert update_item_status(item_id, "resolved")
+        assert get_inbox_item(item_id)["status"] == "resolved"
+
+    def test_assessment_agent_cleared_and_restore(self):
+        from sre_agent.inbox import create_inbox_item, get_inbox_item, restore_item, update_item_status
+
+        item_id = create_inbox_item(_make_item(item_type="assessment", title="Assessment clear"))
+        assert update_item_status(item_id, "agent_cleared")
+        assert restore_item(item_id)
+        assert get_inbox_item(item_id)["status"] == "new"
+
+    def test_alert_agent_reviewed_lifecycle(self):
+        from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
+
+        item_id = create_inbox_item(_make_item(item_type="alert", title="Alert lifecycle"))
+        assert update_item_status(item_id, "agent_reviewing")
+        assert update_item_status(item_id, "acknowledged")
+        assert update_item_status(item_id, "resolved")
+        assert get_inbox_item(item_id)["status"] == "resolved"

@@ -1,0 +1,13 @@
+{
+    "name": "inbox_lifecycle_transitions",
+    "prompt": "I have an inbox item that's currently being reviewed by the agent. Move it forward to investigating status so I can start working on it.",
+    "recorded_responses": {
+        "list_resources": "No resources found.",
+        "create_inbox_task": "Created inbox task: Test item (id: inb-test123, due: this_week)"
+    },
+    "expected": {
+        "should_mention": ["investigating", "status", "updated"],
+        "should_not_use_tools": ["delete_pod", "scale_deployment", "apply_yaml"],
+        "max_tool_calls": 5
+    }
+}
