@@ -416,9 +416,14 @@ async def _run_agent_ws(
 
             positions = compute_layout(session_components)
 
-            # Dedup: finding_id match takes priority over title match
+            # Dedup: session-created view > finding_id > title match
             existing = None
-            if finding_id:
+            if _view_updated_ids:
+                for vid in _view_updated_ids:
+                    existing = _db.get_view(vid, current_user)
+                    if existing:
+                        break
+            if not existing and finding_id:
                 existing = _db.get_view_by_finding(finding_id)
             if not existing:
                 existing = _db.get_view_by_title(current_user, view_title)
