@@ -400,7 +400,7 @@ def update_view(view_id: str, owner: str, **updates) -> bool:
         except Exception:
             pass
 
-    allowed = {"title", "description", "icon", "layout", "positions"}
+    allowed = {"title", "description", "icon", "layout", "positions", "visibility", "status", "view_type"}
     fields = []
     values = []
     for key, value in updates.items():

@@ -36,7 +36,7 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `POST` | `/monitor/pause` | token | Emergency kill switch — pause all auto-fix actions |
 | `POST` | `/monitor/resume` | token | Resume auto-fix actions after a pause |
 | `GET` | `/tools/usage/chains` | token | Discovered tool call chains (common sequences via bigram analysis) |
-| `GET` | `/views` | token | List saved views for current user |
+| `GET` | `/views` | token | List saved views. Query params: `view_type`, `visibility`, `exclude_status` |
 | `GET` | `/views/:id` | token | Get a single saved view |
 | `POST` | `/views` | token | Save a new view |
 | `PUT` | `/views/:id` | token | Update view (title, layout, positions) |
@@ -47,6 +47,9 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/views/:id/versions` | token | List version history for a view |
 | `POST` | `/views/:id/undo` | token | Undo last change to a view |
 | `POST` | `/views/:id/actions` | token + owner | Execute a tool from an action_button component |
+| `POST` | `/views/:id/status` | token + owner | Transition view status (incident/plan/assessment lifecycle) |
+| `POST` | `/views/:id/claim` | token + owner | Claim a team view |
+| `DELETE` | `/views/:id/claim` | token + owner | Release a claim |
 | `GET` | `/fix-history/summary` | token | Aggregated fix stats: totals, success/rollback rates, by-category with auto_fixed/confirmation_required, trend (query: `days` 1-90) |
 | `GET` | `/monitor/coverage` | token | Scanner coverage: active/total scanners, coverage %, category breakdown, per-scanner finding stats (query: `days` 1-90) |
 | `GET` | `/monitor/history` | token | Paginated scan run history (query: `limit`, `offset`) |
