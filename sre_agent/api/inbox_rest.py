@@ -33,12 +33,19 @@ async def rest_list_inbox(
     group_by: str | None = Query(None),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    owner: str = Depends(get_owner),
 ):
+    resolved_claimed = claimed_by
+    if claimed_by == "__current_user__":
+        resolved_claimed = owner
+    elif claimed_by == "__unclaimed__":
+        resolved_claimed = "__null__"
+
     return list_inbox_items(
         item_type=type,
         status=status,
         namespace=namespace,
-        claimed_by=claimed_by,
+        claimed_by=resolved_claimed,
         severity=severity,
         group_by=group_by,
         limit=limit,
@@ -139,14 +146,11 @@ async def rest_dismiss_item(item_id: str):
 
 @router.post("/inbox/{item_id}/investigate")
 async def rest_investigate_item(item_id: str, owner: str = Depends(get_owner)):
-    item = get_inbox_item(item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="Item not found")
-    claim_item(item_id, owner)
-    if item["item_type"] == "finding" and item["status"] in ("new", "acknowledged"):
-        if item["status"] == "new":
-            update_item_status(item_id, "acknowledged")
-        update_item_status(item_id, "investigating")
+    from ..inbox import claim_and_investigate
+
+    ok = claim_and_investigate(item_id, owner)
+    if not ok:
+        raise HTTPException(status_code=409, detail="Item not found or already claimed by another user")
     return {"ok": True, "item_id": item_id}
 
 

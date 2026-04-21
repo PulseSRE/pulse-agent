@@ -171,7 +171,9 @@ def list_inbox_items(
     if namespace:
         where_parts.append("namespace = ?")
         params.append(namespace)
-    if claimed_by:
+    if claimed_by == "__null__":
+        where_parts.append("claimed_by IS NULL")
+    elif claimed_by:
         where_parts.append("claimed_by = ?")
         params.append(claimed_by)
     if severity:
@@ -301,6 +303,36 @@ def claim_item(item_id: str, username: str) -> bool:
     return True
 
 
+def claim_and_investigate(item_id: str, username: str) -> bool:
+    """Atomically claim an item and transition to investigating status."""
+    item = get_inbox_item(item_id)
+    if item is None:
+        return False
+
+    db = get_database()
+    now = int(time.time())
+
+    target_status = item["status"]
+    if item["item_type"] == "finding":
+        if item["status"] == "new":
+            target_status = "acknowledged"
+        if item["status"] in ("new", "acknowledged"):
+            target_status = "investigating"
+
+    db.execute(
+        "UPDATE inbox_items SET claimed_by = ?, claimed_at = ?, status = ?, updated_at = ? WHERE id = ? AND (claimed_by IS NULL OR claimed_by = ?)",
+        (username, now, target_status, now, item_id, username),
+    )
+    db.commit()
+
+    updated = get_inbox_item(item_id)
+    if updated and updated["claimed_by"] == username:
+        _publish_event("inbox_item_claimed", item_id, {"claimed_by": username, "claimed_at": now})
+        _publish_event("inbox_item_updated", item_id, {"status": target_status})
+        return True
+    return False
+
+
 def unclaim_item(item_id: str) -> bool:
     db = get_database()
     now = int(time.time())
@@ -309,6 +341,7 @@ def unclaim_item(item_id: str) -> bool:
         (now, item_id),
     )
     db.commit()
+    _publish_event("inbox_item_updated", item_id, {"claimed_by": None})
     return True
 
 
