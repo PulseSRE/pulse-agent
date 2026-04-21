@@ -776,6 +776,24 @@ def _phase_b_investigate() -> int:
                 metadata["investigation_confidence"] = result.get("confidence", 0)
                 metadata["evidence"] = result.get("evidence", [])
 
+                try:
+                    from .dependency_graph import get_graph
+
+                    resources = item.get("resources", [])
+                    graph = get_graph()
+                    if resources and graph:
+                        r = resources[0]
+                        affected = graph.downstream_blast_radius(
+                            r.get("kind", ""), r.get("namespace", ""), r.get("name", "")
+                        )
+                        if affected:
+                            metadata["blast_radius"] = {
+                                "affected_count": len(affected),
+                                "affected_resources": affected[:10],
+                            }
+                except Exception:
+                    _inbox_logger.debug("Blast radius enrichment failed for %s", item["id"], exc_info=True)
+
                 inv_confidence = float(result.get("confidence", 0))
                 recommended_fix = result.get("recommended_fix", "")
                 no_action = any(
