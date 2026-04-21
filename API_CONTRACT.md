@@ -72,6 +72,9 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/analytics/learning` | token | Agent learning feed: weight updates, scaffolded skills, routing decisions (query: `days` 1-365) |
 | `PUT` | `/plan-templates/{type}` | token | Update plan template phases/timeouts |
 | `DELETE` | `/plan-templates/{type}` | token | Delete auto-generated plan templates |
+| `GET` | `/metrics/fix-success-rate` | token | Auto-fix outcome success rate (query: `period` 1-365 days) |
+| `GET` | `/metrics/response-latency` | token | Agent response p50/p95/p99 latency from tool_usage (query: `period` 1-365 days) |
+| `GET` | `/metrics/eval-trend` | token | Eval score trend with sparkline (query: `suite`, `releases` 1-50) |
 
 **Authentication:** Token-authenticated endpoints accept `Authorization: Bearer <token>` header or `?token=<token>` query parameter. The token is `PULSE_AGENT_WS_TOKEN`. Unauthenticated requests return 401.
 

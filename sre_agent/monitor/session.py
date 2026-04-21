@@ -14,7 +14,7 @@ from .. import db_schema
 from ..config import get_settings
 from ..db import get_database
 from ..k8s_client import get_core_client, safe
-from .actions import save_action, save_investigation, update_action_verification
+from .actions import mark_finding_actions_resolved, save_action, save_investigation, update_action_verification
 from .autofix import _autofix_paused
 from .confidence import _estimate_auto_fix_confidence, _estimate_finding_confidence, _finding_key
 from .findings import _make_action_report, _ts
@@ -1093,8 +1093,6 @@ class MonitorSession:
                 }
             )
             if finding_id:
-                from .actions import mark_finding_actions_resolved
-
                 mark_finding_actions_resolved(finding_id)
 
         # Track transient findings for noise learning

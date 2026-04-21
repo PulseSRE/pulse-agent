@@ -408,17 +408,14 @@ def mark_finding_actions_resolved(finding_id: str) -> int:
     try:
         _ensure_tables()
         db = get_database()
-        db.execute(
+        cursor = db.execute(
             "UPDATE actions SET outcome = 'resolved' WHERE finding_id = ? AND outcome = 'unknown'",
             (finding_id,),
         )
         db.commit()
-        row = db.fetchone(
-            "SELECT COUNT(*) AS cnt FROM actions WHERE finding_id = ? AND outcome = 'resolved'",
-            (finding_id,),
-        )
-        return row["cnt"] if row else 0
-    except Exception:
+        return getattr(cursor, "rowcount", 0)
+    except Exception as e:
+        logger.error("Failed to mark finding actions resolved: %s", e)
         return 0
 
 

@@ -34,26 +34,28 @@ async def metrics_response_latency(
 
     try:
         database = db.get_database()
-        rows = database.fetchall(
-            "SELECT duration_ms FROM tool_usage "
+        row = database.fetchone(
+            "SELECT "
+            "  percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms) AS p50, "
+            "  percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95, "
+            "  percentile_cont(0.99) WITHIN GROUP (ORDER BY duration_ms) AS p99, "
+            "  AVG(duration_ms) AS avg_ms, "
+            "  COUNT(*) AS cnt "
+            "FROM tool_usage "
             "WHERE timestamp >= NOW() - INTERVAL '1 day' * ? "
-            "AND duration_ms > 0 "
-            "ORDER BY duration_ms",
+            "AND duration_ms > 0",
             (period,),
         )
-        if not rows:
+        if not row or row["cnt"] == 0:
             return {"period_days": period, "p50_ms": None, "p95_ms": None, "p99_ms": None, "count": 0}
-
-        durations = [r["duration_ms"] for r in rows]
-        n = len(durations)
 
         return {
             "period_days": period,
-            "p50_ms": durations[n // 2],
-            "p95_ms": durations[int(n * 0.95)],
-            "p99_ms": durations[int(n * 0.99)],
-            "count": n,
-            "avg_ms": round(sum(durations) / n, 1),
+            "p50_ms": round(row["p50"], 1) if row["p50"] is not None else None,
+            "p95_ms": round(row["p95"], 1) if row["p95"] is not None else None,
+            "p99_ms": round(row["p99"], 1) if row["p99"] is not None else None,
+            "count": row["cnt"],
+            "avg_ms": round(row["avg_ms"], 1) if row["avg_ms"] is not None else None,
         }
     except Exception as e:
         logger.error("Failed to get response latency: %s", e)

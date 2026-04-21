@@ -208,6 +208,10 @@ def _migrate_020_action_outcomes(db: Database) -> None:
         db.execute("ALTER TABLE actions ADD COLUMN outcome TEXT NOT NULL DEFAULT 'unknown'")
     except Exception:
         pass
+    try:
+        db.execute("CREATE INDEX IF NOT EXISTS idx_actions_finding_id ON actions (finding_id)")
+    except Exception:
+        pass
     db.commit()
 
 
