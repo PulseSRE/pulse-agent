@@ -663,9 +663,9 @@ def _phase_a_triage() -> int:
         )
 
         try:
-            import anthropic
+            from .agent import create_client
 
-            client = anthropic.Anthropic()
+            client = create_client()
             response = client.messages.create(
                 model=model, max_tokens=200, messages=[{"role": "user", "content": prompt}]
             )
