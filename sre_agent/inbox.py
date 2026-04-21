@@ -9,16 +9,11 @@ from typing import Any
 
 from .db import get_database
 
-# -- WebSocket event helper --
 
+def _publish_event(event_type: str, item_id: str, data: dict[str, Any] | None = None) -> None:
+    from .api.view_events import publish_view_event
 
-def _publish_inbox_event(event_type: str, item_id: str, data: dict[str, Any] | None = None) -> None:
-    try:
-        from .api.view_events import ViewEvent, get_event_bus
-
-        get_event_bus().publish(ViewEvent(event_type=event_type, view_id=item_id, actor="system", data=data or {}))
-    except Exception:
-        pass
+    publish_view_event(event_type, item_id, "system", data)
 
 
 # -- Status lifecycles per item type --
@@ -134,7 +129,7 @@ def create_inbox_item(item: dict[str, Any]) -> str:
         ),
     )
     db.commit()
-    _publish_inbox_event(
+    _publish_event(
         "inbox_item_created",
         item_id,
         {"title": item["title"], "severity": item.get("severity"), "item_type": item["item_type"]},
@@ -157,6 +152,8 @@ def list_inbox_items(
     claimed_by: str | None = None,
     severity: str | None = None,
     group_by: str | None = None,
+    limit: int = 200,
+    offset: int = 0,
 ) -> dict[str, Any]:
     db = get_database()
     where_parts = [
@@ -182,8 +179,9 @@ def list_inbox_items(
         params.append(severity)
 
     where = " AND ".join(where_parts)
+    params.extend([limit, offset])
     rows = db.fetchall(
-        f"SELECT * FROM inbox_items WHERE {where} ORDER BY priority_score DESC",
+        f"SELECT * FROM inbox_items WHERE {where} ORDER BY priority_score DESC LIMIT ? OFFSET ?",
         tuple(params),
     )
     items = [_deserialize_row(r) for r in rows]
@@ -276,7 +274,7 @@ def update_item_status(item_id: str, new_status: str) -> bool:
     )
     db.commit()
     event_type = "inbox_item_resolved" if new_status == "resolved" else "inbox_item_updated"
-    _publish_inbox_event(event_type, item_id, {"status": new_status})
+    _publish_event(event_type, item_id, {"status": new_status})
     return True
 
 
@@ -292,7 +290,7 @@ def claim_item(item_id: str, username: str) -> bool:
         (username, now, now, item_id),
     )
     db.commit()
-    _publish_inbox_event("inbox_item_claimed", item_id, {"claimed_by": username, "claimed_at": now})
+    _publish_event("inbox_item_claimed", item_id, {"claimed_by": username, "claimed_at": now})
 
     if item["status"] == "new":
         if item["item_type"] == "task":
@@ -373,12 +371,7 @@ def upsert_inbox_item(item: dict[str, Any]) -> str:
     if existing is None:
         return create_inbox_item(item)
 
-    existing_resources = existing.get("resources", [])
-    new_resources = item.get("resources", [])
-    existing_names = {(r["kind"], r["name"], r["namespace"]) for r in existing_resources}
-    for r in new_resources:
-        if (r["kind"], r["name"], r["namespace"]) not in existing_names:
-            existing_resources.append(r)
+    merged_resources = _merge_resources(existing.get("resources", []), item.get("resources", []))
 
     now = int(time.time())
     priority = compute_priority_score(
@@ -391,7 +384,7 @@ def upsert_inbox_item(item: dict[str, Any]) -> str:
 
     db.execute(
         "UPDATE inbox_items SET resources = ?, priority_score = ?, updated_at = ? WHERE id = ?",
-        (json.dumps(existing_resources), priority, now, existing["id"]),
+        (json.dumps(merged_resources), priority, now, existing["id"]),
     )
     db.commit()
     return existing["id"]
@@ -447,15 +440,49 @@ def pin_item(item_id: str, username: str) -> bool:
     return True
 
 
-def prune_old_items(max_age_days: int = 30) -> int:
+def dismiss_item(item_id: str) -> bool:
+    item = get_inbox_item(item_id)
+    if item is None:
+        return False
     db = get_database()
-    cutoff = int(time.time()) - max_age_days * 86400
+    now = int(time.time())
+    db.execute(
+        "UPDATE inbox_items SET status = 'archived', updated_at = ?, resolved_at = ? WHERE id = ?",
+        (now, now, item_id),
+    )
+    db.commit()
+    _publish_event("inbox_item_updated", item_id, {"status": "archived"})
+    return True
+
+
+_last_prune_time = 0
+_PRUNE_INTERVAL = 86400
+
+
+def prune_old_items(max_age_days: int = 30) -> int:
+    global _last_prune_time
+    now = time.time()
+    if now - _last_prune_time < _PRUNE_INTERVAL:
+        return 0
+    _last_prune_time = now
+
+    db = get_database()
+    cutoff = int(now) - max_age_days * 86400
     cur = db.execute(
         "DELETE FROM inbox_items WHERE status IN ('resolved', 'archived') AND resolved_at IS NOT NULL AND resolved_at < ?",
         (cutoff,),
     )
     db.commit()
     return cur.rowcount if hasattr(cur, "rowcount") else 0
+
+
+def _merge_resources(existing: list[dict], new: list[dict]) -> list[dict]:
+    seen = {(r["kind"], r["name"], r["namespace"]) for r in existing}
+    merged = list(existing)
+    for r in new:
+        if (r["kind"], r["name"], r["namespace"]) not in seen:
+            merged.append(r)
+    return merged
 
 
 def _deserialize_row(row: Any) -> dict[str, Any]:
@@ -481,12 +508,7 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
 
     if existing:
         existing_item = _deserialize_row(existing)
-        existing_resources = existing_item.get("resources", [])
-        new_resources = finding.get("resources", [])
-        existing_names = {(r["kind"], r["name"], r["namespace"]) for r in existing_resources}
-        for r in new_resources:
-            if (r["kind"], r["name"], r["namespace"]) not in existing_names:
-                existing_resources.append(r)
+        merged_resources = _merge_resources(existing_item.get("resources", []), finding.get("resources", []))
 
         now = int(time.time())
         priority = compute_priority_score(
@@ -498,7 +520,7 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
         )
         db.execute(
             "UPDATE inbox_items SET resources = ?, priority_score = ?, updated_at = ? WHERE id = ?",
-            (json.dumps(existing_resources), priority, now, existing_item["id"]),
+            (json.dumps(merged_resources), priority, now, existing_item["id"]),
         )
         db.commit()
         return existing_item["id"]
@@ -539,7 +561,7 @@ def resolve_finding_inbox_item(finding_id: str) -> bool:
         (now, now, item["id"]),
     )
     db.commit()
-    _publish_inbox_event("inbox_item_resolved", item["id"], {"resolved_at": now})
+    _publish_event("inbox_item_resolved", item["id"], {"resolved_at": now})
     return True
 
 

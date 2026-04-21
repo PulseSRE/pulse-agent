@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import time
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ..inbox import (
     VALID_TRANSITIONS,
     claim_item,
     create_inbox_item,
+    dismiss_item,
     escalate_assessment,
     get_inbox_item,
     get_inbox_stats,
@@ -32,6 +31,8 @@ async def rest_list_inbox(
     claimed_by: str | None = Query(None),
     severity: str | None = Query(None),
     group_by: str | None = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
 ):
     return list_inbox_items(
         item_type=type,
@@ -40,6 +41,8 @@ async def rest_list_inbox(
         claimed_by=claimed_by,
         severity=severity,
         group_by=group_by,
+        limit=limit,
+        offset=offset,
     )
 
 
@@ -128,18 +131,9 @@ async def rest_snooze_item(item_id: str, request: Request):
 
 @router.post("/inbox/{item_id}/dismiss")
 async def rest_dismiss_item(item_id: str):
-    item = get_inbox_item(item_id)
-    if item is None:
+    ok = dismiss_item(item_id)
+    if not ok:
         raise HTTPException(status_code=404, detail="Item not found")
-    from ..db import get_database
-
-    now = int(time.time())
-    db = get_database()
-    db.execute(
-        "UPDATE inbox_items SET status = 'archived', updated_at = ?, resolved_at = ? WHERE id = ?",
-        (now, now, item_id),
-    )
-    db.commit()
     return {"ok": True}
 
 
