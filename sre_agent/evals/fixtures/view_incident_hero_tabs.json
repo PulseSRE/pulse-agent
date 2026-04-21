@@ -1,0 +1,20 @@
+{
+    "name": "view_incident_hero_tabs",
+    "prompt": "Create an incident investigation view for the payment-api pod that's crashlooping due to OOM. I want the full investigation layout with hero header, status pipeline, confidence badge, resolution steps, blast radius, and a timeline.",
+    "recorded_responses": {
+        "describe_pod": "{\"name\": \"payment-api-7f8b9c6d4-x2k9m\", \"namespace\": \"production\", \"status\": \"Running\", \"containers\": [{\"name\": \"payment-api\", \"image\": \"payment:v3.1\", \"ready\": false, \"restarts\": 12, \"state\": \"waiting\", \"reason\": \"CrashLoopBackOff\", \"lastState\": {\"terminated\": {\"reason\": \"OOMKilled\", \"exitCode\": 137}}}], \"conditions\": [{\"type\": \"Ready\", \"status\": \"False\"}]}",
+        "get_pod_logs": "2024-01-15T14:30:01Z [ERROR] java.lang.OutOfMemoryError: Java heap space\n2024-01-15T14:30:01Z [ERROR] Container killed by OOM (exit code 137)\n2024-01-15T14:29:55Z [WARN] Heap usage at 95%: 486Mi/512Mi",
+        "get_events": "LAST SEEN   TYPE      REASON    OBJECT                MESSAGE\n2m          Warning   OOMKilled  pod/payment-api       Container exceeded memory limit\n5m          Warning   BackOff    pod/payment-api       Back-off restarting failed container\n10m         Normal    Pulling    pod/payment-api       Pulling image payment:v3.1",
+        "get_firing_alerts": "FIRING: KubePodCrashLooping (critical) — Pod production/payment-api is crash-looping (12 restarts)\nFIRING: KubeContainerOOMKilled (warning) — Container payment-api OOM killed 3 times in 30m",
+        "get_topology_graph": "{\"nodes\": [{\"id\": \"1\", \"kind\": \"Pod\", \"name\": \"payment-api-x2k9m\", \"namespace\": \"production\", \"status\": \"error\"}, {\"id\": \"2\", \"kind\": \"Service\", \"name\": \"payment-api\", \"namespace\": \"production\", \"status\": \"degraded\"}, {\"id\": \"3\", \"kind\": \"Ingress\", \"name\": \"payment-ingress\", \"namespace\": \"production\", \"status\": \"healthy\"}], \"edges\": [{\"source\": \"2\", \"target\": \"1\", \"relationship\": \"selects\"}, {\"source\": \"3\", \"target\": \"2\", \"relationship\": \"routes_to\"}]}",
+        "get_prometheus_query": "Query: container_memory_working_set_bytes{pod=~\"payment-api.*\"}\nResults: payment-api: 536870912 (512Mi) — at memory limit",
+        "emit_component": "Component emitted successfully",
+        "create_dashboard": "Dashboard 'Incident Investigation — payment-api' created with view_type=incident, status=investigating. Hero header: confidence_badge (0.85), status_pipeline (Detected→Investigated→Action Taken→Verifying→Resolved, current=1), metric_card grid (restarts: 12, memory: 512Mi, CPU: 45%, latency: 230ms). Tabs: Resolution (resolution_tracker + action_button), Analysis (key_value + data_table), Impact (blast_radius), Timeline (timeline)."
+    },
+    "expected": {
+        "should_mention": ["payment-api", "OOM", "investigation", "hero", "tabs"],
+        "should_use_tools": ["describe_pod", "get_pod_logs", "create_dashboard"],
+        "should_not_use_tools": ["delete_pod", "drain_node"],
+        "max_tool_calls": 12
+    }
+}

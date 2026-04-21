@@ -181,6 +181,69 @@
       "rollback_available": false,
       "retry_attempts": 0,
       "transient_failures": 0
+    },
+    {
+      "scenario_id": "view_incident_hero_tabs",
+      "category": "view_designer",
+      "description": "Create an incident investigation view that triggers hero header + tabs layout with status_pipeline, confidence_badge, and metric cards in the hero, plus Resolution/Analysis/Impact/Timeline tabs.",
+      "tool_calls": [
+        "describe_pod",
+        "get_pod_logs",
+        "get_events",
+        "get_firing_alerts",
+        "get_topology_graph",
+        "get_prometheus_query",
+        "emit_component",
+        "create_dashboard"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 60,
+      "user_confirmed_resolution": true,
+      "final_response": "Created incident investigation view for payment-api OOM crash. Hero header shows 85% confidence badge, status pipeline at 'Investigated' step, and 4 metric cards (restarts, memory, CPU, latency). Resolution tab has step tracker and restart action button. Analysis tab shows root cause and affected pods. Impact tab shows blast radius with 3 downstream dependencies. Timeline tab shows event swim lanes.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "view_plan_layout",
+      "category": "view_designer",
+      "description": "Create a remediation plan view with Prerequisites/Steps/Impact/Current State tabs and status_pipeline showing execution progress.",
+      "tool_calls": [
+        "namespace_summary",
+        "get_prometheus_query",
+        "get_topology_graph",
+        "emit_component",
+        "create_dashboard"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 45,
+      "user_confirmed_resolution": true,
+      "final_response": "Created remediation plan view for memory scaling. Hero shows 92% readiness confidence, status pipeline at 'Ready' step, and 3 metric cards (current memory, target, estimated effort). Prerequisites tab has checklist of 4 items. Steps tab shows ordered execution plan with action buttons per step. Impact tab shows blast radius for the change. Current State tab shows live resource data.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
+    },
+    {
+      "scenario_id": "view_assessment_trend",
+      "category": "view_designer",
+      "description": "Create a predictive assessment view for a trending resource pressure issue with Trend/Recommendations/Impact tabs.",
+      "tool_calls": [
+        "get_prometheus_query",
+        "get_prometheus_query",
+        "get_topology_graph",
+        "emit_component",
+        "create_dashboard"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 40,
+      "user_confirmed_resolution": true,
+      "final_response": "Created assessment view for memory pressure trend on worker-03. Hero shows 78% prediction confidence, status pipeline at 'Analyzing', and 3 metric cards (current 85%, predicted 95% in 2h, time to breach). Trend tab shows predict_linear chart. Recommendations tab has preventive actions with action buttons. Impact tab shows blast radius of affected workloads.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
     }
   ],
   "description": "Dashboard generation quality — validates component selection, layout, and tool usage for view creation"

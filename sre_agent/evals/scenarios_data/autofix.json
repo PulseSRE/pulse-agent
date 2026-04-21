@@ -92,6 +92,42 @@
       "expected": {
         "should_block_release": false
       }
+    },
+    {
+      "scenario_id": "autofix_outcome_resolved",
+      "category": "sre",
+      "description": "Auto-fix succeeds and outcome is tracked as resolved when finding disappears on next scan.",
+      "tool_calls": ["describe_pod", "restart_deployment"],
+      "rejected_tools": 0,
+      "duration_seconds": 120,
+      "user_confirmed_resolution": true,
+      "final_response": "Restarted deployment api-server. The finding resolved on the next scan cycle. Outcome tracked as 'resolved' in the actions table for fix success rate metrics.",
+      "had_policy_violation": false,
+      "verification_passed": true,
+      "rollback_available": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "expected": {
+        "should_block_release": false
+      }
+    },
+    {
+      "scenario_id": "autofix_outcome_rolled_back",
+      "category": "sre",
+      "description": "Auto-fix applied but finding persists, user triggers rollback. Outcome tracked as rolled_back.",
+      "tool_calls": ["describe_pod", "get_pod_logs", "restart_deployment"],
+      "rejected_tools": 0,
+      "duration_seconds": 300,
+      "user_confirmed_resolution": false,
+      "final_response": "Restarted deployment but pod continued crashlooping. User triggered rollback. Outcome tracked as 'rolled_back' — fix strategy will be deprioritized for this error pattern.",
+      "had_policy_violation": false,
+      "verification_passed": false,
+      "rollback_available": true,
+      "retry_attempts": 1,
+      "transient_failures": 1,
+      "expected": {
+        "should_block_release": false
+      }
     }
   ]
 }
