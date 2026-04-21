@@ -56,6 +56,10 @@
     {"id": "sel_remove_column", "query": "remove the namespace column and add the resource kind column", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
     {"id": "sel_hide_column", "query": "hide the labels column from the table", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
     {"id": "sel_sort_table", "query": "sort by restarts descending", "expected_skill": "view_designer", "acceptable": ["view_designer", "sre"]},
-    {"id": "sel_custom_view_context", "query": "Context: custom_view / rename the first widget", "expected_skill": "view_designer", "acceptable": ["view_designer"]}
+    {"id": "sel_custom_view_context", "query": "Context: custom_view / rename the first widget", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_pill_node_health", "query": "Create a dashboard showing node health: CPU/memory utilization, pod density, and node conditions", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_pill_workload", "query": "Create a dashboard showing deployment status, pod restart trends, and OOM kills", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_pill_security", "query": "Create a dashboard showing security audit score, cluster-admin bindings, unprotected namespaces, and SCC usage", "expected_skill": "view_designer", "acceptable": ["view_designer"]},
+    {"id": "sel_pill_capacity", "query": "Create a dashboard showing resource utilization ratios, capacity projections, and idle workloads", "expected_skill": "view_designer", "acceptable": ["view_designer"]}
   ]
 }
