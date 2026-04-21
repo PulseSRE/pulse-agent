@@ -1092,6 +1092,10 @@ class MonitorSession:
                     "timestamp": _ts(),
                 }
             )
+            if finding_id:
+                from .actions import mark_finding_actions_resolved
+
+                mark_finding_actions_resolved(finding_id)
 
         # Track transient findings for noise learning
         for key in stale_keys:

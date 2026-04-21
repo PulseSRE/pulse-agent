@@ -97,7 +97,10 @@ clean:
 
 release:
 	@test -n "$(VERSION)" || (echo "Usage: make release VERSION=x.y.z" && exit 1)
+	@echo "Running eval gate check..."
+	python3 -m sre_agent.evals.cli --suite release --compare-baseline || (echo "Eval regression detected — aborting release" && exit 1)
 	./scripts/bump-version.sh $(VERSION)
+	python3 -m sre_agent.evals.cli --suite release --save-baseline
 	git add pyproject.toml chart/Chart.yaml
 	git commit -m "chore: bump version to $(VERSION)"
 	git tag "v$(VERSION)"

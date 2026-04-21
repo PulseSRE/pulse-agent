@@ -202,6 +202,15 @@ def _migrate_019_agent_views(db: Database) -> None:
     db.commit()
 
 
+def _migrate_020_action_outcomes(db: Database) -> None:
+    """Add outcome tracking to actions table for fix success rate metrics."""
+    try:
+        db.execute("ALTER TABLE actions ADD COLUMN outcome TEXT NOT NULL DEFAULT 'unknown'")
+    except Exception:
+        pass
+    db.commit()
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -222,4 +231,5 @@ MIGRATIONS = [
     (17, "plan_executions", _migrate_017_plan_executions),
     (18, "user_events", _migrate_018_user_events),
     (19, "agent_views", _migrate_019_agent_views),
+    (20, "action_outcomes", _migrate_020_action_outcomes),
 ]

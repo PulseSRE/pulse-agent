@@ -25,6 +25,7 @@ from .chat_rest import router as chat_router
 from .eval_rest import router as eval_router
 from .fix_rest import router as fix_router
 from .memory_rest import router as memory_router
+from .metrics_rest import router as metrics_router
 from .monitor_rest import router as monitor_router
 from .scanner_rest import router as scanner_router
 from .skill_rest import router as skill_router
@@ -129,6 +130,7 @@ app.include_router(skill_router)
 app.include_router(analytics_router)
 app.include_router(recommendations_router)
 app.include_router(topology_router)
+app.include_router(metrics_router)
 
 # Register WebSocket endpoints
 # /ws/agent — ORCA-routed chat (routes to any of 7 skills)

@@ -355,7 +355,10 @@ def execute_rollback(action_id: str) -> dict:
 
             # Update status in database
             db = get_database()
-            db.execute("UPDATE actions SET status = 'rolled_back' WHERE id = ?", (action_id,))
+            db.execute(
+                "UPDATE actions SET status = 'rolled_back', outcome = 'rolled_back' WHERE id = ?",
+                (action_id,),
+            )
             db.commit()
             return {"status": "rolled_back", "actionId": action_id, "detail": result_text}
         except Exception as e:
@@ -378,6 +381,73 @@ def update_action_verification(action_id: str, status: str, evidence: str) -> No
         db.commit()
     except Exception as e:
         logger.error("Failed to update action verification: %s", e)
+
+
+# ── Outcome tracking ─────────────────────────────────────────────────────
+
+_VALID_OUTCOMES = frozenset({"resolved", "rolled_back", "escalated", "unknown"})
+
+
+def update_action_outcome(action_id: str, outcome: str) -> bool:
+    """Set the outcome of an action (resolved, rolled_back, escalated)."""
+    if outcome not in _VALID_OUTCOMES:
+        return False
+    try:
+        _ensure_tables()
+        db = get_database()
+        db.execute("UPDATE actions SET outcome = ? WHERE id = ?", (outcome, action_id))
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error("Failed to update action outcome: %s", e)
+        return False
+
+
+def mark_finding_actions_resolved(finding_id: str) -> int:
+    """Mark all actions for a finding as resolved. Returns count updated."""
+    try:
+        _ensure_tables()
+        db = get_database()
+        db.execute(
+            "UPDATE actions SET outcome = 'resolved' WHERE finding_id = ? AND outcome = 'unknown'",
+            (finding_id,),
+        )
+        db.commit()
+        row = db.fetchone(
+            "SELECT COUNT(*) AS cnt FROM actions WHERE finding_id = ? AND outcome = 'resolved'",
+            (finding_id,),
+        )
+        return row["cnt"] if row else 0
+    except Exception:
+        return 0
+
+
+def get_fix_success_rate(days: int = 30) -> dict:
+    """Calculate fix success rate over a time period."""
+    try:
+        _ensure_tables()
+        db = get_database()
+        rows = db.fetchall(
+            "SELECT outcome, COUNT(*) AS cnt FROM actions "
+            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000 "
+            "AND outcome != 'unknown' "
+            "GROUP BY outcome",
+            (days,),
+        )
+        totals = {r["outcome"]: r["cnt"] for r in rows}
+        total = sum(totals.values())
+        resolved = totals.get("resolved", 0)
+        return {
+            "period_days": days,
+            "total_with_outcome": total,
+            "resolved": resolved,
+            "rolled_back": totals.get("rolled_back", 0),
+            "escalated": totals.get("escalated", 0),
+            "success_rate": round(resolved / total, 4) if total > 0 else None,
+        }
+    except Exception as e:
+        logger.error("Failed to get fix success rate: %s", e)
+        return {"period_days": days, "total_with_outcome": 0, "success_rate": None}
 
 
 # ── Cost / usage tracking ──────────────────────────────────────────────────
