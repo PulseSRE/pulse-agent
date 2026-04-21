@@ -265,7 +265,19 @@ def _deserialize_view_row(row: dict) -> dict:
 
 @_db_safe
 def save_view(
-    owner: str, view_id: str, title: str, description: str, layout: list, positions: dict | None = None, icon: str = ""
+    owner: str,
+    view_id: str,
+    title: str,
+    description: str,
+    layout: list,
+    positions: dict | None = None,
+    icon: str = "",
+    *,
+    view_type: str = "custom",
+    status: str = "active",
+    trigger_source: str = "user",
+    finding_id: str | None = None,
+    visibility: str = "private",
 ) -> str | None:
     """Save a new view for a user. Returns the view ID."""
     import json
@@ -273,19 +285,33 @@ def save_view(
 
     db = get_database()
     now = datetime.now(UTC).isoformat()
-    # Only upsert if the existing row belongs to the same owner
     db.execute(
-        "INSERT INTO views (id, owner, title, description, icon, layout, positions, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "INSERT INTO views (id, owner, title, description, icon, layout, positions, "
+        "view_type, status, trigger_source, finding_id, visibility, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT (id) DO UPDATE SET "
         "title = EXCLUDED.title, description = EXCLUDED.description, icon = EXCLUDED.icon, "
         "layout = EXCLUDED.layout, positions = EXCLUDED.positions, updated_at = EXCLUDED.updated_at "
         "WHERE views.owner = EXCLUDED.owner",
-        (view_id, owner, title, description, icon, json.dumps(layout), json.dumps(positions or {}), now, now),
+        (
+            view_id,
+            owner,
+            title,
+            description,
+            icon,
+            json.dumps(layout),
+            json.dumps(positions or {}),
+            view_type,
+            status,
+            trigger_source,
+            finding_id,
+            visibility,
+            now,
+            now,
+        ),
     )
     db.commit()
 
-    # Snapshot the initial version so version history is never empty
     try:
         snapshot_view(view_id, "created")
     except Exception:

@@ -72,6 +72,35 @@ class TestSaveView:
         view = db_module.get_view("cv-1", "alice")
         assert isinstance(view["positions"], dict)
 
+    def test_saves_with_view_type_and_status(self):
+        result = db_module.save_view(
+            "alice",
+            "cv-incident-1",
+            "CrashLoop Investigation",
+            "desc",
+            _layout(),
+            view_type="incident",
+            status="investigating",
+            trigger_source="monitor",
+            finding_id="f-123",
+            visibility="team",
+        )
+        assert result == "cv-incident-1"
+        view = db_module.get_view("cv-incident-1", "alice")
+        assert view["view_type"] == "incident"
+        assert view["status"] == "investigating"
+        assert view["trigger_source"] == "monitor"
+        assert view["finding_id"] == "f-123"
+        assert view["visibility"] == "team"
+
+    def test_save_defaults_to_custom(self):
+        db_module.save_view("alice", "cv-default", "Default View", "desc", _layout())
+        view = db_module.get_view("cv-default", "alice")
+        assert view["view_type"] == "custom"
+        assert view["status"] == "active"
+        assert view["visibility"] == "private"
+        assert view["trigger_source"] == "user"
+
 
 # ---------------------------------------------------------------------------
 # list_views
