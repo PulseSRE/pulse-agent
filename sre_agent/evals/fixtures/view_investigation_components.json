@@ -1,0 +1,20 @@
+{
+    "name": "view_investigation_components",
+    "prompt": "Create an incident investigation dashboard for the payment-api pod that's crashlooping. I want to see resolution steps, confidence scores, blast radius, and action buttons for remediation.",
+    "recorded_responses": {
+        "describe_pod": "{\"name\": \"payment-api-7f8b9c6d4-x2k9m\", \"namespace\": \"production\", \"status\": \"Running\", \"containers\": [{\"name\": \"payment-api\", \"image\": \"payment:v3.1\", \"ready\": false, \"restarts\": 12, \"state\": \"waiting\", \"reason\": \"CrashLoopBackOff\", \"lastState\": {\"terminated\": {\"reason\": \"OOMKilled\", \"exitCode\": 137}}}], \"conditions\": [{\"type\": \"Ready\", \"status\": \"False\"}]}",
+        "get_pod_logs": "2024-01-15T14:30:01Z [ERROR] java.lang.OutOfMemoryError: Java heap space\n2024-01-15T14:30:01Z [ERROR] Container killed by OOM (exit code 137)\n2024-01-15T14:29:55Z [WARN] Heap usage at 95%: 486Mi/512Mi\n2024-01-15T14:29:50Z [INFO] Processing batch of 50000 transactions",
+        "get_firing_alerts": "FIRING: KubePodCrashLooping (critical) — Pod production/payment-api is crash-looping (12 restarts in last hour)\nFIRING: KubeContainerOOMKilled (warning) — Container payment-api OOM killed 3 times in 30m",
+        "get_topology_graph": "{\"nodes\": [{\"id\": \"1\", \"kind\": \"Pod\", \"name\": \"payment-api-7f8b9c6d4-x2k9m\", \"namespace\": \"production\", \"status\": \"error\"}, {\"id\": \"2\", \"kind\": \"Service\", \"name\": \"payment-api\", \"namespace\": \"production\", \"status\": \"degraded\"}, {\"id\": \"3\", \"kind\": \"Ingress\", \"name\": \"payment-ingress\", \"namespace\": \"production\", \"status\": \"healthy\"}, {\"id\": \"4\", \"kind\": \"HPA\", \"name\": \"payment-api\", \"namespace\": \"production\", \"status\": \"healthy\"}], \"edges\": [{\"source\": \"2\", \"target\": \"1\", \"relationship\": \"selects\"}, {\"source\": \"3\", \"target\": \"2\", \"relationship\": \"routes_to\"}, {\"source\": \"4\", \"target\": \"1\", \"relationship\": \"scales\"}]}",
+        "get_prometheus_query": "Query: container_memory_working_set_bytes{pod=~\"payment-api.*\",namespace=\"production\"}\nResults (1 series):\n  payment-api: 536870912 (512Mi) — at memory limit",
+        "emit_component": "Component emitted successfully",
+        "plan_dashboard": "Dashboard plan: Incident Investigation — payment-api\nRow 1: Confidence badge (85%), 3 metric cards (restarts, memory, alert count)\nRow 2: Resolution tracker (3 steps), Blast radius (3 dependencies)\nRow 3: Memory trend chart, Action button (restart deployment)\nRow 4: Pod logs, Events table",
+        "create_dashboard": "Dashboard 'Incident Investigation — payment-api' created with resolution_tracker, confidence_badge, blast_radius, action_button, metric_cards, chart, and data_table"
+    },
+    "expected": {
+        "should_mention": ["payment-api", "OOM", "resolution", "blast radius"],
+        "should_use_tools": ["describe_pod", "get_pod_logs", "create_dashboard"],
+        "should_not_use_tools": ["delete_pod", "drain_node", "scale_deployment"],
+        "max_tool_calls": 12
+    }
+}

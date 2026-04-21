@@ -57,7 +57,7 @@
       "rejected_tools": 0,
       "duration_seconds": 55,
       "user_confirmed_resolution": true,
-      "final_response": "Created 'Incident Triage \u2014 api-server' dashboard because the pod is OOM-killed. Shows pod status, restart count, memory trend, log viewer, and events table.",
+      "final_response": "Created 'Incident Triage — api-server' dashboard because the pod is OOM-killed. Shows pod status, restart count, memory trend, log viewer, and events table.",
       "verification_passed": true,
       "rollback_available": false,
       "retry_attempts": 0,
@@ -158,7 +158,30 @@
         "max_overall": 0.8,
         "should_block_release": false
       }
+    },
+    {
+      "scenario_id": "view_investigation_components",
+      "category": "view_designer",
+      "description": "Create an incident investigation view using Phase 2 components: resolution_tracker, confidence_badge, blast_radius, and action_button alongside standard components.",
+      "tool_calls": [
+        "describe_pod",
+        "get_pod_logs",
+        "get_firing_alerts",
+        "get_topology_graph",
+        "get_prometheus_query",
+        "emit_component",
+        "plan_dashboard",
+        "create_dashboard"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 60,
+      "user_confirmed_resolution": true,
+      "final_response": "Created Incident Investigation dashboard with resolution_tracker showing recovery steps (identify root cause: done, scale replicas: running, verify health: pending), confidence_badge at 85% for root cause analysis, blast_radius showing 3 downstream dependencies (Service, Ingress, HPA), and action_button for restart_deployment. Also includes metric cards, memory trend chart, and pod status table.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
     }
   ],
-  "description": "Dashboard generation quality \u2014 validates component selection, layout, and tool usage for view creation"
+  "description": "Dashboard generation quality — validates component selection, layout, and tool usage for view creation"
 }
