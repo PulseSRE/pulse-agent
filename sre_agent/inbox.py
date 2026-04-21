@@ -31,9 +31,10 @@ VALID_TRANSITIONS: dict[str, dict[str, list[str]]] = {
         "agent_cleared": ["new", "acknowledged", "archived"],
     },
     "task": {
-        "new": ["in_progress", "agent_reviewing", "agent_cleared", "agent_review_failed"],
-        "agent_reviewing": ["in_progress", "agent_cleared", "agent_review_failed"],
+        "new": ["in_progress", "acknowledged", "agent_reviewing", "agent_cleared", "agent_review_failed"],
+        "agent_reviewing": ["in_progress", "acknowledged", "agent_cleared", "agent_review_failed"],
         "agent_review_failed": ["new", "in_progress", "archived"],
+        "acknowledged": ["in_progress", "new"],
         "in_progress": ["resolved"],
         "resolved": ["archived"],
         "agent_cleared": ["new", "in_progress", "archived"],
