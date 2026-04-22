@@ -7,9 +7,11 @@ import pytest
 from sre_agent.promql_recipes import (
     RECIPES,
     PromQLRecipe,
+    check_thanos_compatibility,
     get_fallback,
     get_recipe,
     get_recipes_for_category,
+    inject_cluster_label,
 )
 
 VALID_SCOPES = {"cluster", "namespace", "pod", "node"}
@@ -115,3 +117,59 @@ class TestLookupFunctions:
 
     def test_get_fallback_nonexistent(self) -> None:
         assert get_fallback("nonexistent") is None
+
+
+class TestInjectClusterLabel:
+    def test_bare_metric(self):
+        assert inject_cluster_label("up", "prod") == 'up{cluster="prod"}'
+
+    def test_metric_with_labels(self):
+        result = inject_cluster_label('metric{ns="x"}', "prod")
+        assert result == 'metric{cluster="prod",ns="x"}'
+
+    def test_recording_rule(self):
+        result = inject_cluster_label("namespace:cpu:sum", "c1")
+        assert 'cluster="c1"' in result
+
+    def test_nested_query(self):
+        result = inject_cluster_label('rate(http_requests_total{code="200"}[5m])', "c1")
+        assert 'cluster="c1"' in result
+        assert "rate{" not in result
+
+    def test_aggregation_not_injected(self):
+        result = inject_cluster_label('sum by (namespace) (up{job="k8s"})', "c1")
+        assert "sum{" not in result
+        assert 'cluster="c1"' in result
+
+    def test_idempotent(self):
+        q = inject_cluster_label("up", "prod")
+        assert inject_cluster_label(q, "prod") == q
+
+    def test_invalid_cluster_name_raises(self):
+        with pytest.raises(ValueError):
+            inject_cluster_label("up", "bad;name")
+
+    def test_all_recipes_injectable(self):
+        for _cat, recipes in RECIPES.items():
+            for r in recipes:
+                q = inject_cluster_label(r.query, "test-cluster")
+                assert 'cluster="test-cluster"' in q, f"Failed for {r.name}"
+
+    def test_render_with_cluster(self):
+        recipe = RECIPES["cpu"][0]
+        rendered = recipe.render(cluster="my-cluster")
+        assert 'cluster="my-cluster"' in rendered
+
+
+class TestThanosCompatibility:
+    def test_group_left_detected(self):
+        assert check_thanos_compatibility("metric on(instance) group_left(node) kube_node_info") is not None
+
+    def test_group_right_detected(self):
+        assert check_thanos_compatibility("a on(x) group_right(y) b") is not None
+
+    def test_safe_query_returns_none(self):
+        assert check_thanos_compatibility("rate(http_total[5m])") is None
+
+    def test_sum_by_returns_none(self):
+        assert check_thanos_compatibility('sum by (namespace) (up{job="k8s"})') is None
