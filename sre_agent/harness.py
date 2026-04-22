@@ -313,6 +313,19 @@ def gather_cluster_context(mode: str = "sre") -> str:
         fetchers["views"] = _fetch_view_count
     # Security mode: just nodes + namespaces + version (lightweight)
 
+    # ACM detection — all modes benefit from knowing if fleet tools are available
+    def _fetch_acm_info():
+        try:
+            from .prometheus import get_prometheus_client
+
+            if get_prometheus_client().is_acm_available():
+                return "ACM Thanos: Available (use fleet_query_metrics for multi-cluster monitoring)"
+        except Exception:
+            pass
+        return None
+
+    fetchers["acm"] = _fetch_acm_info
+
     futures = {_context_pool.submit(fn): key for key, fn in fetchers.items()}
     for future in concurrent.futures.as_completed(futures, timeout=10):
         key = futures[future]
@@ -328,7 +341,7 @@ def gather_cluster_context(mode: str = "sre") -> str:
 
     import time as _time
 
-    parts = [results[k] for k in ("nodes", "namespaces", "version", "pods", "alerts") if k in results]
+    parts = [results[k] for k in ("nodes", "namespaces", "version", "pods", "alerts", "acm") if k in results]
     ts = _time.strftime("%H:%M:%S")
     return f"\n## Live Cluster State (gathered at {ts})\n" + "\n".join(f"- {p}" for p in parts)
 

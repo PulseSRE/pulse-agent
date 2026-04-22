@@ -159,13 +159,19 @@ def check_thanos_compatibility(query: str) -> str | None:
 class PromQLRecipe:
     """A curated PromQL query with rendering metadata."""
 
-    name: str  # Human title: "CPU by Namespace"
-    query: str  # PromQL query string
-    chart_type: str  # "line", "area", "stacked_area", "bar", "stacked_bar", "metric_card", "status_list"
-    description: str  # What this measures
-    metric: str  # Primary metric name: "container_cpu_usage_seconds_total"
-    scope: str  # "cluster", "namespace", "pod", "node"
-    parameters: list[str] = field(default_factory=list)  # Template variables: ["namespace"]
+    name: str
+    query: str
+    chart_type: str
+    description: str
+    metric: str
+    scope: str
+    parameters: list[str] = field(default_factory=list)
+    acm_safe: bool | None = None
+
+    def __post_init__(self) -> None:
+        if self.acm_safe is None:
+            # Recording rules (colon-separated names) may not exist on ACM Thanos
+            self.acm_safe = ":" not in self.metric
 
     def render(self, **params: str) -> str:
         """Substitute parameter placeholders in the query.
@@ -537,6 +543,7 @@ RECIPES: dict[str, list[PromQLRecipe]] = {
             description="Ratio of CPU usage to total cluster capacity",
             metric="cluster:node_cpu:ratio",
             scope="cluster",
+            acm_safe=True,
         ),
         PromQLRecipe(
             name="Cluster CPU Cores Used",
@@ -545,6 +552,7 @@ RECIPES: dict[str, list[PromQLRecipe]] = {
             description="Total CPU cores actively used across the cluster",
             metric="cluster:cpu_usage_cores:sum",
             scope="cluster",
+            acm_safe=True,
         ),
         PromQLRecipe(
             name="Cluster Memory Used",
@@ -553,6 +561,7 @@ RECIPES: dict[str, list[PromQLRecipe]] = {
             description="Total memory actively used across the cluster",
             metric="cluster:memory_usage_bytes:sum",
             scope="cluster",
+            acm_safe=True,
         ),
         PromQLRecipe(
             name="Workload vs Platform CPU",
@@ -841,6 +850,99 @@ RECIPES: dict[str, list[PromQLRecipe]] = {
             scope="cluster",
         ),
     ],
+    # -- ACM Fleet (10) — queries known to work on ACM Thanos hub --
+    "acm_fleet": [
+        PromQLRecipe(
+            name="Fleet CPU Capacity",
+            query="sum by (cluster) (cluster:capacity_cpu_cores:sum)",
+            chart_type="bar",
+            description="Total CPU cores available per managed cluster",
+            metric="cluster:capacity_cpu_cores:sum",
+            scope="cluster",
+            acm_safe=True,
+        ),
+        PromQLRecipe(
+            name="Fleet CPU Usage",
+            query="sum by (cluster) (cluster:cpu_usage_cores:sum)",
+            chart_type="stacked_area",
+            description="CPU cores consumed per managed cluster",
+            metric="cluster:cpu_usage_cores:sum",
+            scope="cluster",
+            acm_safe=True,
+        ),
+        PromQLRecipe(
+            name="Fleet Memory Capacity",
+            query="sum by (cluster) (cluster:capacity_memory_bytes:sum)",
+            chart_type="bar",
+            description="Total memory available per managed cluster",
+            metric="cluster:capacity_memory_bytes:sum",
+            scope="cluster",
+            acm_safe=True,
+        ),
+        PromQLRecipe(
+            name="Fleet Memory Usage",
+            query="sum by (cluster) (cluster:memory_usage_bytes:sum)",
+            chart_type="stacked_area",
+            description="Memory consumed per managed cluster",
+            metric="cluster:memory_usage_bytes:sum",
+            scope="cluster",
+            acm_safe=True,
+        ),
+        PromQLRecipe(
+            name="Fleet CPU Utilization %",
+            query="100 * cluster:node_cpu:ratio",
+            chart_type="line",
+            description="CPU utilization percentage per cluster — compare fleet efficiency",
+            metric="cluster:node_cpu:ratio",
+            scope="cluster",
+            acm_safe=True,
+        ),
+        PromQLRecipe(
+            name="Fleet API Server Latency p99",
+            query='histogram_quantile(0.99, sum by (cluster, le) (rate(apiserver_request_duration_seconds_bucket{verb!="WATCH"}[5m])))',
+            chart_type="line",
+            description="99th percentile API server latency per cluster — control plane health",
+            metric="apiserver_request_duration_seconds_bucket",
+            scope="cluster",
+            acm_safe=True,
+        ),
+        PromQLRecipe(
+            name="Fleet etcd Leader Status",
+            query='max by (cluster) (etcd_server_has_leader{job="etcd"})',
+            chart_type="status_list",
+            description="etcd leadership status per cluster (1=healthy, 0=no leader)",
+            metric="etcd_server_has_leader",
+            scope="cluster",
+            acm_safe=True,
+        ),
+        PromQLRecipe(
+            name="Fleet API Server Errors (5xx)",
+            query='sum by (cluster) (rate(apiserver_request_total{code=~"5.."}[5m]))',
+            chart_type="line",
+            description="API server 5xx error rate per cluster",
+            metric="apiserver_request_total",
+            scope="cluster",
+            acm_safe=True,
+        ),
+        PromQLRecipe(
+            name="Fleet Node Availability",
+            query='sum by (cluster) (kube_node_status_condition{condition="Ready",status="true"}) / count by (cluster) (kube_node_status_condition{condition="Ready"})',
+            chart_type="line",
+            description="Ratio of Ready nodes per cluster — fleet-wide availability",
+            metric="kube_node_status_condition",
+            scope="cluster",
+            acm_safe=True,
+        ),
+        PromQLRecipe(
+            name="Fleet Pod Count",
+            query="sum by (cluster) (kube_pod_info)",
+            chart_type="bar",
+            description="Total running pods per managed cluster",
+            metric="kube_pod_info",
+            scope="cluster",
+            acm_safe=True,
+        ),
+    ],
 }
 
 
@@ -858,9 +960,17 @@ def get_recipe(metric_name: str) -> PromQLRecipe | None:
     return None
 
 
-def get_recipes_for_category(category: str) -> list[PromQLRecipe]:
-    """Get all recipes in a category."""
-    return list(RECIPES.get(category, []))
+def get_recipes_for_category(category: str, acm_only: bool = False) -> list[PromQLRecipe]:
+    """Get all recipes in a category, optionally filtered to ACM-safe ones."""
+    recipes = list(RECIPES.get(category, []))
+    if acm_only:
+        recipes = [r for r in recipes if r.acm_safe]
+    return recipes
+
+
+def get_acm_fleet_recipes() -> list[PromQLRecipe]:
+    """Get all ACM fleet recipes (known to work on ACM Thanos hub)."""
+    return list(RECIPES.get("acm_fleet", []))
 
 
 def get_fallback(category: str, scope: str = "cluster") -> PromQLRecipe | None:
