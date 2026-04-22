@@ -26,13 +26,13 @@ MAX_EXEC_OUTPUT = 10 * 1024  # 10KB cap
 
 
 @beta_tool
-def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = True):
-    """Apply a YAML manifest to the cluster. Runs server-side dry-run first by default. REQUIRES USER CONFIRMATION.
+def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = False):
+    """Apply a YAML manifest to the cluster. REQUIRES USER CONFIRMATION before execution.
 
     Args:
         yaml_content: The YAML content to apply (single resource only).
         namespace: Override namespace (optional, uses the one in the YAML if not specified).
-        dry_run: If True (default), only validate — don't actually apply. Set to False to apply for real.
+        dry_run: If True, only validate without applying. Default is False (apply for real).
     """
     import yaml as yaml_lib
 
