@@ -172,6 +172,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `memory/` — self-improving agent (PostgreSQL, pattern detection, learned runbooks)
 - `view_tools.py` — `namespace_summary` + `create_dashboard` (accepts view_type, trigger_source, finding_id, visibility for agent view lifecycle) + `get_topology_graph` tools for generative views. Topology supports 5 perspectives (Physical, Logical, Network, Multi-Tenant, Helm) via `kinds`, `relationships`, `layout_hint`, `include_metrics`, `group_by` params
 - `view_mutations.py` — view mutation tools extracted from view_tools.py (`update_dashboard`, `delete_dashboard`, `clone_view`, `share_view`)
+- `view_executor.py` — executes viewPlan widget specs at claim time (tool-backed + props-only, timeout, staleness, security gate)
 - `dependency_graph.py` — live K8s resource dependency graph (17 types, 10 relationships), `_fetch_metrics()` with 30s TTL cache for metrics-server enrichment
 - `quality_engine.py` — unified dashboard validation + quality scoring (includes `critique_view` moved from view_critic.py)
 - `db.py` — Database abstraction (PostgreSQL production, SQLite tests) + view CRUD + lifecycle (status transitions, claims, finding lookup, recurrence handling, assessment escalation, resolution tool extraction, similar view search)

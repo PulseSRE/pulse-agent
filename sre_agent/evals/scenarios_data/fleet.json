@@ -178,6 +178,24 @@
       "rollback_available": false,
       "retry_attempts": 0,
       "transient_failures": 0
+    },
+    {
+      "scenario_id": "investigation_view_quality",
+      "category": "sre",
+      "description": "Investigation view contains diagnostic widgets (confidence badge, resolution tracker, live data) after claim.",
+      "tool_calls": [
+        "get_events",
+        "list_pods",
+        "get_prometheus_query"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 45,
+      "user_confirmed_resolution": true,
+      "final_response": "Investigation view built with confidence badge (85%), investigation summary, memory trend chart, pod health table, and resolution tracker showing 3 diagnosis steps.",
+      "verification_passed": true,
+      "rollback_available": false,
+      "retry_attempts": 0,
+      "transient_failures": 0
     }
   ],
   "description": "Multi-cluster operations \u2014 cross-cluster comparison, health summary, drift detection, cordon/drain, certificate audit, ACM Thanos metrics"
