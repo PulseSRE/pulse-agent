@@ -16,13 +16,30 @@ logger = logging.getLogger("pulse_agent.view_executor")
 _MAX_WIDGETS = 6
 _TOOL_TIMEOUT = 10
 _STALENESS_THRESHOLD = 1800
-_executor = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="view")
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=6, thread_name_prefix="view")
 atexit.register(_executor.shutdown, wait=False)
 
 
 def _resolve_tool(tool_name: str) -> Any:
     """Resolve a tool name to its registered tool object, or None. Separate function for testability."""
     return TOOL_REGISTRY.get(tool_name)
+
+
+def _record_tool_call(tool_name: str, args: dict, result: Any, item_id: str) -> None:
+    """Fire-and-forget tool usage recording for audit trail."""
+    try:
+        from .tool_usage import record_tool_call
+
+        output = str(result)[:200] if result else ""
+        record_tool_call(
+            tool_name=tool_name,
+            input_data=args,
+            output_summary=output,
+            source="view_executor",
+            session_id=item_id,
+        )
+    except Exception:
+        logger.debug("Failed to record tool call %s", tool_name, exc_info=True)
 
 
 def _build_header_widgets(item: dict[str, Any]) -> list[dict[str, Any]]:
@@ -62,7 +79,7 @@ def _build_header_widgets(item: dict[str, Any]) -> list[dict[str, Any]]:
     return header
 
 
-def _execute_tool_widget(widget: dict[str, Any]) -> dict[str, Any] | None:
+def _execute_tool_widget(widget: dict[str, Any], item_id: str = "") -> dict[str, Any] | None:
     """Execute a tool-backed widget and return a component spec, or None on failure."""
     tool_name = widget["tool"]
 
@@ -80,16 +97,9 @@ def _execute_tool_widget(widget: dict[str, Any]) -> dict[str, Any] | None:
         logger.warning("Widget %s has non-dict args, skipping", widget.get("title", ""))
         return None
 
-    future = _executor.submit(tool_obj.call, args)
-    try:
-        result = future.result(timeout=_TOOL_TIMEOUT)
-    except concurrent.futures.TimeoutError:
-        logger.warning("Tool %s timed out after %ds, skipping widget", tool_name, _TOOL_TIMEOUT)
-        future.cancel()
-        return None
-    except Exception:
-        logger.warning("Tool %s failed, skipping widget", tool_name, exc_info=True)
-        return None
+    result = tool_obj.call(args)
+
+    _record_tool_call(tool_name, args, result, item_id)
 
     title = widget.get("title", "")
 
@@ -136,13 +146,17 @@ def execute_view_plan(view_plan: list[dict[str, Any]], item: dict[str, Any]) -> 
 
     Always prepends confidence badge + investigation summary header.
     Skips tool-backed widgets if plan is stale (>30min old).
+    Tool-backed widgets execute in parallel for speed.
     """
     layout = _build_header_widgets(item)
+    item_id = item.get("id", "")
 
     view_plan_at = item.get("metadata", {}).get("view_plan_at", 0)
     is_stale = view_plan_at > 0 and (time.time() - view_plan_at) > _STALENESS_THRESHOLD
 
     if is_stale and any("tool" in w for w in view_plan):
+        investigated_at = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(view_plan_at))
+        age_min = int((time.time() - view_plan_at) / 60)
         layout.append(
             {
                 "kind": "info_card_grid",
@@ -151,7 +165,7 @@ def execute_view_plan(view_plan: list[dict[str, Any]], item: dict[str, Any]) -> 
                     "cards": [
                         {
                             "label": "Note",
-                            "value": "This investigation ran more than 30 minutes ago. Live data widgets were skipped. Open the agent chat to get fresh diagnostics.",
+                            "value": f"Investigated at {investigated_at} ({age_min}min ago). Live data widgets were skipped. Open the agent chat to get fresh diagnostics.",
                         }
                     ],
                 },
@@ -159,17 +173,46 @@ def execute_view_plan(view_plan: list[dict[str, Any]], item: dict[str, Any]) -> 
         )
 
     valid_kinds = get_valid_kinds()
-    for widget in view_plan[:_MAX_WIDGETS]:
+
+    # Separate props-only and tool-backed widgets, preserving order
+    props_widgets: list[tuple[int, dict]] = []
+    tool_widgets: list[tuple[int, dict]] = []
+
+    for i, widget in enumerate(view_plan[:_MAX_WIDGETS]):
         if widget.get("kind", "") not in valid_kinds:
             continue
         if "tool" in widget:
-            if is_stale:
-                logger.debug("Skipping stale tool widget: %s", widget.get("title", ""))
-                continue
-            component = _execute_tool_widget(widget)
-            if component:
-                layout.append(component)
+            if not is_stale:
+                tool_widgets.append((i, widget))
         elif "props" in widget:
-            layout.append({"kind": widget["kind"], "title": widget.get("title", ""), "props": widget["props"]})
+            props_widgets.append((i, widget))
+
+    # Execute tool widgets in parallel
+    futures: dict[concurrent.futures.Future, tuple[int, dict]] = {}
+    for idx, widget in tool_widgets:
+        future = _executor.submit(_execute_tool_widget, widget, item_id)
+        futures[future] = (idx, widget)
+
+    # Collect results, keyed by original index for ordering
+    results: dict[int, dict] = {}
+
+    for idx, widget in props_widgets:
+        results[idx] = {"kind": widget["kind"], "title": widget.get("title", ""), "props": widget["props"]}
+
+    try:
+        for future in concurrent.futures.as_completed(futures, timeout=_TOOL_TIMEOUT + 5):
+            idx, widget = futures[future]
+            try:
+                component = future.result(timeout=1)
+                if component:
+                    results[idx] = component
+            except Exception:
+                logger.warning("Widget %s failed", widget.get("title", ""), exc_info=True)
+    except TimeoutError:
+        logger.warning("View plan execution timed out, some widgets skipped")
+
+    # Append in original plan order
+    for idx in sorted(results):
+        layout.append(results[idx])
 
     return layout

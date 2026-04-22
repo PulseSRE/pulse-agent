@@ -39,9 +39,30 @@ def _build_investigation_prompt(finding: dict) -> str:
                 "log_viewer",
             }
         )
-        read_tools = sorted(set(TOOL_REGISTRY.keys()) - WRITE_TOOL_NAMES)[:30]
+        # Scope tools to the finding category instead of dumping all 30+
+        all_read = set(TOOL_REGISTRY.keys()) - WRITE_TOOL_NAMES
+        category = finding.get("category", "")
+        try:
+            from ..skill_loader import select_tools
+
+            inv_hint = f"investigate {category}: {finding.get('title', '')}"
+            _, _, offered = select_tools(
+                inv_hint,
+                [TOOL_REGISTRY[n] for n in all_read if n in TOOL_REGISTRY],
+                {n: TOOL_REGISTRY[n] for n in all_read if n in TOOL_REGISTRY},
+            )
+            read_tools = sorted(offered[:15])
+        except Exception:
+            read_tools = sorted(all_read)[:15]
         if not read_tools:
-            read_tools = ["get_events", "list_pods", "list_deployments", "get_prometheus_query"]
+            read_tools = [
+                "get_events",
+                "list_pods",
+                "list_deployments",
+                "get_prometheus_query",
+                "get_pod_logs",
+                "describe_pod",
+            ]
     except Exception:
         logger.debug("Registry unavailable for viewPlan hints, using fallback", exc_info=True)
         view_kinds = ["chart", "data_table", "resolution_tracker", "status_list", "metric_card"]
