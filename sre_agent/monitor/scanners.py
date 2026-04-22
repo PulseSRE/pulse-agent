@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -11,6 +10,7 @@ from typing import Any
 from ..config import get_settings
 from ..errors import ToolError
 from ..k8s_client import get_apps_client, get_autoscaling_client, get_core_client, get_custom_client, safe
+from ..prometheus import PrometheusBackend, get_prometheus_client
 from .findings import _make_finding, _skip_namespace
 from .registry import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING
 
@@ -237,14 +237,7 @@ def scan_firing_alerts() -> list[dict]:
     """Check Prometheus for firing alerts."""
     findings: list[dict[str, Any]] = []
     try:
-        core = get_core_client()
-        result = core.connect_get_namespaced_service_proxy_with_path(
-            "thanos-querier:web",
-            "openshift-monitoring",
-            path="api/v1/rules?type=alert",
-            _preload_content=False,
-        )
-        data = json.loads(result.data)
+        data = get_prometheus_client()._request("api/v1/rules", {"type": "alert"}, 15, PrometheusBackend.LOCAL)
         if data.get("status") != "success":
             return findings
         for group in data.get("data", {}).get("groups", []):

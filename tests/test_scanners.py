@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -676,6 +675,11 @@ class TestScanFiringAlerts:
             "data": {"groups": [{"rules": rules}]},
         }
 
+    def _patch_prom(self, response):
+        mock_client = MagicMock()
+        mock_client._request.return_value = response
+        return patch("sre_agent.monitor.scanners.get_prometheus_client", return_value=mock_client)
+
     def test_detects_firing_critical_alert(self):
         alert = {
             "state": "firing",
@@ -687,11 +691,8 @@ class TestScanFiringAlerts:
             },
             "annotations": {"summary": "Pod is crash looping"},
         }
-        response = MagicMock()
-        response.data = json.dumps(self._make_alert_response([alert]))
 
-        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
-            mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = response
+        with self._patch_prom(self._make_alert_response([alert])):
             findings = scan_firing_alerts()
 
         assert len(findings) == 1
@@ -706,10 +707,7 @@ class TestScanFiringAlerts:
             "labels": {"alertname": "HighLatency", "severity": "warning", "namespace": "prod"},
             "annotations": {"summary": "Latency is high"},
         }
-        response = MagicMock()
-        response.data = json.dumps(self._make_alert_response([alert]))
-        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
-            mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = response
+        with self._patch_prom(self._make_alert_response([alert])):
             findings = scan_firing_alerts()
         assert len(findings) == 1
         assert findings[0]["severity"] == SEVERITY_WARNING
@@ -727,10 +725,7 @@ class TestScanFiringAlerts:
                 "annotations": {},
             },
         ]
-        response = MagicMock()
-        response.data = json.dumps(self._make_alert_response(alerts))
-        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
-            mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = response
+        with self._patch_prom(self._make_alert_response(alerts)):
             findings = scan_firing_alerts()
         assert findings == []
 
@@ -740,10 +735,7 @@ class TestScanFiringAlerts:
             "labels": {"alertname": "DeployDown", "severity": "critical", "namespace": "ns", "deployment": "web"},
             "annotations": {"summary": "deploy down"},
         }
-        response = MagicMock()
-        response.data = json.dumps(self._make_alert_response([alert]))
-        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
-            mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = response
+        with self._patch_prom(self._make_alert_response([alert])):
             findings = scan_firing_alerts()
         assert findings[0]["resources"] == [{"kind": "Deployment", "name": "web", "namespace": "ns"}]
 
@@ -753,26 +745,19 @@ class TestScanFiringAlerts:
             "labels": {"alertname": "NodeDown", "severity": "critical", "namespace": "", "node": "worker-1"},
             "annotations": {"summary": "node down"},
         }
-        response = MagicMock()
-        response.data = json.dumps(self._make_alert_response([alert]))
-        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
-            mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = response
+        with self._patch_prom(self._make_alert_response([alert])):
             findings = scan_firing_alerts()
         assert findings[0]["resources"] == [{"kind": "Node", "name": "worker-1"}]
 
     def test_non_success_status_returns_empty(self):
-        response = MagicMock()
-        response.data = json.dumps({"status": "error", "data": {}})
-        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
-            mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = response
+        with self._patch_prom({"status": "error", "data": {}}):
             findings = scan_firing_alerts()
         assert findings == []
 
     def test_api_error_returns_empty(self):
-        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
-            mock_core.return_value.connect_get_namespaced_service_proxy_with_path.side_effect = Exception(
-                "no monitoring"
-            )
+        mock_client = MagicMock()
+        mock_client._request.side_effect = Exception("no monitoring")
+        with patch("sre_agent.monitor.scanners.get_prometheus_client", return_value=mock_client):
             findings = scan_firing_alerts()
         assert findings == []
 
@@ -782,10 +767,7 @@ class TestScanFiringAlerts:
             "labels": {"alertname": "InfoAlert", "severity": "info", "namespace": "ns"},
             "annotations": {"summary": "just info"},
         }
-        response = MagicMock()
-        response.data = json.dumps(self._make_alert_response([alert]))
-        with patch("sre_agent.monitor.scanners.get_core_client") as mock_core:
-            mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = response
+        with self._patch_prom(self._make_alert_response([alert])):
             findings = scan_firing_alerts()
         assert len(findings) == 1
         assert findings[0]["severity"] == SEVERITY_INFO

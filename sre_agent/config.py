@@ -60,6 +60,12 @@ class PulseAgentSettings(BaseSettings):
     cb_threshold: int = 3
     cb_timeout: float = 60.0
 
+    # Prometheus / Thanos
+    thanos_url: str = ""
+    acm_thanos_url: str = ""
+    acm_thanos_enabled: bool | None = None
+    prometheus_insecure: bool = False
+
     # Tool timeout
     tool_timeout: int = 30
 

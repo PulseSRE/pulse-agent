@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,14 +16,19 @@ from sre_agent.monitor.trend_scanners import (
 
 @pytest.fixture
 def mock_prometheus_response():
-    """Factory for creating mock Prometheus responses."""
+    """Factory for creating mock Prometheus query() responses."""
 
-    def _make_response(results: list[dict]) -> MagicMock:
-        mock = MagicMock()
-        mock.data = json.dumps({"status": "success", "data": {"result": results}})
-        return mock
+    def _make_response(results: list[dict]) -> dict:
+        return {"status": "success", "data": {"result": results}}
 
     return _make_response
+
+
+def _patch_prom(response):
+    """Patch get_prometheus_client().query() to return response."""
+    mock_client = MagicMock()
+    mock_client.query.return_value = response
+    return patch("sre_agent.monitor.trend_scanners.get_prometheus_client", return_value=mock_client)
 
 
 def test_scan_memory_pressure_forecast_detects_exhaustion(mock_prometheus_response):
@@ -32,15 +36,11 @@ def test_scan_memory_pressure_forecast_detects_exhaustion(mock_prometheus_respon
     results = [
         {
             "metric": {"instance": "node1", "node": "node1"},
-            "value": [1234567890, "-1000000000"],  # Negative = exhaustion predicted
+            "value": [1234567890, "-1000000000"],
         }
     ]
 
-    with patch("sre_agent.monitor.trend_scanners.get_core_client") as mock_core:
-        mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = mock_prometheus_response(
-            results
-        )
-
+    with _patch_prom(mock_prometheus_response(results)):
         findings = scan_memory_pressure_forecast()
 
         assert len(findings) == 1
@@ -57,15 +57,11 @@ def test_scan_memory_pressure_forecast_no_exhaustion(mock_prometheus_response):
     results = [
         {
             "metric": {"instance": "node1"},
-            "value": [1234567890, "5000000000"],  # Positive = still available
+            "value": [1234567890, "5000000000"],
         }
     ]
 
-    with patch("sre_agent.monitor.trend_scanners.get_core_client") as mock_core:
-        mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = mock_prometheus_response(
-            results
-        )
-
+    with _patch_prom(mock_prometheus_response(results)):
         findings = scan_memory_pressure_forecast()
 
         assert len(findings) == 0
@@ -80,15 +76,11 @@ def test_scan_disk_pressure_forecast_detects_pvc_exhaustion(mock_prometheus_resp
                 "persistentvolumeclaim": "data-pvc",
                 "pod": "app-pod",
             },
-            "value": [1234567890, "1"],  # Non-zero = will exceed capacity
+            "value": [1234567890, "1"],
         }
     ]
 
-    with patch("sre_agent.monitor.trend_scanners.get_core_client") as mock_core:
-        mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = mock_prometheus_response(
-            results
-        )
-
+    with _patch_prom(mock_prometheus_response(results)):
         findings = scan_disk_pressure_forecast()
 
         assert len(findings) == 1
@@ -112,11 +104,7 @@ def test_scan_disk_pressure_forecast_pod_fallback(mock_prometheus_response):
         }
     ]
 
-    with patch("sre_agent.monitor.trend_scanners.get_core_client") as mock_core:
-        mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = mock_prometheus_response(
-            results
-        )
-
+    with _patch_prom(mock_prometheus_response(results)):
         findings = scan_disk_pressure_forecast()
 
         assert len(findings) == 1
@@ -132,15 +120,11 @@ def test_scan_hpa_exhaustion_trend_detects_sustained_high_usage(mock_prometheus_
                 "namespace": "default",
                 "horizontalpodautoscaler": "web-hpa",
             },
-            "value": [1234567890, "0.95"],  # 95% average utilization
+            "value": [1234567890, "0.95"],
         }
     ]
 
-    with patch("sre_agent.monitor.trend_scanners.get_core_client") as mock_core:
-        mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = mock_prometheus_response(
-            results
-        )
-
+    with _patch_prom(mock_prometheus_response(results)):
         findings = scan_hpa_exhaustion_trend()
 
         assert len(findings) == 1
@@ -155,14 +139,9 @@ def test_scan_hpa_exhaustion_trend_detects_sustained_high_usage(mock_prometheus_
 
 def test_scan_hpa_exhaustion_trend_no_findings_below_threshold(mock_prometheus_response):
     """Test HPA exhaustion trend with empty Prometheus results."""
-    # Prometheus query filters to >0.9, so an empty result set is realistic
     results = []
 
-    with patch("sre_agent.monitor.trend_scanners.get_core_client") as mock_core:
-        mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = mock_prometheus_response(
-            results
-        )
-
+    with _patch_prom(mock_prometheus_response(results)):
         findings = scan_hpa_exhaustion_trend()
 
         assert len(findings) == 0
@@ -177,15 +156,11 @@ def test_scan_error_rate_acceleration_detects_increasing_errors(mock_prometheus_
                 "service": "api-service",
                 "code": "500",
             },
-            "value": [1234567890, "0.005"],  # Positive derivative = increasing
+            "value": [1234567890, "0.005"],
         }
     ]
 
-    with patch("sre_agent.monitor.trend_scanners.get_core_client") as mock_core:
-        mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = mock_prometheus_response(
-            results
-        )
-
+    with _patch_prom(mock_prometheus_response(results)):
         findings = scan_error_rate_acceleration()
 
         assert len(findings) == 1
@@ -207,15 +182,11 @@ def test_scan_error_rate_acceleration_no_findings_stable_rate(mock_prometheus_re
                 "service": "api-service",
                 "code": "500",
             },
-            "value": [1234567890, "-0.001"],  # Negative = decreasing
+            "value": [1234567890, "-0.001"],
         }
     ]
 
-    with patch("sre_agent.monitor.trend_scanners.get_core_client") as mock_core:
-        mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = mock_prometheus_response(
-            results
-        )
-
+    with _patch_prom(mock_prometheus_response(results)):
         findings = scan_error_rate_acceleration()
 
         assert len(findings) == 0
@@ -223,12 +194,10 @@ def test_scan_error_rate_acceleration_no_findings_stable_rate(mock_prometheus_re
 
 def test_all_scanners_handle_prometheus_errors():
     """Test all scanners gracefully handle Prometheus errors."""
-    with patch("sre_agent.monitor.trend_scanners.get_core_client") as mock_core:
-        mock_core.return_value.connect_get_namespaced_service_proxy_with_path.side_effect = Exception(
-            "Connection refused"
-        )
+    mock_client = MagicMock()
+    mock_client.query.side_effect = Exception("Connection refused")
 
-        # All scanners should return empty lists on error
+    with patch("sre_agent.monitor.trend_scanners.get_prometheus_client", return_value=mock_client):
         assert scan_memory_pressure_forecast() == []
         assert scan_disk_pressure_forecast() == []
         assert scan_hpa_exhaustion_trend() == []
@@ -236,13 +205,11 @@ def test_all_scanners_handle_prometheus_errors():
 
 
 def test_all_scanners_handle_invalid_json():
-    """Test all scanners handle invalid JSON responses."""
-    with patch("sre_agent.monitor.trend_scanners.get_core_client") as mock_core:
-        mock = MagicMock()
-        mock.data = "not json"
-        mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = mock
+    """Test all scanners handle non-dict responses."""
+    mock_client = MagicMock()
+    mock_client.query.side_effect = ValueError("not json")
 
-        # All scanners should return empty lists on parse error
+    with patch("sre_agent.monitor.trend_scanners.get_prometheus_client", return_value=mock_client):
         assert scan_memory_pressure_forecast() == []
         assert scan_disk_pressure_forecast() == []
         assert scan_hpa_exhaustion_trend() == []
@@ -251,11 +218,10 @@ def test_all_scanners_handle_invalid_json():
 
 def test_all_scanners_handle_prometheus_failure_status(mock_prometheus_response):
     """Test all scanners handle Prometheus failure status."""
-    with patch("sre_agent.monitor.trend_scanners.get_core_client") as mock_core:
-        mock = MagicMock()
-        mock.data = json.dumps({"status": "error", "error": "query timeout"})
-        mock_core.return_value.connect_get_namespaced_service_proxy_with_path.return_value = mock
+    mock_client = MagicMock()
+    mock_client.query.return_value = {"status": "error", "error": "query timeout"}
 
+    with patch("sre_agent.monitor.trend_scanners.get_prometheus_client", return_value=mock_client):
         assert scan_memory_pressure_forecast() == []
         assert scan_disk_pressure_forecast() == []
         assert scan_hpa_exhaustion_trend() == []

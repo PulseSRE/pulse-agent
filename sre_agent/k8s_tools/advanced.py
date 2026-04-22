@@ -337,17 +337,12 @@ def get_resource_recommendations(namespace: str, time_range: str = "24h"):
         namespace: Kubernetes namespace.
         time_range: Time window for usage analysis (default '24h').
     """
-    import os
-    import ssl
-    import urllib.parse
-    import urllib.request
+    from ..prometheus import get_prometheus_client
 
     if err := _validate_k8s_namespace(namespace):
         return err
 
-    base_url = os.environ.get("THANOS_URL", "")
-    if not base_url:
-        base_url = "https://thanos-querier.openshift-monitoring.svc:9091"
+    prom = get_prometheus_client()
 
     # Build Prometheus queries for CPU and memory P95
     cpu_query = (
@@ -363,27 +358,9 @@ def get_resource_recommendations(namespace: str, time_range: str = "24h"):
     cpu_req_query = f'kube_pod_container_resource_requests{{namespace="{namespace}",resource="cpu"}}'
     mem_req_query = f'kube_pod_container_resource_requests{{namespace="{namespace}",resource="memory"}}'
 
-    # Read SA token
-    try:
-        with open("/var/run/secrets/kubernetes.io/serviceaccount/token") as f:
-            token = f.read().strip()
-    except FileNotFoundError:
-        token = ""
-
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
     def _instant_query(query: str) -> list[dict]:
-        params = urllib.parse.urlencode({"query": query})
-        url = f"{base_url}/api/v1/query?{params}"
-        headers = {}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        req = urllib.request.Request(url, headers=headers)
         try:
-            resp = urllib.request.urlopen(req, context=ctx, timeout=15)
-            data = json.loads(resp.read())
+            data = prom.query(query, timeout=15)
             if data.get("status") == "success":
                 return data.get("data", {}).get("result", [])
         except Exception:

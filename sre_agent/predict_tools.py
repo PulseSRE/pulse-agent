@@ -6,15 +6,10 @@ resource exhaustion, detecting HPA thrashing, and suggesting fixes.
 
 from __future__ import annotations
 
-import json
-import os
-import urllib.error
-import urllib.parse
-import urllib.request
-
 from .decorators import beta_tool
 from .errors import ToolError
 from .k8s_client import get_autoscaling_client, get_core_client, safe
+from .prometheus import get_prometheus_client
 from .units import parse_cpu_millicores, parse_memory_bytes
 
 
@@ -23,37 +18,9 @@ def _query_prometheus_trend(query: str, hours: int = 24) -> float | None:
 
     Returns the per-hour growth rate, or None if Prometheus is unreachable.
     """
-    thanos_url = os.environ.get("THANOS_URL", "")
-    if not thanos_url:
-        # Try OpenShift Thanos via service proxy
-        try:
-            core = get_core_client()
-            # Use deriv() for rate of change over the window
-            prom_query = f"deriv({query}[{hours}h])"
-            path = f"api/v1/query?{urllib.parse.urlencode({'query': prom_query})}"
-            result = core.connect_get_namespaced_service_proxy_with_path(
-                "thanos-querier:web",
-                "openshift-monitoring",
-                path=path,
-                _preload_content=False,
-            )
-            data = json.loads(result.data)
-            if data.get("status") == "success":
-                results = data.get("data", {}).get("result", [])
-                if results:
-                    # deriv returns per-second rate, convert to per-hour
-                    rate_per_sec = float(results[0].get("value", [0, "0"])[1])
-                    return rate_per_sec * 3600
-        except Exception:
-            pass
-        return None
-
     try:
         prom_query = f"deriv({query}[{hours}h])"
-        url = f"{thanos_url.rstrip('/')}/api/v1/query?{urllib.parse.urlencode({'query': prom_query})}"
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
+        data = get_prometheus_client().query(prom_query, timeout=10)
         if data.get("status") == "success":
             results = data.get("data", {}).get("result", [])
             if results:

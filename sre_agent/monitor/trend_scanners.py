@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
-from ..k8s_client import get_core_client
+from ..prometheus import get_prometheus_client
 from .findings import _make_finding
 from .registry import SEVERITY_WARNING
 
@@ -14,16 +13,9 @@ logger = logging.getLogger("pulse_agent.monitor")
 
 
 def _query_prometheus(query: str) -> list[dict]:
-    """Query Prometheus via Thanos-querier service proxy and return results."""
+    """Query Prometheus via unified client and return results."""
     try:
-        core = get_core_client()
-        result = core.connect_get_namespaced_service_proxy_with_path(
-            "thanos-querier:web",
-            "openshift-monitoring",
-            path=f"api/v1/query?query={query}",
-            _preload_content=False,
-        )
-        data = json.loads(result.data)
+        data = get_prometheus_client().query(query, timeout=15)
         if data.get("status") != "success":
             logger.debug("Prometheus query failed: %s", data.get("error", "unknown"))
             return []
