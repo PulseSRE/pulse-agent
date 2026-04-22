@@ -97,7 +97,8 @@ def _build_investigation_prompt(finding: dict) -> str:
         "viewPlan: 3-5 widgets to help the user verify your diagnosis.\n"
         f"Valid kinds: {', '.join(view_kinds)}\n"
         f"Valid tools: {', '.join(read_tools[:20])}\n"
-        "Always include a resolution_tracker showing your investigation steps.\n"
+        "Always include: (1) a resolution_tracker showing your investigation steps, "
+        "(2) a chart with a PromQL query showing the relevant metric trend (e.g. restart rate, memory usage, error rate).\n"
     )
 
     # Inject shared context from the context bus
@@ -248,6 +249,14 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
         except Exception:
             pass
 
+    from ..tool_usage import build_tool_result_handler
+
+    finding_id = finding.get("id", "unknown")[:12]
+    on_tool_result = build_tool_result_handler(
+        session_id=f"pipeline-{finding_id}",
+        agent_mode="pipeline:investigate",
+    )
+
     client = create_client()
     response = run_agent_streaming(
         client=client,
@@ -256,6 +265,7 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
         tool_defs=readonly_defs,
         tool_map=readonly_map,
         write_tools=set(),
+        on_tool_result=on_tool_result,
     )
 
     # Use module-level mutation
