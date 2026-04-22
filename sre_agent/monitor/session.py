@@ -157,12 +157,20 @@ class MonitorSession:
 
             logger.info("Auto-fix: attempting fix for %s (category=%s)", finding.get("title"), category)
 
-            # Compute resource key early — needed by both targeted and blunt fix paths
+            # Compute resource key — for Pods, use the owner controller name
+            # so cooldowns/retry limits survive pod restarts
             resources = finding.get("resources", [])
             resource_key = ""
             if resources:
                 r = resources[0]
-                resource_key = f"{r.get('kind', '')}:{r.get('namespace', '')}:{r.get('name', '')}"
+                name = r.get("name", "")
+                kind = r.get("kind", "")
+                if kind == "Pod":
+                    # Strip ReplicaSet hash suffix (e.g., "operator-5f58f69bd6-w4x22" → "operator")
+                    parts = name.rsplit("-", 2)
+                    if len(parts) >= 3:
+                        name = parts[0]
+                resource_key = f"{kind}:{r.get('namespace', '')}:{name}"
 
             # Try intelligent fix — uses investigation diagnosis
             from .fix_planner import (
