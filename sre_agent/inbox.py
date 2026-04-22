@@ -320,6 +320,41 @@ def claim_item(item_id: str, username: str) -> bool:
     return True
 
 
+_COMPONENT_KINDS = [
+    "topology",
+    "metric_card",
+    "stat_card",
+    "chart",
+    "data_table",
+    "info_card_grid",
+    "status_list",
+    "log_viewer",
+    "yaml_viewer",
+    "timeline",
+    "blast_radius",
+    "resource_counts",
+    "key_value",
+    "badge_list",
+    "progress_list",
+]
+
+_VIEW_LAYOUT_PROMPT = """You are designing a dashboard for an SRE investigating this issue:
+Title: {title}
+Summary: {summary}
+Investigation: {investigation}
+Suspected cause: {cause}
+Recommended fix: {fix}
+Namespace: {namespace}
+Resources: {resources}
+
+Available component kinds: {kinds}
+
+Design 3-5 dashboard components. For topology, use props like {{"kinds": ["Pod","Service","NetworkPolicy"], "namespace": "X", "perspective": "network"}}.
+For yaml_viewer, include the recommended YAML (e.g. a NetworkPolicy). For metric_card/stat_card, include a PromQL query.
+Reply ONLY with valid JSON, no markdown:
+{{"components": [{{"kind": "...", "title": "...", "props": {{...}}}}]}}"""
+
+
 def _generate_view_for_item(item_id: str, item: dict[str, Any], owner: str = "system") -> None:
     """Generate an investigation view when a user claims an item."""
     metadata = item.get("metadata", {})
@@ -338,41 +373,13 @@ def _generate_view_for_item(item_id: str, item: dict[str, Any], owner: str = "sy
         )
         db.commit()
 
+        layout = _generate_smart_layout(item, metadata)
+
         from .db import save_view
 
         view_id = f"cv-{uuid.uuid4().hex[:12]}"
         title = f"Investigation: {item['title'][:60]}"
         view_type = "incident" if item["item_type"] == "finding" else "plan"
-
-        layout: list[dict[str, Any]] = []
-        if metadata.get("investigation_summary"):
-            layout.append(
-                {
-                    "kind": "info_card",
-                    "title": "Investigation Summary",
-                    "body": str(metadata["investigation_summary"]),
-                    "props": {
-                        "suspected_cause": str(metadata.get("suspected_cause", "")),
-                        "recommended_fix": str(metadata.get("recommended_fix", "")),
-                    },
-                }
-            )
-        if metadata.get("blast_radius"):
-            layout.append(
-                {
-                    "kind": "blast_radius",
-                    "title": "Blast Radius",
-                    "props": metadata["blast_radius"],
-                }
-            )
-        if item.get("namespace"):
-            layout.append(
-                {
-                    "kind": "namespace_summary",
-                    "title": f"Namespace: {item['namespace']}",
-                    "props": {"namespace": item["namespace"]},
-                }
-            )
 
         save_view(
             owner=owner,
@@ -408,6 +415,86 @@ def _generate_view_for_item(item_id: str, item: dict[str, Any], owner: str = "sy
             db.commit()
         except Exception:
             _inbox_logger.exception("Failed to update view_status for %s", item_id)
+
+
+def _generate_smart_layout(item: dict[str, Any], metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    """Ask Claude to design the investigation dashboard layout."""
+    resources_str = ", ".join(f"{r['kind']}/{r['name']}" for r in item.get("resources", []))
+    prompt = _VIEW_LAYOUT_PROMPT.format(
+        title=item.get("title", ""),
+        summary=item.get("summary", ""),
+        investigation=metadata.get("investigation_summary", ""),
+        cause=metadata.get("suspected_cause", ""),
+        fix=metadata.get("recommended_fix", ""),
+        namespace=item.get("namespace") or "cluster-wide",
+        resources=resources_str or "none",
+        kinds=", ".join(_COMPONENT_KINDS),
+    )
+
+    try:
+        from .agent import create_client
+        from .config import get_settings
+
+        client = create_client()
+        response = client.messages.create(
+            model=get_settings().model,
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text.strip()
+
+        match = _re.search(r"\{.*\}", text, _re.DOTALL)
+        if match:
+            try:
+                data = json.loads(match.group())
+                components = data.get("components", [])
+                if components:
+                    valid = [c for c in components if c.get("kind") in _COMPONENT_KINDS]
+                    if valid:
+                        _inbox_logger.info("Agent designed %d-component view layout", len(valid))
+                        return valid
+            except json.JSONDecodeError:
+                _inbox_logger.warning("View layout JSON parse failed, using fallback")
+    except Exception:
+        _inbox_logger.exception("Smart layout generation failed, using fallback")
+
+    return _fallback_layout(item, metadata)
+
+
+def _fallback_layout(item: dict[str, Any], metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    """Simple fallback layout when agent layout generation fails."""
+    layout: list[dict[str, Any]] = []
+    if metadata.get("investigation_summary"):
+        layout.append(
+            {
+                "kind": "info_card_grid",
+                "title": "Investigation",
+                "props": {
+                    "cards": [
+                        {"label": "Summary", "value": str(metadata["investigation_summary"])},
+                        {"label": "Suspected Cause", "value": str(metadata.get("suspected_cause", "Unknown"))},
+                        {"label": "Recommended Fix", "value": str(metadata.get("recommended_fix", "N/A"))},
+                    ],
+                },
+            }
+        )
+    if item.get("namespace"):
+        layout.append(
+            {
+                "kind": "resource_counts",
+                "title": f"Resources in {item['namespace']}",
+                "props": {"namespace": item["namespace"]},
+            }
+        )
+    if metadata.get("blast_radius"):
+        layout.append(
+            {
+                "kind": "blast_radius",
+                "title": "Blast Radius",
+                "props": metadata["blast_radius"],
+            }
+        )
+    return layout
 
 
 def claim_and_investigate(item_id: str, username: str) -> bool:
