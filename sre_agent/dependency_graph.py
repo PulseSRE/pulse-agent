@@ -367,10 +367,21 @@ class DependencyGraph:
             "last_refresh": self._last_refresh,
         }
 
+    def memory_stats(self) -> dict:
+        """Return memory-related stats for the debug endpoint."""
+        stats = self.summary()
+        stats["adjacency_keys"] = len(self._adjacency)
+        stats["reverse_keys"] = len(self._reverse)
+        stats["metrics_cache_entries"] = len(_metrics_cache)
+        return stats
+
 
 # Metrics cache
 _metrics_cache: dict[str, tuple[float, tuple[dict, dict]]] = {}
 _METRICS_TTL = 30
+
+
+_MAX_METRICS_CACHE_ENTRIES = 100
 
 
 def _fetch_metrics(namespace: str = "") -> tuple[dict[str, dict], dict[str, dict]]:
@@ -384,6 +395,16 @@ def _fetch_metrics(namespace: str = "") -> tuple[dict[str, dict], dict[str, dict
     cached = _metrics_cache.get(cache_key)
     if cached and now - cached[0] < _METRICS_TTL:
         return cached[1]
+
+    # Evict expired entries to prevent unbounded growth
+    expired = [k for k, (ts, _) in _metrics_cache.items() if now - ts > _METRICS_TTL]
+    for k in expired:
+        del _metrics_cache[k]
+    # Hard cap: if still too large, drop oldest entries
+    if len(_metrics_cache) >= _MAX_METRICS_CACHE_ENTRIES:
+        oldest = sorted(_metrics_cache, key=lambda k: _metrics_cache[k][0])
+        for k in oldest[: len(_metrics_cache) - _MAX_METRICS_CACHE_ENTRIES + 1]:
+            del _metrics_cache[k]
 
     node_metrics: dict[str, dict] = {}
     pod_metrics: dict[str, dict] = {}

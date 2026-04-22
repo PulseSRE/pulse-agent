@@ -28,6 +28,9 @@ from .agent_ws import (
 from .auth import _get_current_user, _verify_ws_token
 from .context import _apply_style_hint, _build_context_prefix
 
+# Active monitor sessions — keyed by ws_id, used by /debug/memory
+_active_monitor_sessions: dict[str, MonitorSession] = {}
+
 logger = logging.getLogger("pulse_agent.api")
 
 # Keywords that force a mode switch out of view_designer.
@@ -814,6 +817,7 @@ async def websocket_monitor(websocket: WebSocket):
     session = MonitorSession(websocket, trust_level, auto_fix_categories)
     ws_id = str(uuid.uuid4())
     _ws_alive[ws_id] = True
+    _active_monitor_sessions[ws_id] = session
 
     # Start scan loop as background task
     scan_task = asyncio.create_task(session.run_loop())
@@ -897,3 +901,4 @@ async def websocket_monitor(websocket: WebSocket):
         except asyncio.CancelledError:
             pass
         _ws_alive.pop(ws_id, None)
+        _active_monitor_sessions.pop(ws_id, None)

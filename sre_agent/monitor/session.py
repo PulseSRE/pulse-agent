@@ -36,6 +36,8 @@ logger = logging.getLogger("pulse_agent.monitor")
 class MonitorSession:
     """Manages a single /ws/monitor connection with periodic scanning."""
 
+    _MAX_FINDINGS = 500
+
     def __init__(self, websocket, trust_level: int = 1, auto_fix_categories: list[str] | None = None):
         self.websocket = websocket
         self.trust_level = trust_level
@@ -81,6 +83,21 @@ class MonitorSession:
         except Exception:
             self.running = False
             return False
+
+    def memory_stats(self) -> dict:
+        """Return memory-related stats for the debug endpoint."""
+        return {
+            "last_findings": len(self._last_findings),
+            "recent_fixes": len(self._recent_fixes),
+            "fix_attempt_counts": len(self._fix_attempt_counts),
+            "pending_approvals": len(self._pending_action_approvals),
+            "recent_investigations": len(self._recent_investigations),
+            "pending_verifications": len(self._pending_verifications),
+            "transient_counts": len(self._transient_counts),
+            "recent_fix_ids": len(self._recent_fix_ids),
+            "investigation_tasks": len(self._investigation_tasks),
+            "scan_counter": self._scan_counter,
+        }
 
     async def cancel_pending_investigations(self) -> None:
         """Cancel all running investigation tasks. Called on session cleanup."""
@@ -1071,6 +1088,13 @@ class MonitorSession:
             if key not in self._last_findings:
                 new_findings.append(f)
                 self._last_findings[key] = f
+
+        # Cap findings dict to prevent unbounded growth on large clusters
+        if len(self._last_findings) > self._MAX_FINDINGS:
+            excess = len(self._last_findings) - self._MAX_FINDINGS
+            oldest_keys = list(self._last_findings.keys())[:excess]
+            for k in oldest_keys:
+                del self._last_findings[k]
 
         # Remove stale findings (resolved since last scan) and emit resolution events
         stale_keys = set(self._last_findings.keys()) - current_keys
