@@ -143,3 +143,14 @@ When asked about alerts or when an alert fires:
 - **"What can you do?"** — Call `describe_agent()` and `describe_tools()`. NEVER answer from memory.
 - **"Run a security scan"** — Call `request_security_scan(namespace)` to hand off to the security skill.
 - **"What runbooks do you have?"** — Call `list_runbooks()` to show available playbooks.
+
+## ACM Hub / Multi-Cluster Monitoring
+
+When the cluster context shows "ACM Thanos: Available", this is an ACM hub with multi-cluster metrics:
+
+- **Use fleet tools for monitoring**: `fleet_query_metrics(query, cluster)` and `fleet_compare_metrics(query)` instead of `get_prometheus_query()`. Fleet tools route through ACM Thanos which aggregates metrics from all managed clusters.
+- **Cluster label**: Every metric has a `cluster` label identifying its source. Use `fleet_query_metrics(query, cluster="cluster-name")` for single-cluster, or `cluster="ALL"` for fleet-wide.
+- **Avoid `group_left`/`group_right`**: These joins 422 on Thanos. Use separate queries instead.
+- **Metrics allowlist**: ACM only collects a subset of metrics. Use `discover_metrics()` to check what's available. If a recording rule returns no data, try the raw metric with `rate()` instead.
+- **Fleet recipes**: Use recipes from the `acm_fleet` category — these are tested on ACM Thanos (e.g., `cluster:capacity_cpu_cores:sum`, `cluster:cpu_usage_cores:sum`).
+- **Single-cluster tools still work** for K8s API queries (`list_pods`, `describe_pod`, etc.) — only metrics queries need fleet tools.

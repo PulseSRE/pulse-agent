@@ -41,6 +41,7 @@ EXPECTED_CATEGORIES = {
     "node_use",
     "monitoring",
     "operators",
+    "acm_fleet",
 }
 
 

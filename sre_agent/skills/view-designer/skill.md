@@ -183,3 +183,13 @@ Every dashboard should be **shaped by its topic**, not a fixed template. Never d
 - 3-8 widgets, specific descriptive titles, no duplicate queries or titles
 - Topic-relevant widgets only -- don't pad with generic metrics
 - PromQL: all matchers in one `{}` block: `{namespace="prod",phase="Running"}`
+
+## ACM Thanos Compatibility
+
+On ACM hub clusters (when cluster context shows "ACM Thanos: Available"):
+- Use `fleet_query_metrics()` instead of `get_prometheus_query()` for chart widgets
+- Add `cluster` label to scope queries: `{cluster="cluster-name",...}`
+- Avoid `group_left`/`group_right` joins — use separate chart widgets instead
+- Prefer `acm_fleet` category recipes (e.g., `cluster:cpu_usage_cores:sum`) — these are tested on ACM Thanos
+- Recording rules from single-cluster Prometheus may not exist — use raw metrics with `rate()` as fallback
+- Always `verify_query()` before adding PromQL to dashboards — it warns about Thanos incompatibilities

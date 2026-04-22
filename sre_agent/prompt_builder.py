@@ -76,13 +76,15 @@ NEVER say you can't do something if you have a tool for it. Check your available
 """
 
 FLEET_PREFIX = (
-    "[FLEET MODE: This query spans all managed clusters. "
-    "Use fleet_* tools (fleet_list_pods, fleet_list_deployments, "
-    "fleet_compare_resource, fleet_query_metrics, fleet_compare_metrics, etc.) "
-    "to query across clusters. For metrics, fleet_query_metrics routes through "
-    "ACM Thanos which aggregates metrics from all managed clusters — each metric "
-    "has a 'cluster' label for per-cluster filtering. "
-    "Do NOT use single-cluster tools unless the user specifies a cluster.]"
+    "[FLEET MODE: This is an ACM hub with multi-cluster monitoring. "
+    "ALWAYS use fleet tools instead of single-cluster tools for monitoring:\n"
+    "  - fleet_query_metrics(query, cluster) — metrics via ACM Thanos (NOT get_prometheus_query)\n"
+    "  - fleet_compare_metrics(query) — compare metric across all clusters\n"
+    "  - fleet_list_pods/deployments — K8s resources across clusters\n"
+    "  - fleet_compare_resource — detect config drift\n"
+    "Every metric has a 'cluster' label. Use acm_fleet recipes (cluster:cpu_usage_cores:sum, etc.). "
+    "Avoid group_left/group_right joins. "
+    "Single-cluster K8s API tools (list_pods, describe_pod) still work for the hub.]"
 )
 
 

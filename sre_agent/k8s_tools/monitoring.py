@@ -293,18 +293,29 @@ def get_prometheus_query(query: str, time_range: str = "1h", title: str = "", de
             record_query_result(query, success=False, series_count=0)
         except Exception:
             pass
-        # Suggest verified recipe alternatives
+        # Suggest verified recipe alternatives — prefer ACM-safe when on ACM
         try:
             from ..promql_recipes import _detect_category, get_recipes_for_category
 
+            is_acm = False
+            try:
+                from ..prometheus import get_prometheus_client
+
+                is_acm = get_prometheus_client().is_acm_available()
+            except Exception:
+                pass
+
             cat = _detect_category(query)
             if cat:
-                alternatives = get_recipes_for_category(cat)[:3]
+                alternatives = get_recipes_for_category(cat, acm_only=is_acm)[:3]
+                if not alternatives and is_acm:
+                    alternatives = get_recipes_for_category(cat)[:3]
                 if alternatives:
+                    prefix = "ACM-safe " if is_acm else ""
                     alt_text = "\n".join(f"  - {r.name}: {r.query}" for r in alternatives)
                     return (
                         f"Query returned no results for: {query}\n\n"
-                        f"Try these verified alternatives for '{cat}':\n{alt_text}"
+                        f"Try these {prefix}verified alternatives for '{cat}':\n{alt_text}"
                     )
         except Exception:
             pass
