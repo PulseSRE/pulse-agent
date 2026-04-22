@@ -9,6 +9,151 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger("pulse_agent.promql_recipes")
 
+_VALID_CLUSTER_NAME = re.compile(r"^[a-zA-Z0-9._-]+$")
+
+# PromQL function names that should not be treated as metric selectors
+_PROMQL_FUNCS = {
+    "abs",
+    "absent",
+    "absent_over_time",
+    "avg_over_time",
+    "ceil",
+    "changes",
+    "clamp",
+    "clamp_max",
+    "clamp_min",
+    "count_over_time",
+    "day_of_month",
+    "day_of_week",
+    "days_in_month",
+    "delta",
+    "deriv",
+    "exp",
+    "floor",
+    "histogram_quantile",
+    "holt_winters",
+    "hour",
+    "idelta",
+    "increase",
+    "irate",
+    "label_join",
+    "label_replace",
+    "last_over_time",
+    "ln",
+    "log2",
+    "log10",
+    "max_over_time",
+    "min_over_time",
+    "minute",
+    "month",
+    "predict_linear",
+    "quantile_over_time",
+    "rate",
+    "resets",
+    "round",
+    "scalar",
+    "sgn",
+    "sort",
+    "sort_desc",
+    "sqrt",
+    "stddev_over_time",
+    "stdvar_over_time",
+    "sum_over_time",
+    "time",
+    "timestamp",
+    "vector",
+    "year",
+    # aggregation operators
+    "avg",
+    "bottomk",
+    "count",
+    "count_values",
+    "group",
+    "max",
+    "min",
+    "quantile",
+    "stddev",
+    "stdvar",
+    "sum",
+    "topk",
+}
+
+# Matches a metric selector: metric_name{...} or metric_name (bare)
+# Captures: (metric_name)({...}) where group 2 may be absent
+_METRIC_RE = re.compile(r"(?<![a-zA-Z_:])([a-zA-Z_:][a-zA-Z0-9_:]*)\{([^}]*)\}")
+_BARE_METRIC_RE = re.compile(
+    r"(?<![a-zA-Z_:{])([a-zA-Z_:][a-zA-Z0-9_:]*)"
+    r"(?=\s*[\[\(,\)\s]|$)"
+)
+
+_THANOS_INCOMPATIBLE = [
+    (
+        re.compile(r"on\s*\([^)]*\)\s*group_left"),
+        "group_left joins may fail on ACM Thanos — use separate queries instead",
+    ),
+    (re.compile(r"on\s*\([^)]*\)\s*group_right"), "group_right joins may fail on ACM Thanos"),
+]
+
+
+def inject_cluster_label(query: str, cluster_name: str) -> str:
+    """Inject cluster='X' into all metric selectors in a PromQL query.
+
+    Handles metric{labels} and bare metric names. Skips if cluster= already present.
+    """
+    if not _VALID_CLUSTER_NAME.match(cluster_name):
+        raise ValueError(f"Invalid cluster name: {cluster_name!r}")
+    if f'cluster="{cluster_name}"' in query:
+        return query
+
+    cluster_matcher = f'cluster="{cluster_name}"'
+
+    def _inject_into_selector(m: re.Match) -> str:
+        name = m.group(1)
+        labels = m.group(2)
+        if "cluster=" in labels:
+            return m.group(0)
+        sep = "," if labels.strip() else ""
+        return f"{name}{{{cluster_matcher}{sep}{labels}}}"
+
+    result = _METRIC_RE.sub(_inject_into_selector, query)
+
+    # Handle bare metrics (no braces) — only if not a function name
+    def _inject_bare(m: re.Match) -> str:
+        name = m.group(1)
+        if name.lower() in _PROMQL_FUNCS:
+            return name
+        if name in (
+            "by",
+            "without",
+            "on",
+            "ignoring",
+            "bool",
+            "offset",
+            "and",
+            "or",
+            "unless",
+            "inf",
+            "nan",
+            "NaN",
+            "Inf",
+        ):
+            return name
+        # Don't inject if this metric was already handled (has braces after it)
+        end = m.end()
+        if end < len(result) and result[end] == "{":
+            return name
+        return f"{name}{{{cluster_matcher}}}"
+
+    return _BARE_METRIC_RE.sub(_inject_bare, result)
+
+
+def check_thanos_compatibility(query: str) -> str | None:
+    """Return a warning if query uses patterns known to fail on Thanos, or None."""
+    for pattern, warning in _THANOS_INCOMPATIBLE:
+        if pattern.search(query):
+            return warning
+    return None
+
 
 @dataclass
 class PromQLRecipe:
@@ -25,14 +170,15 @@ class PromQLRecipe:
     def render(self, **params: str) -> str:
         """Substitute parameter placeholders in the query.
 
-        Example: recipe.render(namespace="production", pod="my-pod")
-        Replaces 'NS' with namespace value, 'POD' with pod value, etc.
+        Example: recipe.render(namespace="production", pod="my-pod", cluster="prod-east")
         """
         q = self.query
         mapping = {"NS": "namespace", "POD": "pod", "NODE": "instance", "DEP": "deployment"}
         for placeholder, param_name in mapping.items():
             if param_name in params:
                 q = q.replace(f"'{placeholder}'", f"'{params[param_name]}'")
+        if "cluster" in params:
+            q = inject_cluster_label(q, params["cluster"])
         return q
 
 
