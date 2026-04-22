@@ -1,0 +1,15 @@
+{
+    "name": "inbox_action_plan_execution",
+    "prompt": "Execute the action plan for the crashlooping pod in namespace production. Start with step 1: check pod status.",
+    "recorded_responses": {
+        "list_pods": "NAME                     READY  STATUS           RESTARTS  AGE\napi-server-7b8d9f4-x2k  0/1    CrashLoopBackOff 5         12m\napi-server-7b8d9f4-m9j  1/1    Running          0         3d",
+        "get_pod_logs": "Error: OOMKilled - container exceeded memory limit of 256Mi\njava.lang.OutOfMemoryError: Java heap space\n    at java.util.Arrays.copyOf(Arrays.java:3236)",
+        "describe_pod": "Name: api-server-7b8d9f4-x2k\nNamespace: production\nStatus: CrashLoopBackOff\nRestarts: 5\nLast State: Terminated (OOMKilled)\nMemory Limit: 256Mi\nMemory Request: 128Mi"
+    },
+    "expected": {
+        "should_mention": ["OOM", "memory", "limit"],
+        "should_use_tools": ["list_pods"],
+        "should_not_use_tools": ["delete_pod", "apply_yaml"],
+        "max_tool_calls": 5
+    }
+}

@@ -378,7 +378,60 @@
       "retry_attempts": 0,
       "transient_failures": 0,
       "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_inbox_action_plan_step_execution",
+      "category": "sre",
+      "description": "Execute an inbox action plan step — agent uses the suggested tool and reports results for step completion.",
+      "tool_calls": [
+        "list_pods",
+        "get_pod_logs",
+        "describe_pod"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 60,
+      "user_confirmed_resolution": true,
+      "final_response": "Executed step 'Check pod status': found 2 crashlooping pods in production namespace. Logs show OOMKilled errors. Ready for the next step — increase memory limits.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": false
+    },
+    {
+      "scenario_id": "integration_inbox_action_plan_multi_step",
+      "category": "sre",
+      "description": "Complete multiple action plan steps sequentially — each step uses correct tools and reports progress.",
+      "tool_calls": [
+        "list_pods",
+        "get_pod_logs",
+        "get_prometheus_query",
+        "scale_deployment"
+      ],
+      "rejected_tools": 0,
+      "duration_seconds": 120,
+      "user_confirmed_resolution": true,
+      "final_response": "All 3 action plan steps completed: (1) diagnosed OOM crashloop via pod logs, (2) confirmed memory pressure via Prometheus metrics, (3) scaled deployment to 4 replicas with increased memory limits. Pods now running healthy.",
+      "verification_passed": true,
+      "retry_attempts": 0,
+      "transient_failures": 0,
+      "rollback_available": true
+    },
+    {
+      "scenario_id": "integration_inbox_action_plan_step_failure",
+      "category": "sre",
+      "description": "Action plan step fails gracefully — agent reports failure and suggests retry or alternative approach.",
+      "tool_calls": [
+        "scale_deployment"
+      ],
+      "rejected_tools": 1,
+      "duration_seconds": 45,
+      "user_confirmed_resolution": false,
+      "final_response": "Step 'Scale deployment' failed: insufficient cluster capacity to scale to 8 replicas. Worker nodes are at 92% CPU utilization. Recommend either scaling the node pool first or reducing replica count to 4.",
+      "verification_passed": false,
+      "retry_attempts": 1,
+      "transient_failures": 0,
+      "rollback_available": false
     }
   ],
-  "description": "Cross-tool workflows testing error recovery, partial data handling, timeouts, post-fix verification, and parallel multi-skill execution"
+  "description": "Cross-tool workflows testing error recovery, partial data handling, timeouts, post-fix verification, parallel multi-skill execution, and inbox action plan step execution"
 }
