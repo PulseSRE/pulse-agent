@@ -31,8 +31,13 @@ _TRANSITIONS: dict[str, list[str]] = {
 }
 
 VALID_TRANSITIONS: dict[str, dict[str, list[str]]] = {
-    t: dict(_TRANSITIONS) for t in ("finding", "task", "alert", "assessment")
+    "task": dict(_TRANSITIONS),
 }
+
+
+def _get_transitions(item_type: str) -> dict[str, list[str]]:
+    return VALID_TRANSITIONS.get(item_type, VALID_TRANSITIONS["task"])
+
 
 SEVERITY_WEIGHTS = {"critical": 4, "warning": 2, "info": 1}
 AGE_BONUS_CAP = 2.0
@@ -278,7 +283,7 @@ def update_item_status(item_id: str, new_status: str) -> bool:
 
     item_type = item["item_type"]
     current_status = item["status"]
-    transitions = VALID_TRANSITIONS.get(item_type, {})
+    transitions = _get_transitions(item_type)
     valid_next = transitions.get(current_status, [])
 
     if new_status not in valid_next:
@@ -379,7 +384,7 @@ def _generate_view_for_item(item_id: str, item: dict[str, Any], owner: str = "sy
 
         view_id = f"cv-{uuid.uuid4().hex[:12]}"
         title = f"Investigation: {item['title'][:60]}"
-        view_type = "incident" if item["item_type"] == "finding" else "plan"
+        view_type = "incident" if item.get("severity") in ("critical", "warning") else "plan"
 
         save_view(
             owner=owner,
@@ -613,7 +618,7 @@ def upsert_inbox_item(item: dict[str, Any]) -> str:
 
 def escalate_assessment(item_id: str) -> str | None:
     item = get_inbox_item(item_id)
-    if item is None or item["item_type"] != "assessment":
+    if item is None or item["item_type"] != "task":
         return None
 
     db = get_database()
@@ -625,7 +630,7 @@ def escalate_assessment(item_id: str) -> str | None:
     db.commit()
 
     finding_item = {
-        "item_type": "finding",
+        "item_type": "task",
         "title": item["title"],
         "summary": item.get("summary", ""),
         "severity": item.get("severity", "warning"),
@@ -750,7 +755,7 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
         corr_key = f"{finding.get('category', 'unknown')}:{finding.get('namespace', '')}"
         if corr_key:
             existing = db.fetchone(
-                "SELECT * FROM inbox_items WHERE correlation_key = ? AND item_type = 'finding' AND status NOT IN ('resolved', 'archived')",
+                "SELECT * FROM inbox_items WHERE correlation_key = ? AND item_type = 'task' AND status NOT IN ('resolved', 'archived')",
                 (corr_key,),
             )
 
@@ -774,7 +779,7 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
         return existing_item["id"]
 
     item = {
-        "item_type": "finding",
+        "item_type": "task",
         "title": finding.get("title", "Unknown finding"),
         "summary": finding.get("summary", ""),
         "severity": finding.get("severity", "warning"),
@@ -1133,7 +1138,7 @@ def run_generator_cycle() -> None:
     db = get_database()
     rows = db.fetchall(
         """SELECT id, correlation_key, metadata FROM inbox_items
-        WHERE item_type = 'assessment'
+        WHERE item_type = 'task'
         AND status IN ('new', 'triaged')""",
     )
     generator_rows = [r for r in rows if _deserialize_row(r).get("metadata", {}).get("generator")]

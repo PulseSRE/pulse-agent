@@ -25,7 +25,7 @@ def _make_assessment(
     confidence: float = 0.8,
 ) -> dict[str, Any]:
     return {
-        "item_type": "assessment",
+        "item_type": "task",
         "title": title,
         "summary": summary,
         "severity": severity,
@@ -168,7 +168,7 @@ def _get_stale_findings() -> list[dict]:
         cutoff = int(time.time()) - 72 * 3600
         rows = db.fetchall(
             """SELECT id, title, created_at FROM inbox_items
-            WHERE item_type = 'finding' AND status IN ('new', 'acknowledged')
+            WHERE item_type = 'task' AND status IN ('new', 'triaged')
             AND created_at < ?""",
             (cutoff,),
         )

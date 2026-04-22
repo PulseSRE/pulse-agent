@@ -22,7 +22,7 @@ def _clean_inbox():
 def _make_item(**overrides):
     """Helper to create an inbox item dict with defaults."""
     defaults = {
-        "item_type": "finding",
+        "item_type": "task",
         "title": "Pod crashlooping",
         "summary": "payment-api pod restarting every 30s",
         "severity": "critical",
@@ -50,20 +50,20 @@ class TestInboxCRUD:
         assert fetched is not None
         assert fetched["title"] == "Pod crashlooping"
         assert fetched["status"] == "new"
-        assert fetched["item_type"] == "finding"
+        assert fetched["item_type"] == "task"
 
     def test_list_items_with_filters(self):
         from sre_agent.inbox import create_inbox_item, list_inbox_items
 
-        create_inbox_item(_make_item(title="Finding 1", item_type="finding"))
+        create_inbox_item(_make_item(title="Finding 1", item_type="task"))
         create_inbox_item(_make_item(title="Task 1", item_type="task", severity=None))
-        create_inbox_item(_make_item(title="Alert 1", item_type="alert"))
+        create_inbox_item(_make_item(title="Alert 1", item_type="task"))
 
         all_items = list_inbox_items()
         assert len(all_items["items"]) >= 3
 
-        findings = list_inbox_items(item_type="finding")
-        assert all(i["item_type"] == "finding" for i in findings["items"])
+        findings = list_inbox_items(item_type="task")
+        assert all(i["item_type"] == "task" for i in findings["items"])
 
         tasks = list_inbox_items(item_type="task")
         assert all(i["item_type"] == "task" for i in tasks["items"])
@@ -104,7 +104,7 @@ class TestLifecycle:
         """All item types share the same lifecycle: new → triaged → claimed → in_progress → resolved."""
         from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
 
-        for item_type in ("finding", "task", "alert", "assessment"):
+        for item_type in ("task",):
             item_id = create_inbox_item(_make_item(item_type=item_type, title=f"{item_type} lifecycle"))
             assert update_item_status(item_id, "triaged")
             assert update_item_status(item_id, "claimed")
@@ -115,14 +115,14 @@ class TestLifecycle:
     def test_invalid_transition(self):
         from sre_agent.inbox import create_inbox_item, update_item_status
 
-        item_id = create_inbox_item(_make_item(item_type="finding"))
+        item_id = create_inbox_item(_make_item(item_type="task"))
         assert update_item_status(item_id, "in_progress") is False
 
     def test_agent_pipeline_lifecycle(self):
         """Agent pipeline: new → agent_reviewing → triaged → claimed → in_progress → resolved."""
         from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
 
-        item_id = create_inbox_item(_make_item(item_type="finding"))
+        item_id = create_inbox_item(_make_item(item_type="task"))
         assert update_item_status(item_id, "agent_reviewing")
         assert update_item_status(item_id, "triaged")
         assert update_item_status(item_id, "claimed")
@@ -138,7 +138,7 @@ class TestLifecycle:
             update_item_status,
         )
 
-        item_id = create_inbox_item(_make_item(item_type="assessment", title="Memory trend"))
+        item_id = create_inbox_item(_make_item(item_type="task", title="Memory trend"))
         assert update_item_status(item_id, "triaged") is True
 
         finding_id = escalate_assessment(item_id)
@@ -148,7 +148,7 @@ class TestLifecycle:
         assert old["status"] == "resolved"
 
         new_finding = get_inbox_item(finding_id)
-        assert new_finding["item_type"] == "finding"
+        assert new_finding["item_type"] == "task"
         assert new_finding["status"] == "new"
         assert new_finding["metadata"].get("escalated_from") == item_id
 
@@ -378,19 +378,17 @@ class TestNoDeadEndStatuses:
             for status, next_statuses in transitions.items():
                 assert len(next_statuses) > 0, f"{item_type}/{status} has no forward transitions — dead end!"
 
-    def test_unified_lifecycle_all_types(self):
-        """All 4 item types share the same transition map."""
+    def test_unified_lifecycle_single_type(self):
+        """Single 'task' type with unified transitions."""
         from sre_agent.inbox import VALID_TRANSITIONS
 
-        types = list(VALID_TRANSITIONS.keys())
-        assert len(types) == 4
-        for t in types[1:]:
-            assert VALID_TRANSITIONS[t] == VALID_TRANSITIONS[types[0]], f"{t} has different transitions"
+        assert "task" in VALID_TRANSITIONS
+        assert len(VALID_TRANSITIONS["task"]) > 0
 
     def test_full_lifecycle_forward(self):
         from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
 
-        item_id = create_inbox_item(_make_item(item_type="finding"))
+        item_id = create_inbox_item(_make_item(item_type="task"))
 
         path = ["agent_reviewing", "triaged", "claimed", "in_progress", "resolved"]
         for step in path:
@@ -401,7 +399,7 @@ class TestNoDeadEndStatuses:
     def test_agent_cleared_and_restore(self):
         from sre_agent.inbox import create_inbox_item, get_inbox_item, restore_item, update_item_status
 
-        item_id = create_inbox_item(_make_item(item_type="finding"))
+        item_id = create_inbox_item(_make_item(item_type="task"))
         assert update_item_status(item_id, "agent_cleared")
         assert get_inbox_item(item_id)["status"] == "agent_cleared"
 
@@ -411,7 +409,7 @@ class TestNoDeadEndStatuses:
     def test_agent_review_failed_recovery(self):
         from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
 
-        item_id = create_inbox_item(_make_item(item_type="finding", title="Failed review"))
+        item_id = create_inbox_item(_make_item(item_type="task", title="Failed review"))
         assert update_item_status(item_id, "agent_review_failed")
         assert get_inbox_item(item_id)["status"] == "agent_review_failed"
         assert update_item_status(item_id, "new")
@@ -420,7 +418,7 @@ class TestNoDeadEndStatuses:
     def test_agent_review_failed_to_triaged(self):
         from sre_agent.inbox import create_inbox_item, get_inbox_item, update_item_status
 
-        item_id = create_inbox_item(_make_item(item_type="finding", title="Failed then manual"))
+        item_id = create_inbox_item(_make_item(item_type="task", title="Failed then manual"))
         assert update_item_status(item_id, "agent_review_failed")
         assert update_item_status(item_id, "triaged")
         assert get_inbox_item(item_id)["status"] == "triaged"
