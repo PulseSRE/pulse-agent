@@ -130,6 +130,48 @@ def record_tool_call(
         logger.debug(f"Failed to record tool call: {e}")
 
 
+def build_tool_result_handler(session_id: str, agent_mode: str, write_tools: set[str] | None = None):
+    """Build an on_tool_result callback that records each tool call to the DB.
+
+    Used by both interactive agent sessions and autonomous pipeline phases.
+    """
+    _write = write_tools or set()
+
+    def on_tool_result(info: dict):
+        try:
+            from .skill_loader import get_tool_category
+
+            tool_name = info["tool_name"]
+            try:
+                from .mcp_client import list_mcp_tools
+
+                mcp_names = {t["name"] for t in list_mcp_tools()}
+            except Exception:
+                mcp_names = set()
+            tool_source = "mcp" if tool_name in mcp_names else "native"
+
+            record_tool_call(
+                session_id=session_id,
+                turn_number=info.get("turn_number", 0),
+                agent_mode=agent_mode,
+                tool_name=tool_name,
+                tool_category=get_tool_category(tool_name),
+                input_data=info.get("input"),
+                status=info["status"],
+                error_message=info.get("error_message"),
+                error_category=info.get("error_category"),
+                duration_ms=info.get("duration_ms", 0),
+                result_bytes=info.get("result_bytes", 0),
+                requires_confirmation=tool_name in _write,
+                was_confirmed=info.get("was_confirmed"),
+                tool_source=tool_source,
+            )
+        except Exception:
+            logger.debug("Tool result recording failed", exc_info=True)
+
+    return on_tool_result
+
+
 def record_turn(
     *,
     session_id: str,

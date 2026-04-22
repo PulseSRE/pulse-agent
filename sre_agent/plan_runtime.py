@@ -311,6 +311,13 @@ class PlanRuntime:
             def on_tool(name):
                 tools_called.append(name)
 
+            from .tool_usage import build_tool_result_handler
+
+            on_tool_result = build_tool_result_handler(
+                session_id=f"plan-{phase.id}",
+                agent_mode=f"pipeline:plan:{phase.skill_name}",
+            )
+
             response = await asyncio.to_thread(
                 run_agent_streaming,
                 client,
@@ -320,6 +327,7 @@ class PlanRuntime:
                 config["tool_map"],
                 config.get("write_tools", set()),
                 on_tool_use=on_tool,
+                on_tool_result=on_tool_result,
                 mode=phase.skill_name,
             )
 

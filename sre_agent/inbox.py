@@ -16,6 +16,30 @@ def _publish_event(event_type: str, item_id: str, data: dict[str, Any] | None = 
     publish_view_event(event_type, item_id, "system", data)
 
 
+def record_interaction(
+    *,
+    actor: str,
+    interaction_type: str,
+    item_id: str | None = None,
+    action_id: str | None = None,
+    decision: str = "",
+    metadata: dict | None = None,
+) -> None:
+    """Fire-and-forget audit record for human-in-the-loop decisions."""
+    try:
+        db = get_database()
+        db.execute(
+            "INSERT INTO user_interactions (actor, interaction_type, item_id, action_id, decision, metadata) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (actor, interaction_type, item_id, action_id, decision, json.dumps(metadata or {})),
+        )
+        db.commit()
+    except Exception:
+        import logging
+
+        logging.getLogger("pulse_agent.inbox").debug("Failed to record interaction", exc_info=True)
+
+
 # -- Simplified lifecycle: New → Triaged → Claimed → In Progress → Resolved --
 # All item types share the same transition map.
 
@@ -276,7 +300,7 @@ def get_inbox_stats() -> dict[str, int]:
     return stats
 
 
-def update_item_status(item_id: str, new_status: str) -> bool:
+def update_item_status(item_id: str, new_status: str, actor: str = "") -> bool:
     item = get_inbox_item(item_id)
     if item is None:
         return False
@@ -299,6 +323,8 @@ def update_item_status(item_id: str, new_status: str) -> bool:
     db.commit()
     event_type = "inbox_item_resolved" if new_status == "resolved" else "inbox_item_updated"
     _publish_event(event_type, item_id, {"status": new_status})
+    if actor:
+        record_interaction(actor=actor, interaction_type=new_status, item_id=item_id, decision=new_status)
     return True
 
 
@@ -534,7 +560,7 @@ def claim_and_investigate(item_id: str, username: str) -> bool:
     return False
 
 
-def unclaim_item(item_id: str) -> bool:
+def unclaim_item(item_id: str, actor: str = "") -> bool:
     db = get_database()
     now = int(time.time())
     db.execute(
@@ -543,10 +569,12 @@ def unclaim_item(item_id: str) -> bool:
     )
     db.commit()
     _publish_event("inbox_item_updated", item_id, {"claimed_by": None})
+    if actor:
+        record_interaction(actor=actor, interaction_type="unclaim", item_id=item_id)
     return True
 
 
-def snooze_item(item_id: str, hours: float) -> bool:
+def snooze_item(item_id: str, hours: float, actor: str = "") -> bool:
     item = get_inbox_item(item_id)
     if item is None:
         return False
@@ -563,6 +591,8 @@ def snooze_item(item_id: str, hours: float) -> bool:
         (snoozed_until, json.dumps(metadata), now, item_id),
     )
     db.commit()
+    if actor:
+        record_interaction(actor=actor, interaction_type="snooze", item_id=item_id, metadata={"hours": hours})
     return True
 
 
@@ -684,12 +714,15 @@ def pin_item(item_id: str, username: str) -> bool:
     return True
 
 
-def restore_item(item_id: str) -> bool:
+def restore_item(item_id: str, actor: str = "") -> bool:
     """Restore an agent-cleared item back to new status (user override)."""
-    return update_item_status(item_id, "new")
+    ok = update_item_status(item_id, "new")
+    if ok and actor:
+        record_interaction(actor=actor, interaction_type="restore", item_id=item_id, decision="new")
+    return ok
 
 
-def dismiss_item(item_id: str) -> bool:
+def dismiss_item(item_id: str, actor: str = "") -> bool:
     item = get_inbox_item(item_id)
     if item is None:
         return False
@@ -701,6 +734,8 @@ def dismiss_item(item_id: str) -> bool:
     )
     db.commit()
     _publish_event("inbox_item_updated", item_id, {"status": "archived"})
+    if actor:
+        record_interaction(actor=actor, interaction_type="dismiss", item_id=item_id, decision="archived")
     return True
 
 

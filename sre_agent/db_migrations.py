@@ -222,6 +222,13 @@ def _migrate_021_inbox_items(db: Database) -> None:
     db.executescript(INBOX_ITEMS_SCHEMA)
 
 
+def _migrate_022_user_interactions(db: Database) -> None:
+    """Create user_interactions table for HITL audit trail."""
+    from .db_schema import USER_INTERACTIONS_SCHEMA
+
+    db.executescript(USER_INTERACTIONS_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -244,4 +251,5 @@ MIGRATIONS = [
     (19, "agent_views", _migrate_019_agent_views),
     (20, "action_outcomes", _migrate_020_action_outcomes),
     (21, "inbox_items", _migrate_021_inbox_items),
+    (22, "user_interactions", _migrate_022_user_interactions),
 ]

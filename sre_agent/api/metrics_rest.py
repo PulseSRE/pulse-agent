@@ -108,3 +108,83 @@ def _trend(scores: list[float]) -> str:
     if avg_recent < avg_all - 0.02:
         return "declining"
     return "stable"
+
+
+@router.get("/usage/summary")
+async def usage_summary(
+    days: int = Query(7, ge=1, le=90, description="Lookback period in days"),
+    _auth=Depends(verify_token),
+):
+    """Tool usage summary split by agent (interactive) vs pipeline (autonomous)."""
+    try:
+        from ..db import get_database
+
+        db = get_database()
+        import time as _time
+
+        cutoff_s = _time.time() - days * 86400
+        rows = db.fetchall(
+            "SELECT agent_mode, COUNT(*) as calls, COALESCE(SUM(duration_ms), 0) as total_ms "
+            "FROM tool_usage WHERE timestamp > to_timestamp(?) GROUP BY agent_mode",
+            (cutoff_s,),
+        )
+        agent_calls = 0
+        agent_ms = 0
+        pipeline_calls = 0
+        pipeline_ms = 0
+        breakdown: dict[str, int] = {}
+        for r in rows or []:
+            mode = r.get("agent_mode", "")
+            calls = r.get("calls", 0)
+            ms = r.get("total_ms", 0) or 0
+            if mode.startswith("pipeline:"):
+                pipeline_calls += calls
+                pipeline_ms += ms
+                breakdown[mode] = calls
+            else:
+                agent_calls += calls
+                agent_ms += ms
+        return {
+            "days": days,
+            "agent": {"tool_calls": agent_calls, "total_duration_ms": agent_ms},
+            "pipeline": {"tool_calls": pipeline_calls, "total_duration_ms": pipeline_ms, "breakdown": breakdown},
+        }
+    except Exception as e:
+        logger.error("Failed to get usage summary: %s", e)
+        return {"days": days, "agent": {}, "pipeline": {}, "error": str(e)}
+
+
+@router.get("/interactions")
+async def list_interactions(
+    actor: str = Query("", description="Filter by actor"),
+    interaction_type: str = Query("", description="Filter by type"),
+    item_id: str = Query("", description="Filter by inbox item ID"),
+    limit: int = Query(50, ge=1, le=500),
+    _auth=Depends(verify_token),
+):
+    """Query the user_interactions audit log."""
+    try:
+        from ..db import get_database
+
+        db = get_database()
+        where = []
+        params: list = []
+        if actor:
+            where.append("actor = ?")
+            params.append(actor)
+        if interaction_type:
+            where.append("interaction_type = ?")
+            params.append(interaction_type)
+        if item_id:
+            where.append("item_id = ?")
+            params.append(item_id)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        params.append(limit)
+        rows = db.fetchall(
+            f"SELECT * FROM user_interactions {clause} ORDER BY timestamp DESC LIMIT ?",
+            tuple(params),
+        )
+        return {"interactions": rows or [], "count": len(rows or [])}
+    except Exception as e:
+        logger.error("Failed to list interactions: %s", e)
+        return {"interactions": [], "count": 0, "error": str(e)}

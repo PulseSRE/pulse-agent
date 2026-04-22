@@ -14,6 +14,7 @@ from ..inbox import (
     get_inbox_stats,
     list_inbox_items,
     pin_item,
+    record_interaction,
     snooze_item,
     unclaim_item,
     update_item_status,
@@ -111,34 +112,34 @@ async def rest_claim_item(item_id: str, owner: str = Depends(get_owner)):
 
 
 @router.delete("/inbox/{item_id}/claim")
-async def rest_unclaim_item(item_id: str):
-    unclaim_item(item_id)
+async def rest_unclaim_item(item_id: str, owner: str = Depends(get_owner)):
+    unclaim_item(item_id, actor=owner)
     return {"ok": True}
 
 
 @router.post("/inbox/{item_id}/acknowledge")
-async def rest_acknowledge_item(item_id: str):
-    ok = update_item_status(item_id, "triaged")
+async def rest_acknowledge_item(item_id: str, owner: str = Depends(get_owner)):
+    ok = update_item_status(item_id, "triaged", actor=owner)
     if not ok:
         raise HTTPException(status_code=400, detail="Invalid status transition")
     return {"ok": True}
 
 
 @router.post("/inbox/{item_id}/snooze")
-async def rest_snooze_item(item_id: str, request: Request):
+async def rest_snooze_item(item_id: str, request: Request, owner: str = Depends(get_owner)):
     body = await request.json()
     hours = body.get("hours", 24)
     if hours not in (4, 24, 72, 168):
         raise HTTPException(status_code=400, detail="hours must be 4, 24, 72, or 168")
-    ok = snooze_item(item_id, hours)
+    ok = snooze_item(item_id, hours, actor=owner)
     if not ok:
         raise HTTPException(status_code=404, detail="Item not found")
     return {"ok": True}
 
 
 @router.post("/inbox/{item_id}/dismiss")
-async def rest_dismiss_item(item_id: str):
-    ok = dismiss_item(item_id)
+async def rest_dismiss_item(item_id: str, owner: str = Depends(get_owner)):
+    ok = dismiss_item(item_id, actor=owner)
     if not ok:
         raise HTTPException(status_code=404, detail="Item not found")
     return {"ok": True}
@@ -155,12 +156,12 @@ async def rest_investigate_item(item_id: str, owner: str = Depends(get_owner)):
 
 
 @router.post("/inbox/{item_id}/resolve")
-async def rest_resolve_item(item_id: str):
+async def rest_resolve_item(item_id: str, owner: str = Depends(get_owner)):
     item = get_inbox_item(item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    ok = update_item_status(item_id, "resolved")
+    ok = update_item_status(item_id, "resolved", actor=owner)
     if not ok:
         valid_next = VALID_TRANSITIONS.get(item["item_type"], {}).get(item["status"], [])
         raise HTTPException(
@@ -179,12 +180,27 @@ async def rest_escalate_item(item_id: str):
 
 
 @router.post("/inbox/{item_id}/restore")
-async def rest_restore_item(item_id: str):
+async def rest_restore_item(item_id: str, owner: str = Depends(get_owner)):
     from ..inbox import restore_item
 
-    ok = restore_item(item_id)
+    ok = restore_item(item_id, actor=owner)
     if not ok:
         raise HTTPException(status_code=400, detail="Item is not agent_cleared or not found")
+    return {"ok": True}
+
+
+@router.post("/inbox/{item_id}/step")
+async def rest_record_step(item_id: str, request: Request, owner: str = Depends(get_owner)):
+    body = await request.json()
+    action = body.get("action", "")
+    if action not in ("execute", "skip"):
+        raise HTTPException(status_code=400, detail="action must be 'execute' or 'skip'")
+    record_interaction(
+        actor=owner,
+        interaction_type=f"{action}_step",
+        item_id=item_id,
+        metadata={"step_index": body.get("step_index", 0), "step_title": body.get("step_title", "")},
+    )
     return {"ok": True}
 
 

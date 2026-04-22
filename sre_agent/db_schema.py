@@ -506,6 +506,22 @@ CREATE INDEX IF NOT EXISTS idx_inbox_items_namespace ON inbox_items (namespace);
 CREATE INDEX IF NOT EXISTS idx_inbox_items_finding_id ON inbox_items (finding_id);
 """
 
+USER_INTERACTIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS user_interactions (
+    id SERIAL PRIMARY KEY,
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actor TEXT NOT NULL,
+    interaction_type TEXT NOT NULL,
+    item_id TEXT,
+    action_id TEXT,
+    decision TEXT DEFAULT '',
+    metadata JSONB DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_user_interactions_actor ON user_interactions(actor);
+CREATE INDEX IF NOT EXISTS idx_user_interactions_type ON user_interactions(interaction_type);
+CREATE INDEX IF NOT EXISTS idx_user_interactions_item ON user_interactions(item_id);
+"""
+
 ALL_SCHEMAS = (
     INCIDENTS_SCHEMA
     + RUNBOOKS_SCHEMA
@@ -536,4 +552,5 @@ ALL_SCHEMAS = (
     + PLAN_EXECUTIONS_SCHEMA
     + USER_EVENTS_SCHEMA
     + INBOX_ITEMS_SCHEMA
+    + USER_INTERACTIONS_SCHEMA
 )

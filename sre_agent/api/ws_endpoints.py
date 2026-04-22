@@ -869,6 +869,15 @@ async def websocket_monitor(websocket: WebSocket):
                 approved = data.get("approved", False)
                 handled = session.resolve_action_response(action_id, approved)
                 logger.info("Action response: id=%s approved=%s handled=%s", action_id, approved, handled)
+                if handled:
+                    from ..inbox import record_interaction
+
+                    record_interaction(
+                        actor="monitor_user",
+                        interaction_type="approve_fix" if approved else "reject_fix",
+                        action_id=action_id,
+                        decision="approved" if approved else "rejected",
+                    )
 
             elif msg_type == "set_disabled_scanners":
                 scanner_ids = data.get("scannerIds", [])
