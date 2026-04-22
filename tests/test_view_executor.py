@@ -169,6 +169,68 @@ class TestToolBackedWidgets:
         layout = execute_view_plan(plan, {"id": "x", "title": "x", "metadata": {}})
         assert not any(w.get("title") == "Bad" for w in layout)
 
+
+# ---------------------------------------------------------------------------
+# Staleness
+# ---------------------------------------------------------------------------
+
+import time
+
+
+class TestStaleness:
+    def test_stale_plan_skips_tool_widgets_keeps_props(self):
+        from sre_agent.view_executor import execute_view_plan
+
+        stale_ts = int(time.time()) - 3600
+        plan = [
+            {"kind": "data_table", "title": "Events", "tool": "get_events", "args": {"namespace": "prod"}},
+            {
+                "kind": "resolution_tracker",
+                "title": "Steps",
+                "props": {"steps": [{"title": "Done", "status": "complete"}]},
+            },
+        ]
+        item = {"id": "x", "title": "x", "metadata": {"view_plan_at": stale_ts}}
+        layout = execute_view_plan(plan, item)
+        kinds = [w["kind"] for w in layout]
+        assert "resolution_tracker" in kinds
+        assert "data_table" not in kinds
+
+    def test_stale_plan_shows_outdated_notice(self):
+        from sre_agent.view_executor import execute_view_plan
+
+        stale_ts = int(time.time()) - 3600
+        plan = [{"kind": "data_table", "title": "Events", "tool": "get_events", "args": {}}]
+        item = {"id": "x", "title": "x", "metadata": {"view_plan_at": stale_ts}}
+        layout = execute_view_plan(plan, item)
+        titles = [w.get("title", "") for w in layout]
+        assert any("Outdated" in t for t in titles)
+
+    def test_fresh_plan_executes_tool_widgets(self):
+        from sre_agent.view_executor import execute_view_plan
+
+        mock_tool = MagicMock()
+        mock_tool.call.return_value = ("data", {"kind": "data_table", "rows": []})
+        fresh_ts = int(time.time())
+        plan = [{"kind": "data_table", "title": "Events", "tool": "get_events", "args": {}}]
+        item = {"id": "x", "title": "x", "metadata": {"view_plan_at": fresh_ts}}
+
+        with patch("sre_agent.view_executor._resolve_tool", return_value=mock_tool):
+            layout = execute_view_plan(plan, item)
+        assert any(w.get("title") == "Events" for w in layout)
+
+    def test_no_timestamp_assumes_fresh(self):
+        from sre_agent.view_executor import execute_view_plan
+
+        mock_tool = MagicMock()
+        mock_tool.call.return_value = ("data", {"kind": "data_table", "rows": []})
+        plan = [{"kind": "data_table", "title": "Events", "tool": "get_events", "args": {}}]
+        item = {"id": "x", "title": "x", "metadata": {}}
+
+        with patch("sre_agent.view_executor._resolve_tool", return_value=mock_tool):
+            layout = execute_view_plan(plan, item)
+        assert any(w.get("title") == "Events" for w in layout)
+
     def test_confidence_badge_always_present(self):
         from sre_agent.view_executor import execute_view_plan
 
