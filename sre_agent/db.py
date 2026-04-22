@@ -285,6 +285,10 @@ def save_view(
 
     db = get_database()
     now = datetime.now(UTC).isoformat()
+    existing = get_view_by_title(owner, title)
+    if existing:
+        view_id = existing["id"]
+
     db.execute(
         "INSERT INTO views (id, owner, title, description, icon, layout, positions, "
         "view_type, status, trigger_source, finding_id, visibility, created_at, updated_at) "
