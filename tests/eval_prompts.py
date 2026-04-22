@@ -398,6 +398,18 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "sre",
         "Fleet deployment comparison",
     ),
+    (
+        "show CPU usage across all managed clusters",
+        ["fleet_query_metrics"],
+        "sre",
+        "Fleet metrics query",
+    ),
+    (
+        "compare memory usage between clusters",
+        ["fleet_compare_metrics"],
+        "sre",
+        "Fleet metrics comparison",
+    ),
     # ─── Security ─────────────────────────────────────────────────────────
     (
         "scan RBAC for overly permissive roles",

@@ -231,6 +231,8 @@ TOOL_CATEGORIES = {
             "fleet_list_deployments",
             "fleet_get_alerts",
             "fleet_compare_resource",
+            "fleet_query_metrics",
+            "fleet_compare_metrics",
         ],
     },
     "self": {

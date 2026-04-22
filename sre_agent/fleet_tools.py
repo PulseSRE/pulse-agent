@@ -494,6 +494,187 @@ def fleet_compare_resource(kind: str, name: str, namespace: str = "default"):
     return (text, component)
 
 
+@beta_tool
+def fleet_query_metrics(
+    query: str,
+    cluster: str = "ALL",
+    time_range: str = "1h",
+    title: str = "",
+    description: str = "",
+):
+    """Query Prometheus metrics across managed clusters using ACM Observatorium/Thanos.
+
+    When deployed on an ACM hub, queries the centralized Thanos store that
+    aggregates metrics from all managed clusters. Each metric has a 'cluster'
+    label identifying its source.
+
+    Args:
+        query: PromQL query string. A 'cluster' label is auto-injected when targeting a specific cluster.
+        cluster: Cluster name to query, or 'ALL' for fleet-wide. Use fleet_list_clusters to see names.
+        time_range: Time range (e.g. '5m', '1h', '24h'). Defaults to '1h'.
+        title: Chart title (auto-generated if empty).
+        description: What to watch for.
+    """
+    from .prometheus import PrometheusBackend, get_prometheus_client
+    from .promql_recipes import check_thanos_compatibility, inject_cluster_label
+
+    prom = get_prometheus_client()
+    if not prom.is_acm_available():
+        return (
+            "ACM multicluster-observability is not available on this cluster. "
+            "Fleet metrics require the ACM Observatorium stack. "
+            "Check that the open-cluster-management-observability namespace exists and Thanos is running."
+        )
+
+    warning = check_thanos_compatibility(query)
+
+    effective_query = query
+    if cluster.upper() != "ALL":
+        effective_query = inject_cluster_label(query, cluster)
+
+    import time as _time
+
+    _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    try:
+        unit = time_range[-1]
+        amount = int(time_range[:-1])
+        seconds = amount * _UNITS.get(unit, 3600)
+    except (ValueError, IndexError):
+        seconds = 3600
+
+    now = int(_time.time())
+    step = max(60, seconds // 120)
+
+    try:
+        data = prom.query_range(effective_query, now - seconds, now, step, backend=PrometheusBackend.ACM, timeout=20)
+    except Exception as e:
+        return f"Cannot reach ACM Thanos: {e}"
+
+    if data.get("status") != "success":
+        return f"Query error: {data.get('error', 'unknown')}"
+
+    results = data.get("data", {}).get("result", [])
+    if not results:
+        msg = f"No results for: {effective_query}"
+        if cluster.upper() != "ALL":
+            msg += f"\nMetric may not be in the ACM metrics allowlist, or cluster '{cluster}' has no data."
+        return msg
+
+    _COLORS = ["#60a5fa", "#34d399", "#fbbf24", "#f87171", "#a78bfa", "#38bdf8", "#fb923c", "#e879f9"]
+
+    auto_title = title or f"Fleet: {query[:50]}" + (f" ({cluster})" if cluster.upper() != "ALL" else "")
+
+    series = []
+    text_lines = [f"{auto_title} — {len(results)} series, range {time_range}"]
+    for i, r in enumerate(results[:20]):
+        metric = r.get("metric", {})
+        label = metric.get("cluster", metric.get("pod", metric.get("namespace", f"series-{i}")))
+        values = r.get("values", [])
+        if values:
+            latest = values[-1][1]
+            text_lines.append(f"  {label}: {latest}")
+        series.append(
+            {
+                "label": label,
+                "color": _COLORS[i % len(_COLORS)],
+                "values": values,
+            }
+        )
+
+    if warning:
+        text_lines.insert(0, f"⚠ {warning}")
+
+    component = {
+        "kind": "chart",
+        "chartType": "line",
+        "title": auto_title,
+        "description": description or f"Fleet metrics across {'all clusters' if cluster.upper() == 'ALL' else cluster}",
+        "series": series,
+        "timeRange": time_range,
+    }
+
+    return ("\n".join(text_lines), component)
+
+
+@beta_tool
+def fleet_compare_metrics(query: str, time_range: str = "1h", title: str = ""):
+    """Compare a metric across all managed clusters side-by-side.
+
+    Runs the query against ACM Thanos and shows results broken down by cluster.
+    Useful for spotting outlier clusters.
+
+    Args:
+        query: PromQL query string. Will be aggregated per cluster.
+        time_range: Time range (e.g. '5m', '1h', '24h'). Defaults to '1h'.
+        title: Chart title (auto-generated if empty).
+    """
+    from .prometheus import PrometheusBackend, get_prometheus_client
+
+    prom = get_prometheus_client()
+    if not prom.is_acm_available():
+        return (
+            "ACM multicluster-observability is not available on this cluster. "
+            "Fleet metrics require the ACM Observatorium stack."
+        )
+
+    comparison_query = f"sum by (cluster) ({query})"
+
+    import time as _time
+
+    _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    try:
+        unit = time_range[-1]
+        amount = int(time_range[:-1])
+        seconds = amount * _UNITS.get(unit, 3600)
+    except (ValueError, IndexError):
+        seconds = 3600
+
+    now = int(_time.time())
+    step = max(60, seconds // 120)
+
+    try:
+        data = prom.query_range(comparison_query, now - seconds, now, step, backend=PrometheusBackend.ACM, timeout=20)
+    except Exception as e:
+        return f"Cannot reach ACM Thanos: {e}"
+
+    if data.get("status") != "success":
+        return f"Query error: {data.get('error', 'unknown')}"
+
+    results = data.get("data", {}).get("result", [])
+    if not results:
+        return f"No results for fleet comparison: {query}"
+
+    _COLORS = ["#60a5fa", "#34d399", "#fbbf24", "#f87171", "#a78bfa", "#38bdf8", "#fb923c", "#e879f9"]
+
+    auto_title = title or f"Fleet Comparison: {query[:50]}"
+
+    series = []
+    text_lines = [f"{auto_title} — {len(results)} clusters"]
+    for i, r in enumerate(results):
+        cluster_name = r.get("metric", {}).get("cluster", f"cluster-{i}")
+        values = r.get("values", [])
+        latest = values[-1][1] if values else "N/A"
+        text_lines.append(f"  {cluster_name}: {latest}")
+        series.append(
+            {
+                "label": cluster_name,
+                "color": _COLORS[i % len(_COLORS)],
+                "values": values,
+            }
+        )
+
+    component = {
+        "kind": "chart",
+        "chartType": "line",
+        "title": auto_title,
+        "description": f"Per-cluster comparison over {time_range}",
+        "series": series,
+        "timeRange": time_range,
+    }
+
+    return ("\n".join(text_lines), component)
+
+
 # All fleet tools
 FLEET_TOOLS: list[Any] = [
     fleet_list_clusters,
@@ -501,6 +682,8 @@ FLEET_TOOLS: list[Any] = [
     fleet_list_deployments,
     fleet_get_alerts,
     fleet_compare_resource,
+    fleet_query_metrics,
+    fleet_compare_metrics,
 ]
 
 # Register fleet tools in the central registry (all read-only)
