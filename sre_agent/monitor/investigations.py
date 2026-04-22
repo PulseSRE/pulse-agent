@@ -17,6 +17,35 @@ def _build_investigation_prompt(finding: dict) -> str:
     sanitized_resources = []
     for r in resources:
         sanitized_resources.append({k: _sanitize_for_prompt(str(v)) for k, v in r.items()})
+
+    try:
+        from ..component_registry import get_valid_kinds
+        from ..tool_registry import TOOL_REGISTRY, WRITE_TOOL_NAMES
+
+        view_kinds = sorted(
+            get_valid_kinds()
+            & {
+                "chart",
+                "data_table",
+                "status_list",
+                "metric_card",
+                "info_card_grid",
+                "resolution_tracker",
+                "blast_radius",
+                "topology",
+                "key_value",
+                "resource_counts",
+                "timeline",
+                "log_viewer",
+            }
+        )
+        read_tools = sorted(set(TOOL_REGISTRY.keys()) - WRITE_TOOL_NAMES)[:30]
+        if not read_tools:
+            read_tools = ["get_events", "list_pods", "list_deployments", "get_prometheus_query"]
+    except Exception:
+        view_kinds = ["chart", "data_table", "resolution_tracker", "status_list", "metric_card"]
+        read_tools = ["get_events", "list_pods", "list_deployments", "get_prometheus_query"]
+
     prompt = (
         "Investigate the following Kubernetes issue and return ONLY JSON.\n"
         "Rules:\n"
@@ -36,9 +65,17 @@ def _build_investigation_prompt(finding: dict) -> str:
         '  "suspected_cause": "likely root cause",\n'
         '  "recommended_fix": "next best action",\n'
         '  "confidence": 0.0,\n'
-        '  "evidence": ["fact 1 that supports the diagnosis", "fact 2"],\n'
-        '  "alternatives_considered": ["hypothesis ruled out and why"]\n'
-        "}\n"
+        '  "evidence": ["fact 1", "fact 2"],\n'
+        '  "alternatives_considered": ["hypothesis ruled out"],\n'
+        '  "viewPlan": [\n'
+        '    {"kind": "<component>", "title": "...", "props": {...}},\n'
+        '    {"kind": "<component>", "title": "...", "tool": "<tool_name>", "args": {...}}\n'
+        "  ]\n"
+        "}\n\n"
+        "viewPlan: 3-5 widgets to help the user verify your diagnosis.\n"
+        f"Valid kinds: {', '.join(view_kinds)}\n"
+        f"Valid tools: {', '.join(read_tools[:20])}\n"
+        "Always include a resolution_tracker showing your investigation steps.\n"
     )
 
     # Inject shared context from the context bus
@@ -221,6 +258,9 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
     alternatives = parsed.get("alternatives_considered", [])
     if not isinstance(alternatives, list):
         alternatives = []
+    view_plan = parsed.get("viewPlan", [])
+    if not isinstance(view_plan, list):
+        view_plan = []
     return {
         "summary": summary,
         "suspectedCause": suspected_cause,
@@ -228,6 +268,7 @@ def _run_proactive_investigation_sync(finding: dict) -> dict[str, Any]:
         "confidence": round(confidence, 2),
         "evidence": [str(e) for e in evidence[:10]],
         "alternativesConsidered": [str(a) for a in alternatives[:10]],
+        "viewPlan": view_plan,
     }
 
 
