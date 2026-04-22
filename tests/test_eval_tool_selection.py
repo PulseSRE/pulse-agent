@@ -11,6 +11,7 @@ from sre_agent import (
     git_tools,  # noqa: F401
     gitops_tools,  # noqa: F401
     handoff_tools,  # noqa: F401
+    inbox,  # noqa: F401
     k8s_tools,  # noqa: F401
     predict_tools,  # noqa: F401
     security_tools,  # noqa: F401
