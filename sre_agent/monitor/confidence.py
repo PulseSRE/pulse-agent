@@ -71,7 +71,15 @@ def _finding_key(finding: dict) -> str:
     resource_part = "_"
     if resources:
         r = resources[0]
-        resource_part = f"{r.get('kind', '')}:{r.get('namespace', '')}:{r.get('name', '')}"
+        name = r.get("name", "")
+        kind = r.get("kind", "")
+        # Strip ReplicaSet hash suffix so recreated pods share the same key
+        # e.g. "operator-5f58f69bd6-w4x22" → "operator"
+        if kind == "Pod":
+            parts = name.rsplit("-", 2)
+            if len(parts) >= 3:
+                name = parts[0]
+        resource_part = f"{kind}:{r.get('namespace', '')}:{name}"
     return f"{finding.get('category', '')}:{finding.get('title', '')}:{resource_part}"
 
 
