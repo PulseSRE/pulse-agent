@@ -650,6 +650,8 @@ def get_view_details(view_id: str):
     owner = get_current_user()
     view = db.get_view(view_id, owner)
     if not view:
+        view = db.get_view(view_id)
+    if not view:
         return f"View '{view_id}' not found."
 
     widgets = view.get("layout", [])
@@ -722,7 +724,13 @@ def delete_dashboard(view_id: str):
     from . import db
 
     owner = get_current_user()
-    success = db.delete_view(view_id, owner)
+    view = db.get_view(view_id, owner)
+    if not view:
+        view = db.get_view(view_id)
+    if not view:
+        return f"View '{view_id}' not found."
+    actual_owner = view.get("owner", owner)
+    success = db.delete_view(view_id, actual_owner)
     if not success:
         return f"View '{view_id}' not found or you don't have permission to delete it."
     return _signal("view_deleted", f"Deleted dashboard {view_id}.", view_id=view_id)
@@ -740,6 +748,11 @@ def clone_dashboard(view_id: str, new_title: str = ""):
 
     owner = get_current_user()
     new_id = db.clone_view(view_id, owner)
+    if not new_id:
+        # Retry with view's actual owner
+        view = db.get_view(view_id)
+        if view:
+            new_id = db.clone_view(view_id, view.get("owner", owner))
     if not new_id:
         return f"View '{view_id}' not found or you don't have permission to clone it."
 

@@ -379,6 +379,8 @@ def get_view_versions(view_id: str):
     owner = get_current_user()
     view = db.get_view(view_id, owner)
     if not view:
+        view = db.get_view(view_id)
+    if not view:
         return f"View '{view_id}' not found."
 
     versions = db.list_view_versions(view_id) or []
