@@ -291,7 +291,7 @@ class PlanRuntime:
         )
 
         try:
-            from .agent import borrow_client, run_agent_streaming
+            from .agent import borrow_async_client, run_agent_streaming
             from .skill_loader import build_config_from_skill, get_skill
 
             skill = get_skill(phase.skill_name)
@@ -317,15 +317,14 @@ class PlanRuntime:
                 agent_mode=f"pipeline:plan:{phase.skill_name}",
             )
 
-            with borrow_client(self._client) as client:
-                response = await asyncio.to_thread(
-                    run_agent_streaming,
+            async with borrow_async_client(self._client) as client:
+                response = await run_agent_streaming(
                     client,
                     [{"role": "user", "content": prompt}],
                     config["system_prompt"],
                     config["tool_defs"],
                     config["tool_map"],
-                    set(),  # investigation plans are read-only — no write tools
+                    set(),
                     on_tool_use=on_tool,
                     on_tool_result=on_tool_result,
                     mode=phase.skill_name,
@@ -756,8 +755,7 @@ async def run_parallel_skills(
             if websocket is not None:
                 from .api.agent_ws import SkillExecutor
 
-                loop = asyncio.get_running_loop()
-                executor = SkillExecutor(websocket, session_id, loop)
+                executor = SkillExecutor(websocket, session_id)
 
                 primary_task = asyncio.create_task(
                     executor.run(
