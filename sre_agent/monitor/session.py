@@ -58,6 +58,8 @@ class MonitorSession:
         self._last_security_followup: float = 0.0  # cooldown tracker
         self._recent_fix_ids: set[str] = set()  # finding IDs that were auto-fixed (for resolution attribution)
         self._investigation_tasks: list[asyncio.Task] = []  # track spawned async investigations for cleanup
+        self._max_concurrent_investigations = 3
+        self._generator_task: asyncio.Task | None = None
         # Improvement flywheel timers
         self._last_daily_run: float = 0.0
         self._last_weekly_run: float = 0.0
@@ -66,6 +68,10 @@ class MonitorSession:
         self._noise_threshold = get_settings().noise_threshold
         self._session_id = f"mon-{uuid.uuid4().hex[:12]}"  # Unique session ID for DB tracking
         self.disabled_scanners: set[str] = set()  # Scanner IDs disabled by the client
+        # Shared Anthropic client — avoids creating a new httpx session per investigation
+        from ..agent import create_client
+
+        self._client = create_client()
 
     def resolve_action_response(self, action_id: str, approved: bool) -> bool:
         """Resolve an outstanding action approval request."""
@@ -105,6 +111,10 @@ class MonitorSession:
             if not task.done():
                 task.cancel()
         self._investigation_tasks.clear()
+        try:
+            self._client.close()
+        except Exception:
+            pass
 
     async def auto_fix(self, findings: list[dict]) -> None:
         """Attempt to auto-fix findings when trust level permits.
@@ -419,7 +429,7 @@ class MonitorSession:
             if not template:
                 return False
 
-            runtime = PlanRuntime()
+            runtime = PlanRuntime(client=self._client)
             finding_id = finding.get("id", "")
             all_phases = [{"id": p.id, "status": "pending", "skill_name": p.skill_name} for p in template.phases]
 
@@ -662,21 +672,43 @@ class MonitorSession:
 
                 template = match_template(category=finding.get("category", ""))
                 if template:
+                    self._investigation_tasks = [t for t in self._investigation_tasks if not t.done()]
+                    if len(self._investigation_tasks) >= self._max_concurrent_investigations:
+                        logger.info(
+                            "Skipping investigation for %s — %d tasks already running",
+                            finding.get("title", "")[:40],
+                            len(self._investigation_tasks),
+                        )
+                        continue
                     self._recent_investigations[key] = now
                     investigations_run += 1
                     self._daily_investigation_count += 1
-                    # Fire and forget — plan runtime handles its own errors and WebSocket updates
                     task = asyncio.create_task(
                         self._try_plan_execution(finding),
                         name=f"plan-{finding.get('id', 'unknown')[:12]}",
                     )
-                    self._investigation_tasks = [t for t in self._investigation_tasks if not t.done()]
                     self._investigation_tasks.append(task)
+
+                    # Emit failure event if plan execution fails in the background
+                    finding_ref = finding
+
+                    def _on_plan_done(t: asyncio.Task, f=finding_ref) -> None:
+                        try:
+                            if t.cancelled() or not t.result():
+                                logger.warning(
+                                    "Plan execution failed for %s — finding may need manual investigation",
+                                    f.get("title", "")[:40],
+                                )
+                        except Exception:
+                            logger.warning("Plan execution raised for %s", f.get("title", "")[:40], exc_info=True)
+
+                    task.add_done_callback(_on_plan_done)
                     logger.info(
                         "Spawned async investigation for %s (template=%s)",
                         finding.get("title", "")[:40],
                         template.name,
                     )
+                    continue  # plan handles this finding — skip flat investigation
             except Exception:
                 logger.debug("Plan execution spawn failed", exc_info=True)
 
@@ -694,7 +726,7 @@ class MonitorSession:
             }
             try:
                 result = await asyncio.wait_for(
-                    asyncio.to_thread(_run_proactive_investigation_sync, finding),
+                    asyncio.to_thread(_run_proactive_investigation_sync, finding, client=self._client),
                     timeout=timeout_seconds,
                 )
                 report.update(
@@ -737,7 +769,7 @@ class MonitorSession:
                 ):
                     try:
                         sec_result = await asyncio.wait_for(
-                            asyncio.to_thread(_run_security_followup_sync, finding),
+                            asyncio.to_thread(_run_security_followup_sync, finding, client=self._client),
                             timeout=timeout_seconds,
                         )
                         report["securityFollowup"] = {
@@ -975,6 +1007,9 @@ class MonitorSession:
         logger.info("Running cluster scan...")
         scan_start = time.time()
         self._scan_counter += 1
+
+        # Prune completed investigation tasks
+        self._investigation_tasks = [t for t in self._investigation_tasks if not t.done()]
 
         # Refresh dependency graph at start of each scan cycle
         try:
@@ -1249,11 +1284,12 @@ class MonitorSession:
         except Exception:
             logger.exception("Failed to bridge findings to inbox")
 
-        # Run inbox generators async — don't block the scan cycle
+        # Run inbox generators async — don't block the scan cycle (skip if previous still running)
         try:
             from ..inbox import run_generator_cycle
 
-            asyncio.create_task(asyncio.to_thread(run_generator_cycle))
+            if self._generator_task is None or self._generator_task.done():
+                self._generator_task = asyncio.create_task(asyncio.to_thread(run_generator_cycle))
         except Exception:
             logger.exception("Failed to start inbox generator cycle")
 
@@ -1353,7 +1389,7 @@ class MonitorSession:
                 }
                 try:
                     await asyncio.wait_for(
-                        asyncio.to_thread(_run_security_followup_sync, finding),
+                        asyncio.to_thread(_run_security_followup_sync, finding, client=self._client),
                         timeout=timeout_seconds,
                     )
                     logger.info("Handoff security scan completed for %s", namespace)
@@ -1373,7 +1409,7 @@ class MonitorSession:
                 }
                 try:
                     await asyncio.wait_for(
-                        asyncio.to_thread(_run_proactive_investigation_sync, finding),
+                        asyncio.to_thread(_run_proactive_investigation_sync, finding, client=self._client),
                         timeout=timeout_seconds,
                     )
                     logger.info("Handoff SRE investigation completed for %s", namespace)

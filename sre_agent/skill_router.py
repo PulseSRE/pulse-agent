@@ -320,30 +320,39 @@ def _llm_classify(query: str):
         from .agent import create_client
 
         client = create_client()
-
-        skill_options = "\n".join(f"- {s.name}: {s.description}" for s in skills.values())
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=20,
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        f"Classify this user query into exactly one skill.\n\n"
-                        f"Available skills:\n{skill_options}\n\n"
-                        f"Query: {query}\n\n"
-                        f"Reply with ONLY the skill name, nothing else."
-                    ),
-                }
-            ],
-        )
+        try:
+            skill_options = "\n".join(f"- {s.name}: {s.description}" for s in skills.values())
+            response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=20,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Classify this user query into exactly one skill.\n\n"
+                            f"Available skills:\n{skill_options}\n\n"
+                            f"Query: {query}\n\n"
+                            f"Reply with ONLY the skill name, nothing else."
+                        ),
+                    }
+                ],
+            )
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
 
         name = response.content[0].text.strip().lower().replace(" ", "_")
         skill = skills.get(name)
         if skill:
             # Cache the result
             _llm_cache[query_hash] = (name, time.time())
-            # Evict oldest entries if cache is full
+            # Evict expired entries first, then oldest if still over cap
+            now = time.time()
+            expired = [k for k, (_, ts) in _llm_cache.items() if now - ts >= _LLM_CACHE_TTL]
+            for k in expired:
+                del _llm_cache[k]
             while len(_llm_cache) > _LLM_CACHE_MAX:
                 oldest_key = next(iter(_llm_cache))
                 del _llm_cache[oldest_key]

@@ -298,18 +298,24 @@ def llm_pick_tools(
         from .agent import create_client
 
         client = create_client()
-        tool_list = ", ".join(tool_names)
+        try:
+            tool_list = ", ".join(tool_names)
 
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=200,
-            messages=[{"role": "user", "content": query}],
-            system=(
-                f"You are a tool selector. Given a user query about Kubernetes/OpenShift, "
-                f"pick the {top_k} most relevant tools from this list:\n{tool_list}\n\n"
-                f"Reply with ONLY comma-separated tool names, nothing else."
-            ),
-        )
+            response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=200,
+                messages=[{"role": "user", "content": query}],
+                system=(
+                    f"You are a tool selector. Given a user query about Kubernetes/OpenShift, "
+                    f"pick the {top_k} most relevant tools from this list:\n{tool_list}\n\n"
+                    f"Reply with ONLY comma-separated tool names, nothing else."
+                ),
+            )
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
 
         raw = response.content[0].text.strip()
         valid_set = set(tool_names)

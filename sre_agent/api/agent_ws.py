@@ -292,11 +292,55 @@ async def _run_agent_ws(
     from ..view_tools import set_current_user
 
     set_current_user(current_user)
+    _cleanup_stale_pending()
     client = create_client()
     ws_id = session_id
-    _turn_starts[ws_id] = time.monotonic()
+    _turn_start = time.monotonic()
+    _turn_starts[ws_id] = _turn_start
     loop = asyncio.get_running_loop()
 
+    try:
+        return await _run_agent_ws_inner(
+            websocket,
+            messages,
+            system_prompt,
+            tool_defs,
+            tool_map,
+            write_tools,
+            ws_id,
+            current_user,
+            mode,
+            turn_number,
+            user_query,
+            client,
+            _turn_start,
+            loop,
+        )
+    finally:
+        _turn_starts.pop(ws_id, None)
+        try:
+            client.close()
+        except Exception:
+            pass
+
+
+async def _run_agent_ws_inner(
+    websocket,
+    messages,
+    system_prompt,
+    tool_defs,
+    tool_map,
+    write_tools,
+    ws_id,
+    current_user,
+    mode,
+    turn_number,
+    user_query,
+    client,
+    _turn_start,
+    loop,
+):
+    """Inner body of _run_agent_ws — separated so the outer function can clean up _turn_starts."""
     # Start memory timing before agent runs
     manager = None
     if get_settings().memory:
@@ -310,7 +354,7 @@ async def _run_agent_ws(
             logger.debug("Memory manager init failed", exc_info=True)
 
     # Run via SkillExecutor — handles callbacks, memory augmentation, tool recording
-    executor = SkillExecutor(websocket, session_id, loop)
+    executor = SkillExecutor(websocket, ws_id, loop)
     config = {
         "system_prompt": system_prompt,
         "tool_defs": tool_defs,
@@ -583,7 +627,7 @@ async def _run_agent_ws(
     turn_meta = {
         "tools_called": list(session_tools),
         "tool_count": len(session_tools),
-        "duration_ms": int((time.monotonic() - _turn_starts.pop(ws_id, time.monotonic())) * 1000),
+        "duration_ms": int((time.monotonic() - _turn_start) * 1000),
         **turn_token_usage,
     }
 
@@ -597,7 +641,7 @@ _turn_starts: dict[str, float] = {}
 
 
 def _cleanup_stale_pending():
-    """Remove stale pending confirms/nonces older than TTL."""
+    """Remove stale pending confirms/nonces older than TTL and dead _ws_alive entries."""
     now = time.time()
     stale = [sid for sid, ts in _pending_timestamps.items() if now - ts > _PENDING_TTL_SECONDS]
     for sid in stale:
@@ -608,6 +652,11 @@ def _cleanup_stale_pending():
         _pending_timestamps.pop(sid, None)
     if stale:
         logger.info("Cleaned up %d stale pending confirmation(s)", len(stale))
+    # Purge _ws_alive entries marked False (ungraceful disconnects)
+    dead = [sid for sid, alive in _ws_alive.items() if not alive]
+    for sid in dead:
+        _ws_alive.pop(sid, None)
+        _turn_starts.pop(sid, None)
 
 
 async def _create_and_register_future(ws_id: str, tool_name: str, tool_input: dict, websocket: WebSocket):

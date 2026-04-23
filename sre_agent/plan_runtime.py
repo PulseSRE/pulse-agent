@@ -304,6 +304,7 @@ class PlanRuntime:
                 )
 
             config = build_config_from_skill(skill, query=prompt)
+            _owns_client = self._client is None
             client = self._client or create_client()
 
             tools_called: list[str] = []
@@ -318,18 +319,25 @@ class PlanRuntime:
                 agent_mode=f"pipeline:plan:{phase.skill_name}",
             )
 
-            response = await asyncio.to_thread(
-                run_agent_streaming,
-                client,
-                [{"role": "user", "content": prompt}],
-                config["system_prompt"],
-                config["tool_defs"],
-                config["tool_map"],
-                config.get("write_tools", set()),
-                on_tool_use=on_tool,
-                on_tool_result=on_tool_result,
-                mode=phase.skill_name,
-            )
+            try:
+                response = await asyncio.to_thread(
+                    run_agent_streaming,
+                    client,
+                    [{"role": "user", "content": prompt}],
+                    config["system_prompt"],
+                    config["tool_defs"],
+                    config["tool_map"],
+                    config.get("write_tools", set()),
+                    on_tool_use=on_tool,
+                    on_tool_result=on_tool_result,
+                    mode=phase.skill_name,
+                )
+            finally:
+                if _owns_client:
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
 
             # Try to extract structured SkillOutput from response
             output = self._parse_skill_output(response, phase, tools_called)
@@ -732,7 +740,8 @@ async def run_parallel_skills(
     from .context_bus import get_context_bus
     from .skill_loader import build_config_from_skill
 
-    if client is None:
+    _owns_client = client is None
+    if _owns_client:
         client = create_client()
 
     start = time.monotonic()
@@ -874,6 +883,11 @@ async def run_parallel_skills(
 
     finally:
         bus.flush_buffer(task_id)
+        if _owns_client:
+            try:
+                client.close()
+            except Exception:
+                pass
 
     elapsed_ms = int((time.monotonic() - start) * 1000)
 

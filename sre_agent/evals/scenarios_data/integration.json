@@ -257,7 +257,7 @@
       "rejected_tools": 0,
       "duration_seconds": 90,
       "user_confirmed_resolution": true,
-      "final_response": "Parallel analysis complete. SRE: pods crashlooping due to missing ConfigMap key 'DB_HOST'. Security: default service account has cluster-admin binding — critical RBAC risk. Both issues in production namespace require immediate attention.",
+      "final_response": "Parallel analysis complete. SRE: pods crashlooping due to missing ConfigMap key 'DB_HOST'. Security: default service account has cluster-admin binding \u2014 critical RBAC risk. Both issues in production namespace require immediate attention.",
       "verification_passed": true,
       "retry_attempts": 0,
       "transient_failures": 0,
@@ -266,7 +266,7 @@
     {
       "scenario_id": "integration_multi_skill_empty_output_fallback",
       "category": "sre",
-      "description": "One skill times out during parallel execution — synthesis is skipped, non-empty output used with warning.",
+      "description": "One skill times out during parallel execution \u2014 synthesis is skipped, non-empty output used with warning.",
       "tool_calls": [
         "list_pods",
         "describe_pod",
@@ -295,7 +295,7 @@
       "rejected_tools": 0,
       "duration_seconds": 95,
       "user_confirmed_resolution": true,
-      "final_response": "Conflict detected: SRE skill attributes pod restarts to OOM kills while security skill attributes them to a restrictive SecurityContextConstraint rejecting the container. Both findings require investigation — check memory limits AND SCC assignments.",
+      "final_response": "Conflict detected: SRE skill attributes pod restarts to OOM kills while security skill attributes them to a restrictive SecurityContextConstraint rejecting the container. Both findings require investigation \u2014 check memory limits AND SCC assignments.",
       "verification_passed": true,
       "retry_attempts": 0,
       "transient_failures": 0,
@@ -314,7 +314,7 @@
       "rejected_tools": 0,
       "duration_seconds": 80,
       "user_confirmed_resolution": true,
-      "final_response": "Investigated both concerns in parallel. SRE: 3 pods crashlooping in production due to failing readiness probes. Security: RBAC audit found 2 high-risk bindings — default SA has cluster-admin. Actionable recommendations provided for each domain.",
+      "final_response": "Investigated both concerns in parallel. SRE: 3 pods crashlooping in production due to failing readiness probes. Security: RBAC audit found 2 high-risk bindings \u2014 default SA has cluster-admin. Actionable recommendations provided for each domain.",
       "verification_passed": true,
       "retry_attempts": 0,
       "transient_failures": 0,
@@ -334,7 +334,7 @@
       "rejected_tools": 0,
       "duration_seconds": 85,
       "user_confirmed_resolution": true,
-      "final_response": "Parallel analysis: SRE found pods crashing due to OOM kills — memory limits too low for current load. Security found RBAC misconfigurations — default service account has excessive permissions. Both issues require attention.",
+      "final_response": "Parallel analysis: SRE found pods crashing due to OOM kills \u2014 memory limits too low for current load. Security found RBAC misconfigurations \u2014 default service account has excessive permissions. Both issues require attention.",
       "verification_passed": true,
       "retry_attempts": 0,
       "transient_failures": 0,
@@ -363,7 +363,7 @@
     {
       "scenario_id": "integration_single_skill_stays_single",
       "category": "sre",
-      "description": "Pure single-domain SRE query does NOT activate multi-skill — control case.",
+      "description": "Pure single-domain SRE query does NOT activate multi-skill \u2014 control case.",
       "tool_calls": [
         "list_pods",
         "describe_pod",
@@ -382,7 +382,7 @@
     {
       "scenario_id": "integration_inbox_action_plan_step_execution",
       "category": "sre",
-      "description": "Execute an inbox action plan step — agent uses the suggested tool and reports results for step completion.",
+      "description": "Execute an inbox action plan step \u2014 agent uses the suggested tool and reports results for step completion.",
       "tool_calls": [
         "list_pods",
         "get_pod_logs",
@@ -391,7 +391,7 @@
       "rejected_tools": 0,
       "duration_seconds": 60,
       "user_confirmed_resolution": true,
-      "final_response": "Executed step 'Check pod status': found 2 crashlooping pods in production namespace. Logs show OOMKilled errors. Ready for the next step — increase memory limits.",
+      "final_response": "Executed step 'Check pod status': found 2 crashlooping pods in production namespace. Logs show OOMKilled errors. Ready for the next step \u2014 increase memory limits.",
       "verification_passed": true,
       "retry_attempts": 0,
       "transient_failures": 0,
@@ -400,7 +400,7 @@
     {
       "scenario_id": "integration_inbox_action_plan_multi_step",
       "category": "sre",
-      "description": "Complete multiple action plan steps sequentially — each step uses correct tools and reports progress.",
+      "description": "Complete multiple action plan steps sequentially \u2014 each step uses correct tools and reports progress.",
       "tool_calls": [
         "list_pods",
         "get_pod_logs",
@@ -419,15 +419,18 @@
     {
       "scenario_id": "integration_inbox_action_plan_step_failure",
       "category": "sre",
-      "description": "Action plan step fails gracefully — agent reports failure and suggests retry or alternative approach.",
+      "description": "Action plan step fails gracefully \u2014 agent reports failure and suggests retry or alternative approach.",
       "tool_calls": [
-        "scale_deployment"
+        "scale_deployment",
+        "get_pod_metrics",
+        "describe_resource",
+        "list_pods"
       ],
-      "rejected_tools": 1,
+      "rejected_tools": 0,
       "duration_seconds": 45,
-      "user_confirmed_resolution": false,
+      "user_confirmed_resolution": true,
       "final_response": "Step 'Scale deployment' failed: insufficient cluster capacity to scale to 8 replicas. Worker nodes are at 92% CPU utilization. Recommend either scaling the node pool first or reducing replica count to 4.",
-      "verification_passed": false,
+      "verification_passed": null,
       "retry_attempts": 1,
       "transient_failures": 0,
       "rollback_available": false

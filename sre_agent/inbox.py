@@ -475,11 +475,17 @@ def _generate_smart_layout(item: dict[str, Any], metadata: dict[str, Any]) -> li
         from .config import get_settings
 
         client = create_client()
-        response = client.messages.create(
-            model=get_settings().model,
-            max_tokens=1500,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        try:
+            response = client.messages.create(
+                model=get_settings().model,
+                max_tokens=1500,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
         text = response.content[0].text.strip()
 
         match = _re.search(r"\{.*\}", text, _re.DOTALL)
@@ -875,6 +881,9 @@ def _phase_a_triage() -> int:
         _inbox_logger.exception("Failed to get settings for triage")
         return 0
 
+    from .agent import create_client
+
+    client = create_client()
     triaged = 0
     for row in rows:
         item = _deserialize_row(row)
@@ -896,9 +905,6 @@ def _phase_a_triage() -> int:
         )
 
         try:
-            from .agent import create_client
-
-            client = create_client()
             response = client.messages.create(
                 model=model, max_tokens=200, messages=[{"role": "user", "content": prompt}]
             )
@@ -938,6 +944,10 @@ def _phase_a_triage() -> int:
             _inbox_logger.exception("Triage failed for %s", item["id"])
             update_item_status(item["id"], "agent_review_failed")
 
+    try:
+        client.close()
+    except Exception:
+        pass
     return triaged
 
 
@@ -1083,6 +1093,9 @@ def _phase_c_plan() -> int:
         _inbox_logger.exception("Failed to get settings for plan generation")
         return 0
 
+    from .agent import create_client
+
+    client = create_client()
     planned = 0
     for row in rows:
         item = _deserialize_row(row)
@@ -1110,9 +1123,6 @@ def _phase_c_plan() -> int:
         )
 
         try:
-            from .agent import create_client
-
-            client = create_client()
             response = client.messages.create(
                 model=model, max_tokens=1000, messages=[{"role": "user", "content": prompt}]
             )
@@ -1149,6 +1159,10 @@ def _phase_c_plan() -> int:
         except Exception:
             _inbox_logger.exception("Plan generation failed for %s", item["id"])
 
+    try:
+        client.close()
+    except Exception:
+        pass
     return planned
 
 

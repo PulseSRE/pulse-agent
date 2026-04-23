@@ -56,21 +56,37 @@ def _ensure_tables() -> None:
 class ContextBus:
     """Shared context between Monitor, SRE Agent, and Security Agent."""
 
+    _BUFFER_TTL = 300  # 5 minutes — evict unflushed buffers after this
+
     def __init__(self, max_entries: int = 100, ttl_seconds: int = 3600):
         self._lock = threading.Lock()
         self._ttl = ttl_seconds
         self._max_entries = max_entries
         self._buffers: dict[str, list[ContextEntry]] = {}
+        self._buffer_timestamps: dict[str, float] = {}
+
+    def _evict_stale_buffers(self) -> None:
+        """Remove buffers older than _BUFFER_TTL. Must be called under self._lock."""
+        now = time.time()
+        stale = [k for k, ts in self._buffer_timestamps.items() if now - ts > self._BUFFER_TTL]
+        for k in stale:
+            self._buffers.pop(k, None)
+            self._buffer_timestamps.pop(k, None)
+        if stale:
+            logger.info("Evicted %d stale context bus buffers", len(stale))
 
     def start_buffering(self, task_id: str) -> None:
         """Begin buffering entries for a parallel task."""
         with self._lock:
+            self._evict_stale_buffers()
             self._buffers[task_id] = []
+            self._buffer_timestamps[task_id] = time.time()
 
     def flush_buffer(self, task_id: str) -> None:
         """Flush buffered entries for a parallel task to the database."""
         with self._lock:
             entries = self._buffers.pop(task_id, [])
+            self._buffer_timestamps.pop(task_id, None)
         for entry in entries:
             entry.parallel_task_id = ""
             self.publish(entry)
