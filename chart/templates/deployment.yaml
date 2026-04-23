@@ -74,6 +74,8 @@ spec:
           env:
             - name: PYTHONDONTWRITEBYTECODE
               value: "1"
+            - name: MALLOC_ARENA_MAX
+              value: "2"
             {{- if .Values.vertexAI.projectId }}
             - name: ANTHROPIC_VERTEX_PROJECT_ID
               value: {{ .Values.vertexAI.projectId | quote }}
