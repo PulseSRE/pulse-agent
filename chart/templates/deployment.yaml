@@ -57,14 +57,14 @@ spec:
               path: /healthz
               port: http
             periodSeconds: 10
-            timeoutSeconds: 3
+            timeoutSeconds: 5
             failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /healthz
               port: http
             periodSeconds: 30
-            timeoutSeconds: 3
+            timeoutSeconds: 5
             failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
