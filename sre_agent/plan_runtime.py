@@ -778,10 +778,10 @@ async def run_parallel_skills(
 
                 try:
                     remaining = set(tasks)
-                    deadline = asyncio.get_event_loop().time() + 120
+                    deadline = asyncio.get_running_loop().time() + 120
 
                     while remaining:
-                        timeout_left = max(deadline - asyncio.get_event_loop().time(), 0)
+                        timeout_left = max(deadline - asyncio.get_running_loop().time(), 0)
                         done, remaining = await asyncio.wait(
                             remaining, return_when=asyncio.FIRST_COMPLETED, timeout=timeout_left
                         )

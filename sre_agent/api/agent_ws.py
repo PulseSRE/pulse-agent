@@ -37,10 +37,9 @@ class SkillExecutor:
     When skill_tag is set (parallel): tool events only, text/thinking suppressed.
     """
 
-    def __init__(self, websocket: WebSocket, session_id: str, loop: asyncio.AbstractEventLoop | None = None):
+    def __init__(self, websocket: WebSocket, session_id: str):
         self.websocket = websocket
         self.session_id = session_id
-        # loop parameter accepted for backward compatibility (plan_runtime.py) but unused
 
     async def run(
         self,
@@ -60,42 +59,31 @@ class SkillExecutor:
 
         # --- Async Callbacks (native, no threading bridge) ---
 
+        async def _ws_send(data: dict):
+            try:
+                await self.websocket.send_json(data)
+            except Exception:
+                logger.debug("WebSocket send failed for %s", self.session_id, exc_info=True)
+
         async def on_text(delta: str):
             if not skill_tag:
-                try:
-                    await self.websocket.send_json({"type": "text_delta", "text": delta})
-                except Exception:
-                    pass
+                await _ws_send({"type": "text_delta", "text": delta})
 
         async def on_thinking(delta: str):
             if not skill_tag:
-                try:
-                    await self.websocket.send_json({"type": "thinking_delta", "thinking": delta})
-                except Exception:
-                    pass
+                await _ws_send({"type": "thinking_delta", "thinking": delta})
 
         async def on_tool_use(name: str):
             tools_called.append(name)
             if skill_tag:
-                try:
-                    await self.websocket.send_json(
-                        {"type": "skill_progress", "skill": skill_tag, "status": "tool_use", "tool": name}
-                    )
-                except Exception:
-                    pass
+                await _ws_send({"type": "skill_progress", "skill": skill_tag, "status": "tool_use", "tool": name})
             else:
-                try:
-                    await self.websocket.send_json({"type": "tool_use", "tool": name})
-                except Exception:
-                    pass
+                await _ws_send({"type": "tool_use", "tool": name})
 
         async def on_component(name: str, spec: dict):
             components.append(spec)
             if not skill_tag:
-                try:
-                    await self.websocket.send_json({"type": "component", "spec": spec, "tool": name})
-                except Exception:
-                    pass
+                await _ws_send({"type": "component", "spec": spec, "tool": name})
 
         async def on_usage(**kwargs):
             for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"):
@@ -113,6 +101,7 @@ class SkillExecutor:
                 )
                 return await asyncio.wait_for(confirm_future, timeout=120)
             except (asyncio.CancelledError, TimeoutError):
+                await _ws_send({"type": "error", "message": "Confirmation timed out or failed. Operation cancelled."})
                 return False
             finally:
                 _pending_confirms.pop(self.session_id, None)
@@ -122,18 +111,15 @@ class SkillExecutor:
         async def on_tool_result(info: dict):
             _base_tool_result_handler(info)
             if skill_tag and info.get("status") == "success":
-                try:
-                    await self.websocket.send_json(
-                        {
-                            "type": "skill_progress",
-                            "skill": skill_tag,
-                            "status": "tool_complete",
-                            "tool": info["tool_name"],
-                            "duration_ms": info.get("duration_ms", 0),
-                        }
-                    )
-                except Exception:
-                    pass
+                await _ws_send(
+                    {
+                        "type": "skill_progress",
+                        "skill": skill_tag,
+                        "status": "tool_complete",
+                        "tool": info["tool_name"],
+                        "duration_ms": info.get("duration_ms", 0),
+                    }
+                )
 
         effective_system = config["system_prompt"]
         if get_settings().memory:

@@ -127,6 +127,7 @@ class TestExecuteTool:
         assert meta["result_bytes"] == 0
 
 
+@patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
 class TestConfirmationGate:
     def _make_stream_context(self, responses):
         """Build a mock client that returns responses in sequence."""
@@ -237,6 +238,7 @@ class TestConfirmationGate:
         confirm_mock.assert_not_called()
 
 
+@patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
 class TestIterationGuard:
     @pytest.mark.asyncio
     async def test_max_iterations_stops_loop(self):

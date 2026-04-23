@@ -96,6 +96,14 @@ _tool_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_pr
 atexit.register(_tool_pool.shutdown, wait=False)
 
 
+async def _invoke(callback, *args, **kwargs):
+    """Invoke a callback that may be sync or async."""
+    result = callback(*args, **kwargs)
+    if asyncio.iscoroutine(result):
+        return await result
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Circuit Breaker — enters "Silent Mode" when the API is unreachable
 # ---------------------------------------------------------------------------
@@ -239,33 +247,24 @@ TOOL_DEFS = [t.to_dict() for t in ALL_TOOLS]
 TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 
 
+def _get_vertex_config() -> tuple[str, str]:
+    """Return (project, region) for Vertex AI, or empty strings for direct API."""
+    return os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", ""), os.environ.get("CLOUD_ML_REGION", "")
+
+
 def create_client():
-    """Create a sync Anthropic client.
-
-    Uses Vertex AI if GCP project is configured,
-    otherwise falls back to direct Anthropic API.
-    """
-    project = os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", "")
-    region = os.environ.get("CLOUD_ML_REGION", "")
-
+    """Create a sync Anthropic client."""
+    project, region = _get_vertex_config()
     if project and region:
         return anthropic.AnthropicVertex(region=region, project_id=project)
-
     return anthropic.Anthropic()
 
 
 def create_async_client():
-    """Create an async Anthropic client for the agent loop.
-
-    Uses Vertex AI if GCP project is configured,
-    otherwise falls back to direct Anthropic API.
-    """
-    project = os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", "")
-    region = os.environ.get("CLOUD_ML_REGION", "")
-
+    """Create an async Anthropic client for the agent loop."""
+    project, region = _get_vertex_config()
     if project and region:
         return anthropic.AsyncAnthropicVertex(region=region, project_id=project)
-
     return anthropic.AsyncAnthropic()
 
 
@@ -566,7 +565,7 @@ async def run_agent_streaming(
                         "API %d, retrying in %ds (attempt %d/%d)", e.status_code, delay, attempt + 1, max_retries
                     )
                     if on_text:
-                        await on_text(f"\n*Rate limited, retrying in {delay}s...*\n")
+                        await _invoke(on_text, f"\n*Rate limited, retrying in {delay}s...*\n")
                     await asyncio.sleep(min(delay, 30))
                     continue
                 _circuit_breaker.record_failure()
@@ -598,22 +597,23 @@ async def run_agent_streaming(
                 if event.type == "content_block_start":
                     if hasattr(event.content_block, "name"):
                         if on_tool_use:
-                            await on_tool_use(event.content_block.name)
+                            await _invoke(on_tool_use, event.content_block.name)
                 elif event.type == "content_block_delta":
                     if event.delta.type == "text_delta":
                         if on_text:
-                            await on_text(event.delta.text)
+                            await _invoke(on_text, event.delta.text)
                         full_text_parts.append(event.delta.text)
                     elif event.delta.type == "thinking_delta":
                         if on_thinking:
-                            await on_thinking(event.delta.thinking)
+                            await _invoke(on_thinking, event.delta.thinking)
 
             response = await stream.get_final_message()
 
         # Extract token usage from API response
         _usage = getattr(response, "usage", None)
         if _usage and on_usage:
-            await on_usage(
+            await _invoke(
+                on_usage,
                 input_tokens=getattr(_usage, "input_tokens", 0),
                 output_tokens=getattr(_usage, "output_tokens", 0),
                 cache_read_tokens=getattr(_usage, "cache_read_input_tokens", 0),
@@ -654,7 +654,8 @@ async def run_agent_streaming(
                     elapsed_ms = int((time.time() - start_time) * 1000)
                     results_map[block.id] = (f"Error: {block.name} timed out", None)
                     if on_tool_result:
-                        await on_tool_result(
+                        await _invoke(
+                            on_tool_result,
                             {
                                 "tool_name": block.name,
                                 "input": block.input,
@@ -665,7 +666,7 @@ async def run_agent_streaming(
                                 "result_bytes": 0,
                                 "was_confirmed": None,
                                 "turn_number": iterations,
-                            }
+                            },
                         )
 
                 for task in done:
@@ -675,7 +676,8 @@ async def run_agent_streaming(
                         text, component, exec_meta = task.result()
                         results_map[block.id] = (text, component)
                         if on_tool_result:
-                            await on_tool_result(
+                            await _invoke(
+                                on_tool_result,
                                 {
                                     "tool_name": block.name,
                                     "input": block.input,
@@ -686,12 +688,13 @@ async def run_agent_streaming(
                                     "result_bytes": exec_meta["result_bytes"],
                                     "was_confirmed": None,
                                     "turn_number": iterations,
-                                }
+                                },
                             )
                     except Exception:
                         results_map[block.id] = (f"Error executing {block.name}", None)
                         if on_tool_result:
-                            await on_tool_result(
+                            await _invoke(
+                                on_tool_result,
                                 {
                                     "tool_name": block.name,
                                     "input": block.input,
@@ -702,16 +705,17 @@ async def run_agent_streaming(
                                     "result_bytes": 0,
                                     "was_confirmed": None,
                                     "turn_number": iterations,
-                                }
+                                },
                             )
 
             # Execute write tools sequentially (need confirmation gate)
             for block in write_blocks:
-                confirmed = await on_confirm(block.name, block.input) if on_confirm else False
+                confirmed = await _invoke(on_confirm, block.name, block.input) if on_confirm else False
                 if not confirmed:
                     results_map[block.id] = ("Operation denied. No confirmation callback or user rejected.", None)
                     if on_tool_result:
-                        await on_tool_result(
+                        await _invoke(
+                            on_tool_result,
                             {
                                 "tool_name": block.name,
                                 "input": block.input,
@@ -722,7 +726,7 @@ async def run_agent_streaming(
                                 "result_bytes": 0,
                                 "was_confirmed": False,
                                 "turn_number": iterations,
-                            }
+                            },
                         )
                     continue
                 write_start = time.time()
@@ -733,7 +737,8 @@ async def run_agent_streaming(
                 write_elapsed_ms = int((time.time() - write_start) * 1000)
                 results_map[block.id] = (text, component)
                 if on_tool_result:
-                    await on_tool_result(
+                    await _invoke(
+                        on_tool_result,
                         {
                             "tool_name": block.name,
                             "input": block.input,
@@ -744,7 +749,7 @@ async def run_agent_streaming(
                             "result_bytes": exec_meta["result_bytes"],
                             "was_confirmed": True,
                             "turn_number": iterations,
-                        }
+                        },
                     )
 
             # Assemble results in original order
@@ -758,7 +763,7 @@ async def run_agent_streaming(
                     }
                 )
                 if component and on_component:
-                    await on_component(block.name, component)
+                    await _invoke(on_component, block.name, component)
 
             messages.append({"role": "user", "content": tool_results})
         elif response.stop_reason == "pause_turn":
