@@ -593,7 +593,7 @@ async def websocket_auto_agent(websocket: WebSocket):
 
                         await websocket.send_json({"type": "skill_progress", "skill": "synthesis", "status": "running"})
 
-                        from ..agent import borrow_client as _borrow_synth
+                        from ..agent import borrow_async_client as _borrow_synth
 
                         async def _synth_text_delta(text: str):
                             try:
@@ -601,7 +601,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                             except Exception:
                                 pass
 
-                        with _borrow_synth() as synth_client:
+                        async with _borrow_synth() as synth_client:
                             synthesis = await synthesize_parallel_outputs(
                                 parallel_result,
                                 content,

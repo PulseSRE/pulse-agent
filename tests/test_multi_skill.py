@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from sre_agent.config import get_settings
 from sre_agent.orchestrator import split_compound_intent
@@ -272,8 +272,8 @@ def test_last_selection_result_contextvar_isolation(set_orca_result):
 def _parallel_skill_patches(mock_client, create_called=True):
     """Common patches for run_parallel_skills tests."""
     return (
-        patch("sre_agent.agent.create_client", return_value=mock_client),
-        patch("sre_agent.agent.run_agent_streaming", return_value="test output"),
+        patch("sre_agent.agent.create_async_client", return_value=mock_client),
+        patch("sre_agent.agent.run_agent_streaming", new_callable=AsyncMock, return_value="test output"),
         patch(
             "sre_agent.skill_loader.build_config_from_skill",
             return_value={

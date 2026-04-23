@@ -118,8 +118,6 @@ async def synthesize_parallel_outputs(
         on_text_delta: optional async callback(str) for streaming synthesis text.
     """
     try:
-        import asyncio
-
         user_content = (
             f"Original user query: {query}\n\n"
             f"--- {result.primary_skill.upper()} SKILL OUTPUT ---\n"
@@ -129,25 +127,19 @@ async def synthesize_parallel_outputs(
         )
 
         if on_text_delta:
-            _loop = asyncio.get_running_loop()
-
-            def _stream_synthesis():
-                collected = []
-                with client.messages.stream(
-                    model=SYNTHESIS_MODEL,
-                    max_tokens=4096,
-                    system=_SYNTHESIS_SYSTEM,
-                    messages=[{"role": "user", "content": user_content}],
-                ) as stream:
-                    for text in stream.text_stream:
-                        collected.append(text)
-                        asyncio.run_coroutine_threadsafe(on_text_delta(text), _loop)
-                return "".join(collected)
-
-            raw_text = await asyncio.to_thread(_stream_synthesis)
+            collected: list[str] = []
+            async with client.messages.stream(
+                model=SYNTHESIS_MODEL,
+                max_tokens=4096,
+                system=_SYNTHESIS_SYSTEM,
+                messages=[{"role": "user", "content": user_content}],
+            ) as stream:
+                async for text in stream.text_stream:
+                    collected.append(text)
+                    await on_text_delta(text)
+            raw_text = "".join(collected)
         else:
-            response = await asyncio.to_thread(
-                client.messages.create,
+            response = await client.messages.create(
                 model=SYNTHESIS_MODEL,
                 max_tokens=4096,
                 system=_SYNTHESIS_SYSTEM,

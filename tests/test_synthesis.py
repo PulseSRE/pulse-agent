@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from sre_agent.synthesis import (
     Conflict,
@@ -102,7 +102,7 @@ def test_synthesize_fallback_on_api_error():
         duration_ms=2000,
     )
     mock_client = MagicMock()
-    mock_client.messages.create = MagicMock(side_effect=Exception("API down"))
+    mock_client.messages.create = AsyncMock(side_effect=Exception("API down"))
 
     synthesis = asyncio.run(synthesize_parallel_outputs(result, "test query", mock_client))
     assert "SRE output" in synthesis.unified_response
