@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from sre_agent.context_bus import ContextEntry, get_context_bus
 from sre_agent.db import Database, reset_database, set_database
 from sre_agent.handoff_tools import request_security_scan, request_sre_investigation
-from sre_agent.monitor import MonitorSession
+from sre_agent.monitor.cluster_monitor import ClusterMonitor
 
 
 @pytest.fixture(autouse=True)
@@ -102,12 +102,10 @@ class TestRequestSreInvestigation:
 
 class TestProcessHandoffs:
     @pytest.fixture
-    def session(self):
-        ws = MagicMock()
-        ws.send_json = AsyncMock()
-        return MonitorSession(websocket=ws, trust_level=1)
+    def monitor(self):
+        return ClusterMonitor()
 
-    def test_processes_security_handoff(self, session):
+    def test_processes_security_handoff(self, monitor):
         # Publish a security handoff request
         bus = get_context_bus()
         bus.publish(
@@ -121,12 +119,12 @@ class TestProcessHandoffs:
         )
 
         with patch(
-            "sre_agent.monitor.session._run_security_followup_sync",
+            "sre_agent.monitor.cluster_monitor._run_security_followup_sync",
             return_value={"security_issues": [], "risk_level": "low"},
         ) as mock_sec:
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(session.process_handoffs())
+                loop.run_until_complete(monitor.process_handoffs())
             finally:
                 loop.close()
             mock_sec.assert_called_once()
@@ -134,7 +132,7 @@ class TestProcessHandoffs:
             assert finding_arg["category"] == "handoff"
             assert "prod" in finding_arg["title"]
 
-    def test_processes_sre_handoff(self, session):
+    def test_processes_sre_handoff(self, monitor):
         bus = get_context_bus()
         bus.publish(
             ContextEntry(
@@ -153,12 +151,12 @@ class TestProcessHandoffs:
         )
 
         with patch(
-            "sre_agent.monitor.session._run_proactive_investigation_sync",
+            "sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync",
             return_value={"summary": "ok", "confidence": 0.5},
         ) as mock_sre:
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(session.process_handoffs())
+                loop.run_until_complete(monitor.process_handoffs())
             finally:
                 loop.close()
             mock_sre.assert_called_once()
@@ -166,7 +164,7 @@ class TestProcessHandoffs:
             assert finding_arg["category"] == "handoff"
             assert "staging" in finding_arg["resources"][0]["namespace"]
 
-    def test_cleans_up_processed_requests(self, session):
+    def test_cleans_up_processed_requests(self, monitor):
         from sre_agent.db import get_database
 
         bus = get_context_bus()
@@ -180,10 +178,10 @@ class TestProcessHandoffs:
             )
         )
 
-        with patch("sre_agent.monitor.session._run_security_followup_sync", return_value={}):
+        with patch("sre_agent.monitor.cluster_monitor._run_security_followup_sync", return_value={}):
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(session.process_handoffs())
+                loop.run_until_complete(monitor.process_handoffs())
             finally:
                 loop.close()
 
@@ -198,15 +196,15 @@ class TestProcessHandoffs:
         )
         assert len(rows) == 0
 
-    def test_no_handoffs_is_noop(self, session):
+    def test_no_handoffs_is_noop(self, monitor):
         # Should not raise
         loop = asyncio.new_event_loop()
         try:
-            loop.run_until_complete(session.process_handoffs())
+            loop.run_until_complete(monitor.process_handoffs())
         finally:
             loop.close()
 
-    def test_ignores_unknown_target(self, session):
+    def test_ignores_unknown_target(self, monitor):
         bus = get_context_bus()
         bus.publish(
             ContextEntry(
@@ -220,12 +218,12 @@ class TestProcessHandoffs:
 
         # Should not call either investigation function
         with (
-            patch("sre_agent.monitor.session._run_security_followup_sync") as mock_sec,
-            patch("sre_agent.monitor.session._run_proactive_investigation_sync") as mock_sre,
+            patch("sre_agent.monitor.cluster_monitor._run_security_followup_sync") as mock_sec,
+            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync") as mock_sre,
         ):
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(session.process_handoffs())
+                loop.run_until_complete(monitor.process_handoffs())
             finally:
                 loop.close()
             mock_sec.assert_not_called()

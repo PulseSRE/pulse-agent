@@ -53,13 +53,19 @@ async def debug_memory():
         result["dependency_graph"] = {"error": str(e)}
 
     try:
+        from ..monitor.cluster_monitor import get_cluster_monitor_sync
+
+        monitor = get_cluster_monitor_sync()
+        if monitor:
+            result["cluster_monitor"] = monitor.memory_stats()
+        else:
+            result["cluster_monitor"] = {"status": "not_started"}
+        # Also report active client count
         from .ws_endpoints import _active_monitor_sessions
 
-        sessions = {ws_id: s.memory_stats() for ws_id, s in _active_monitor_sessions.items()}
-        result["monitor_sessions"] = sessions
-        result["monitor_session_count"] = len(sessions)
+        result["monitor_client_count"] = len(_active_monitor_sessions)
     except Exception as e:
-        result["monitor_sessions"] = {"error": str(e)}
+        result["cluster_monitor"] = {"error": str(e)}
 
     try:
         from ..tool_registry import TOOL_REGISTRY

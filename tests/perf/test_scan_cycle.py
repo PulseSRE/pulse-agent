@@ -39,12 +39,16 @@ def _mock_custom():
     return custom
 
 
-def _make_session():
-    from sre_agent.monitor.session import MonitorSession
+def _make_monitor():
+    from sre_agent.monitor.cluster_monitor import ClusterMonitor
+    from sre_agent.monitor.session import MonitorClient
 
     ws = AsyncMock()
     ws.send_json = AsyncMock()
-    return MonitorSession(ws, trust_level=0, auto_fix_categories=[])
+    monitor = ClusterMonitor()
+    client = MonitorClient(ws, trust_level=0, auto_fix_categories=[])
+    monitor._subscribers.append(client)
+    return monitor
 
 
 class TestScanCycleLatency:
@@ -61,12 +65,12 @@ class TestScanCycleLatency:
             patch("sre_agent.k8s_client.get_custom_client", return_value=_mock_custom()),
             patch("sre_agent.k8s_client.get_version_client", return_value=MagicMock()),
         ):
-            session = _make_session()
+            monitor = _make_monitor()
 
             loop = asyncio.new_event_loop()
             try:
                 start = time.monotonic()
-                loop.run_until_complete(session.run_scan())
+                loop.run_until_complete(monitor.run_scan())
                 elapsed = time.monotonic() - start
             finally:
                 loop.close()
@@ -88,10 +92,10 @@ class TestScanCycleLatency:
             patch("sre_agent.k8s_client.get_custom_client", return_value=_mock_custom()),
             patch("sre_agent.k8s_client.get_version_client", return_value=MagicMock()),
         ):
-            session = _make_session()
+            monitor = _make_monitor()
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(session.run_scan())
+                loop.run_until_complete(monitor.run_scan())
             finally:
                 loop.close()
-            assert session._scan_counter >= 1
+            assert monitor._scan_counter >= 1

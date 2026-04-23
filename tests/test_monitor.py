@@ -26,6 +26,7 @@ from sre_agent.monitor import (
     save_investigation,
     update_action_verification,
 )
+from sre_agent.monitor.cluster_monitor import ClusterMonitor, reset_cluster_monitor
 from tests.conftest import _TEST_DB_URL
 
 
@@ -64,6 +65,7 @@ def _use_temp_db(monkeypatch, tmp_path):
     _cb._ensure_tables()
     yield
     reset_database()
+    reset_cluster_monitor()
     _mon.findings._tables_ensured = False
     _cb._tables_ensured = False
 
@@ -336,7 +338,11 @@ class TestSecurityFollowup:
             async def send_json(self, data):
                 sent_messages.append(data)
 
-        session = MonitorSession(FakeSocket(), trust_level=1)
+        monitor = ClusterMonitor()
+        client = MonitorSession(FakeSocket(), trust_level=1)
+
+        # Manually add subscriber so broadcast works
+        monitor._subscribers.append(client)
 
         finding = _make_finding(
             severity="critical",
@@ -359,16 +365,18 @@ class TestSecurityFollowup:
         }
 
         with (
-            patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
-            patch("sre_agent.monitor.session._run_security_followup_sync", return_value=mock_sec_result) as mock_sec,
+            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch(
+                "sre_agent.monitor.cluster_monitor._run_security_followup_sync", return_value=mock_sec_result
+            ) as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
-            patch.object(session, "_try_plan_execution", return_value=False),
+            patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
         ):
             mock_cb.is_open = False
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(session.run_investigations([finding]))
+                loop.run_until_complete(monitor.run_investigations([finding]))
             finally:
                 loop.close()
 
@@ -392,7 +400,9 @@ class TestSecurityFollowup:
             async def send_json(self, data):
                 sent_messages.append(data)
 
-        session = MonitorSession(FakeSocket(), trust_level=1)
+        monitor = ClusterMonitor()
+        client = MonitorSession(FakeSocket(), trust_level=1)
+        monitor._subscribers.append(client)
 
         finding = _make_finding(
             severity="critical",
@@ -410,16 +420,16 @@ class TestSecurityFollowup:
         }
 
         with (
-            patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
-            patch("sre_agent.monitor.session._run_security_followup_sync") as mock_sec,
+            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor.cluster_monitor._run_security_followup_sync") as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
-            patch.object(session, "_try_plan_execution", return_value=False),
+            patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
         ):
             mock_cb.is_open = False
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(session.run_investigations([finding]))
+                loop.run_until_complete(monitor.run_investigations([finding]))
             finally:
                 loop.close()
 
@@ -443,7 +453,9 @@ class TestSecurityFollowup:
             async def send_json(self, data):
                 sent_messages.append(data)
 
-        session = MonitorSession(FakeSocket(), trust_level=1)
+        monitor = ClusterMonitor()
+        client = MonitorSession(FakeSocket(), trust_level=1)
+        monitor._subscribers.append(client)
 
         findings = [
             _make_finding(
@@ -469,16 +481,18 @@ class TestSecurityFollowup:
         }
 
         with (
-            patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
-            patch("sre_agent.monitor.session._run_security_followup_sync", return_value=mock_sec_result) as mock_sec,
+            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch(
+                "sre_agent.monitor.cluster_monitor._run_security_followup_sync", return_value=mock_sec_result
+            ) as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
-            patch.object(session, "_try_plan_execution", return_value=False),
+            patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
         ):
             mock_cb.is_open = False
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(session.run_investigations(findings))
+                loop.run_until_complete(monitor.run_investigations(findings))
             finally:
                 loop.close()
 
@@ -506,7 +520,9 @@ class TestMonitorAutoLearn:
             async def send_json(self, data):
                 sent_messages.append(data)
 
-        session = MonitorSession(FakeSocket(), trust_level=1)
+        monitor = ClusterMonitor()
+        client = MonitorSession(FakeSocket(), trust_level=1)
+        monitor._subscribers.append(client)
 
         finding = _make_finding(
             severity="critical",
@@ -524,15 +540,15 @@ class TestMonitorAutoLearn:
         }
 
         with (
-            patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
-            patch.object(session, "_try_plan_execution", return_value=False),
+            patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
         ):
             mock_cb.is_open = False
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(session.run_investigations([finding]))
+                loop.run_until_complete(monitor.run_investigations([finding]))
             finally:
                 loop.close()
 
@@ -563,7 +579,9 @@ class TestMonitorAutoLearn:
             async def send_json(self, data):
                 sent_messages.append(data)
 
-        session = MonitorSession(FakeSocket(), trust_level=1)
+        monitor = ClusterMonitor()
+        client = MonitorSession(FakeSocket(), trust_level=1)
+        monitor._subscribers.append(client)
 
         finding = _make_finding(
             severity="warning",
@@ -581,14 +599,14 @@ class TestMonitorAutoLearn:
         }
 
         with (
-            patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch("sre_agent.plan_templates.match_template", return_value=None),
         ):
             mock_cb.is_open = False
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(session.run_investigations([finding]))
+                loop.run_until_complete(monitor.run_investigations([finding]))
             finally:
                 loop.close()
 
@@ -615,7 +633,9 @@ class TestMonitorAutoLearn:
             async def send_json(self, data):
                 sent_messages.append(data)
 
-        session = MonitorSession(FakeSocket(), trust_level=1)
+        monitor = ClusterMonitor()
+        client = MonitorSession(FakeSocket(), trust_level=1)
+        monitor._subscribers.append(client)
 
         finding = _make_finding(
             severity="critical",
@@ -633,16 +653,16 @@ class TestMonitorAutoLearn:
         }
 
         with (
-            patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
-            patch.object(session, "_try_plan_execution", return_value=False),
+            patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
         ):
             mock_cb.is_open = False
             # Should not raise even without memory
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(session.run_investigations([finding]))
+                loop.run_until_complete(monitor.run_investigations([finding]))
             finally:
                 loop.close()
 
@@ -661,9 +681,11 @@ class TestMonitorAutoLearn:
             async def send_json(self, data):
                 sent_messages.append(data)
 
-        session = MonitorSession(FakeSocket(), trust_level=3, auto_fix_categories=["crashloop"])
+        monitor = ClusterMonitor()
+        client = MonitorSession(FakeSocket(), trust_level=3, auto_fix_categories=["crashloop"])
+        monitor._subscribers.append(client)
 
-        # Create a pending action in session state
+        # Create a pending action in monitor state
         action = _make_action_report(
             finding_id="f-test",
             tool="delete_pod",
@@ -672,16 +694,16 @@ class TestMonitorAutoLearn:
             reasoning="Auto-fix crashloop",
         )
         save_action(action, category="crashloop", resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}])
-        session._pending_verifications[action["id"]] = {
+        monitor._pending_verifications[action["id"]] = {
             "category": "crashloop",
             "resources": [{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
             "payload": {"tool": "delete_pod"},
         }
 
-        # Simulate no active finding → verified
+        # Simulate no active finding -> verified
         loop = asyncio.new_event_loop()
         try:
-            loop.run_until_complete(session.process_verifications([]))
+            loop.run_until_complete(monitor.process_verifications([]))
         finally:
             loop.close()
 
@@ -868,8 +890,7 @@ class TestConfidenceScoring:
 class TestResolutionEvents:
     def test_resolution_emitted_when_finding_disappears(self):
         """When a finding from scan N is absent in scan N+1, a resolution event is sent."""
-        ws = MagicMock()
-        session = MonitorSession(ws, trust_level=1)
+        monitor = ClusterMonitor()
 
         # Simulate scan N: finding present
         finding = _make_finding(
@@ -880,19 +901,19 @@ class TestResolutionEvents:
             resources=[{"kind": "Pod", "name": "web", "namespace": "prod"}],
         )
         key = "crashloop:Pod crashing:Pod:prod:web"
-        session._last_findings[key] = finding
+        monitor._last_findings[key] = finding
 
         # Simulate scan N+1: finding gone — run the stale-key detection inline
         current_keys: set[str] = set()  # empty = finding disappeared
-        stale_keys = set(session._last_findings.keys()) - current_keys
+        stale_keys = set(monitor._last_findings.keys()) - current_keys
         resolution_events = []
         for k in stale_keys:
-            resolved = session._last_findings.pop(k)
+            resolved = monitor._last_findings.pop(k)
             resolved_by = "self-healed"
             fid = resolved.get("id", "")
-            if fid in session._recent_fix_ids:
+            if fid in monitor._recent_fix_ids:
                 resolved_by = "auto-fix"
-                session._recent_fix_ids.discard(fid)
+                monitor._recent_fix_ids.discard(fid)
             resolution_events.append(
                 {
                     "type": "resolution",
@@ -909,8 +930,7 @@ class TestResolutionEvents:
 
     def test_resolution_attributed_to_auto_fix(self):
         """When a fixed finding disappears, resolvedBy should be 'auto-fix'."""
-        ws = MagicMock()
-        session = MonitorSession(ws, trust_level=3)
+        monitor = ClusterMonitor()
 
         finding = _make_finding(
             severity="warning",
@@ -920,34 +940,33 @@ class TestResolutionEvents:
             resources=[{"kind": "Deployment", "name": "api", "namespace": "prod"}],
         )
         key = "workloads:Deploy failing:Deployment:prod:api"
-        session._last_findings[key] = finding
-        session._recent_fix_ids.add(finding["id"])
+        monitor._last_findings[key] = finding
+        monitor._recent_fix_ids.add(finding["id"])
 
         # Finding disappears
-        stale_keys = set(session._last_findings.keys()) - set()
+        stale_keys = set(monitor._last_findings.keys()) - set()
         for k in stale_keys:
-            resolved = session._last_findings.pop(k)
+            resolved = monitor._last_findings.pop(k)
             fid = resolved.get("id", "")
-            if fid in session._recent_fix_ids:
+            if fid in monitor._recent_fix_ids:
                 resolved_by = "auto-fix"
-                session._recent_fix_ids.discard(fid)
+                monitor._recent_fix_ids.discard(fid)
             else:
                 resolved_by = "self-healed"
 
         assert resolved_by == "auto-fix"
-        assert finding["id"] not in session._recent_fix_ids  # cleaned up
+        assert finding["id"] not in monitor._recent_fix_ids  # cleaned up
 
     def test_recent_fix_ids_bounded(self):
         """_recent_fix_ids should not grow unboundedly."""
-        ws = MagicMock()
-        session = MonitorSession(ws, trust_level=3)
+        monitor = ClusterMonitor()
         for i in range(600):
-            session._recent_fix_ids.add(f"f-{i:012d}")
-        assert len(session._recent_fix_ids) == 600
+            monitor._recent_fix_ids.add(f"f-{i:012d}")
+        assert len(monitor._recent_fix_ids) == 600
         # Simulate the cap logic from _run_scan_locked
-        if len(session._recent_fix_ids) > 500:
-            session._recent_fix_ids = set(list(session._recent_fix_ids)[-500:])
-        assert len(session._recent_fix_ids) == 500
+        if len(monitor._recent_fix_ids) > 500:
+            monitor._recent_fix_ids = set(list(monitor._recent_fix_ids)[-500:])
+        assert len(monitor._recent_fix_ids) == 500
 
 
 class TestExecuteRollback:
@@ -1064,8 +1083,7 @@ class TestSimulation:
 
 class TestNoiseTracking:
     def test_noise_score_not_set_on_first_appearance(self):
-        ws = MagicMock()
-        session = MonitorSession(ws, trust_level=1)
+        monitor = ClusterMonitor()
         # No transient history — noise score should not be set
         finding = _make_finding(
             severity="warning",
@@ -1075,25 +1093,23 @@ class TestNoiseTracking:
             resources=[{"kind": "Pod", "name": "x", "namespace": "ns"}],
         )
         key = _finding_key(finding)
-        assert session._transient_counts.get(key, 0) == 0
+        assert monitor._transient_counts.get(key, 0) == 0
 
     def test_transient_count_increments(self):
-        ws = MagicMock()
-        session = MonitorSession(ws, trust_level=1)
+        monitor = ClusterMonitor()
         key = "pending:Pod pending:Pod:ns:x"
-        session._transient_counts[key] = 2
+        monitor._transient_counts[key] = 2
         # Simulate another disappearance
-        session._transient_counts[key] += 1
-        assert session._transient_counts[key] == 3
+        monitor._transient_counts[key] += 1
+        assert monitor._transient_counts[key] == 3
 
     def test_noise_threshold_configurable(self, monkeypatch):
         from sre_agent.config import _reset_settings
 
         monkeypatch.setenv("PULSE_AGENT_NOISE_THRESHOLD", "0.9")
         _reset_settings()
-        ws = MagicMock()
-        session = MonitorSession(ws, trust_level=1)
-        assert session._noise_threshold == 0.9
+        monitor = ClusterMonitor()
+        assert monitor._noise_threshold == 0.9
 
 
 class TestCreateDashboard:
@@ -1139,7 +1155,9 @@ class TestEvalScaffoldingIntegration:
             async def send_json(self, data):
                 sent_messages.append(data)
 
-        session = MonitorSession(FakeSocket(), trust_level=1)
+        monitor = ClusterMonitor()
+        client = MonitorSession(FakeSocket(), trust_level=1)
+        monitor._subscribers.append(client)
 
         finding = _make_finding(
             severity="critical",
@@ -1192,7 +1210,10 @@ class TestEvalScaffoldingIntegration:
 
         eval_mock = MagicMock()
         with (
-            patch("sre_agent.monitor.session.MonitorSession._try_plan_execution", wraps=session._try_plan_execution),
+            patch(
+                "sre_agent.monitor.cluster_monitor.ClusterMonitor._try_plan_execution",
+                wraps=monitor._try_plan_execution,
+            ),
             patch("sre_agent.plan_runtime.PlanRuntime.execute", side_effect=_fake_execute),
             patch("sre_agent.plan_templates.match_template", return_value=template),
             patch("sre_agent.postmortem.save_postmortem"),
@@ -1205,7 +1226,7 @@ class TestEvalScaffoldingIntegration:
         ):
             loop = asyncio.new_event_loop()
             try:
-                result = loop.run_until_complete(session._try_plan_execution(finding))
+                result = loop.run_until_complete(monitor._try_plan_execution(finding))
             finally:
                 loop.close()
 
@@ -1230,7 +1251,9 @@ class TestEvalScaffoldingIntegration:
             async def send_json(self, data):
                 sent_messages.append(data)
 
-        session = MonitorSession(FakeSocket(), trust_level=1)
+        monitor = ClusterMonitor()
+        client = MonitorSession(FakeSocket(), trust_level=1)
+        monitor._subscribers.append(client)
 
         finding = _make_finding(
             severity="critical",
@@ -1250,9 +1273,9 @@ class TestEvalScaffoldingIntegration:
         eval_mock = MagicMock()
         fake_bus = MagicMock()
         with (
-            patch("sre_agent.monitor.session._run_proactive_investigation_sync", return_value=mock_inv_result),
+            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation_sync", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
-            patch.object(session, "_try_plan_execution", return_value=False),
+            patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.context_bus.get_context_bus", return_value=fake_bus),
             patch("sre_agent.plan_templates.match_template", return_value=None),
             patch("sre_agent.skill_scaffolder.save_scaffolded_skill"),
@@ -1265,7 +1288,7 @@ class TestEvalScaffoldingIntegration:
             mock_cb.is_open = False
             loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(session.run_investigations([finding]))
+                loop.run_until_complete(monitor.run_investigations([finding]))
             finally:
                 loop.close()
 

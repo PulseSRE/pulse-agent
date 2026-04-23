@@ -26,6 +26,12 @@ from .autofix import (
     is_autofix_paused,
     set_autofix_paused,
 )
+from .cluster_monitor import (
+    ClusterMonitor,
+    get_cluster_monitor,
+    get_cluster_monitor_sync,
+    reset_cluster_monitor,
+)
 from .confidence import (
     _estimate_auto_fix_confidence,
     _estimate_finding_confidence,
@@ -70,7 +76,7 @@ from .scanners import (
     scan_oom_killed_pods,
     scan_pending_pods,
 )
-from .session import MonitorSession
+from .session import MonitorClient, MonitorSession
 from .webhook import _send_webhook
 
 # The `findings` submodule is imported above (via _ensure_tables, etc.)
@@ -81,23 +87,20 @@ from .webhook import _send_webhook
 __all__ = [
     "ALL_SCANNERS",
     "AUTO_FIX_HANDLERS",
-    # registry
     "SCANNER_REGISTRY",
     "SEVERITY_CRITICAL",
     "SEVERITY_INFO",
     "SEVERITY_WARNING",
-    # session
+    "ClusterMonitor",
+    "MonitorClient",
     "MonitorSession",
-    # investigations
     "_build_investigation_prompt",
     "_ensure_tables",
     "_estimate_auto_fix_confidence",
-    # confidence
     "_estimate_finding_confidence",
     "_extract_json_object",
     "_finding_content_hash",
     "_finding_key",
-    # autofix
     "_fix_crashloop",
     "_fix_image_pull",
     "_fix_workloads",
@@ -109,21 +112,20 @@ __all__ = [
     "_run_proactive_investigation_sync",
     "_run_security_followup_sync",
     "_sanitize_for_prompt",
-    # webhook
     "_send_webhook",
     "_skip_namespace",
-    # findings
     "_ts",
     "execute_rollback",
     "get_action_detail",
     "get_briefing",
+    "get_cluster_monitor",
+    "get_cluster_monitor_sync",
     "get_fix_history",
     "get_investigation_stats",
     "is_autofix_paused",
-    # actions
+    "reset_cluster_monitor",
     "save_action",
     "save_investigation",
-    # scanners
     "scan_crashlooping_pods",
     "scan_daemonset_gaps",
     "scan_degraded_operators",

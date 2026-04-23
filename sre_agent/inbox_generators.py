@@ -74,11 +74,11 @@ def _get_tls_secrets() -> list[dict]:
 
 def _get_trend_findings() -> list[dict]:
     try:
-        from .monitor.session import MonitorSession
+        from .monitor.cluster_monitor import get_cluster_monitor_sync
 
-        session = MonitorSession._instance
-        if session and hasattr(session, "_trend_findings"):
-            return session._trend_findings
+        monitor = get_cluster_monitor_sync()
+        if monitor and hasattr(monitor, "_trend_findings"):
+            return monitor._trend_findings
     except Exception:
         pass
     return []

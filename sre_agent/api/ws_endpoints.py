@@ -12,7 +12,7 @@ import uuid
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
 from ..config import get_settings
-from ..monitor import MonitorSession, get_fix_history
+from ..monitor import MonitorClient, get_cluster_monitor, get_fix_history
 from ..orchestrator import build_orchestrated_config, classify_intent, fix_typos
 from .agent_ws import (
     MAX_MESSAGE_SIZE,
@@ -29,7 +29,7 @@ from .auth import _get_current_user, _verify_ws_token
 from .context import _apply_style_hint, _build_context_prefix
 
 # Active monitor sessions — keyed by ws_id, used by /debug/memory
-_active_monitor_sessions: dict[str, MonitorSession] = {}
+_active_monitor_sessions: dict[str, MonitorClient] = {}
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -814,13 +814,19 @@ async def websocket_monitor(websocket: WebSocket):
     except (TimeoutError, Exception):
         pass  # Use defaults
 
-    session = MonitorSession(websocket, trust_level, auto_fix_categories)
+    client = MonitorClient(websocket, trust_level, auto_fix_categories)
     ws_id = str(uuid.uuid4())
     _ws_alive[ws_id] = True
-    _active_monitor_sessions[ws_id] = session
+    _active_monitor_sessions[ws_id] = client
 
-    # Start scan loop as background task
-    scan_task = asyncio.create_task(session.run_loop())
+    # Get or create the singleton ClusterMonitor and subscribe this client
+    monitor = await get_cluster_monitor()
+    await monitor.subscribe(client)
+
+    # Start scan loop if not already running
+    scan_task: asyncio.Task | None = None
+    if not monitor.running:
+        scan_task = asyncio.create_task(monitor.run_loop())
 
     # Listen for client messages (with rate limiting)
     message_timestamps: list[float] = []
@@ -855,19 +861,19 @@ async def websocket_monitor(websocket: WebSocket):
 
             if msg_type == "trigger_scan":
                 # H1: check scan lock before creating a new task to prevent overlapping scans
-                if session._scan_lock.locked():
+                if monitor._scan_lock.locked():
                     logger.info("Manual scan skipped -- scan already in progress")
                     await websocket.send_json({"type": "error", "message": "Scan already in progress"})
                 else:
                     logger.info("Manual scan triggered by client")
-                    asyncio.create_task(session.run_scan())
+                    asyncio.create_task(monitor.run_scan())
 
             elif msg_type == "action_response":
                 action_id = data.get("actionId", "")
                 if not isinstance(action_id, str) or len(action_id) > 200:
                     continue
                 approved = data.get("approved", False)
-                handled = session.resolve_action_response(action_id, approved)
+                handled = client.resolve_action_response(action_id, approved)
                 logger.info("Action response: id=%s approved=%s handled=%s", action_id, approved, handled)
                 if handled:
                     from ..inbox import record_interaction
@@ -882,10 +888,10 @@ async def websocket_monitor(websocket: WebSocket):
             elif msg_type == "set_disabled_scanners":
                 scanner_ids = data.get("scannerIds", [])
                 if isinstance(scanner_ids, list):
-                    session.disabled_scanners = {str(s) for s in scanner_ids if isinstance(s, str) and len(s) < 64}
-                    logger.info("Disabled scanners updated: %s", session.disabled_scanners)
+                    client.disabled_scanners = {str(s) for s in scanner_ids if isinstance(s, str) and len(s) < 64}
+                    logger.info("Disabled scanners updated: %s", client.disabled_scanners)
                     await websocket.send_json(
-                        {"type": "ack", "message": f"Disabled {len(session.disabled_scanners)} scanners"}
+                        {"type": "ack", "message": f"Disabled {len(client.disabled_scanners)} scanners"}
                     )
 
             elif msg_type == "get_fix_history":
@@ -902,12 +908,16 @@ async def websocket_monitor(websocket: WebSocket):
     except Exception as e:
         logger.error("Monitor WebSocket error: %s", e)
     finally:
-        session.running = False
-        await session.cancel_pending_investigations()
-        scan_task.cancel()
-        try:
-            await scan_task
-        except asyncio.CancelledError:
-            pass
+        await monitor.unsubscribe(client)
+        # If no subscribers left, stop the scan loop
+        if monitor.subscriber_count == 0:
+            monitor.running = False
+            await monitor.cancel_pending_investigations()
+            if scan_task and not scan_task.done():
+                scan_task.cancel()
+                try:
+                    await scan_task
+                except asyncio.CancelledError:
+                    pass
         _ws_alive.pop(ws_id, None)
         _active_monitor_sessions.pop(ws_id, None)
