@@ -8,7 +8,6 @@ import contextlib
 import json
 import logging
 import os
-import threading
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -120,39 +119,34 @@ class CircuitBreaker:
         self.state = self.CLOSED
         self.failure_count = 0
         self.last_failure_time: float = 0
-        self._lock = threading.Lock()
 
     def allow_request(self) -> bool:
-        with self._lock:
-            if self.state == self.CLOSED:
-                return True
-            if self.state == self.OPEN:
-                if time.time() - self.last_failure_time >= self.recovery_timeout:
-                    self.state = self.HALF_OPEN
-                    logger.info("Circuit breaker: HALF_OPEN — testing recovery")
-                    return True
-                return False
-            # HALF_OPEN — allow one request to test
+        if self.state == self.CLOSED:
             return True
+        if self.state == self.OPEN:
+            if time.time() - self.last_failure_time >= self.recovery_timeout:
+                self.state = self.HALF_OPEN
+                logger.info("Circuit breaker: HALF_OPEN — testing recovery")
+                return True
+            return False
+        return True
 
     def record_success(self):
-        with self._lock:
-            if self.state == self.HALF_OPEN:
-                logger.info("Circuit breaker: CLOSED — API recovered")
-            self.state = self.CLOSED
-            self.failure_count = 0
+        if self.state == self.HALF_OPEN:
+            logger.info("Circuit breaker: CLOSED — API recovered")
+        self.state = self.CLOSED
+        self.failure_count = 0
 
     def record_failure(self):
-        with self._lock:
-            self.failure_count += 1
-            self.last_failure_time = time.time()
-            if self.failure_count >= self.failure_threshold:
-                self.state = self.OPEN
-                logger.warning(
-                    "Circuit breaker: OPEN — Silent Mode activated after %d failures. Will retry in %ds.",
-                    self.failure_count,
-                    self.recovery_timeout,
-                )
+        self.failure_count += 1
+        self.last_failure_time = time.time()
+        if self.failure_count >= self.failure_threshold:
+            self.state = self.OPEN
+            logger.warning(
+                "Circuit breaker: OPEN — Silent Mode activated after %d failures. Will retry in %ds.",
+                self.failure_count,
+                self.recovery_timeout,
+            )
 
     @property
     def is_open(self) -> bool:
@@ -245,7 +239,7 @@ TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 
 
 def create_client():
-    """Create an Anthropic client.
+    """Create a sync Anthropic client.
 
     Uses Vertex AI if GCP project is configured,
     otherwise falls back to direct Anthropic API.
@@ -257,6 +251,21 @@ def create_client():
         return anthropic.AnthropicVertex(region=region, project_id=project)
 
     return anthropic.Anthropic()
+
+
+def create_async_client():
+    """Create an async Anthropic client for the agent loop.
+
+    Uses Vertex AI if GCP project is configured,
+    otherwise falls back to direct Anthropic API.
+    """
+    project = os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", "")
+    region = os.environ.get("CLOUD_ML_REGION", "")
+
+    if project and region:
+        return anthropic.AsyncAnthropicVertex(region=region, project_id=project)
+
+    return anthropic.AsyncAnthropic()
 
 
 @contextlib.contextmanager

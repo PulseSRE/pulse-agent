@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import anthropic
 
 from sre_agent.agent import (
     MAX_ITERATIONS,
@@ -407,3 +410,19 @@ class TestOnToolResult:
             on_tool_result=lambda info: results.append(info),
         )
         assert results[0]["turn_number"] == 1
+
+
+class TestCreateAsyncClient:
+    @patch.dict(os.environ, {"ANTHROPIC_VERTEX_PROJECT_ID": "test-proj", "CLOUD_ML_REGION": "us-east5"})
+    def test_returns_async_vertex_when_configured(self):
+        from sre_agent.agent import create_async_client
+
+        client = create_async_client()
+        assert isinstance(client, anthropic.AsyncAnthropicVertex)
+
+    @patch.dict(os.environ, {"ANTHROPIC_VERTEX_PROJECT_ID": "", "CLOUD_ML_REGION": ""})
+    def test_returns_async_anthropic_when_no_vertex(self):
+        from sre_agent.agent import create_async_client
+
+        client = create_async_client()
+        assert isinstance(client, anthropic.AsyncAnthropic)
