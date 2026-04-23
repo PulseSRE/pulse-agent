@@ -426,6 +426,63 @@ class TestOnToolResult:
         assert results[0]["turn_number"] == 1
 
 
+class TestAsyncConfirmation:
+    @pytest.mark.asyncio
+    async def test_cancelled_future_returns_false(self):
+        """CancelledError during confirmation await should return False (deny)."""
+        import asyncio
+
+        future = asyncio.get_running_loop().create_future()
+        future.cancel()
+
+        async def on_confirm(name, inp):
+            try:
+                return await asyncio.wait_for(future, timeout=5)
+            except (asyncio.CancelledError, TimeoutError):
+                return False
+
+        result = await on_confirm("delete_pod", {"pod_name": "test"})
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_timeout_returns_false(self):
+        """TimeoutError during confirmation await should return False (deny)."""
+        import asyncio
+
+        future = asyncio.get_running_loop().create_future()
+
+        async def on_confirm(name, inp):
+            try:
+                return await asyncio.wait_for(future, timeout=0.01)
+            except (asyncio.CancelledError, TimeoutError):
+                return False
+
+        result = await on_confirm("delete_pod", {"pod_name": "test"})
+        assert result is False
+
+
+class TestAsyncToolExecution:
+    @pytest.mark.asyncio
+    async def test_tool_timeout_via_asyncio_wait(self):
+        """Tools exceeding timeout should be in the pending set."""
+        import asyncio
+        import time
+
+        from sre_agent.agent import _tool_pool
+
+        def slow_tool(name, input_data, tool_map):
+            time.sleep(10)
+            return "done", None, {"status": "success", "error_message": None, "error_category": None, "result_bytes": 4}
+
+        loop = asyncio.get_running_loop()
+        task = asyncio.ensure_future(loop.run_in_executor(_tool_pool, slow_tool, "slow", {}, {}))
+        _done, pending = await asyncio.wait({task}, timeout=0.05)
+
+        assert len(pending) == 1
+        for p in pending:
+            p.cancel()
+
+
 class TestCreateAsyncClient:
     @patch.dict(os.environ, {"ANTHROPIC_VERTEX_PROJECT_ID": "test-proj", "CLOUD_ML_REGION": "us-east5"})
     def test_returns_async_vertex_when_configured(self):
