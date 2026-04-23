@@ -11,6 +11,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "availability",
         "checks": ["restart count > threshold", "container state = CrashLoopBackOff"],
         "auto_fixable": True,
+        "scan_every": 1,
     },
     "pending": {
         "displayName": "Pending Pods",
@@ -18,6 +19,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "availability",
         "checks": ["pod phase = Pending", "age > 5 minutes"],
         "auto_fixable": False,
+        "scan_every": 1,
     },
     "workloads": {
         "displayName": "Failed Deployments",
@@ -25,6 +27,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "availability",
         "checks": ["available replicas < desired", "progressing condition"],
         "auto_fixable": True,
+        "scan_every": 1,
     },
     "nodes": {
         "displayName": "Node Pressure",
@@ -32,6 +35,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "infrastructure",
         "checks": ["DiskPressure", "MemoryPressure", "PIDPressure", "NotReady"],
         "auto_fixable": False,
+        "scan_every": 3,
     },
     "cert_expiry": {
         "displayName": "Certificate Expiry",
@@ -39,6 +43,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "security",
         "checks": ["certificate expiry < 30 days", "already expired"],
         "auto_fixable": False,
+        "scan_every": 5,
     },
     "alerts": {
         "displayName": "Firing Alerts",
@@ -46,6 +51,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "monitoring",
         "checks": ["alertstate = firing", "severity mapping"],
         "auto_fixable": False,
+        "scan_every": 1,
     },
     "oom": {
         "displayName": "OOM Killed Pods",
@@ -53,6 +59,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "resources",
         "checks": ["exit reason = OOMKilled", "last terminated state"],
         "auto_fixable": False,
+        "scan_every": 1,
     },
     "image_pull": {
         "displayName": "Image Pull Errors",
@@ -60,6 +67,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "availability",
         "checks": ["waiting reason = ImagePullBackOff", "waiting reason = ErrImagePull"],
         "auto_fixable": True,
+        "scan_every": 1,
     },
     "operators": {
         "displayName": "Degraded Operators",
@@ -67,6 +75,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "infrastructure",
         "checks": ["operator condition Degraded = True"],
         "auto_fixable": False,
+        "scan_every": 3,
     },
     "daemonsets": {
         "displayName": "DaemonSet Gaps",
@@ -74,6 +83,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "availability",
         "checks": ["ready count < desired count"],
         "auto_fixable": False,
+        "scan_every": 3,
     },
     "hpa": {
         "displayName": "HPA Saturation",
@@ -81,6 +91,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "resources",
         "checks": ["current replicas = max replicas"],
         "auto_fixable": False,
+        "scan_every": 3,
     },
     "audit_config": {
         "displayName": "Config Changes",
@@ -88,6 +99,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "audit",
         "checks": ["recent config modifications"],
         "auto_fixable": False,
+        "scan_every": 5,
     },
     "audit_rbac": {
         "displayName": "RBAC Changes",
@@ -95,6 +107,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "audit",
         "checks": ["role/binding modifications"],
         "auto_fixable": False,
+        "scan_every": 5,
     },
     "audit_deployment": {
         "displayName": "Recent Deployments",
@@ -102,6 +115,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "audit",
         "checks": ["deployment rollouts"],
         "auto_fixable": False,
+        "scan_every": 5,
     },
     "audit_events": {
         "displayName": "Warning Events",
@@ -109,6 +123,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "audit",
         "checks": ["event type = Warning"],
         "auto_fixable": False,
+        "scan_every": 3,
     },
     "audit_auth": {
         "displayName": "Auth Events",
@@ -116,6 +131,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "audit",
         "checks": ["auth failures", "privilege escalation attempts"],
         "auto_fixable": False,
+        "scan_every": 5,
     },
     "slo_burn": {
         "displayName": "SLO Burn Rate",
@@ -123,6 +139,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "monitoring",
         "checks": ["burn rate > threshold", "error budget < 30%", "error budget < 10%"],
         "auto_fixable": False,
+        "scan_every": 5,
     },
     "security": {
         "displayName": "Security Posture",
@@ -139,6 +156,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
             "secret rotation > 90 days",
         ],
         "auto_fixable": False,
+        "scan_every": 3,
     },
     "trend_memory": {
         "displayName": "Memory Pressure Forecast",
@@ -146,6 +164,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "predictive",
         "checks": ["predict_linear(node_memory_MemAvailable_bytes[7d], 3*86400) < 0"],
         "auto_fixable": False,
+        "scan_every": 1,  # Trend scanners run separately, not via unified path
     },
     "trend_disk": {
         "displayName": "Disk Pressure Forecast",
@@ -153,6 +172,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "predictive",
         "checks": ["predict_linear(kubelet_volume_stats_used_bytes[7d], 7*86400) > capacity"],
         "auto_fixable": False,
+        "scan_every": 1,  # Trend scanners run separately, not via unified path
     },
     "trend_hpa": {
         "displayName": "HPA Exhaustion Trend",
@@ -160,6 +180,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "predictive",
         "checks": ["avg_over_time((current/max)[48h:]) > 0.9"],
         "auto_fixable": False,
+        "scan_every": 1,  # Trend scanners run separately, not via unified path
     },
     "trend_errors": {
         "displayName": "Error Rate Acceleration",
@@ -167,6 +188,7 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "category": "predictive",
         "checks": ['deriv(rate(http_requests_total{code=~"5.."}[1h])[24h:]) > 0'],
         "auto_fixable": False,
+        "scan_every": 1,  # Trend scanners run separately, not via unified path
     },
 }
 

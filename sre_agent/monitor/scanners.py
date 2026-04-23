@@ -472,6 +472,7 @@ def _get_all_scanners() -> list[tuple[str, Callable[..., Any]]]:
         ("audit_events", scan_warning_events),
         ("audit_auth", scan_auth_events),
         ("slo_burn", scan_slo_burn_rate),
+        ("security", scan_security_posture),
     ]
 
 
@@ -511,3 +512,64 @@ def scan_slo_burn_rate() -> list[dict]:
         return findings
     except Exception:
         return []
+
+
+def scan_security_posture() -> list[dict]:
+    """Run comprehensive security posture check and convert to findings format.
+
+    This wrapper calls get_security_summary() and parses its string output
+    into structured findings compatible with the monitor system.
+    """
+    findings: list[dict[str, Any]] = []
+    try:
+        from ..security_tools import get_security_summary
+
+        summary = get_security_summary()
+
+        # Parse the summary string to extract findings
+        # Format: "  [!!!] [CRITICAL] Category: detail"
+        for line in summary.split("\n"):
+            line = line.strip()
+            if not line or not line.startswith("["):
+                continue
+
+            # Extract severity
+            severity_map = {
+                "[!!!]": SEVERITY_CRITICAL,
+                "[!!]": SEVERITY_WARNING,
+                "[i]": SEVERITY_INFO,
+            }
+            severity = SEVERITY_INFO
+            for marker, sev in severity_map.items():
+                if line.startswith(marker):
+                    severity = sev
+                    break
+
+            # Extract category and detail
+            # Format after severity marker: "[SEVERITY] Category: detail"
+            parts = line.split("]", 2)  # Split on first 2 "]"
+            if len(parts) < 3:
+                continue
+
+            remainder = parts[2].strip()
+            if ":" not in remainder:
+                continue
+
+            category, detail = remainder.split(":", 1)
+            category = category.strip()
+            detail = detail.strip()
+
+            findings.append(
+                _make_finding(
+                    severity=severity,
+                    category="security",
+                    title=f"Security: {category}",
+                    summary=detail,
+                    resources=[],
+                    auto_fixable=False,
+                )
+            )
+    except Exception as e:
+        logger.error("Security posture scan failed: %s", e)
+
+    return findings

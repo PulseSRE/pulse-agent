@@ -1034,9 +1034,12 @@ class MonitorSession:
         except Exception as e:
             logger.error("Failed to fetch shared pod list: %s", e)
 
-        # Run all standard scanners in parallel (skip client-disabled scanners)
+        # Run all standard scanners in parallel (skip client-disabled scanners and respect scan_every)
         active_scanners = [
-            (category, scanner) for category, scanner in _get_all_scanners() if category not in self.disabled_scanners
+            (category, scanner)
+            for category, scanner in _get_all_scanners()
+            if category not in self.disabled_scanners
+            and self._scan_counter % SCANNER_REGISTRY.get(category, {}).get("scan_every", 1) == 0
         ]
 
         async def _run_scanner(category: str, scanner):
@@ -1081,46 +1084,6 @@ class MonitorSession:
         for pr in parallel_results:
             scanner_results.append(pr["result"])
             all_findings.extend(pr["findings"])
-
-        # Run security posture check every 3rd scan
-        if self._scan_counter % 3 == 0:
-            from ..security_tools import get_security_summary
-
-            scanner_start = time.monotonic()
-            try:
-                sec_result = await asyncio.to_thread(get_security_summary)
-                elapsed_ms = int((time.monotonic() - scanner_start) * 1000)
-                # Parse security summary to extract findings count
-                findings_count = 0
-                if "CRITICAL:" in sec_result or "WARNING:" in sec_result:
-                    findings_count = sec_result.count("CRITICAL:") + sec_result.count("WARNING:")
-                registry = SCANNER_REGISTRY.get("security", {})
-                scanner_results.append(
-                    {
-                        "name": "security",
-                        "displayName": registry.get("displayName", "Security Posture"),
-                        "description": registry.get("description", ""),
-                        "duration_ms": elapsed_ms,
-                        "findings_count": findings_count,
-                        "checks": registry.get("checks", []),
-                        "status": "warning" if findings_count > 0 else "clean",
-                    }
-                )
-            except Exception as e:
-                elapsed_ms = int((time.monotonic() - scanner_start) * 1000)
-                logger.error("Security scanner failed: %s", e)
-                scanner_results.append(
-                    {
-                        "name": "security",
-                        "displayName": "Security Posture",
-                        "description": "Comprehensive security check",
-                        "duration_ms": elapsed_ms,
-                        "findings_count": 0,
-                        "status": "error",
-                        "error": str(e)[:100],
-                        "checks": SCANNER_REGISTRY.get("security", {}).get("checks", []),
-                    }
-                )
 
         # Deduplicate: only send new/changed findings
         current_keys = set()
