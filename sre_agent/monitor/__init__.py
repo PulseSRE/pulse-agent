@@ -52,9 +52,7 @@ from .findings import (
 from .investigations import (
     _build_investigation_prompt,
     _run_proactive_investigation,
-    _run_proactive_investigation_sync,
     _run_security_followup,
-    _run_security_followup_sync,
     simulate_action,
 )
 from .registry import (
@@ -112,9 +110,7 @@ __all__ = [
     "_make_prediction",
     "_make_rollback_info",
     "_run_proactive_investigation",
-    "_run_proactive_investigation_sync",
     "_run_security_followup",
-    "_run_security_followup_sync",
     "_sanitize_for_prompt",
     "_send_webhook",
     "_skip_namespace",

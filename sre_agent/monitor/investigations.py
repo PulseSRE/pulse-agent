@@ -304,10 +304,6 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
     }
 
 
-# Backward-compatible alias
-_run_proactive_investigation_sync = _run_proactive_investigation
-
-
 async def _run_security_followup(finding: dict, *, client=None) -> dict:
     """Run a lightweight security check on the namespace of a critical finding."""
     from ..agent import borrow_async_client, run_agent_streaming
@@ -377,7 +373,3 @@ async def _run_security_followup(finding: dict, *, client=None) -> dict:
         "risk_level": parsed.get("risk_level", "unknown"),
         "raw_response": response[:500],
     }
-
-
-# Backward-compatible alias
-_run_security_followup_sync = _run_security_followup
