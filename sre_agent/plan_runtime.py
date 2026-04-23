@@ -327,7 +327,7 @@ class PlanRuntime:
                     config["system_prompt"],
                     config["tool_defs"],
                     config["tool_map"],
-                    config.get("write_tools", set()),
+                    set(),  # investigation plans are read-only — no write tools
                     on_tool_use=on_tool,
                     on_tool_result=on_tool_result,
                     mode=phase.skill_name,
