@@ -302,7 +302,8 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
 
         view_plan = validate_view_plan(view_plan)
     except Exception:
-        logger.debug("viewPlan validation failed, using raw plan", exc_info=True)
+        logger.debug("viewPlan validation failed, dropping plan", exc_info=True)
+        view_plan = []
     return {
         "summary": summary,
         "suspectedCause": suspected_cause,

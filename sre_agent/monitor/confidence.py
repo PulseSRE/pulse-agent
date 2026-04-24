@@ -41,7 +41,8 @@ def _estimate_finding_confidence(finding: dict) -> float:
         base = max(0.0, base - 0.10)
 
     resources = finding.get("resources", [])
-    if not resources:
+    cluster_wide_categories = {"security_posture", "slo_burn"}
+    if not resources and category not in cluster_wide_categories:
         base *= 0.6
     elif len(resources) == 1 and resources[0].get("kind") == "Unknown":
         base *= 0.7
