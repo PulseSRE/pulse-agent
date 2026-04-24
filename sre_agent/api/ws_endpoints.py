@@ -216,7 +216,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
 
                     effective_system += "\n\n" + select_runbooks(content)
                 except Exception:
-                    pass
+                    logger.debug("Runbook selection failed", exc_info=True)
 
             try:
                 _result = await _run_agent_ws(
@@ -266,7 +266,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                         }
                     )
                 except Exception:
-                    pass  # Client disconnected -- expected during long queries
+                    logger.debug("Client disconnected before done message", exc_info=True)
             except Exception as exc:
                 logger.exception("Agent error")
                 if messages:
@@ -299,7 +299,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                         }
                     )
                 except Exception:
-                    pass  # Client already disconnected
+                    logger.debug("Client disconnected before error message", exc_info=True)
 
     except Exception:
         logger.exception("WebSocket error")
@@ -455,7 +455,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                         # No handoff triggered — stay in current skill
                         intent = last_mode
                 except Exception:
-                    pass
+                    logger.debug("Skill handoff check failed", exc_info=True)
 
             config = build_orchestrated_config(intent, query=content)
             last_mode = intent
@@ -516,7 +516,7 @@ async def websocket_auto_agent(websocket: WebSocket):
 
                             _dynamic += "\n\n" + select_runbooks(content)
                         except Exception:
-                            pass
+                            logger.debug("Runbook selection failed for auto-agent", exc_info=True)
                     effective_system = build_cached_system_prompt(_static, _dynamic)
             except Exception:
                 # Safe fallback
@@ -534,7 +534,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                         logger.info("Circuit breaker OPEN — degrading to single-skill")
                         secondary_skill = None
                 except Exception:
-                    pass
+                    logger.debug("Circuit breaker check failed", exc_info=True)
 
                 if secondary_skill:
                     try:
@@ -606,7 +606,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                             try:
                                 await websocket.send_json({"type": "text_delta", "text": text})
                             except Exception:
-                                pass
+                                logger.debug("Client disconnected during synthesis text delta", exc_info=True)
 
                         async with _borrow_synth() as synth_client:
                             synthesis = await synthesize_parallel_outputs(
@@ -623,7 +623,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                             try:
                                 await websocket.send_json({"type": "component", "spec": comp, "tool": "parallel"})
                             except Exception:
-                                pass
+                                logger.debug("Client disconnected during component forward", exc_info=True)
 
                         if parallel_result.primary_output:
                             bus.publish(
@@ -732,7 +732,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                         }
                     )
                 except Exception:
-                    pass  # Client disconnected -- expected during long queries
+                    logger.debug("Client disconnected before done message (auto-agent)", exc_info=True)
 
                 # Record skill invocation for analytics (with tool/token data)
                 try:
@@ -786,7 +786,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                         }
                     )
                 except Exception:
-                    pass  # Client already disconnected
+                    logger.debug("Client disconnected before error message (auto-agent)", exc_info=True)
 
     except Exception:
         logger.exception("WebSocket error")
@@ -857,7 +857,7 @@ async def websocket_monitor(websocket: WebSocket):
                 auto_fix_categories,
             )
     except (TimeoutError, Exception):
-        pass  # Use defaults
+        logger.debug("Monitor subscribe handshake failed, using defaults", exc_info=True)
 
     client = MonitorClient(websocket, trust_level, auto_fix_categories)
     ws_id = str(uuid.uuid4())

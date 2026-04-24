@@ -428,7 +428,7 @@ def query_usage(
             try:
                 entry["input_summary"] = json.loads(entry["input_summary"])
             except (json.JSONDecodeError, TypeError):
-                pass
+                logger.debug("Failed to parse input_summary JSON for tool usage entry", exc_info=True)
         entries.append(entry)
 
     return {"entries": entries, "total": total, "page": page, "per_page": per_page}

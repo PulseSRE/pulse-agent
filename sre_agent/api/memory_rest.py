@@ -155,7 +155,7 @@ async def memory_summary(_auth=Depends(verify_token)):
         except ImportError:
             pass
     except Exception:
-        pass
+        logger.debug("Failed to compute memory stats", exc_info=True)
 
     return {
         "incidents_count": incidents_row["cnt"] if incidents_row else 0,

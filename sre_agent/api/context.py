@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import re
+
+logger = logging.getLogger("pulse_agent.api")
 
 # Allowed characters in context fields (K8s name rules + slashes/dots)
 _SAFE_CONTEXT = re.compile(r"^[a-zA-Z0-9\-._/: ]{0,253}$")
@@ -48,7 +51,7 @@ def _build_context_prefix(data: dict) -> str:
                     f"for any update_view_widgets or get_view_details calls.\n\n"
                 )
         except Exception:
-            pass
+            logger.debug("Failed to fetch view details for context prefix", exc_info=True)
         return f"[UI Context: Dashboard {view_id}]\n\n"
 
     kind = _sanitize_context_field(context.get("kind", ""))

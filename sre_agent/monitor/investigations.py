@@ -137,7 +137,7 @@ def _build_investigation_prompt(finding: dict) -> str:
             if dep_lines:
                 prompt += "\nResource dependencies:\n" + "\n".join(dep_lines) + "\n"
     except Exception:
-        pass
+        logger.debug("Failed to inject dependency graph context into investigation prompt", exc_info=True)
 
     # Inject log fingerprints — classified error patterns from pod logs
     try:
@@ -152,7 +152,7 @@ def _build_investigation_prompt(finding: dict) -> str:
                 )
             prompt += "\n" + "\n".join(fp_lines) + "\n"
     except Exception:
-        pass
+        logger.debug("Failed to inject log fingerprints into investigation prompt", exc_info=True)
 
     return prompt
 
@@ -251,7 +251,7 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
             if manager:
                 effective_system = manager.augment_prompt(effective_system, prompt)
         except Exception:
-            pass
+            logger.debug("Memory augmentation failed for proactive investigation", exc_info=True)
 
     from ..tool_usage import build_tool_result_handler
 
@@ -367,7 +367,7 @@ async def _run_security_followup(finding: dict, *, client=None) -> dict:
             if manager:
                 effective_system = manager.augment_prompt(effective_system, prompt)
         except Exception:
-            pass
+            logger.debug("Memory augmentation failed for security followup", exc_info=True)
 
     async with borrow_async_client(client) as c:
         response = await run_agent_streaming(

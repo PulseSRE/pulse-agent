@@ -187,7 +187,7 @@ def get_prompt_stats(days: int = 30) -> dict:
                         section_counts.setdefault(k, []).append(v)
             section_avg = {k: sum(v) / len(v) for k, v in section_counts.items() if v}
         except Exception:
-            pass
+            logger.debug("Failed to compute section token averages", exc_info=True)
 
         # Skill names for the versions picker
         skill_names = [row["skill_name"] for row in by_skill_rows] if by_skill_rows else []
@@ -330,7 +330,7 @@ def get_prompt_log(session_id: str) -> list[dict]:
                 try:
                     entry["sections"] = json.loads(entry["sections"])
                 except (json.JSONDecodeError, TypeError):
-                    pass
+                    logger.debug("Failed to parse sections JSON in prompt log entry", exc_info=True)
             results.append(entry)
 
         return results

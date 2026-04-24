@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger("pulse_agent.evals")
 
 from .runner import evaluate_suite
 from .scenarios import load_suite
@@ -234,7 +237,7 @@ def main() -> None:
             ],
         )
     except Exception:
-        pass
+        logger.debug("Failed to record eval run to history", exc_info=True)
 
     # Exit codes
     if args.fail_on_gate and not result.gate_passed:

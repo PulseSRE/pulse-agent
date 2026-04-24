@@ -24,7 +24,7 @@ def _get_rss_mb() -> float:
                 if line.startswith("VmRSS:"):
                     return int(line.split()[1]) / 1024
     except FileNotFoundError:
-        pass
+        logger.debug("/proc/self/status not available, using fallback RSS method")
     # Fallback: ru_maxrss is peak RSS (bytes on macOS, KB on Linux)
     try:
         import resource

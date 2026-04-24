@@ -101,7 +101,7 @@ def _init_hard_pre_route() -> None:
             try:
                 _HARD_PRE_ROUTE.append((re.compile(pattern, re.IGNORECASE), skill.name))
             except re.error:
-                pass
+                logger.debug("Invalid trigger_pattern regex for skill %s: %s", skill.name, pattern, exc_info=True)
 
 
 def _hard_pre_route(query: str):

@@ -75,7 +75,7 @@ async def get_topology(
                 if res_str:
                     finding_status[res_str] = "error" if sev in ("critical", "warning") else "warning"
     except Exception:
-        pass
+        logger.debug("Failed to fetch finding status for topology", exc_info=True)
 
     risk_scores: dict[str, int] = {}
     try:
@@ -97,7 +97,7 @@ async def get_topology(
                 assessment = score_deployment_change(deployment_name=name, namespace=ns)
                 risk_scores[res_str] = assessment.score
     except Exception:
-        pass
+        logger.debug("Failed to compute risk scores for topology", exc_info=True)
 
     recent_changes: set[str] = set()
     try:
@@ -111,7 +111,7 @@ async def get_topology(
                 if res_str.strip():
                     recent_changes.add(res_str.strip())
     except Exception:
-        pass
+        logger.debug("Failed to fetch recent changes for topology", exc_info=True)
 
     cluster_scoped = {"Node", "HPA"}
     temp_nodes: list[dict] = []
@@ -465,7 +465,7 @@ async def get_finding_learning(
                         "path": f"sre_agent/skills/{cat}/skill.md",
                     }
         except OSError:
-            pass
+            logger.debug("Failed to read scaffolded skill at %s", skill_path, exc_info=True)
 
     # (b) Scaffolded plan template
     result["scaffolded_plan"] = None
@@ -483,7 +483,7 @@ async def get_finding_learning(
                         "phases": len(data.get("phases", [])),
                     }
         except (OSError, ValueError):
-            pass
+            logger.debug("Failed to read scaffolded plan template for %s", cat, exc_info=True)
 
     # (c) Scaffolded eval
     result["scaffolded_eval"] = None
@@ -500,7 +500,7 @@ async def get_finding_learning(
                         }
                         break
         except (OSError, ValueError):
-            pass
+            logger.debug("Failed to read scaffolded eval for %s", cat, exc_info=True)
 
     # (d) Learned runbook + (e) Detected patterns — single store instance
     result["learned_runbook"] = None
@@ -626,7 +626,7 @@ async def simulate_with_blast_radius(
                 fix_blast_radius = [_parse_dep_id(graph, d) for d in downstream_ids]
                 fix_upstream_deps = [_parse_dep_id(graph, u) for u in upstream_ids]
             except Exception:
-                pass
+                logger.debug("Failed to compute fix blast radius", exc_info=True)
 
     sim["fixBlastRadius"] = fix_blast_radius
     sim["fixUpstreamDeps"] = fix_upstream_deps

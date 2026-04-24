@@ -118,7 +118,7 @@ async def eval_status(_auth=Depends(verify_token)):
                     blocker_counts=suite_result.blocker_counts,
                 )
         except Exception:
-            pass
+            logger.debug("Failed to record eval run to history", exc_info=True)
 
         _EVAL_STATUS_CACHE = payload
         _EVAL_STATUS_CACHE_TS_MS = now_ms

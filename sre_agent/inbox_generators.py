@@ -66,9 +66,10 @@ def _get_tls_secrets() -> list[dict]:
                         }
                     )
                 except (ValueError, OSError):
-                    pass
+                    logger.debug("Failed to parse cert expiry for secret", exc_info=True)
         return secrets
     except Exception:
+        logger.debug("Failed to fetch expiring certs", exc_info=True)
         return []
 
 
@@ -80,7 +81,7 @@ def _get_trend_findings() -> list[dict]:
         if monitor and hasattr(monitor, "_trend_findings"):
             return monitor._trend_findings
     except Exception:
-        pass
+        logger.debug("Failed to fetch trend findings from cluster monitor", exc_info=True)
     return []
 
 

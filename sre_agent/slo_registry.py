@@ -131,7 +131,7 @@ class SLORegistry:
                         val = data.get("value", slo.target)
                         values[key] = float(val)
                     except (ValueError, TypeError):
-                        pass
+                        logger.debug("Failed to parse SLO query result for %s", key, exc_info=True)
         except Exception:
             logger.debug("Prometheus SLO query failed", exc_info=True)
 

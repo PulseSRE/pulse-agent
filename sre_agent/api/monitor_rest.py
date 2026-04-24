@@ -511,7 +511,7 @@ async def agent_learning_feed(
                     }
                 )
             except Exception:
-                pass
+                logger.debug("Failed to parse routing decision for learning feed", exc_info=True)
 
         # Selection stats
         sel_row = database.fetchone(
@@ -569,7 +569,7 @@ async def agent_learning_feed(
                         }
                     )
     except Exception:
-        pass
+        logger.debug("Failed to scan for scaffolded skills", exc_info=True)
 
     return {"events": events, "days": days}
 

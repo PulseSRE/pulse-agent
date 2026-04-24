@@ -383,7 +383,7 @@ async def _run_agent_ws_inner(
                         json_str = text.split(SIGNAL_PREFIX, 1)[1].strip()
                         signals.append(json.loads(json_str))
                     except (json.JSONDecodeError, IndexError):
-                        pass
+                        logger.debug("Failed to parse signal from tool result", exc_info=True)
         return signals
 
     for sig in _extract_signals(messages):
@@ -556,7 +556,7 @@ async def _run_agent_ws_inner(
         try:
             await websocket.send_json({"type": "view_updated", "viewId": vid})
         except Exception:
-            pass
+            logger.debug("Client disconnected before view_updated message for %s", vid, exc_info=True)
 
     # Record turn-level data (tools + token usage + routing decision)
     try:
@@ -601,7 +601,7 @@ async def _run_agent_ws_inner(
                 manager.record_tool_call(t, {})
             manager.finish_turn(user_query, full_response)
         except Exception:
-            pass
+            logger.debug("Memory finish_turn failed", exc_info=True)
 
     # Return response + metadata tuple for the caller
     turn_meta = {
@@ -709,7 +709,7 @@ def _make_receive_loop(
                             if manager and approved:
                                 manager.update_last_outcome(True)
                         except Exception:
-                            pass
+                            logger.debug("Failed to record confirmation as positive feedback", exc_info=True)
                     _pending_nonces.pop(session_id, None)
                     continue
 
@@ -746,7 +746,7 @@ def _make_receive_loop(
 
                         update_turn_feedback(session_id=session_id, feedback="positive" if resolved else "negative")
                     except Exception:
-                        pass
+                        logger.debug("Failed to record turn feedback", exc_info=True)
 
                     continue
 
@@ -755,6 +755,7 @@ def _make_receive_loop(
             _ws_alive[session_id] = False
             await incoming.put(None)
         except Exception:
+            logger.debug("WebSocket receive loop error for session %s", session_id, exc_info=True)
             _ws_alive[session_id] = False
             await incoming.put(None)
 

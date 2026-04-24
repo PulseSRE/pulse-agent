@@ -198,7 +198,7 @@ def _migrate_019_agent_views(db: Database) -> None:
             not_null = " NOT NULL" if default else ""
             db.execute(f"ALTER TABLE views ADD COLUMN {col} {typ}{not_null}{default_clause}")
         except Exception:
-            pass
+            logger.debug("Column %s may already exist on views table", col, exc_info=True)
     db.commit()
 
 
@@ -207,11 +207,11 @@ def _migrate_020_action_outcomes(db: Database) -> None:
     try:
         db.execute("ALTER TABLE actions ADD COLUMN IF NOT EXISTS outcome TEXT NOT NULL DEFAULT 'unknown'")
     except Exception:
-        pass
+        logger.debug("actions.outcome column may already exist", exc_info=True)
     try:
         db.execute("CREATE INDEX IF NOT EXISTS idx_actions_finding_id ON actions (finding_id)")
     except Exception:
-        pass
+        logger.debug("idx_actions_finding_id index may already exist", exc_info=True)
     db.commit()
 
 

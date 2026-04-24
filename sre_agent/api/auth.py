@@ -69,7 +69,7 @@ def _get_current_user(
                 if migrated:
                     logger.info("Migrated %d views to user '%s'", migrated, username)
             except Exception:
-                pass
+                logger.debug("View ownership migration failed for user '%s'", username, exc_info=True)
             _user_cache[f"_migrated_{username}"] = (username, time.time())
         return username
 

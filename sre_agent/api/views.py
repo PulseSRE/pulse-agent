@@ -478,7 +478,7 @@ async def rest_execute_action(
             was_confirmed=True,
         )
     except Exception:
-        pass
+        logger.debug("Failed to record action tool call", exc_info=True)
 
     from .view_events import publish_view_event
 

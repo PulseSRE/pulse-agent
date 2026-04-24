@@ -95,7 +95,7 @@ def score_deployment_change(
                 score += 10
                 factors.append(f"Moderate historical failure rate: {failure_rate:.0%}")
     except Exception:
-        pass
+        logger.debug("Failed to query historical failure rate", exc_info=True)
 
     # Blast radius from dependency graph
     try:
@@ -110,7 +110,7 @@ def score_deployment_change(
             score += 5
             factors.append(f"Moderate blast radius: {len(blast)} downstream resources")
     except Exception:
-        pass
+        logger.debug("Failed to compute blast radius", exc_info=True)
 
     # Clamp score
     score = min(score, 100)

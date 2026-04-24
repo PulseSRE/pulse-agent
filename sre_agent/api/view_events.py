@@ -39,14 +39,14 @@ class ViewEventBus:
         try:
             self._queues.remove(q)
         except ValueError:
-            pass
+            logger.debug("Attempted to unsubscribe a queue that was not registered")
 
     def publish(self, event: ViewEvent) -> None:
         for q in self._queues:
             try:
                 q.put_nowait(event)
             except asyncio.QueueFull:
-                pass
+                logger.debug("View event queue full, dropping event %s for view %s", event.event_type, event.view_id)
 
 
 _bus: ViewEventBus | None = None
@@ -64,4 +64,4 @@ def publish_view_event(event_type: str, view_id: str, actor: str, data: dict[str
     try:
         get_event_bus().publish(ViewEvent(event_type=event_type, view_id=view_id, actor=actor, data=data or {}))
     except Exception:
-        pass
+        logger.debug("Failed to publish view event %s for view %s", event_type, view_id, exc_info=True)

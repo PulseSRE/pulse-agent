@@ -381,7 +381,7 @@ def get_cluster_context(max_age: float = 60, mode: str = "sre") -> str:
                 if hints:
                     ctx += hints
             except Exception:
-                pass
+                logger.debug("Failed to load tool chain hints", exc_info=True)
         try:
             from .intelligence import get_intelligence_context
 
@@ -389,7 +389,7 @@ def get_cluster_context(max_age: float = 60, mode: str = "sre") -> str:
             if intel:
                 ctx += "\n\n" + intel
         except Exception:
-            pass
+            logger.debug("Failed to load intelligence context", exc_info=True)
         _cluster_context_cache[mode] = (ctx, now)
         return ctx
     except Exception as e:
@@ -535,7 +535,7 @@ def get_component_hint(mode: str = "sre", tool_names: list[str] | None = None) -
 
             return _build_component_hint(skill, tool_names or [])
     except Exception:
-        pass
+        logger.debug("Failed to build component hint for mode=%s", mode, exc_info=True)
 
     # Fallback: tool-based schema selection (legacy path)
     import os as _os

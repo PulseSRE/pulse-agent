@@ -55,7 +55,7 @@ def scan_memory_pressure_forecast() -> list[dict]:
                             )
                         )
                 except (ValueError, TypeError):
-                    pass
+                    logger.debug("Failed to parse memory pressure value for node", exc_info=True)
     except Exception as e:
         logger.error("Memory pressure forecast scan failed: %s", e)
     return findings
@@ -140,7 +140,7 @@ def scan_hpa_exhaustion_trend() -> list[dict]:
                         )
                     )
                 except (ValueError, TypeError):
-                    pass
+                    logger.debug("Failed to parse HPA utilization value", exc_info=True)
     except Exception as e:
         logger.error("HPA exhaustion trend scan failed: %s", e)
     return findings
@@ -180,7 +180,7 @@ def scan_error_rate_acceleration() -> list[dict]:
                             )
                         )
                 except (ValueError, TypeError):
-                    pass
+                    logger.debug("Failed to parse error rate derivative value", exc_info=True)
     except Exception as e:
         logger.error("Error rate acceleration scan failed: %s", e)
     return findings

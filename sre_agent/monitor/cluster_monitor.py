@@ -108,7 +108,7 @@ class ClusterMonitor:
             try:
                 self._subscribers.remove(client)
             except ValueError:
-                pass
+                logger.debug("Attempted to unsubscribe client that was not registered")
             logger.info("ClusterMonitor: client unsubscribed (total=%d)", len(self._subscribers))
 
     @property
@@ -343,7 +343,7 @@ class ClusterMonitor:
                     if existing:
                         continue
                 except Exception:
-                    pass
+                    logger.debug("Failed to check for existing human_review action", exc_info=True)
                 action_report = _make_action_report(
                     finding_id=finding["id"],
                     tool="require_human_review",
@@ -739,7 +739,7 @@ class ClusterMonitor:
                         ", ".join(f"{fp['category']}({fp['count']})" for fp in fps[:3]),
                     )
             except Exception:
-                pass
+                logger.debug("Log fingerprinting failed for finding", exc_info=True)
 
             # Spawn plan-based investigation as background task
             try:

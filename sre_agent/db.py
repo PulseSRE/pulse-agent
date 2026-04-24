@@ -134,7 +134,7 @@ class Database:
             try:
                 self._pool.putconn(self._local.conn)
             except Exception:
-                pass
+                logger.debug("Failed to return connection to pool", exc_info=True)
             self._local.conn = None
         if hasattr(self, "_pool") and self._pool is not None:
             self._pool.closeall()
@@ -144,7 +144,7 @@ class Database:
         try:
             self.close()
         except Exception:
-            pass
+            logger.debug("Error during Database.__del__ cleanup", exc_info=True)
 
     def health_check(self) -> bool:
         """Check if the pool can serve a connection."""
@@ -321,7 +321,7 @@ def save_view(
     try:
         snapshot_view(view_id, "created")
     except Exception:
-        pass
+        logger.exception("Failed to snapshot view %s on creation", view_id)
 
     return view_id
 
@@ -403,7 +403,7 @@ def update_view(view_id: str, owner: str, **updates) -> bool:
         try:
             snapshot_view(view_id, action)
         except Exception:
-            pass
+            logger.exception("Failed to snapshot view %s on %s", view_id, action)
 
     allowed = {"title", "description", "icon", "layout", "positions", "visibility", "status", "view_type"}
     fields = []
@@ -574,7 +574,7 @@ def list_view_versions(view_id: str, limit: int = 20) -> list[dict]:
             try:
                 row["layout"] = _json.loads(row["layout"])
             except (ValueError, TypeError):
-                pass
+                logger.debug("Failed to parse layout JSON for view version", exc_info=True)
     return rows
 
 
@@ -696,7 +696,7 @@ def transition_view_status(view_id: str, actor: str, new_status: str) -> bool:
     try:
         snapshot_view(view_id, f"status:{new_status}")
     except Exception:
-        pass
+        logger.exception("Failed to snapshot view %s on status transition to %s", view_id, new_status)
 
     cursor = db.execute(
         "UPDATE views SET status = ?, updated_at = ? WHERE id = ?",
@@ -808,7 +808,7 @@ def reopen_view_for_finding(finding_id: str) -> str | None:
     try:
         snapshot_view(view_id, "status:recurrence")
     except Exception:
-        pass
+        logger.exception("Failed to snapshot view %s on recurrence", view_id)
 
     db.execute(
         "UPDATE views SET status = 'investigating', updated_at = ? WHERE id = ?",
@@ -833,7 +833,7 @@ def escalate_assessment_to_incident(view_id: str) -> bool:
     try:
         snapshot_view(view_id, "escalated:assessment_to_incident")
     except Exception:
-        pass
+        logger.exception("Failed to snapshot view %s on assessment escalation", view_id)
 
     db.execute(
         "UPDATE views SET view_type = 'incident', status = 'investigating', updated_at = ? WHERE id = ?",

@@ -143,7 +143,7 @@ def get_messages(session_id: str, owner: str, limit: int = 100, offset: int = 0)
                 try:
                     msg["components"] = json.loads(r["components_json"])
                 except Exception:
-                    pass
+                    logger.debug("Failed to parse components_json for chat message", exc_info=True)
             messages.append(msg)
         return {"messages": messages, "total": total}
     except Exception:
