@@ -153,7 +153,7 @@ async def memory_summary(_auth=Depends(verify_token)):
             result = score_eval_prompts(EVAL_PROMPTS)
             eval_accuracy = result["accuracy"]
         except ImportError:
-            pass
+            logger.debug("Eval prompts not available (expected in production)")
     except Exception:
         logger.debug("Failed to compute memory stats", exc_info=True)
 

@@ -1,9 +1,12 @@
 """Entrypoint for the Pulse Agent API server with socket cleanup."""
 
 import atexit
+import logging
 import os
 import signal
 import sys
+
+logger = logging.getLogger("pulse_agent.serve")
 
 import uvicorn
 
@@ -17,7 +20,7 @@ def _cleanup_socket():
         try:
             os.unlink(socket_path)
         except OSError:
-            pass
+            logger.debug("Failed to unlink socket %s", socket_path, exc_info=True)
 
     # Also clean up any uvicorn PID file
     pid_file = "/tmp/pulse_agent.pid"
@@ -25,7 +28,7 @@ def _cleanup_socket():
         try:
             os.unlink(pid_file)
         except OSError:
-            pass
+            logger.debug("Failed to unlink PID file %s", pid_file, exc_info=True)
 
 
 def _signal_handler(signum, frame):

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+logger = logging.getLogger("pulse_agent.api")
 
 from ..inbox import (
     VALID_TRANSITIONS,
@@ -226,7 +230,7 @@ async def rest_get_investigation(item_id: str):
             try:
                 result[field] = _json.loads(result[field])
             except (ValueError, TypeError):
-                pass
+                logger.debug("Failed to parse JSON field '%s' in investigation result", field)
     return result
 
 

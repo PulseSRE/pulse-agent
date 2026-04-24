@@ -362,7 +362,7 @@ def select_tools_adaptive(
             try:
                 learn(query=query, tools_called=llm_tools, tools_offered=list(all_tool_map.keys()))
             except Exception:
-                pass
+                logger.debug("Failed to bootstrap TF-IDF from LLM picks", exc_info=True)
         else:
             # Phase 3: Category fallback
             tool_names = set()

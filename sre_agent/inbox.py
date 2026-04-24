@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from typing import Any
 
 from .db import get_database
+
+logger = logging.getLogger("pulse_agent.inbox")
 
 
 def _publish_event(event_type: str, item_id: str, data: dict[str, Any] | None = None) -> None:
@@ -1005,7 +1008,7 @@ def _phase_b_investigate() -> int:
                 inv_prompt = f"Investigate: {item['title']} in {item.get('namespace', 'cluster')}"
                 _, _, tools_offered = select_tools(inv_prompt, list(readonly_map.values()), readonly_map)
             except Exception:
-                pass
+                logger.debug("Failed to select tools for inbox investigation", exc_info=True)
 
             if result.get("summary"):
                 investigation_id = result.get("id", f"inv-{item['id']}")

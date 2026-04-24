@@ -275,7 +275,12 @@ def scan_recent_deployments() -> list[dict]:
                                 finding["riskLevel"] = risk.level
                                 finding["riskFactors"] = risk.factors
                             except Exception:
-                                pass
+                                logger.debug(
+                                    "Failed to compute change risk score for %s/%s",
+                                    ns,
+                                    dep.metadata.name,
+                                    exc_info=True,
+                                )
 
                             findings.append(finding)
                         break
@@ -472,9 +477,9 @@ def scan_auth_events() -> list[dict]:
                                     )
                                 )
                         except (ValueError, TypeError):
-                            pass
+                            logger.debug("Failed to parse OAuthClient creation timestamp", exc_info=True)
         except Exception:
-            pass  # oauth.openshift.io may not exist
+            logger.debug("oauth.openshift.io may not exist on this cluster", exc_info=True)
 
     except Exception as e:
         logger.error("Auth events scan failed: %s", e)

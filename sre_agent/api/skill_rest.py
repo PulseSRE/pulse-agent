@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import logging
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,6 +12,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .auth import verify_token
+
+logger = logging.getLogger("pulse_agent.api")
 
 router = APIRouter()
 
@@ -733,7 +736,7 @@ async def test_mcp_server(body: dict, _auth=Depends(verify_token)):
         if addr.is_private or addr.is_loopback or addr.is_link_local:
             raise HTTPException(status_code=400, detail="URL blocked: private/internal IP")
     except ValueError:
-        pass
+        logger.debug("Hostname '%s' is not an IP address, skipping private IP check", hostname)
 
     return test_mcp_connection(url, transport)
 

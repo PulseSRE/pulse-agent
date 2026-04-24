@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import contextvars
 import json
+import logging
 import uuid
 
 from .decorators import beta_tool
+
+logger = logging.getLogger("pulse_agent.view_tools")
 from .quality_engine import critique_view
 from .tool_registry import register_tool
 

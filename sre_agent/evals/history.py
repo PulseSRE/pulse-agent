@@ -101,7 +101,7 @@ def get_eval_history(
                     try:
                         entry[field] = json.loads(entry[field])
                     except (ValueError, TypeError):
-                        pass
+                        logger.debug("Failed to parse JSONB field '%s' in eval history entry", field)
             results.append(entry)
         return results
     except Exception:
