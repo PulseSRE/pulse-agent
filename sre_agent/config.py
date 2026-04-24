@@ -104,6 +104,9 @@ class PulseAgentSettings(BaseSettings):
     chain_min_probability: float = 0.6
     chain_min_frequency: int = 3
 
+    # Token forwarding
+    token_forwarding: bool = True
+
     # Investigation settings
     investigation_categories: str = (
         "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa"

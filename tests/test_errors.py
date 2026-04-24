@@ -18,9 +18,9 @@ def _make_api_error(status: int, reason: str = "", message: str = "") -> ApiExce
 
 
 class TestClassifyApiError:
-    def test_403_permission(self):
+    def test_403_forbidden(self):
         err = classify_api_error(_make_api_error(403, "Forbidden", "pods is forbidden"))
-        assert err.category == "permission"
+        assert err.category == "forbidden"
         assert err.status_code == 403
         assert len(err.suggestions) > 0
 
@@ -28,9 +28,11 @@ class TestClassifyApiError:
         err = classify_api_error(_make_api_error(403, "Forbidden", "exceeded quota"))
         assert err.category == "quota"
 
-    def test_401_permission(self):
+    def test_401_unauthorized(self):
         err = classify_api_error(_make_api_error(401, "Unauthorized"))
-        assert err.category == "permission"
+        assert err.category == "unauthorized"
+        assert err.status_code == 401
+        assert any("reconnect" in s.lower() or "expired" in s.lower() for s in err.suggestions)
 
     def test_404_not_found(self):
         err = classify_api_error(_make_api_error(404, "Not Found", "pods 'foo' not found"))
@@ -66,7 +68,7 @@ class TestClassifyException:
     def test_api_exception_delegates(self):
         e = _make_api_error(403, "Forbidden", "forbidden")
         err = classify_exception(e, "test_op")
-        assert err.category == "permission"
+        assert err.category == "forbidden"
         assert err.operation == "test_op"
 
     def test_connection_error(self):

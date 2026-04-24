@@ -20,7 +20,7 @@ class ToolError:
     """Structured error returned by tools instead of raw strings."""
 
     message: str
-    category: str  # permission, not_found, conflict, validation, server, network, quota
+    category: str  # unauthorized, forbidden, not_found, conflict, validation, server, network, quota
     status_code: int | None = None
     operation: str = ""
     suggestions: list[str] = dataclasses.field(default_factory=list)
@@ -62,15 +62,26 @@ def classify_api_error(e: ApiException, operation: str = "") -> ToolError:
             ],
         )
 
-    if status in (401, 403):
+    if status == 401:
         return ToolError(
             message=msg,
-            category="permission",
+            category="unauthorized",
             status_code=status,
             operation=operation,
             suggestions=[
-                "Check the agent's ServiceAccount RBAC permissions",
-                "Run 'scan_rbac_risks' to audit roles",
+                "Session expired — reconnect to refresh credentials",
+            ],
+        )
+
+    if status == 403:
+        return ToolError(
+            message=msg,
+            category="forbidden",
+            status_code=status,
+            operation=operation,
+            suggestions=[
+                "You don't have permission for this resource",
+                "Check your RBAC role bindings in this namespace",
             ],
         )
 
