@@ -74,6 +74,27 @@ class TestUserTokenVar:
         finally:
             _user_api_client_var.reset(reset_cli)
 
+    def test_refresh_hook_nulled_on_user_client(self):
+        """InCluster refresh hook must not overwrite user bearer token."""
+        import copy
+
+        from kubernetes import client as kc
+
+        from sre_agent.k8s_client import _get_user_api_client, _user_api_client_var
+
+        reset_cli = _user_api_client_var.set(None)
+        try:
+            with patch("sre_agent.k8s_client._load_k8s"):
+                fake_default = kc.Configuration()
+                fake_default.refresh_api_key_hook = lambda c: c.api_key.update({"authorization": "SA-TOKEN-FROM-DISK"})
+                with patch.object(kc.Configuration, "get_default_copy", return_value=copy.deepcopy(fake_default)):
+                    api_client = _get_user_api_client("user-token-123")
+                    assert api_client.configuration.refresh_api_key_hook is None
+                    key = api_client.configuration.get_api_key_with_prefix("authorization")
+                    assert "user-token-123" in key
+        finally:
+            _user_api_client_var.reset(reset_cli)
+
 
 class TestUserTokenContext:
     def test_context_manager_sets_and_resets(self):
