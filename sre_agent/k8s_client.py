@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 
@@ -23,6 +25,40 @@ CRIO_SOCKET_PATHS = [
     "/run/crio/crio.sock",
 ]
 CONTAINER_RUNTIME_SOCKET = None
+
+_user_token_var: ContextVar[str | None] = ContextVar("_user_token", default=None)
+_user_api_client_var: ContextVar[Any] = ContextVar("_user_api_client", default=None)
+
+
+def _get_user_api_client(token: str) -> client.ApiClient:
+    """Return a cached ApiClient configured with the user's bearer token."""
+    cached = _user_api_client_var.get()
+    if cached is not None:
+        return cached
+    _load_k8s()
+    cfg = client.Configuration.get_default_copy()
+    cfg.api_key = {"authorization": f"Bearer {token}"}
+    cfg.api_key_prefix = {}
+    api_client = client.ApiClient(configuration=cfg)
+    _user_api_client_var.set(api_client)
+    return api_client
+
+
+@contextmanager
+def user_token_context(token: str | None):
+    """Set the user's bearer token for the duration of the context."""
+    from .config import get_settings
+
+    if not token or not get_settings().token_forwarding:
+        yield
+        return
+    reset_tok = _user_token_var.set(token)
+    reset_cli = _user_api_client_var.set(None)
+    try:
+        yield
+    finally:
+        _user_token_var.reset(reset_tok)
+        _user_api_client_var.reset(reset_cli)
 
 
 def _detect_container_runtime() -> str | None:
@@ -65,6 +101,9 @@ def _load_k8s() -> None:
 
 
 def get_core_client() -> client.CoreV1Api:
+    token = _user_token_var.get()
+    if token:
+        return client.CoreV1Api(api_client=_get_user_api_client(token))
     _load_k8s()
     if "core" not in _clients:
         _clients["core"] = client.CoreV1Api()
@@ -72,6 +111,9 @@ def get_core_client() -> client.CoreV1Api:
 
 
 def get_apps_client() -> client.AppsV1Api:
+    token = _user_token_var.get()
+    if token:
+        return client.AppsV1Api(api_client=_get_user_api_client(token))
     _load_k8s()
     if "apps" not in _clients:
         _clients["apps"] = client.AppsV1Api()
@@ -79,6 +121,9 @@ def get_apps_client() -> client.AppsV1Api:
 
 
 def get_custom_client() -> client.CustomObjectsApi:
+    token = _user_token_var.get()
+    if token:
+        return client.CustomObjectsApi(api_client=_get_user_api_client(token))
     _load_k8s()
     if "custom" not in _clients:
         _clients["custom"] = client.CustomObjectsApi()
@@ -86,6 +131,9 @@ def get_custom_client() -> client.CustomObjectsApi:
 
 
 def get_version_client() -> client.VersionApi:
+    token = _user_token_var.get()
+    if token:
+        return client.VersionApi(api_client=_get_user_api_client(token))
     _load_k8s()
     if "version" not in _clients:
         _clients["version"] = client.VersionApi()
@@ -93,6 +141,9 @@ def get_version_client() -> client.VersionApi:
 
 
 def get_rbac_client() -> client.RbacAuthorizationV1Api:
+    token = _user_token_var.get()
+    if token:
+        return client.RbacAuthorizationV1Api(api_client=_get_user_api_client(token))
     _load_k8s()
     if "rbac" not in _clients:
         _clients["rbac"] = client.RbacAuthorizationV1Api()
@@ -100,6 +151,9 @@ def get_rbac_client() -> client.RbacAuthorizationV1Api:
 
 
 def get_networking_client() -> client.NetworkingV1Api:
+    token = _user_token_var.get()
+    if token:
+        return client.NetworkingV1Api(api_client=_get_user_api_client(token))
     _load_k8s()
     if "networking" not in _clients:
         _clients["networking"] = client.NetworkingV1Api()
@@ -107,6 +161,9 @@ def get_networking_client() -> client.NetworkingV1Api:
 
 
 def get_batch_client() -> client.BatchV1Api:
+    token = _user_token_var.get()
+    if token:
+        return client.BatchV1Api(api_client=_get_user_api_client(token))
     _load_k8s()
     if "batch" not in _clients:
         _clients["batch"] = client.BatchV1Api()
@@ -114,6 +171,9 @@ def get_batch_client() -> client.BatchV1Api:
 
 
 def get_autoscaling_client() -> client.AutoscalingV2Api:
+    token = _user_token_var.get()
+    if token:
+        return client.AutoscalingV2Api(api_client=_get_user_api_client(token))
     _load_k8s()
     if "autoscaling" not in _clients:
         _clients["autoscaling"] = client.AutoscalingV2Api()
