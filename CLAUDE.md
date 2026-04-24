@@ -145,6 +145,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - Confirmation gate enforced in code (not just prompt)
 - Prompt injection defense in system prompt
 - Input validation: replicas 0-100, log lines 1-1000, grace period 1-300s
+- Token forwarding: user OAuth token from `X-Forwarded-Access-Token` forwarded to K8s API calls for per-user RBAC enforcement. Monitor scans use SA. Toggle: `PULSE_AGENT_TOKEN_FORWARDING`
 
 ### MCP Server (`chart/templates/mcp-server.yaml`)
 - OpenShift MCP server (github.com/openshift/openshift-mcp-server) deployed as sidecar pod
@@ -239,19 +240,20 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 | `CLOUD_ML_REGION` | GCP region | required* |
 | `ANTHROPIC_API_KEY` | Direct Anthropic API key | required* |
 | `PULSE_AGENT_MODEL` | Claude model | `claude-opus-4-6` |
-| `PULSE_AGENT_WS_TOKEN` | WebSocket auth token | auto-generated |
+| `PULSE_AGENT_MULTI_SKILL` | Enable parallel multi-skill routing | `true` |
+| `PULSE_AGENT_MULTI_SKILL_MAX` | Max concurrent skills | `2` |
+| `PULSE_AGENT_MULTI_SKILL_THRESHOLD` | ORCA score gap for multi-skill activation | `0.15` |
+| `PULSE_AGENT_NOISE_THRESHOLD` | Noise score threshold for suppressing findings | `0.7` |
 | `PULSE_AGENT_SCAN_INTERVAL` | Monitor scan interval (seconds) | `60` |
-| `PULSE_AGENT_HARNESS` | Enable harness optimizations | `1` |
-| `PULSE_AGENT_MEMORY` | Enable self-improving memory | `1` (enabled) |
-| `PULSE_AGENT_DATABASE_URL` | Database URL (PostgreSQL) | required |
+| `PULSE_AGENT_TEMPORAL_CACHE_TTL` | Temporal signal cache TTL (seconds) | `60` |
+| `PULSE_AGENT_TOKEN_FORWARDING` | Forward user OAuth token to K8s API | `true` |
+| `PULSE_AGENT_WS_TOKEN` | WebSocket auth token | auto-generated |
 | `PULSE_AGENT_AUTOFIX_ENABLED` | Enable monitor auto-fix | `true` |
-| `PULSE_AGENT_MAX_TRUST_LEVEL` | Server-side max trust level (0-4) | `3` |
 | `PULSE_AGENT_CB_THRESHOLD` | Circuit breaker failure threshold | `3` |
 | `PULSE_AGENT_CB_TIMEOUT` | Circuit breaker recovery (seconds) | `60` |
-| `PULSE_AGENT_NOISE_THRESHOLD` | Noise score threshold for suppressing findings | `0.7` |
-| `PULSE_AGENT_MULTI_SKILL` | Enable parallel multi-skill routing | `true` |
-| `PULSE_AGENT_MULTI_SKILL_THRESHOLD` | ORCA score gap for multi-skill activation | `0.15` |
-| `PULSE_AGENT_MULTI_SKILL_MAX` | Max concurrent skills | `2` |
-| `PULSE_AGENT_TEMPORAL_CACHE_TTL` | Temporal signal cache TTL (seconds) | `60` |
+| `PULSE_AGENT_DATABASE_URL` | Database URL (PostgreSQL) | required |
+| `PULSE_AGENT_HARNESS` | Enable harness optimizations | `1` |
+| `PULSE_AGENT_MAX_TRUST_LEVEL` | Server-side max trust level (0-4) | `3` |
+| `PULSE_AGENT_MEMORY` | Enable self-improving memory | `1` (enabled) |
 
 *One of Vertex AI or Anthropic API key is required.
