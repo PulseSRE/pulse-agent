@@ -152,3 +152,52 @@ class TestListFunctions:
         disconnect_all()
         result = list_mcp_tools()
         assert result == []
+
+
+class TestMcpTokenForwarding:
+    def test_mcp_post_includes_auth_header_when_token_set(self):
+        from unittest.mock import MagicMock, patch
+
+        from sre_agent.k8s_client import _user_api_client_var, _user_token_var
+
+        reset_tok = _user_token_var.set("user-oauth-token")
+        reset_cli = _user_api_client_var.set(None)
+        try:
+            with patch("urllib.request.urlopen") as mock_urlopen:
+                mock_ctx = MagicMock()
+                mock_ctx.__enter__ = MagicMock(return_value=mock_ctx)
+                mock_ctx.__exit__ = MagicMock(return_value=False)
+                mock_ctx.headers = {}
+                mock_ctx.read.return_value = b'{"result": {}}'
+                mock_urlopen.return_value = mock_ctx
+
+                from sre_agent.mcp_client import _mcp_post
+
+                _mcp_post("http://localhost:8081", {"jsonrpc": "2.0", "id": 1})
+                call_args = mock_urlopen.call_args
+                req = call_args[0][0]
+                assert req.get_header("Authorization") == "Bearer user-oauth-token"
+        finally:
+            _user_token_var.reset(reset_tok)
+            _user_api_client_var.reset(reset_cli)
+
+    def test_mcp_post_no_auth_header_when_no_token(self):
+        from unittest.mock import MagicMock, patch
+
+        from sre_agent.k8s_client import _user_token_var
+
+        assert _user_token_var.get() is None
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_ctx = MagicMock()
+            mock_ctx.__enter__ = MagicMock(return_value=mock_ctx)
+            mock_ctx.__exit__ = MagicMock(return_value=False)
+            mock_ctx.headers = {}
+            mock_ctx.read.return_value = b'{"result": {}}'
+            mock_urlopen.return_value = mock_ctx
+
+            from sre_agent.mcp_client import _mcp_post
+
+            _mcp_post("http://localhost:8081", {"jsonrpc": "2.0", "id": 1})
+            call_args = mock_urlopen.call_args
+            req = call_args[0][0]
+            assert not req.has_header("Authorization")
