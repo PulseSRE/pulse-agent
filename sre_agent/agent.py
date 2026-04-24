@@ -330,78 +330,93 @@ def _redact_input(name: str, input_data: dict) -> dict:
 MAX_TOOL_RESULT_LENGTH = 50_000  # ~50KB cap to prevent WebSocket overflow
 
 
-def _execute_tool(name: str, input_data: dict, tool_map: dict) -> tuple[str, dict | None, dict]:
+def _execute_tool(
+    name: str, input_data: dict, tool_map: dict, user_token: str | None = None
+) -> tuple[str, dict | None, dict]:
     """Execute a tool by name. Returns (text_result, component_spec_or_None, exec_meta)."""
-    tool = tool_map.get(name)
-    if not tool:
-        meta = {
-            "status": "error",
-            "error_message": f"unknown tool '{name}'",
-            "error_category": "not_found",
-            "result_bytes": 0,
-        }
-        return f"Error: unknown tool '{name}'", None, meta
-    try:
-        result = tool.call(input_data)
-        # Tools can return a tuple (text, component_spec) for rich UI rendering
-        if isinstance(result, tuple) and len(result) == 2:
-            text, component = result
-        else:
-            text, component = result, None
-        # Capture size BEFORE truncation
-        result_bytes = len(text)
-        # Cap result size to prevent WebSocket overflow
-        if len(text) > MAX_TOOL_RESULT_LENGTH:
-            original_len = len(text)
-            text = text[:MAX_TOOL_RESULT_LENGTH] + f"\n\n... (truncated, {original_len} total chars)"
-        logger.info(
-            json.dumps(
-                {
-                    "event": "tool_executed",
-                    "tool": name,
-                    "input": _redact_input(name, input_data),
-                    "result_length": len(text),
-                    "has_component": component is not None,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                }
-            )
-        )
-        meta = {"status": "success", "error_message": None, "error_category": None, "result_bytes": result_bytes}
-        return text, component, meta
-    except Exception as e:
-        from .error_tracker import get_tracker
-        from .errors import classify_exception
+    from .k8s_client import _user_api_client_var, _user_token_var
 
-        err = classify_exception(e, name)
-        get_tracker().record(err)
-        logger.exception(
-            json.dumps(
-                {
-                    "event": "tool_error",
-                    "tool": name,
-                    "input": _redact_input(name, input_data),
-                    "error": type(e).__name__,
-                    "error_detail": str(e)[:500],
-                    "category": err.category,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                }
+    reset_token = _user_token_var.set(user_token)
+    reset_client = _user_api_client_var.set(None)
+    try:
+        tool = tool_map.get(name)
+        if not tool:
+            meta = {
+                "status": "error",
+                "error_message": f"unknown tool '{name}'",
+                "error_category": "not_found",
+                "result_bytes": 0,
+            }
+            return f"Error: unknown tool '{name}'", None, meta
+        try:
+            result = tool.call(input_data)
+            # Tools can return a tuple (text, component_spec) for rich UI rendering
+            if isinstance(result, tuple) and len(result) == 2:
+                text, component = result
+            else:
+                text, component = result, None
+            # Capture size BEFORE truncation
+            result_bytes = len(text)
+            # Cap result size to prevent WebSocket overflow
+            if len(text) > MAX_TOOL_RESULT_LENGTH:
+                original_len = len(text)
+                text = text[:MAX_TOOL_RESULT_LENGTH] + f"\n\n... (truncated, {original_len} total chars)"
+            logger.info(
+                json.dumps(
+                    {
+                        "event": "tool_executed",
+                        "tool": name,
+                        "input": _redact_input(name, input_data),
+                        "result_length": len(text),
+                        "has_component": component is not None,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                )
             )
-        )
-        error_message = f"{type(e).__name__}: {str(e)[:200]}"
-        meta = {"status": "error", "error_message": error_message, "error_category": err.category, "result_bytes": 0}
-        # Only return type name to LLM — don't leak internal details
-        return f"Error executing {name}: {type(e).__name__}", None, meta
+            meta = {"status": "success", "error_message": None, "error_category": None, "result_bytes": result_bytes}
+            return text, component, meta
+        except Exception as e:
+            from .error_tracker import get_tracker
+            from .errors import classify_exception
+
+            err = classify_exception(e, name)
+            get_tracker().record(err)
+            logger.exception(
+                json.dumps(
+                    {
+                        "event": "tool_error",
+                        "tool": name,
+                        "input": _redact_input(name, input_data),
+                        "error": type(e).__name__,
+                        "error_detail": str(e)[:500],
+                        "category": err.category,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                )
+            )
+            error_message = f"{type(e).__name__}: {str(e)[:200]}"
+            meta = {
+                "status": "error",
+                "error_message": error_message,
+                "error_category": err.category,
+                "result_bytes": 0,
+            }
+            # Only return type name to LLM — don't leak internal details
+            return f"Error executing {name}: {type(e).__name__}", None, meta
+    finally:
+        _user_token_var.reset(reset_token)
+        _user_api_client_var.reset(reset_client)
 
 
 TOOL_TIMEOUT = get_settings().tool_timeout
 
 
 def _execute_tool_with_timeout(
-    name: str, input_data: dict, tool_map: dict, timeout: int | None = None
+    name: str, input_data: dict, tool_map: dict, timeout: int | None = None, user_token: str | None = None
 ) -> tuple[str, dict | None, dict]:
     """Execute a tool with a timeout guard."""
     timeout = timeout or TOOL_TIMEOUT
-    future = _tool_pool.submit(_execute_tool, name, input_data, tool_map)
+    future = _tool_pool.submit(_execute_tool, name, input_data, tool_map, user_token)
     try:
         return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
@@ -445,6 +460,7 @@ async def run_agent_streaming(
     on_usage=None,
     mode: str = "sre",
     thinking: dict | None = None,
+    user_token: str | None = None,
 ) -> str:
     """Run an agent turn with streaming, handling the tool loop manually.
 
@@ -642,7 +658,7 @@ async def run_agent_streaming(
                 task_to_block: dict[asyncio.Task, Any] = {}
                 for b in read_blocks:
                     task = asyncio.ensure_future(
-                        loop.run_in_executor(_tool_pool, _execute_tool, b.name, b.input, tool_map)
+                        loop.run_in_executor(_tool_pool, _execute_tool, b.name, b.input, tool_map, user_token)
                     )
                     task_to_block[task] = b
 
@@ -732,7 +748,7 @@ async def run_agent_streaming(
                 write_start = time.time()
                 loop = asyncio.get_running_loop()
                 text, component, exec_meta = await loop.run_in_executor(
-                    _tool_pool, _execute_tool_with_timeout, block.name, block.input, tool_map
+                    _tool_pool, _execute_tool_with_timeout, block.name, block.input, tool_map, None, user_token
                 )
                 write_elapsed_ms = int((time.time() - write_start) * 1000)
                 results_map[block.id] = (text, component)
@@ -789,6 +805,7 @@ async def run_agent_turn_streaming(
     on_confirm=None,
     on_component=None,
     on_tool_result=None,
+    user_token: str | None = None,
 ) -> str:
     """Run the SRE agent. Delegates to the shared agent loop."""
     effective_defs = TOOL_DEFS + (extra_tool_defs or [])
@@ -807,4 +824,5 @@ async def run_agent_turn_streaming(
         on_confirm=on_confirm,
         on_component=on_component,
         on_tool_result=on_tool_result,
+        user_token=user_token,
     )

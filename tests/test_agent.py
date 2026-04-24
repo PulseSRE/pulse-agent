@@ -549,3 +549,57 @@ class TestCreateAsyncClient:
 
         client = create_async_client()
         assert isinstance(client, anthropic.AsyncAnthropic)
+
+
+class TestTokenForwarding:
+    def test_execute_tool_sets_contextvar(self):
+        from unittest.mock import MagicMock
+
+        from sre_agent.agent import _execute_tool
+        from sre_agent.k8s_client import _user_token_var
+
+        captured_token = []
+
+        def capture_tool(inp):
+            captured_token.append(_user_token_var.get())
+            return "ok"
+
+        mock_tool = MagicMock()
+        mock_tool.call.side_effect = capture_tool
+        tool_map = {"test_tool": mock_tool}
+
+        _execute_tool("test_tool", {}, tool_map, user_token="my-token")
+        assert captured_token == ["my-token"]
+        assert _user_token_var.get() is None
+
+    def test_execute_tool_resets_on_exception(self):
+        from unittest.mock import MagicMock
+
+        from sre_agent.agent import _execute_tool
+        from sre_agent.k8s_client import _user_token_var
+
+        mock_tool = MagicMock()
+        mock_tool.call.side_effect = RuntimeError("boom")
+        tool_map = {"bad_tool": mock_tool}
+
+        _execute_tool("bad_tool", {}, tool_map, user_token="leaked?")
+        assert _user_token_var.get() is None
+
+    def test_execute_tool_no_token(self):
+        from unittest.mock import MagicMock
+
+        from sre_agent.agent import _execute_tool
+        from sre_agent.k8s_client import _user_token_var
+
+        captured = []
+
+        def capture(inp):
+            captured.append(_user_token_var.get())
+            return "ok"
+
+        mock_tool = MagicMock()
+        mock_tool.call.side_effect = capture
+        tool_map = {"t": mock_tool}
+
+        _execute_tool("t", {}, tool_map, user_token=None)
+        assert captured == [None]
