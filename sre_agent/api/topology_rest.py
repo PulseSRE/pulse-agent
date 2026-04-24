@@ -10,7 +10,8 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel as _BaseModel
 from pydantic import Field
 
-from .auth import verify_token
+from ..k8s_client import user_token_context
+from .auth import get_user_token, verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -28,6 +29,7 @@ async def get_topology(
     layout_hint: str = Query(""),
     include_metrics: bool = Query(False),
     group_by: str = Query(""),
+    user_token: str | None = Depends(get_user_token),
     _auth=Depends(verify_token),
 ):
     """Return the dependency graph as nodes + edges for visualization.
@@ -169,9 +171,15 @@ async def get_topology(
 
     # Metrics enrichment
     if include_metrics:
+        import asyncio
+
         from ..dependency_graph import _fetch_metrics
 
-        node_met, pod_met = _fetch_metrics(namespace or "")
+        def _fetch_with_token():
+            with user_token_context(user_token):
+                return _fetch_metrics(namespace or "")
+
+        node_met, pod_met = await asyncio.to_thread(_fetch_with_token)
         for n in nodes:
             if n["kind"] == "Node":
                 m = node_met.get(n["name"])
@@ -273,6 +281,7 @@ async def get_topology(
 async def get_blast_radius(
     node_id: str = Query(..., description="Node ID from topology graph"),
     namespace: str = Query("", description="Filter results to namespace (optional)"),
+    user_token: str | None = Depends(get_user_token),
     _auth=Depends(verify_token),
 ):
     """Compute blast radius tree for a selected node — 'What if this goes down?'"""
@@ -357,6 +366,7 @@ async def get_finding_impact(
     kind: str = Query("", description="Resource kind (fallback if finding not in DB)"),
     name: str = Query("", description="Resource name"),
     namespace: str = Query("", description="Resource namespace"),
+    user_token: str | None = Depends(get_user_token),
     _auth=Depends(verify_token),
 ):
     """Blast radius and dependency analysis for a single finding."""
@@ -591,7 +601,9 @@ class _SimulateRequest(_BaseModel):
 
 
 @router.post("/monitor/simulate")
-async def simulate_with_blast_radius(body: _SimulateRequest, _auth=Depends(verify_token)):
+async def simulate_with_blast_radius(
+    body: _SimulateRequest, user_token: str | None = Depends(get_user_token), _auth=Depends(verify_token)
+):
     """Simulate a tool action and enrich with fix blast radius analysis."""
     from ..monitor.investigations import simulate_action
 

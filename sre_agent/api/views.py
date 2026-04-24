@@ -14,7 +14,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query, Request
 
 from ..config import get_settings
-from .auth import get_owner, verify_token
+from .auth import get_owner, get_user_token, verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -403,6 +403,7 @@ async def rest_execute_action(
     view_id: str,
     request: Request,
     owner: str = Depends(get_owner),
+    user_token: str | None = Depends(get_user_token),
 ):
     """Execute a tool action from a view's action_button component."""
     import asyncio
@@ -456,7 +457,7 @@ async def rest_execute_action(
     from ..agent import _execute_tool
 
     tool_map = {action: TOOL_REGISTRY[action]}
-    text, component, meta = await asyncio.to_thread(_execute_tool, action, action_input, tool_map)
+    text, component, meta = await asyncio.to_thread(_execute_tool, action, action_input, tool_map, user_token)
 
     try:
         from ..tool_usage import record_tool_call
