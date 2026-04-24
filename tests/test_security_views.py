@@ -139,7 +139,9 @@ class TestViewOwnershipBypass:
                         ]
 
                         result = undo_view_change("cv-123", version=1)
-                        assert "could not restore" in result.lower(), f"IDOR vulnerability! {result}"
+                        assert "not found" in result.lower() or "could not restore" in result.lower(), (
+                            f"IDOR vulnerability! {result}"
+                        )
 
     def test_delete_dashboard_rejects_other_users_view(self):
         """User B should not be able to delete user A's view."""

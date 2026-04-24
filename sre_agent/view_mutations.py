@@ -28,15 +28,12 @@ def get_current_user() -> str:
 
 
 def _resolve_view(view_id: str) -> tuple[dict | None, str]:
-    """Look up view, falling back to any owner if current user doesn't match."""
+    """Look up view scoped to the current user. No ownerless fallback (IDOR prevention)."""
     from . import db
 
     owner = get_current_user()
     view = db.get_view(view_id, owner)
-    if not view:
-        view = db.get_view(view_id)
-    actual_owner = view.get("owner", owner) if view else owner
-    return view, actual_owner
+    return view, owner
 
 
 @beta_tool
