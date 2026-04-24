@@ -25,7 +25,7 @@ from .agent_ws import (
     _run_agent_ws,
     _ws_alive,
 )
-from .auth import _get_current_user, _verify_ws_token
+from .auth import _get_current_user, _verify_ws_token, extract_user_token
 from .context import _apply_style_hint, _build_context_prefix
 
 # Active monitor sessions — keyed by ws_id, used by /debug/memory
@@ -117,7 +117,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
     message_timestamps: list[float] = []
 
     # Extract user OAuth token for forwarding to K8s API
-    user_token = websocket.headers.get("x-forwarded-access-token") if get_settings().token_forwarding else None
+    user_token = extract_user_token(websocket.headers)
 
     # Extract user identity for view tools
     try:
@@ -343,7 +343,7 @@ async def websocket_auto_agent(websocket: WebSocket):
     last_mode: str = "sre"
 
     # Extract user OAuth token for forwarding to K8s API
-    user_token = websocket.headers.get("x-forwarded-access-token") if get_settings().token_forwarding else None
+    user_token = extract_user_token(websocket.headers)
 
     # Extract user identity for view tools
     try:

@@ -136,6 +136,16 @@ def get_owner(
     return _get_current_user(x_forwarded_access_token, x_forwarded_user)
 
 
+def extract_user_token(headers) -> str | None:
+    """Extract user OAuth token from request/websocket headers. Returns None if absent or disabled."""
+    from ..config import get_settings
+
+    if not get_settings().token_forwarding:
+        return None
+    token = headers.get("x-forwarded-access-token") if hasattr(headers, "get") else None
+    return token or None
+
+
 def get_user_token(
     x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
 ) -> str | None:

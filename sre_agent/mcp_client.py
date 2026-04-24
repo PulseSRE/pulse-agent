@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from .k8s_client import _user_token_var
+from .k8s_client import get_current_user_token
 
 logger = logging.getLogger("pulse_agent.mcp_client")
 
@@ -188,7 +188,7 @@ def _mcp_post(base_url: str, payload: dict, session_id: str = "") -> tuple[dict,
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
     }
-    token = _user_token_var.get()
+    token = get_current_user_token()
     if token:
         headers["Authorization"] = f"Bearer {token}"
     if session_id:

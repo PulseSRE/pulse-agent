@@ -9,7 +9,7 @@ import time
 from typing import Any
 
 from .component_registry import get_valid_kinds
-from .k8s_client import _user_api_client_var, _user_token_var
+from .k8s_client import user_token_context
 from .tool_registry import TOOL_REGISTRY, WRITE_TOOL_NAMES
 
 logger = logging.getLogger("pulse_agent.view_executor")
@@ -107,13 +107,8 @@ def _execute_tool_widget(
         logger.warning("Widget %s has non-dict args, skipping", widget.get("title", ""))
         return None
 
-    reset_tok = _user_token_var.set(user_token)
-    reset_cli = _user_api_client_var.set(None)
-    try:
+    with user_token_context(user_token):
         result = tool_obj.call(args)
-    finally:
-        _user_token_var.reset(reset_tok)
-        _user_api_client_var.reset(reset_cli)
 
     _record_tool_call(tool_name, args, result, item_id)
 

@@ -30,6 +30,11 @@ _user_token_var: ContextVar[str | None] = ContextVar("_user_token", default=None
 _user_api_client_var: ContextVar[Any] = ContextVar("_user_api_client", default=None)
 
 
+def get_current_user_token() -> str | None:
+    """Return the current user's bearer token, or None if using SA."""
+    return _user_token_var.get()
+
+
 def _get_user_api_client(token: str) -> client.ApiClient:
     """Return a cached ApiClient configured with the user's bearer token."""
     cached = _user_api_client_var.get()

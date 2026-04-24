@@ -334,11 +334,9 @@ def _execute_tool(
     name: str, input_data: dict, tool_map: dict, user_token: str | None = None
 ) -> tuple[str, dict | None, dict]:
     """Execute a tool by name. Returns (text_result, component_spec_or_None, exec_meta)."""
-    from .k8s_client import _user_api_client_var, _user_token_var
+    from .k8s_client import user_token_context
 
-    reset_token = _user_token_var.set(user_token)
-    reset_client = _user_api_client_var.set(None)
-    try:
+    with user_token_context(user_token):
         tool = tool_map.get(name)
         if not tool:
             meta = {
@@ -350,14 +348,11 @@ def _execute_tool(
             return f"Error: unknown tool '{name}'", None, meta
         try:
             result = tool.call(input_data)
-            # Tools can return a tuple (text, component_spec) for rich UI rendering
             if isinstance(result, tuple) and len(result) == 2:
                 text, component = result
             else:
                 text, component = result, None
-            # Capture size BEFORE truncation
             result_bytes = len(text)
-            # Cap result size to prevent WebSocket overflow
             if len(text) > MAX_TOOL_RESULT_LENGTH:
                 original_len = len(text)
                 text = text[:MAX_TOOL_RESULT_LENGTH] + f"\n\n... (truncated, {original_len} total chars)"
@@ -401,11 +396,7 @@ def _execute_tool(
                 "error_category": err.category,
                 "result_bytes": 0,
             }
-            # Only return type name to LLM — don't leak internal details
             return f"Error executing {name}: {type(e).__name__}", None, meta
-    finally:
-        _user_token_var.reset(reset_token)
-        _user_api_client_var.reset(reset_client)
 
 
 TOOL_TIMEOUT = get_settings().tool_timeout
