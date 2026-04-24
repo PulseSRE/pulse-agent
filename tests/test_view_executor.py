@@ -379,3 +379,52 @@ class TestIntegrationWithInbox:
             _generate_view_for_item("inb-old", item)
 
         mock_save.assert_called_once()
+
+
+class TestTokenForwarding:
+    def test_execute_tool_widget_sets_contextvar(self):
+        from unittest.mock import MagicMock, patch
+
+        from sre_agent.k8s_client import _user_token_var
+
+        captured = []
+
+        def mock_call(args):
+            captured.append(_user_token_var.get())
+            return ("result", {"kind": "info_card_grid", "props": {}})
+
+        mock_tool = MagicMock()
+        mock_tool.call = mock_call
+
+        with patch("sre_agent.view_executor._resolve_tool", return_value=mock_tool):
+            with patch("sre_agent.view_executor.WRITE_TOOL_NAMES", set()):
+                from sre_agent.view_executor import _execute_tool_widget
+
+                widget = {"tool": "test_tool", "args": {}, "kind": "info_card_grid", "title": "Test"}
+                _execute_tool_widget(widget, item_id="test", user_token="view-token")
+
+        assert captured == ["view-token"]
+        assert _user_token_var.get() is None
+
+    def test_execute_tool_widget_no_token(self):
+        from unittest.mock import MagicMock, patch
+
+        from sre_agent.k8s_client import _user_token_var
+
+        captured = []
+
+        def mock_call(args):
+            captured.append(_user_token_var.get())
+            return "result"
+
+        mock_tool = MagicMock()
+        mock_tool.call = mock_call
+
+        with patch("sre_agent.view_executor._resolve_tool", return_value=mock_tool):
+            with patch("sre_agent.view_executor.WRITE_TOOL_NAMES", set()):
+                from sre_agent.view_executor import _execute_tool_widget
+
+                widget = {"tool": "test_tool", "args": {}, "kind": "info_card_grid", "title": "Test"}
+                _execute_tool_widget(widget, item_id="test")
+
+        assert captured == [None]

@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 from .component_registry import get_valid_kinds
+from .k8s_client import _user_api_client_var, _user_token_var
 from .tool_registry import TOOL_REGISTRY, WRITE_TOOL_NAMES
 
 logger = logging.getLogger("pulse_agent.view_executor")
@@ -86,7 +87,9 @@ def _build_header_widgets(item: dict[str, Any]) -> list[dict[str, Any]]:
     return header
 
 
-def _execute_tool_widget(widget: dict[str, Any], item_id: str = "") -> dict[str, Any] | None:
+def _execute_tool_widget(
+    widget: dict[str, Any], item_id: str = "", user_token: str | None = None
+) -> dict[str, Any] | None:
     """Execute a tool-backed widget and return a component spec, or None on failure."""
     tool_name = widget["tool"]
 
@@ -104,7 +107,13 @@ def _execute_tool_widget(widget: dict[str, Any], item_id: str = "") -> dict[str,
         logger.warning("Widget %s has non-dict args, skipping", widget.get("title", ""))
         return None
 
-    result = tool_obj.call(args)
+    reset_tok = _user_token_var.set(user_token)
+    reset_cli = _user_api_client_var.set(None)
+    try:
+        result = tool_obj.call(args)
+    finally:
+        _user_token_var.reset(reset_tok)
+        _user_api_client_var.reset(reset_cli)
 
     _record_tool_call(tool_name, args, result, item_id)
 
@@ -148,7 +157,9 @@ def validate_view_plan(view_plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return validated
 
 
-def execute_view_plan(view_plan: list[dict[str, Any]], item: dict[str, Any]) -> list[dict[str, Any]]:
+def execute_view_plan(
+    view_plan: list[dict[str, Any]], item: dict[str, Any], user_token: str | None = None
+) -> list[dict[str, Any]]:
     """Execute a viewPlan and return assembled component layout.
 
     Always prepends confidence badge + investigation summary header.
@@ -197,7 +208,7 @@ def execute_view_plan(view_plan: list[dict[str, Any]], item: dict[str, Any]) -> 
     # Execute tool widgets in parallel
     futures: dict[concurrent.futures.Future, tuple[int, dict]] = {}
     for idx, widget in tool_widgets:
-        future = _executor.submit(_execute_tool_widget, widget, item_id)
+        future = _executor.submit(_execute_tool_widget, widget, item_id, user_token)
         futures[future] = (idx, widget)
 
     # Collect results, keyed by original index for ordering
