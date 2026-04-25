@@ -220,7 +220,7 @@ def list_inbox_items(
     elif status == "agent_cleared":
         exclude_clause = "status NOT IN ('archived')"
     elif status == "__needs_attention__":
-        exclude_clause = "status NOT IN ('archived', 'agent_cleared', 'new', 'agent_reviewing', 'agent_review_failed')"
+        exclude_clause = "status NOT IN ('archived', 'agent_cleared', 'new', 'agent_reviewing', 'agent_review_failed') AND (severity IS NULL OR severity != 'info')"
         status = None
     else:
         exclude_clause = "status NOT IN ('archived', 'agent_cleared')"
