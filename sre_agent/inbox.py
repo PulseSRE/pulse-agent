@@ -11,6 +11,41 @@ from typing import Any
 from .db import get_database
 
 logger = logging.getLogger("pulse_agent.inbox")
+_inbox_logger = logger
+
+
+def _resource_exists(resource: dict[str, str]) -> bool:
+    """Quick K8s API check — returns False if the resource is gone (404)."""
+    kind = resource.get("kind", "").lower()
+    name = resource.get("name", "")
+    ns = resource.get("namespace", "default")
+    if not kind or not name:
+        return True
+
+    from kubernetes.client.rest import ApiException
+
+    from .k8s_client import get_apps_client, get_core_client
+
+    try:
+        if kind == "pod":
+            get_core_client().read_namespaced_pod(name, ns)
+        elif kind == "deployment":
+            get_apps_client().read_namespaced_deployment(name, ns)
+        elif kind == "statefulset":
+            get_apps_client().read_namespaced_stateful_set(name, ns)
+        elif kind == "daemonset":
+            get_apps_client().read_namespaced_daemon_set(name, ns)
+        elif kind == "service":
+            get_core_client().read_namespaced_service(name, ns)
+        elif kind == "node":
+            get_core_client().read_node(name)
+        else:
+            return True
+        return True
+    except ApiException as e:
+        return e.status != 404
+    except Exception:
+        return True
 
 
 def _publish_event(event_type: str, item_id: str, data: dict[str, Any] | None = None) -> None:
@@ -976,6 +1011,20 @@ def _phase_b_investigate() -> int:
         item = _deserialize_row(row)
 
         if now - _last_investigate_time.get(item["id"], 0) < _INVESTIGATE_COOLDOWN:
+            continue
+
+        resources = item.get("resources", [])
+        if resources and not _resource_exists(resources[0]):
+            _inbox_logger.info("Resource gone (404) for %s — auto-resolving", item["id"])
+            ts = int(time.time())
+            metadata = item.get("metadata", {})
+            metadata["dismiss_reason"] = "Resource no longer exists"
+            db.execute(
+                "UPDATE inbox_items SET status = 'resolved', resolved_at = ?, metadata = ?, updated_at = ? WHERE id = ?",
+                (ts, json.dumps(metadata), ts, item["id"]),
+            )
+            db.commit()
+            _publish_event("inbox_item_resolved", item["id"], {"resolved_at": ts})
             continue
 
         _last_investigate_time[item["id"]] = now

@@ -462,3 +462,86 @@ class TestNoDeadEndStatuses:
         item = get_inbox_item(item_id)
         assert len(item["metadata"]["action_plan"]) == 2
         assert item["metadata"]["action_plan"][0]["status"] == "pending"
+
+
+class TestResolveFindingInboxItem:
+    """Tests for resolve_finding_inbox_item linking finding→inbox resolution."""
+
+    def test_resolves_linked_inbox_item(self):
+        from sre_agent.inbox import create_inbox_item, get_inbox_item, resolve_finding_inbox_item
+
+        item_id = create_inbox_item(_make_item(finding_id="f-test-123"))
+        assert get_inbox_item(item_id)["status"] == "new"
+
+        resolved = resolve_finding_inbox_item("f-test-123")
+        assert resolved is True
+        item = get_inbox_item(item_id)
+        assert item["status"] == "resolved"
+        assert item["resolved_at"] is not None
+
+    def test_noop_when_no_linked_item(self):
+        from sre_agent.inbox import resolve_finding_inbox_item
+
+        resolved = resolve_finding_inbox_item("f-nonexistent")
+        assert resolved is False
+
+    def test_skips_already_resolved(self):
+        from sre_agent.db import get_database
+        from sre_agent.inbox import create_inbox_item, resolve_finding_inbox_item
+
+        item_id = create_inbox_item(_make_item(finding_id="f-already-done"))
+        db = get_database()
+        now = int(time.time())
+        db.execute(
+            "UPDATE inbox_items SET status = 'resolved', resolved_at = ? WHERE id = ?",
+            (now, item_id),
+        )
+        db.commit()
+
+        resolved = resolve_finding_inbox_item("f-already-done")
+        assert resolved is False
+
+
+class TestResourceExists:
+    """Tests for _resource_exists pre-flight check."""
+
+    def test_returns_true_for_unknown_kind(self):
+        from sre_agent.inbox import _resource_exists
+
+        assert _resource_exists({"kind": "CustomThing", "name": "x", "namespace": "default"}) is True
+
+    def test_returns_true_for_empty_resource(self):
+        from sre_agent.inbox import _resource_exists
+
+        assert _resource_exists({}) is True
+
+    def test_returns_false_on_404(self):
+        from unittest.mock import patch
+
+        from kubernetes.client.rest import ApiException
+
+        from sre_agent.inbox import _resource_exists
+
+        with patch("sre_agent.k8s_client.get_core_client") as mock_core:
+            mock_core.return_value.read_namespaced_pod.side_effect = ApiException(status=404)
+            assert _resource_exists({"kind": "Pod", "name": "gone-pod", "namespace": "default"}) is False
+
+    def test_returns_true_on_non_404_error(self):
+        from unittest.mock import patch
+
+        from kubernetes.client.rest import ApiException
+
+        from sre_agent.inbox import _resource_exists
+
+        with patch("sre_agent.k8s_client.get_core_client") as mock_core:
+            mock_core.return_value.read_namespaced_pod.side_effect = ApiException(status=403)
+            assert _resource_exists({"kind": "Pod", "name": "forbidden-pod", "namespace": "default"}) is True
+
+    def test_returns_true_on_success(self):
+        from unittest.mock import MagicMock, patch
+
+        from sre_agent.inbox import _resource_exists
+
+        with patch("sre_agent.k8s_client.get_core_client") as mock_core:
+            mock_core.return_value.read_namespaced_pod.return_value = MagicMock()
+            assert _resource_exists({"kind": "Pod", "name": "alive-pod", "namespace": "default"}) is True

@@ -37,6 +37,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger("pulse_agent.monitor")
 
 
+def _resolve_finding_inbox(finding_id: str) -> None:
+    """Resolve inbox items linked to a resolved finding."""
+    try:
+        from ..inbox import resolve_finding_inbox_item
+
+        resolve_finding_inbox_item(finding_id)
+    except Exception:
+        logger.debug("Failed to resolve inbox item for finding %s", finding_id, exc_info=True)
+
+
 class ClusterMonitor:
     """Singleton that owns the scan loop and investigation pipeline.
 
@@ -326,9 +336,15 @@ class ClusterMonitor:
                             )
                             continue
                     except Exception as e:
-                        logger.warning(
-                            "Auto-fix skipped: could not verify ownerReferences for %s: %s", r.get("name"), e
-                        )
+                        from kubernetes.client.rest import ApiException as _ApiEx
+
+                        if isinstance(e, _ApiEx) and e.status == 404:
+                            logger.info("Auto-fix: pod gone (404) for %s — resolving", finding["id"])
+                            _resolve_finding_inbox(finding.get("id", ""))
+                        else:
+                            logger.warning(
+                                "Auto-fix skipped: could not verify ownerReferences for %s: %s", r.get("name"), e
+                            )
                         continue
 
             confidence = _estimate_auto_fix_confidence(finding, self._recent_fixes)
@@ -465,16 +481,30 @@ class ClusterMonitor:
                 )
             except Exception as e:
                 duration_ms = _ts() - start_ms
-                action_report["status"] = "failed"
-                action_report["error"] = str(e)
-                action_report["durationMs"] = duration_ms
 
-                logger.info(
-                    "Auto-fix failed: category=%s finding=%s error=%s",
-                    category,
-                    finding["id"],
-                    e,
-                )
+                from kubernetes.client.rest import ApiException as _ApiException
+
+                if isinstance(e, _ApiException) and e.status == 404:
+                    logger.info(
+                        "Auto-fix: resource gone (404) for %s — resolving finding",
+                        finding["id"],
+                    )
+                    action_report["status"] = "completed"
+                    action_report["afterState"] = "Resource no longer exists — resolved"
+                    action_report["durationMs"] = duration_ms
+                    self._recent_fix_ids.add(finding["id"])
+                    _resolve_finding_inbox(finding["id"])
+                else:
+                    action_report["status"] = "failed"
+                    action_report["error"] = str(e)
+                    action_report["durationMs"] = duration_ms
+
+                    logger.info(
+                        "Auto-fix failed: category=%s finding=%s error=%s",
+                        category,
+                        finding["id"],
+                        e,
+                    )
 
             await self._broadcast_raw(action_report)
 
@@ -1208,6 +1238,7 @@ class ClusterMonitor:
             )
             if finding_id:
                 asyncio.get_running_loop().run_in_executor(None, mark_finding_actions_resolved, finding_id)
+                asyncio.get_running_loop().run_in_executor(None, _resolve_finding_inbox, finding_id)
 
         # Track transient findings
         for key in stale_keys:
