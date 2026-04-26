@@ -86,9 +86,9 @@ _TRANSITIONS: dict[str, list[str]] = {
     "agent_reviewing": ["triaged", "agent_cleared", "agent_review_failed"],
     "agent_review_failed": ["new", "triaged", "archived"],
     "triaged": ["claimed", "in_progress", "new"],
-    "claimed": ["in_progress", "resolved", "archived"],
-    "in_progress": ["resolved", "archived"],
-    "resolved": ["archived"],
+    "claimed": ["in_progress", "resolved", "archived", "new"],
+    "in_progress": ["resolved", "archived", "new"],
+    "resolved": ["archived", "new"],
     "agent_cleared": ["new", "triaged", "archived"],
 }
 
