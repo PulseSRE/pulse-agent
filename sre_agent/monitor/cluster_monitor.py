@@ -14,10 +14,9 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from .. import db_schema
 from ..config import get_settings
-from ..db import get_database
 from ..k8s_client import get_core_client, safe
+from ..repositories.monitor_repo import get_monitor_repo
 from .actions import mark_finding_actions_resolved, save_action, save_investigation, update_action_verification
 from .autofix import _autofix_paused
 from .confidence import _estimate_auto_fix_confidence, _estimate_finding_confidence, _finding_key
@@ -92,14 +91,7 @@ class ClusterMonitor:
         self._client = create_async_client()
 
         # Initialize database schema once
-        from .. import db as db_module
-
-        try:
-            db = db_module.get_database()
-            db.executescript(db_schema.SCAN_RUNS_SCHEMA)
-            db.commit()
-        except Exception as e:
-            logger.debug("Failed to initialize scan_runs schema: %s", e, exc_info=True)
+        get_monitor_repo().ensure_scan_runs_table()
 
     # ── Subscriber management ─────────────────────────────────────────────
 
@@ -351,11 +343,7 @@ class ClusterMonitor:
 
             if targeted_plan and targeted_plan.strategy == "require_human_review":
                 try:
-                    _db = get_database()
-                    existing = _db.fetchone(
-                        "SELECT id FROM actions WHERE finding_id = ? AND tool = ? AND status = ?",
-                        (finding["id"], "require_human_review", "proposed"),
-                    )
+                    existing = get_monitor_repo().check_existing_human_review(finding["id"])
                     if existing:
                         continue
                 except Exception:
@@ -1038,17 +1026,16 @@ class ClusterMonitor:
             update_action_verification(action_id, status, evidence)
 
             try:
-                db = get_database()
+                repo = get_monitor_repo()
                 finding_id = payload.get("finding_id", "")
                 if finding_id:
-                    inv = db.fetchone("SELECT id, confidence FROM investigations WHERE finding_id = ?", (finding_id,))
+                    inv = repo.get_investigation_by_finding_id(finding_id)
                     if inv:
                         if status == "verified":
                             new_conf = min(1.0, (inv["confidence"] or 0.5) + 0.05)
                         else:
                             new_conf = max(0.0, (inv["confidence"] or 0.5) - 0.1)
-                        db.execute("UPDATE investigations SET confidence = ? WHERE id = ?", (new_conf, inv["id"]))
-                        db.commit()
+                        repo.update_investigation_confidence(inv["id"], new_conf)
             except Exception as e:
                 logger.debug("Failed to update investigation confidence: %s", e)
 
@@ -1305,12 +1292,9 @@ class ClusterMonitor:
         )
 
         try:
-            db = get_database()
-            db.execute(
-                "INSERT INTO scan_runs (duration_ms, total_findings, scanner_results, session_id) VALUES (?, ?, ?, ?)",
-                (scan_duration_ms, len(all_findings), json.dumps(scanner_results), self._session_id),
+            get_monitor_repo().save_scan_run(
+                scan_duration_ms, len(all_findings), json.dumps(scanner_results), self._session_id
             )
-            db.commit()
         except Exception as e:
             logger.debug("Failed to save scan run: %s", e, exc_info=True)
 
@@ -1420,15 +1404,12 @@ class ClusterMonitor:
     # ── Handoffs ──────────────────────────────────────────────────────────
 
     async def process_handoffs(self) -> None:
-        db = get_database()
+        repo = get_monitor_repo()
         timeout_seconds = get_settings().monitor.investigation_timeout
 
         cutoff = int(time.time() * 1000) - 300_000
         try:
-            rows = db.fetchall(
-                "SELECT * FROM context_entries WHERE category = ? AND timestamp > ? ORDER BY timestamp DESC LIMIT 5",
-                ("handoff_request", cutoff),
-            )
+            rows = repo.get_pending_handoffs(cutoff)
         except Exception as e:
             logger.error("Failed to query handoff requests: %s", e)
             return
@@ -1483,10 +1464,7 @@ class ClusterMonitor:
 
         if rows:
             try:
-                db.execute(
-                    "DELETE FROM context_entries WHERE category = ? AND timestamp > ?", ("handoff_request", cutoff)
-                )
-                db.commit()
+                repo.delete_processed_handoffs(cutoff)
             except Exception as e:
                 logger.error("Failed to clean up handoff requests: %s", e)
 

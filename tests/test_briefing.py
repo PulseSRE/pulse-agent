@@ -13,18 +13,14 @@ from sre_agent.monitor.actions import get_briefing
 def mock_empty_db(monkeypatch):
     """Mock an empty database."""
 
-    class MockDB:
-        def fetchall(self, *args, **kwargs):
+    class MockRepo:
+        def get_actions_since(self, *args, **kwargs):
             return []
 
-    def mock_get_db():
-        return MockDB()
+        def get_investigations_since(self, *args, **kwargs):
+            return []
 
-    def mock_ensure_tables():
-        pass
-
-    monkeypatch.setattr("sre_agent.monitor.actions.get_database", mock_get_db)
-    monkeypatch.setattr("sre_agent.monitor.actions._ensure_tables", mock_ensure_tables)
+    monkeypatch.setattr("sre_agent.monitor.actions.get_monitor_repo", lambda: MockRepo())
 
 
 def test_get_briefing_includes_current_findings(mock_empty_db):

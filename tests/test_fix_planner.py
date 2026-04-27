@@ -202,31 +202,31 @@ class TestExecuteFix:
 
 
 class TestGetInvestigation:
-    @patch("sre_agent.monitor.fix_planner._get_db")
-    def test_returns_latest_investigation(self, mock_get_db):
-        db = MagicMock()
-        db.fetchone.return_value = {
+    @patch("sre_agent.repositories.monitor_repo.get_monitor_repo")
+    def test_returns_latest_investigation(self, mock_get_repo):
+        repo = MagicMock()
+        repo.get_investigation_for_finding.return_value = {
             "suspected_cause": "Image does not exist",
             "recommended_fix": "Roll back",
             "confidence": 0.95,
         }
-        mock_get_db.return_value = db
+        mock_get_repo.return_value = repo
 
         result = get_investigation_for_finding("f-abc123")
         assert result is not None
         assert result["suspected_cause"] == "Image does not exist"
 
-    @patch("sre_agent.monitor.fix_planner._get_db")
-    def test_returns_none_when_no_investigation(self, mock_get_db):
-        db = MagicMock()
-        db.fetchone.return_value = None
-        mock_get_db.return_value = db
+    @patch("sre_agent.repositories.monitor_repo.get_monitor_repo")
+    def test_returns_none_when_no_investigation(self, mock_get_repo):
+        repo = MagicMock()
+        repo.get_investigation_for_finding.return_value = None
+        mock_get_repo.return_value = repo
 
         result = get_investigation_for_finding("f-nonexistent")
         assert result is None
 
-    @patch("sre_agent.monitor.fix_planner._get_db")
-    def test_returns_none_on_db_error(self, mock_get_db):
-        mock_get_db.side_effect = Exception("DB down")
+    @patch("sre_agent.repositories.monitor_repo.get_monitor_repo")
+    def test_returns_none_on_db_error(self, mock_get_repo):
+        mock_get_repo.side_effect = Exception("DB down")
         result = get_investigation_for_finding("f-abc")
         assert result is None

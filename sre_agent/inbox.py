@@ -9,6 +9,7 @@ import uuid
 from typing import Any
 
 from .db import get_database
+from .repositories.inbox_repo import get_inbox_repo
 
 logger = logging.getLogger("pulse_agent.inbox")
 _inbox_logger = logger
@@ -144,11 +145,8 @@ def compute_priority_score(
 
 
 def create_inbox_item(item: dict[str, Any]) -> str:
-    db = get_database()
     item_id = _gen_id()
     now = int(time.time())
-    resources = item.get("resources", [])
-    metadata = item.get("metadata", {})
     priority = compute_priority_score(
         severity=item.get("severity"),
         confidence=item.get("confidence", 0),
@@ -157,36 +155,8 @@ def create_inbox_item(item: dict[str, Any]) -> str:
         due_date=item.get("due_date"),
     )
 
-    db.execute(
-        """INSERT INTO inbox_items
-        (id, item_type, status, title, summary, severity, priority_score,
-         confidence, noise_score, namespace, resources, correlation_key,
-         created_by, due_date, finding_id, view_id, cluster_id,
-         pinned_by, metadata, created_at, updated_at)
-        VALUES (?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?)""",
-        (
-            item_id,
-            item["item_type"],
-            item["title"],
-            item.get("summary", ""),
-            item.get("severity"),
-            priority,
-            item.get("confidence", 0),
-            item.get("noise_score", 0),
-            item.get("namespace"),
-            json.dumps(resources),
-            item.get("correlation_key"),
-            item["created_by"],
-            item.get("due_date"),
-            item.get("finding_id"),
-            item.get("view_id"),
-            item.get("cluster_id") or _get_cluster_id(),
-            json.dumps(metadata),
-            now,
-            now,
-        ),
-    )
-    db.commit()
+    cluster_id = item.get("cluster_id") or _get_cluster_id()
+    get_inbox_repo().insert_item(item_id, item, priority, cluster_id, now)
     _publish_event(
         "inbox_item_created",
         item_id,
@@ -196,8 +166,7 @@ def create_inbox_item(item: dict[str, Any]) -> str:
 
 
 def get_inbox_item(item_id: str) -> dict[str, Any] | None:
-    db = get_database()
-    row = db.fetchone("SELECT * FROM inbox_items WHERE id = ?", (item_id,))
+    row = get_inbox_repo().fetch_item(item_id)
     if row is None:
         return None
     return _deserialize_row(row)
@@ -213,7 +182,6 @@ def list_inbox_items(
     limit: int = 200,
     offset: int = 0,
 ) -> dict[str, Any]:
-    db = get_database()
     exclude_clause = None
     if status == "archived":
         exclude_clause = None
@@ -251,10 +219,7 @@ def list_inbox_items(
 
     where = " AND ".join(where_parts)
     params.extend([limit, offset])
-    rows = db.fetchall(
-        f"SELECT * FROM inbox_items WHERE {where} ORDER BY priority_score DESC LIMIT ? OFFSET ?",
-        tuple(params),
-    )
+    rows = get_inbox_repo().query_items(where, tuple(params))
     items = [_deserialize_row(r) for r in rows]
 
     groups: list[dict[str, Any]] = []
@@ -308,14 +273,8 @@ _NEEDS_ATTENTION_EXCLUDE = frozenset({"archived", "agent_cleared", "new", "agent
 
 
 def get_inbox_stats() -> dict[str, int]:
-    db = get_database()
     now = int(time.time())
-    rows = db.fetchall(
-        """SELECT status, COUNT(*) as cnt FROM inbox_items
-        WHERE (snoozed_until IS NULL OR snoozed_until <= ?)
-        GROUP BY status""",
-        (now,),
-    )
+    rows = get_inbox_repo().get_stats_rows(now)
     stats: dict[str, int] = {}
     total = 0
     cleared = 0
@@ -351,14 +310,9 @@ def update_item_status(item_id: str, new_status: str, actor: str = "") -> bool:
     if new_status not in valid_next:
         return False
 
-    db = get_database()
     now = int(time.time())
     resolved_at = now if new_status == "resolved" else item.get("resolved_at")
-    db.execute(
-        "UPDATE inbox_items SET status = ?, updated_at = ?, resolved_at = ? WHERE id = ?",
-        (new_status, now, resolved_at, item_id),
-    )
-    db.commit()
+    get_inbox_repo().update_status(item_id, new_status, now, resolved_at)
     event_type = "inbox_item_resolved" if new_status == "resolved" else "inbox_item_updated"
     _publish_event(event_type, item_id, {"status": new_status})
     if actor:
@@ -371,13 +325,8 @@ def claim_item(item_id: str, username: str) -> bool:
     if item is None:
         return False
 
-    db = get_database()
     now = int(time.time())
-    db.execute(
-        "UPDATE inbox_items SET claimed_by = ?, claimed_at = ?, updated_at = ? WHERE id = ?",
-        (username, now, now, item_id),
-    )
-    db.commit()
+    get_inbox_repo().update_claim(item_id, username, now)
     _publish_event("inbox_item_claimed", item_id, {"claimed_by": username, "claimed_at": now})
 
     current = item["status"]
@@ -433,14 +382,11 @@ def _generate_view_for_item(item_id: str, item: dict[str, Any], owner: str = "sy
     if item.get("view_id"):
         return
 
+    repo = get_inbox_repo()
     try:
         metadata["view_status"] = "generating"
-        db = get_database()
-        db.execute(
-            "UPDATE inbox_items SET metadata = ? WHERE id = ?",
-            (json.dumps(metadata), item_id),
-        )
-        db.commit()
+        now = int(time.time())
+        repo.update_metadata(item_id, metadata, now)
 
         view_plan = metadata.get("view_plan", [])
         if view_plan:
@@ -473,23 +419,15 @@ def _generate_view_for_item(item_id: str, item: dict[str, Any], owner: str = "sy
 
         metadata["view_status"] = "ready"
         now = int(time.time())
-        db.execute(
-            "UPDATE inbox_items SET view_id = ?, metadata = ?, updated_at = ? WHERE id = ?",
-            (view_id, json.dumps(metadata), now, item_id),
-        )
-        db.commit()
+        repo.update_metadata_and_view(item_id, view_id, metadata, now)
         _publish_event("inbox_item_updated", item_id, {"view_id": view_id})
         _inbox_logger.info("Generated view %s for inbox item %s", view_id, item_id)
     except Exception:
         _inbox_logger.exception("View generation failed for %s", item_id)
         metadata["view_status"] = "failed"
         try:
-            db = get_database()
-            db.execute(
-                "UPDATE inbox_items SET metadata = ? WHERE id = ?",
-                (json.dumps(metadata), item_id),
-            )
-            db.commit()
+            now = int(time.time())
+            repo.update_metadata(item_id, metadata, now)
         except Exception:
             _inbox_logger.exception("Failed to update view_status for %s", item_id)
 
@@ -580,15 +518,10 @@ def claim_and_investigate(item_id: str, username: str) -> bool:
     if item is None:
         return False
 
-    db = get_database()
     now = int(time.time())
     target_status = "in_progress" if item["status"] in ("triaged", "claimed") else "claimed"
 
-    db.execute(
-        "UPDATE inbox_items SET claimed_by = ?, claimed_at = ?, status = ?, updated_at = ? WHERE id = ? AND (claimed_by IS NULL OR claimed_by = ?)",
-        (username, now, target_status, now, item_id, username),
-    )
-    db.commit()
+    get_inbox_repo().update_claim_and_status(item_id, username, target_status, now)
 
     updated = get_inbox_item(item_id)
     if updated and updated["claimed_by"] == username:
@@ -599,13 +532,8 @@ def claim_and_investigate(item_id: str, username: str) -> bool:
 
 
 def unclaim_item(item_id: str, actor: str = "") -> bool:
-    db = get_database()
     now = int(time.time())
-    db.execute(
-        "UPDATE inbox_items SET claimed_by = NULL, claimed_at = NULL, updated_at = ? WHERE id = ?",
-        (now, item_id),
-    )
-    db.commit()
+    get_inbox_repo().clear_claim(item_id, now)
     _publish_event("inbox_item_updated", item_id, {"claimed_by": None})
     if actor:
         record_interaction(actor=actor, interaction_type="unclaim", item_id=item_id)
@@ -617,63 +545,46 @@ def snooze_item(item_id: str, hours: float, actor: str = "") -> bool:
     if item is None:
         return False
 
-    db = get_database()
     now = int(time.time())
     snoozed_until = now + int(hours * 3600)
 
     metadata = item.get("metadata", {})
     metadata["pre_snooze_status"] = item["status"]
 
-    db.execute(
-        "UPDATE inbox_items SET snoozed_until = ?, metadata = ?, updated_at = ? WHERE id = ?",
-        (snoozed_until, json.dumps(metadata), now, item_id),
-    )
-    db.commit()
+    get_inbox_repo().set_snooze(item_id, snoozed_until, metadata, now)
     if actor:
         record_interaction(actor=actor, interaction_type="snooze", item_id=item_id, metadata={"hours": hours})
     return True
 
 
 def unsnooze_expired() -> int:
-    db = get_database()
     now = int(time.time())
-    rows = db.fetchall(
-        "SELECT id, metadata FROM inbox_items WHERE snoozed_until IS NOT NULL AND snoozed_until <= ?",
-        (now,),
-    )
+    repo = get_inbox_repo()
+    rows = repo.fetch_expired_snoozed(now)
     count = 0
     for row in rows:
         raw = row["metadata"]
         metadata = json.loads(raw) if isinstance(raw, str) else (raw or {})
         pre_status = metadata.pop("pre_snooze_status", "new")
-        db.execute(
-            "UPDATE inbox_items SET snoozed_until = NULL, status = ?, metadata = ?, updated_at = ? WHERE id = ?",
-            (pre_status, json.dumps(metadata), now, row["id"]),
-        )
+        repo.clear_snooze(row["id"], pre_status, metadata, now)
         count += 1
     if count:
-        db.commit()
+        repo.commit()
     return count
 
 
 def upsert_inbox_item(item: dict[str, Any]) -> str:
-    db = get_database()
+    repo = get_inbox_repo()
     corr_key = item.get("correlation_key")
     item_type = item["item_type"]
 
     existing = None
     if corr_key:
-        row = db.fetchone(
-            "SELECT * FROM inbox_items WHERE correlation_key = ? AND item_type = ? AND status NOT IN ('resolved', 'archived')",
-            (corr_key, item_type),
-        )
+        row = repo.find_active_by_correlation(corr_key, item_type)
         if row:
             existing = _deserialize_row(row)
         else:
-            recently_resolved = db.fetchone(
-                "SELECT * FROM inbox_items WHERE correlation_key = ? AND item_type = ? AND status IN ('resolved', 'archived') AND updated_at > ?",
-                (corr_key, item_type, int(time.time()) - 86400),
-            )
+            recently_resolved = repo.find_recently_resolved(corr_key, item_type, int(time.time()) - 86400)
             if recently_resolved:
                 return recently_resolved["id"]
 
@@ -691,11 +602,7 @@ def upsert_inbox_item(item: dict[str, Any]) -> str:
         due_date=item.get("due_date", existing.get("due_date")),
     )
 
-    db.execute(
-        "UPDATE inbox_items SET resources = ?, priority_score = ?, updated_at = ? WHERE id = ?",
-        (json.dumps(merged_resources), priority, now, existing["id"]),
-    )
-    db.commit()
+    repo.update_resources_and_priority(existing["id"], merged_resources, priority, now)
     return existing["id"]
 
 
@@ -704,13 +611,9 @@ def escalate_assessment(item_id: str) -> str | None:
     if item is None or item["item_type"] != "task":
         return None
 
-    db = get_database()
+    repo = get_inbox_repo()
     now = int(time.time())
-    db.execute(
-        "UPDATE inbox_items SET status = 'resolved', updated_at = ?, resolved_at = ? WHERE id = ?",
-        (now, now, item_id),
-    )
-    db.commit()
+    repo.resolve_item(item_id, now)
 
     finding_item = {
         "item_type": "task",
@@ -729,11 +632,7 @@ def escalate_assessment(item_id: str) -> str | None:
 
     metadata = item.get("metadata", {})
     metadata["escalated_to"] = finding_id
-    db.execute(
-        "UPDATE inbox_items SET metadata = ?, updated_at = ? WHERE id = ?",
-        (json.dumps(metadata), now, item_id),
-    )
-    db.commit()
+    repo.update_metadata_field(item_id, metadata, now)
 
     return finding_id
 
@@ -749,13 +648,8 @@ def pin_item(item_id: str, username: str) -> bool:
     else:
         pinned.append(username)
 
-    db = get_database()
     now = int(time.time())
-    db.execute(
-        "UPDATE inbox_items SET pinned_by = ?, updated_at = ? WHERE id = ?",
-        (json.dumps(pinned), now, item_id),
-    )
-    db.commit()
+    get_inbox_repo().update_pinned_by(item_id, pinned, now)
     return True
 
 
@@ -771,13 +665,8 @@ def dismiss_item(item_id: str, actor: str = "") -> bool:
     item = get_inbox_item(item_id)
     if item is None:
         return False
-    db = get_database()
     now = int(time.time())
-    db.execute(
-        "UPDATE inbox_items SET status = 'archived', updated_at = ?, resolved_at = ? WHERE id = ?",
-        (now, now, item_id),
-    )
-    db.commit()
+    get_inbox_repo().archive_item(item_id, now)
     _publish_event("inbox_item_updated", item_id, {"status": "archived"})
     if actor:
         record_interaction(actor=actor, interaction_type="dismiss", item_id=item_id, decision="archived")
@@ -795,18 +684,13 @@ def prune_old_items(max_age_days: int = 30) -> int:
         return 0
     _last_prune_time = now
 
-    db = get_database()
     cutoff = int(now) - max_age_days * 86400
-    cur = db.execute(
-        "DELETE FROM inbox_items WHERE status IN ('resolved', 'archived') AND resolved_at IS NOT NULL AND resolved_at < ?",
-        (cutoff,),
-    )
-    db.commit()
+    count = get_inbox_repo().delete_old_resolved(cutoff)
 
     global _last_investigate_time
     _last_investigate_time = {k: v for k, v in _last_investigate_time.items() if v > cutoff}
 
-    return cur.rowcount if hasattr(cur, "rowcount") else 0
+    return count
 
 
 _MAX_RESOURCES = 10
@@ -859,20 +743,14 @@ def _finding_corr_key(finding: dict[str, Any]) -> str:
 def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
     """Create or update an inbox item from a monitor finding."""
     finding_id = finding.get("id", "")
-    db = get_database()
+    repo = get_inbox_repo()
 
-    existing = db.fetchone(
-        "SELECT * FROM inbox_items WHERE finding_id = ? AND status NOT IN ('resolved', 'archived')",
-        (finding_id,),
-    )
+    existing = repo.find_by_finding_id(finding_id)
 
     if existing is None:
         corr_key = _finding_corr_key(finding)
         if corr_key:
-            existing = db.fetchone(
-                "SELECT * FROM inbox_items WHERE correlation_key = ? AND item_type = 'task' AND status NOT IN ('resolved', 'archived')",
-                (corr_key,),
-            )
+            existing = repo.find_active_by_correlation_task(corr_key)
 
     if existing:
         existing_item = _deserialize_row(existing)
@@ -886,11 +764,7 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
             created_at=existing_item["created_at"],
             due_date=None,
         )
-        db.execute(
-            "UPDATE inbox_items SET resources = ?, priority_score = ?, updated_at = ? WHERE id = ?",
-            (json.dumps(merged_resources), priority, now, existing_item["id"]),
-        )
-        db.commit()
+        repo.update_resources_and_priority(existing_item["id"], merged_resources, priority, now)
         return existing_item["id"]
 
     item = {
@@ -927,15 +801,8 @@ def agent_process_inbox() -> None:
 
 def _phase_a_triage() -> int:
     """Triage new items: classify as investigate/dismiss/monitor and act."""
-    db = get_database()
-    rows = db.fetchall(
-        """SELECT * FROM inbox_items
-        WHERE status IN ('new', 'agent_review_failed')
-        AND (metadata NOT LIKE ? OR metadata NOT LIKE ?)
-        ORDER BY priority_score DESC
-        LIMIT 5""",
-        ('%"triaged"%', "%true%"),
-    )
+    repo = get_inbox_repo()
+    rows = repo.fetch_new_for_triage()
     if not rows:
         return 0
 
@@ -998,17 +865,13 @@ def _phase_a_triage() -> int:
                     new_status = "agent_reviewing"
 
                 now = int(time.time())
-                db.execute(
-                    "UPDATE inbox_items SET status = ?, metadata = ?, summary = ?, updated_at = ? WHERE id = ?",
-                    (
-                        new_status,
-                        json.dumps(metadata),
-                        triage.get("assessment", item.get("summary", "")),
-                        now,
-                        item["id"],
-                    ),
+                repo.update_triage_result(
+                    item["id"],
+                    new_status,
+                    metadata,
+                    triage.get("assessment", item.get("summary", "")),
+                    now,
                 )
-                db.commit()
                 _publish_event("inbox_item_updated", item["id"], {"status": new_status})
                 triaged += 1
                 _inbox_logger.info("Triaged %s → %s (%s)", item["id"], new_status, action)
@@ -1021,13 +884,8 @@ def _phase_a_triage() -> int:
 
 def _phase_b_investigate() -> int:
     """Investigate items the triage flagged for review using the SRE agent."""
-    db = get_database()
-    rows = db.fetchall(
-        """SELECT * FROM inbox_items
-        WHERE status = 'agent_reviewing'
-        ORDER BY priority_score DESC
-        LIMIT 3""",
-    )
+    repo = get_inbox_repo()
+    rows = repo.fetch_agent_reviewing()
     if not rows:
         return 0
 
@@ -1048,20 +906,12 @@ def _phase_b_investigate() -> int:
                 ts = int(time.time())
                 metadata = item.get("metadata", {})
                 metadata["dismiss_reason"] = "Resource no longer exists"
-                db.execute(
-                    "UPDATE inbox_items SET status = 'resolved', resolved_at = ?, metadata = ?, updated_at = ? WHERE id = ?",
-                    (ts, json.dumps(metadata), ts, item["id"]),
-                )
-                db.commit()
+                repo.auto_resolve_item(item["id"], metadata, ts)
                 _publish_event("inbox_item_resolved", item["id"], {"resolved_at": ts})
                 continue
             if len(alive) < len(resources):
                 _inbox_logger.info("Pruned %d dead resources from %s", len(resources) - len(alive), item["id"])
-                db.execute(
-                    "UPDATE inbox_items SET resources = ?, updated_at = ? WHERE id = ?",
-                    (json.dumps(alive), int(time.time()), item["id"]),
-                )
-                db.commit()
+                repo.update_resources(item["id"], alive, int(time.time()))
                 item["resources"] = alive
 
         _last_investigate_time[item["id"]] = now
@@ -1150,11 +1000,7 @@ def _phase_b_investigate() -> int:
                     new_status = "triaged"
 
                 ts = int(time.time())
-                db.execute(
-                    "UPDATE inbox_items SET status = ?, metadata = ?, updated_at = ? WHERE id = ?",
-                    (new_status, json.dumps(metadata), ts, item["id"]),
-                )
-                db.commit()
+                repo.update_investigation_result(item["id"], new_status, metadata, ts)
                 _publish_event("inbox_item_updated", item["id"], {"status": new_status})
                 investigated += 1
                 _inbox_logger.info("Investigated %s → %s (confidence: %.2f)", item["id"], new_status, inv_confidence)
@@ -1167,15 +1013,8 @@ def _phase_b_investigate() -> int:
 
 def _phase_c_plan() -> int:
     """Generate step-by-step action plans for investigated items."""
-    db = get_database()
-    rows = db.fetchall(
-        """SELECT * FROM inbox_items
-        WHERE status = 'triaged'
-        AND metadata NOT LIKE ?
-        ORDER BY priority_score DESC
-        LIMIT 3""",
-        ("%action_plan%",),
-    )
+    repo = get_inbox_repo()
+    rows = repo.fetch_triaged_without_plan()
     if not rows:
         return 0
 
@@ -1242,11 +1081,7 @@ def _phase_c_plan() -> int:
                 metadata["action_plan"] = steps
 
                 now = int(time.time())
-                db.execute(
-                    "UPDATE inbox_items SET metadata = ?, updated_at = ? WHERE id = ?",
-                    (json.dumps(metadata), now, item["id"]),
-                )
-                db.commit()
+                repo.update_plan_metadata(item["id"], metadata, now)
                 _publish_event("inbox_item_updated", item["id"], {"has_plan": True})
                 planned += 1
                 _inbox_logger.info("Generated %d-step plan for %s", len(steps), item["id"])
@@ -1258,21 +1093,14 @@ def _phase_c_plan() -> int:
 
 def resolve_finding_inbox_item(finding_id: str) -> bool:
     """Resolve an inbox item when its linked finding resolves."""
-    db = get_database()
-    row = db.fetchone(
-        "SELECT * FROM inbox_items WHERE finding_id = ? AND status NOT IN ('resolved', 'archived')",
-        (finding_id,),
-    )
+    repo = get_inbox_repo()
+    row = repo.find_active_by_finding_id(finding_id)
     if row is None:
         return False
 
     item = _deserialize_row(row)
     now = int(time.time())
-    db.execute(
-        "UPDATE inbox_items SET status = 'resolved', resolved_at = ?, updated_at = ? WHERE id = ?",
-        (now, now, item["id"]),
-    )
-    db.commit()
+    repo.resolve_item(item["id"], now)
     _publish_event("inbox_item_resolved", item["id"], {"resolved_at": now})
     return True
 
@@ -1281,16 +1109,15 @@ _PRUNABLE_KINDS = {"Pod", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet"
 _prune_counter = 0
 
 
-def _prune_stale_resources(db: Any) -> None:
+def _prune_stale_resources() -> None:
     """Remove dead Pod/Deployment resources from open inbox items (every 5th call)."""
     global _prune_counter
     _prune_counter += 1
     if _prune_counter % 5 != 0:
         return
 
-    rows = db.fetchall(
-        "SELECT id, resources FROM inbox_items WHERE status NOT IN ('resolved', 'archived')",
-    )
+    repo = get_inbox_repo()
+    rows = repo.fetch_open_items_with_resources()
     pruned_count = 0
     for row in rows:
         item_resources = json.loads(row["resources"] or "[]")
@@ -1299,10 +1126,10 @@ def _prune_stale_resources(db: Any) -> None:
             continue
         alive = [r for r in item_resources if r.get("kind") not in _PRUNABLE_KINDS or _resource_exists(r)]
         if len(alive) < len(item_resources):
-            db.execute("UPDATE inbox_items SET resources = ? WHERE id = ?", (json.dumps(alive), row["id"]))
+            repo.update_item_resources_raw(row["id"], json.dumps(alive))
             pruned_count += len(item_resources) - len(alive)
     if pruned_count:
-        db.commit()
+        repo.commit()
         _inbox_logger.info("Pruned %d stale resources from inbox items", pruned_count)
 
 
@@ -1319,23 +1146,16 @@ def run_generator_cycle() -> None:
             generated_keys.add(corr_key)
         upsert_inbox_item(item)
 
-    db = get_database()
-    rows = db.fetchall(
-        """SELECT id, correlation_key, metadata FROM inbox_items
-        WHERE item_type = 'task'
-        AND status IN ('new', 'triaged')""",
-    )
+    repo = get_inbox_repo()
+    rows = repo.fetch_generator_items()
     generator_rows = [r for r in rows if _deserialize_row(r).get("metadata", {}).get("generator")]
     now = int(time.time())
     for row in generator_rows:
         if row["correlation_key"] and row["correlation_key"] not in generated_keys:
-            db.execute(
-                "UPDATE inbox_items SET status = 'resolved', resolved_at = ?, updated_at = ? WHERE id = ?",
-                (now, now, row["id"]),
-            )
-    db.commit()
+            repo.auto_resolve_generator_item(row["id"], now)
+    repo.commit()
 
-    _prune_stale_resources(db)
+    _prune_stale_resources()
 
     unsnooze_expired()
     prune_old_items()

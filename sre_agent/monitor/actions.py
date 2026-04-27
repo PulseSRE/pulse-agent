@@ -7,8 +7,8 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from ..db import get_database
-from .findings import _ensure_tables, _ts
+from ..repositories.monitor_repo import get_monitor_repo
+from .findings import _ts
 
 logger = logging.getLogger("pulse_agent.monitor")
 
@@ -20,46 +20,15 @@ def save_action(
     from .findings import _make_rollback_info
 
     try:
-        _ensure_tables()
-        db = get_database()
-
         rollback_available, rollback_action_json = _make_rollback_info(action, finding)
-
-        db.execute(
-            """INSERT INTO actions
-               (id, finding_id, timestamp, category, tool, input, status,
-                before_state, after_state, error, reasoning, duration_ms,
-                rollback_available, rollback_action, resources, verification_status,
-                verification_evidence, verification_timestamp)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT (id) DO UPDATE SET
-               status = EXCLUDED.status, after_state = EXCLUDED.after_state,
-               error = EXCLUDED.error, duration_ms = EXCLUDED.duration_ms,
-               verification_status = EXCLUDED.verification_status,
-               verification_evidence = EXCLUDED.verification_evidence,
-               verification_timestamp = EXCLUDED.verification_timestamp""",
-            (
-                action["id"],
-                action.get("findingId", ""),
-                action.get("timestamp", _ts()),
-                category,
-                action.get("tool", ""),
-                json.dumps(action.get("input", {})),
-                action.get("status", ""),
-                action.get("beforeState", ""),
-                action.get("afterState", ""),
-                action.get("error"),
-                action.get("reasoning", ""),
-                action.get("durationMs", 0),
-                rollback_available,
-                rollback_action_json,
-                json.dumps(resources or []),
-                action.get("verificationStatus"),
-                action.get("verificationEvidence"),
-                action.get("verificationTimestamp"),
-            ),
+        get_monitor_repo().save_action(
+            action=action,
+            category=category,
+            resources_json=json.dumps(resources or []),
+            rollback_available=rollback_available,
+            rollback_action_json=rollback_action_json,
+            timestamp=action.get("timestamp", _ts()),
         )
-        db.commit()
     except Exception as e:
         logger.error("Failed to save action: %s", e)
 
@@ -69,8 +38,6 @@ def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = N
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
     try:
-        _ensure_tables()
-        db = get_database()
         where_parts = []
         params: list[Any] = []
 
@@ -89,14 +56,9 @@ def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = N
                 params.extend([f"%{filters['search']}%", f"%{filters['search']}%"])
 
         where = "WHERE " + " AND ".join(where_parts) if where_parts else ""
-
-        count_row = db.fetchone(f"SELECT COUNT(*) as cnt FROM actions {where}", tuple(params))
-        total = count_row["cnt"] if count_row else 0
         offset = (page - 1) * page_size
-        rows = db.fetchall(
-            f"SELECT * FROM actions {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-            tuple(params + [page_size, offset]),
-        )
+
+        total, rows = get_monitor_repo().list_actions_paginated(where, tuple(params), page_size, offset)
 
         actions = []
         for r in rows:
@@ -132,19 +94,18 @@ def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = N
 def get_briefing(hours: int = 12) -> dict:
     """Build a briefing summary of recent cluster activity."""
     try:
-        _ensure_tables()
-        db = get_database()
+        repo = get_monitor_repo()
         since = _ts() - (hours * 3600 * 1000)
 
         # Recent actions
-        actions = db.fetchall("SELECT status, category, tool FROM actions WHERE timestamp >= ?", (since,))
+        actions = repo.get_actions_since(since)
         total_actions = len(actions)
         completed = sum(1 for a in actions if a["status"] == "completed")
         failed = sum(1 for a in actions if a["status"] == "failed")
         categories_fixed = list({a["category"] for a in actions if a["status"] == "completed"})
 
         # Recent investigations
-        investigations = db.fetchall("SELECT status FROM investigations WHERE timestamp >= ?", (since,))
+        investigations = repo.get_investigations_since(since)
         total_investigations = len(investigations)
 
         # Live scanner runs: fast current state scanners
@@ -256,9 +217,7 @@ def get_briefing(hours: int = 12) -> dict:
 def get_action_detail(action_id: str) -> dict | None:
     """Get a single action by ID."""
     try:
-        _ensure_tables()
-        db = get_database()
-        row = db.fetchone("SELECT * FROM actions WHERE id = ?", (action_id,))
+        row = get_monitor_repo().get_action_by_id(action_id)
         if not row:
             return None
         return {
@@ -289,37 +248,11 @@ def get_action_detail(action_id: str) -> dict | None:
 def save_investigation(report: dict, finding: dict) -> None:
     """Persist a proactive investigation report."""
     try:
-        _ensure_tables()
-        db = get_database()
-        db.execute(
-            """INSERT INTO investigations
-               (id, finding_id, timestamp, category, severity, status, summary,
-                suspected_cause, recommended_fix, confidence, error, resources,
-                evidence, alternatives_considered)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT (id) DO UPDATE SET
-               status = EXCLUDED.status, summary = EXCLUDED.summary,
-               suspected_cause = EXCLUDED.suspected_cause,
-               recommended_fix = EXCLUDED.recommended_fix,
-               confidence = EXCLUDED.confidence, error = EXCLUDED.error""",
-            (
-                report.get("id"),
-                report.get("findingId", ""),
-                report.get("timestamp", _ts()),
-                finding.get("category", ""),
-                finding.get("severity", ""),
-                report.get("status", ""),
-                report.get("summary", ""),
-                report.get("suspectedCause", ""),
-                report.get("recommendedFix", ""),
-                float(report.get("confidence") or 0.0),
-                report.get("error"),
-                json.dumps(finding.get("resources", [])),
-                json.dumps(report.get("evidence", [])),
-                json.dumps(report.get("alternativesConsidered", [])),
-            ),
+        get_monitor_repo().save_investigation(
+            report=report,
+            finding=finding,
+            timestamp=report.get("timestamp", _ts()),
         )
-        db.commit()
     except Exception as e:
         logger.error("Failed to save investigation: %s", e)
 
@@ -354,12 +287,7 @@ def execute_rollback(action_id: str) -> dict:
                 return {"error": f"Rollback failed: {result_text}"}
 
             # Update status in database
-            db = get_database()
-            db.execute(
-                "UPDATE actions SET status = 'rolled_back', outcome = 'rolled_back' WHERE id = ?",
-                (action_id,),
-            )
-            db.commit()
+            get_monitor_repo().update_action_status(action_id, "rolled_back", "rolled_back")
             return {"status": "rolled_back", "actionId": action_id, "detail": result_text}
         except Exception as e:
             return {"error": f"Rollback failed: {e}"}
@@ -370,15 +298,7 @@ def execute_rollback(action_id: str) -> dict:
 def update_action_verification(action_id: str, status: str, evidence: str) -> None:
     """Persist verification result for an action."""
     try:
-        _ensure_tables()
-        db = get_database()
-        db.execute(
-            """UPDATE actions
-               SET verification_status = ?, verification_evidence = ?, verification_timestamp = ?
-               WHERE id = ?""",
-            (status, evidence, _ts(), action_id),
-        )
-        db.commit()
+        get_monitor_repo().update_action_verification(action_id, status, evidence, _ts())
     except Exception as e:
         logger.error("Failed to update action verification: %s", e)
 
@@ -393,10 +313,7 @@ def update_action_outcome(action_id: str, outcome: str) -> bool:
     if outcome not in _VALID_OUTCOMES:
         return False
     try:
-        _ensure_tables()
-        db = get_database()
-        db.execute("UPDATE actions SET outcome = ? WHERE id = ?", (outcome, action_id))
-        db.commit()
+        get_monitor_repo().update_action_outcome(action_id, outcome)
         return True
     except Exception as e:
         logger.error("Failed to update action outcome: %s", e)
@@ -406,14 +323,7 @@ def update_action_outcome(action_id: str, outcome: str) -> bool:
 def mark_finding_actions_resolved(finding_id: str) -> int:
     """Mark all actions for a finding as resolved. Returns count updated."""
     try:
-        _ensure_tables()
-        db = get_database()
-        cursor = db.execute(
-            "UPDATE actions SET outcome = 'resolved' WHERE finding_id = ? AND outcome = 'unknown'",
-            (finding_id,),
-        )
-        db.commit()
-        return getattr(cursor, "rowcount", 0)
+        return get_monitor_repo().mark_finding_actions_resolved(finding_id)
     except Exception as e:
         logger.error("Failed to mark finding actions resolved: %s", e)
         return 0
@@ -422,15 +332,7 @@ def mark_finding_actions_resolved(finding_id: str) -> int:
 def get_fix_success_rate(days: int = 30) -> dict:
     """Calculate fix success rate over a time period."""
     try:
-        _ensure_tables()
-        db = get_database()
-        rows = db.fetchall(
-            "SELECT outcome, COUNT(*) AS cnt FROM actions "
-            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000 "
-            "AND outcome != 'unknown' "
-            "GROUP BY outcome",
-            (days,),
-        )
+        rows = get_monitor_repo().get_fix_success_rate_rows(days)
         totals = {r["outcome"]: r["cnt"] for r in rows}
         total = sum(totals.values())
         resolved = totals.get("resolved", 0)

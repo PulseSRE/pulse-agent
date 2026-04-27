@@ -6,8 +6,6 @@ import json
 import time
 import uuid
 
-from .. import db_schema
-from ..db import get_database
 from .registry import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING  # noqa: F401 — re-export convenience
 
 
@@ -129,16 +127,9 @@ def _ensure_tables() -> None:
     global _tables_ensured
     if _tables_ensured:
         return
-    db = get_database()
-    db.executescript(db_schema.ACTIONS_SCHEMA)
-    db.executescript(db_schema.INVESTIGATIONS_SCHEMA)
-    db.executescript(
-        "CREATE INDEX IF NOT EXISTS idx_actions_ts ON actions(timestamp DESC);\n"
-        "CREATE INDEX IF NOT EXISTS idx_actions_status ON actions(status);\n"
-        "CREATE INDEX IF NOT EXISTS idx_actions_category ON actions(category);\n"
-        "CREATE INDEX IF NOT EXISTS idx_investigations_ts ON investigations(timestamp DESC);\n"
-        "CREATE INDEX IF NOT EXISTS idx_investigations_finding ON investigations(finding_id);\n"
-    )
+    from ..repositories.monitor_repo import get_monitor_repo
+
+    get_monitor_repo().ensure_tables()
     _tables_ensured = True
 
 

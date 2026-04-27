@@ -19,23 +19,12 @@ from ..k8s_client import get_apps_client, get_core_client
 logger = logging.getLogger("pulse_agent.monitor")
 
 
-def _get_db():
-    from ..db import get_database
-
-    return get_database()
-
-
 def get_investigation_for_finding(finding_id: str) -> dict | None:
     """Look up the latest completed investigation for a finding."""
     try:
-        db = _get_db()
-        return db.fetchone(
-            "SELECT suspected_cause, recommended_fix, confidence "
-            "FROM investigations "
-            "WHERE finding_id = %s AND status = 'completed' "
-            "ORDER BY timestamp DESC LIMIT 1",
-            (finding_id,),
-        )
+        from ..repositories.monitor_repo import get_monitor_repo
+
+        return get_monitor_repo().get_investigation_for_finding(finding_id)
     except Exception:
         logger.debug("Failed to look up investigation for %s", finding_id, exc_info=True)
         return None

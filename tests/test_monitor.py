@@ -27,6 +27,7 @@ from sre_agent.monitor import (
     update_action_verification,
 )
 from sre_agent.monitor.cluster_monitor import ClusterMonitor, reset_cluster_monitor
+from sre_agent.repositories.monitor_repo import MonitorRepository
 from tests.conftest import _TEST_DB_URL
 
 
@@ -41,6 +42,7 @@ def _use_temp_db(monkeypatch, tmp_path):
     set_database(db)
     # Reset table-creation flags so each test creates tables fresh
     _mon.findings._tables_ensured = False
+    MonitorRepository._tables_ensured = False
     _cb._tables_ensured = False
     # Ensure tables exist then truncate for isolation
     # Drop and recreate tables to pick up schema changes
@@ -60,6 +62,7 @@ def _use_temp_db(monkeypatch, tmp_path):
             pass
     db.commit()
     _mon.findings._tables_ensured = False
+    MonitorRepository._tables_ensured = False
     _cb._tables_ensured = False
     _mon._ensure_tables()
     _cb._ensure_tables()
@@ -67,6 +70,7 @@ def _use_temp_db(monkeypatch, tmp_path):
     reset_database()
     reset_cluster_monitor()
     _mon.findings._tables_ensured = False
+    MonitorRepository._tables_ensured = False
     _cb._tables_ensured = False
 
 

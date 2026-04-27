@@ -81,6 +81,12 @@ async def lifespan(app: FastAPI):
         logger.info("Connected to cluster")
     except Exception:
         logger.warning("Cannot connect to cluster -- tools may fail")
+    # Populate tool registry (ensures all @beta_tool modules are imported)
+    from ..tool_discovery import discover_tools
+
+    _tools = discover_tools()
+    logger.info("Discovered %d tools in registry", len(_tools))
+
     # Load skill packages
     try:
         from ..skill_loader import load_skills
