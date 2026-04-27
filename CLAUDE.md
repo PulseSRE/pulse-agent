@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v2.5.0, Protocol v2, 136 tools (100 native + 36 MCP), 7 skills (built-in: sre, security, view_designer, capacity_planner, plan-builder, postmortem, slo-management), 22 scanners (18 reactive + 4 predictive trend scanners), 2331 tests, 73 PromQL recipes, 16 eval suites, 175 scenarios, 116 eval prompts. 44 modules (k8s_tools/12, monitor/11, api/20, plus decorators.py, tool_predictor.py, inbox.py, inbox_generators.py) — no file over 910 lines. Python 3.11+, Mypy clean (0 errors), ruff clean. Migration version 021 (inbox_items). Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings), hard pre-route regex rules, and pre-route handoff in skill classifier. Centralized Pydantic config (no raw os.environ). Generative views: tools return 25 component specs (including action_button, confidence_badge, resolution_tracker, blast_radius, status_pipeline) for rich UI rendering, user-scoped custom dashboards with share/clone, action execution endpoint. Agent view lifecycle: 3 view types (incident/plan/assessment) with status state machines, multi-user claims, finding dedup, recurrence handling, assessment→incident escalation. ViewEventBus for real-time broadcast. Multi-datasource live tables with K8s watches + PromQL/log enrichment + sparkline charts. Tool usage tracking: full audit log with chain intelligence. Adaptive tool selection: TF-IDF + LLM fallback + chain expansion. ORCA multi-signal skill selector (6-channel fusion, 5 active by default, parallel multi-skill execution max 2 with Sonnet synthesis, exclusive skills bypass secondary selection, bidirectional conflicts_with), phased plan execution, dependency graph (17 resource types, 10 relationships, 5 topology perspectives with metrics enrichment), auto-postmortems, SLO registry. ALWAYS_INCLUDE trimmed from 12 to 5. Release gate: 99.6% (release suite avg).
+Pulse Agent — AI-powered OpenShift/Kubernetes SRE and Security agent built on Claude. Connects to live clusters via the K8s API and uses Claude Opus for diagnostics, incident triage, and automated remediation. v2.5.0, Protocol v2, 138 tools (102 native + 36 MCP), 7 skills (built-in: sre, security, view_designer, capacity_planner, plan-builder, postmortem, slo-management), 24 scanners (13 reactive + 5 audit + 1 SLO burn + 1 security posture + 4 predictive trend), 2338 tests, 83 PromQL recipes, 16 eval suites, 192 scenarios, 122 eval prompts. 48 modules (k8s_tools/12, monitor/12, api/22, plus decorators.py, tool_predictor.py, inbox.py, inbox_generators.py) — no file over 910 lines. Python 3.11+, Mypy clean (0 errors), ruff clean. Migration version 021 (inbox_items). Auto-routing orchestrator with typo auto-correction (~130 K8s misspellings), hard pre-route regex rules, and pre-route handoff in skill classifier. Centralized Pydantic config (no raw os.environ). Generative views: tools return 25 component specs (including action_button, confidence_badge, resolution_tracker, blast_radius, status_pipeline) for rich UI rendering, user-scoped custom dashboards with share/clone, action execution endpoint. Agent view lifecycle: 3 view types (incident/plan/assessment) with status state machines, multi-user claims, finding dedup, recurrence handling, assessment→incident escalation. ViewEventBus for real-time broadcast. Multi-datasource live tables with K8s watches + PromQL/log enrichment + sparkline charts. Tool usage tracking: full audit log with chain intelligence. Adaptive tool selection: TF-IDF + LLM fallback + chain expansion. ORCA multi-signal skill selector (6-channel fusion, 5 active by default, parallel multi-skill execution max 2 with Sonnet synthesis, exclusive skills bypass secondary selection, bidirectional conflicts_with), phased plan execution, dependency graph (17 resource types, 10 relationships, 5 topology perspectives with metrics enrichment), auto-postmortems, SLO registry. ALWAYS_INCLUDE trimmed from 12 to 5. Release gate: 99.6% (release suite avg).
 
 **UI Repository:** `/Users/amobrem/ali/OpenshiftPulse` — React/TypeScript frontend (Zustand stores, incident views, admin dashboard).
 
@@ -40,7 +40,9 @@ pulse-agent-api                       # FastAPI on port 8080
 # Tests
 python3 -m pytest tests/ -v           # all tests (~tests)
 python3 -m pytest tests/test_k8s_tools.py -v  # single file
-make verify                                    # lint + type-check + test\nmake test-everything                           # verify + ALL eval suites (deterministic + LLM-judged)\nmake chaos-test                                # chaos engineering (5 scenarios, needs cluster)
+make verify                           # lint + type-check + test
+make test-everything                  # verify + ALL eval suites (deterministic + LLM-judged)
+make chaos-test                       # chaos engineering (5 scenarios, needs cluster)
 
 # Eval commands
 python -m sre_agent.evals.cli --suite release --fail-on-gate   # run release eval gate
@@ -56,7 +58,6 @@ make release VERSION=1.6.0            # bump version everywhere, commit, tag
 # Deploy (OpenShift) — uses umbrella script in UI repo
 cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh   # builds UI + Agent, pushes to Quay, Helm upgrade
 cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --dry-run  # preview without applying
-cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --set agent.mcp.enabled=true  # deploy with MCP enabled
 cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --set agent.mcp.enabled=true  # deploy with MCP enabled
 ```
 
@@ -82,7 +83,7 @@ cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --set agent.mcp.enabl
 
 ### Monitor System (`monitor/` package — 11 modules)
 - `MonitorSession` (session.py) — periodic cluster scanning (default 60s interval)
-- 22 scanners: 18 reactive scanners (crashlooping pods, pending pods, failed deployments, node pressure, expiring certs, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation, security posture + 5 audit scanners: config changes, RBAC, deployments, warning events, auth) + 4 predictive trend scanners (memory pressure forecast, disk pressure forecast, HPA exhaustion trend, error rate acceleration) using Prometheus `predict_linear()`
+- 24 scanners: 13 reactive (crashlooping pods, pending pods, failed deployments, node pressure, expiring certs, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation, SLO burn rate, security posture) + 5 audit (config changes, RBAC, deployments, warning events, auth) + 4 predictive trend (memory pressure forecast, disk pressure forecast, HPA exhaustion trend, error rate acceleration) using Prometheus `predict_linear()`
 - Auto-fix at trust level 3+: deletes crashlooping pods, restarts failed deployments
 - Confidence scores on all findings, investigations, and action proposals
 - `resolution` events emitted when findings resolve (auto-fix or self-healed)
@@ -187,7 +188,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `tool_predictor.py` — adaptive tool selection engine (TF-IDF prediction, LLM fallback, co-occurrence expansion, real-time learning)
 - `decorators.py` — typed `beta_tool` wrapper (centralizes SDK type mismatch for tools returning `tuple[str, dict]`)
 - `tool_chains.py` — tool chain discovery and next-tool hints (bigram analysis, system prompt injection)
-- `promql_recipes.py` — 73 production-tested PromQL recipes + learned queries DB (sources: OpenShift console, cluster-monitoring-operator, kube-state-metrics, node_exporter, ACM)
+- `promql_recipes.py` — 83 production-tested PromQL recipes + learned queries DB (sources: OpenShift console, cluster-monitoring-operator, kube-state-metrics, node_exporter, ACM)
 - `layout_engine.py` — semantic auto-layout engine (role-based row packing, replaces fixed templates)
 - `intelligence.py` — analytics feedback loop (query reliability, dashboard patterns, error hotspots → system prompt); supports `PULSE_PROMPT_EXCLUDE_SECTIONS` env var for ablation testing
 - `evals/compare.py` — A/B comparison of eval suite results (baseline vs current, regression detection)
@@ -199,7 +200,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `mcp_client.py` — MCP server connections (SSE transport), tool/prompt discovery, registration
 - `self_tools.py` — 12 self-description + 4 skill management + 3 K8s API introspection tools
 - `prompt_log.py` — prompt logging (hash, sections, tokens, version tracking) for observability and debugging
-- `component_registry.py` — 23 component kinds registered (metrics, data, visualization, status, detail, layout, action); data-driven prompt hints
+- `component_registry.py` — 25 component kinds registered (metrics, data, visualization, status, detail, layout, action); data-driven prompt hints
 - `slo_registry.py` — SLO definition CRUD, live Prometheus burn-rate queries, persistence to `slo_definitions` table
 - `inbox.py` — Ops Inbox CRUD, lifecycle transitions, priority scoring, dedup, snooze, monitor bridge, generator cycle, `create_inbox_task` agent tool
 - `inbox_generators.py` — 13 proactive task generators (cert expiry, trend prediction, degraded operators, upgrades, SLO burn, capacity, stale findings, privileged workloads, RBAC drift, network policy gaps, route certs, endpoint gaps, readiness regressions)

@@ -21,7 +21,9 @@ requires_tools:
 handoff_to:
   sre: [fix, remediate, scale, drain, cordon, apply]
   view_designer: [dashboard, view, create view, build view]
+route_priority: 30
 trigger_patterns:
+  - "(capacity\\s+plan|forecast|projection|right.?siz)"
   - "capacity|headroom|exhaustion|running.out"
   - "forecast|projection|growth.plan"
   - "right.?size|overcommit|bin.?pack"

@@ -514,7 +514,7 @@ def _generate_smart_layout(item: dict[str, Any], metadata: dict[str, Any]) -> li
 
         with borrow_client() as client:
             response = client.messages.create(
-                model=get_settings().model,
+                model=get_settings().agent.model,
                 max_tokens=1500,
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -942,7 +942,7 @@ def _phase_a_triage() -> int:
     try:
         from .config import get_settings
 
-        model = get_settings().model
+        model = get_settings().agent.model
     except Exception:
         _inbox_logger.exception("Failed to get settings for triage")
         return 0
@@ -1182,7 +1182,7 @@ def _phase_c_plan() -> int:
     try:
         from .config import get_settings
 
-        model = get_settings().model
+        model = get_settings().agent.model
     except Exception:
         _inbox_logger.exception("Failed to get settings for plan generation")
         return 0

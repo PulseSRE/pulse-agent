@@ -125,7 +125,7 @@ class SkillExecutor:
                 await _ws_send({"type": "session_expired", "reason": "K8s API returned 401 — token may have expired"})
 
         effective_system = config["system_prompt"]
-        if get_settings().memory:
+        if get_settings().agent.memory:
             try:
                 from ..memory import get_manager
 
@@ -323,7 +323,7 @@ async def _run_agent_ws_inner(
     """Inner body of _run_agent_ws — separated so the outer function can clean up _turn_starts."""
     # Start memory timing before agent runs
     manager = None
-    if get_settings().memory:
+    if get_settings().agent.memory:
         try:
             from ..memory import get_manager
 

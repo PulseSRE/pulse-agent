@@ -27,6 +27,7 @@ requires_tools:
   - describe_agent
   - describe_tools
 skip_component_hints: true
+route_priority: 40
 trigger_patterns:
   - "build.*plan|create.*plan|make.*plan"
   - "build.*skill|create.*skill|new.*skill"

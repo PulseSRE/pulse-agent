@@ -39,64 +39,23 @@ def get_last_routing_decision() -> dict | None:
     return dict(d) if d else None
 
 
+def reset_hard_pre_route() -> None:
+    """Clear cached pre-route rules so they are rebuilt on next query."""
+    global _HARD_PRE_ROUTE
+    _HARD_PRE_ROUTE = []
+
+
 def _init_hard_pre_route() -> None:
-    """Build hard pre-route rules from skill trigger_patterns."""
+    """Build hard pre-route rules from skill trigger_patterns, ordered by route_priority."""
     global _HARD_PRE_ROUTE
     if _HARD_PRE_ROUTE:
         return
 
     from .skill_loader import list_skills
 
-    skills = {s.name: s for s in list_skills()}
+    skills = sorted(list_skills(), key=lambda s: s.route_priority)
 
-    # High-priority deterministic rules checked FIRST (order matters).
-    # MCP/Helm queries must match before view_designer (which matches "chart")
-    _HARD_PRE_ROUTE.extend(
-        [
-            (
-                re.compile(
-                    r"helm\s+(release|chart|list|install|upgrade|rollback|uninstall|history|values)", re.IGNORECASE
-                ),
-                "sre",
-            ),
-            (re.compile(r"(tekton|pipeline|pipelinerun|taskrun)\b", re.IGNORECASE), "sre"),
-            (re.compile(r"(service\s+mesh|istio|kiali|ossm)\b", re.IGNORECASE), "sre"),
-            (re.compile(r"(kubevirt|virtual\s+machine)\b", re.IGNORECASE), "sre"),
-            (
-                re.compile(
-                    r"(create|build|make|design)\s+(me\s+)?(a\s+)?(\w+\s+)?(dashboard|view|live\s+table)", re.IGNORECASE
-                ),
-                "view_designer",
-            ),
-            (
-                re.compile(
-                    r"(edit|update|modify|fix|optimize)\s+(the\s+)?(dashboard|view|layout|widget)", re.IGNORECASE
-                ),
-                "view_designer",
-            ),
-            (re.compile(r"add\s+(a\s+)?(chart|table|widget|metric|column)", re.IGNORECASE), "view_designer"),
-            (
-                re.compile(r"(remove|hide|show|rename|reorder)\s+.{0,30}(column|widget|chart)", re.IGNORECASE),
-                "view_designer",
-            ),
-            (re.compile(r"(sort|filter)\s+(by|the)\s+", re.IGNORECASE), "view_designer"),
-            (re.compile(r"custom_view|/custom/", re.IGNORECASE), "view_designer"),
-            (
-                re.compile(r"(postmortem|post.mortem|incident\s+review|root\s+cause\s+report)\b", re.IGNORECASE),
-                "postmortem",
-            ),
-            (re.compile(r"(slo\b|service\s+level|error\s+budget|burn\s+rate)", re.IGNORECASE), "slo_management"),
-            (re.compile(r"(capacity\s+plan|forecast|projection|right.?siz)", re.IGNORECASE), "capacity_planner"),
-            (
-                re.compile(
-                    r"(since\s+(the\s+)?upgrade|after\s+(the\s+)?upgrade|post.?upgrade|unstable)", re.IGNORECASE
-                ),
-                "sre",
-            ),
-        ]
-    )
-    # Then skill-defined trigger_patterns (lower priority)
-    for skill in skills.values():
+    for skill in skills:
         for pattern in skill.trigger_patterns:
             try:
                 _HARD_PRE_ROUTE.append((re.compile(pattern, re.IGNORECASE), skill.name))
@@ -273,7 +232,7 @@ def classify_query_multi(query: str, *, context: dict | None = None) -> tuple:
     settings = get_settings()
     primary = classify_query(query, context=context)
 
-    if not settings.multi_skill:
+    if not settings.routing.multi_skill:
         return primary, None
 
     if primary.exclusive:

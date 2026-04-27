@@ -19,6 +19,7 @@ requires_tools:
 handoff_to:
   sre: [fix, remediate, scale, restart, apply, patch, delete]
   view_designer: [dashboard, view, create view, security dashboard]
+route_priority: 40
 trigger_patterns:
   - "rbac|role.?binding|cluster.?role|overpermissive"
   - "scc|security.?context|privileged|run.?as.?root"

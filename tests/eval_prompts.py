@@ -779,6 +779,47 @@ EXCLUDED_FROM_EVAL = {
     "critique_view",  # Called programmatically after create_dashboard
     "get_view_details",  # Called by agent internally during view editing
     "get_view_versions",  # Called by agent internally for undo
+    # --- Skill-selected tools (auto-registered by @beta_tool, selected by skills dynamically) ---
+    # K8s convenience wrappers (selected via skill categories, not in SRE default set)
+    "describe_deployment",
+    "describe_node",
+    "get_persistent_volume_claims",
+    "get_pod_disruption_budgets",
+    "get_resource_quotas",
+    "get_services",
+    "list_daemonsets",
+    "list_deployments",
+    "list_limit_ranges",
+    "list_namespaces",
+    "list_nodes",
+    "list_replicasets",
+    "list_statefulsets",
+    "visualize_nodes",
+    # Security tools (selected by security skill)
+    "get_security_summary",
+    "scan_rbac_risks",
+    "scan_pod_security",
+    "scan_network_policies",
+    "scan_images",
+    "scan_scc_usage",
+    "scan_sccs",
+    "scan_secrets",
+    "list_service_account_secrets",
+    # View designer tools (selected by view_designer skill)
+    "create_dashboard",
+    "plan_dashboard",
+    "clone_dashboard",
+    "delete_dashboard",
+    "add_widget_to_view",
+    "remove_widget_from_view",
+    "update_view_widgets",
+    "undo_view_change",
+    "optimize_view",
+    "list_saved_views",
+    "emit_component",
+    "get_topology_graph",
+    # Handoff/inbox tools
+    "request_sre_investigation",
 }
 
 

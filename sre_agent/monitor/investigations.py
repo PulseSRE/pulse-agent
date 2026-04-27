@@ -243,7 +243,7 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
     )
 
     # Memory: inject past incident context into investigation prompt
-    if get_settings().memory:
+    if get_settings().agent.memory:
         try:
             from ..memory import get_manager
 
@@ -359,7 +359,7 @@ async def _run_security_followup(finding: dict, *, client=None) -> dict:
     )
 
     # Memory: inject past security findings into prompt
-    if get_settings().memory:
+    if get_settings().agent.memory:
         try:
             from ..memory import get_manager
 

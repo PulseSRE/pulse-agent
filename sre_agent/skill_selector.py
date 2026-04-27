@@ -362,11 +362,11 @@ class SkillSelector:
             from .config import get_settings
 
             _ms = get_settings()
-            if _ms.multi_skill and fused:
+            if _ms.routing.multi_skill and fused:
                 sorted_skills = sorted(fused.items(), key=lambda x: x[1], reverse=True)
                 if len(sorted_skills) >= 2:
                     gap = sorted_skills[0][1] - sorted_skills[1][1]
-                    if gap <= _ms.multi_skill_threshold:
+                    if gap <= _ms.routing.multi_skill_threshold:
                         candidate = sorted_skills[1][0]
                         best_obj = self._skills.get(best_name)
                         cand_obj = self._skills.get(candidate)
@@ -581,7 +581,7 @@ class SkillSelector:
     def _get_temporal_signal(self) -> TemporalSignal:
         from .config import get_settings
 
-        ttl = get_settings().temporal_cache_ttl
+        ttl = get_settings().routing.temporal_cache_ttl
         return _build_temporal_signal(cache_ttl=ttl)
 
     def _score_temporal(self, query: str) -> dict[str, float]:

@@ -15,8 +15,9 @@ categories:
   - diagnostics
 write_tools: false
 priority: 5
+route_priority: 30
 trigger_patterns:
-  - "slo|service.level|error.budget|burn.rate"
+  - "(slo\\b|service\\s+level|error\\s+budget|burn\\s+rate)"
   - "set.*slo|define.*slo|create.*slo"
   - "availability.*target|reliability.*target"
   - "99\\.9|nines"

@@ -5,10 +5,85 @@ from __future__ import annotations
 import logging
 import os
 
-from pydantic import field_validator
+from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("pulse_agent")
+
+
+# --- Nested sub-models ---
+
+
+class AgentConfig(BaseModel):
+    model: str = "claude-opus-4-6"
+    max_tokens: int = 16000
+    harness: bool = True
+    memory: bool = True
+    prompt_experiment: str = ""
+    dev_user: str = ""
+    tool_timeout: int = 30
+    cb_threshold: int = 3
+    cb_timeout: float = 60.0
+    token_forwarding: bool = True
+
+
+class DatabaseConfig(BaseModel):
+    url: str = ""
+    pool_min: int = 2
+    pool_max: int = 20
+
+
+class MonitorConfig(BaseModel):
+    scan_interval: int = 60
+    crashloop_threshold: int = 3
+    max_daily_investigations: int = 20
+    investigations_max_per_scan: int = 2
+    investigation_timeout: int = 20
+    investigation_cooldown: int = 300
+    autofix_enabled: bool = True
+    security_followup: bool = False
+    noise_threshold: float = 0.7
+    max_trust_level: int = 3
+    investigation_categories: str = (
+        "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa"
+    )
+    max_concurrent_investigations: int = 3
+
+
+class RoutingConfig(BaseModel):
+    multi_skill: bool = True
+    multi_skill_threshold: float = 0.15
+    multi_skill_max: int = 2
+    chain_hints: bool = True
+    chain_min_probability: float = 0.6
+    chain_min_frequency: int = 3
+    temporal_cache_ttl: int = 60
+
+
+class ServerConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8080
+    socket: str = ""
+    ws_token: str = ""
+    webhook_url: str = ""
+    webhook_secret: str = ""
+    max_conversation_messages: int = 50
+    max_agent_sessions: int = 20
+    max_monitor_clients: int = 50
+    user_skills_dir: str = "/tmp/pulse_agent/skills"
+    trusted_registries: str = (
+        "registry.redhat.io,registry.access.redhat.com,quay.io,image-registry.openshift-image-registry.svc"
+    )
+
+
+class PrometheusConfig(BaseModel):
+    thanos_url: str = ""
+    acm_thanos_url: str = ""
+    acm_thanos_enabled: bool | None = None
+    insecure: bool = False
+
+
+# --- Main settings class ---
 
 
 class PulseAgentSettings(BaseSettings):
@@ -19,18 +94,32 @@ class PulseAgentSettings(BaseSettings):
         case_sensitive=False,
     )
 
+    # Nested sub-models (new canonical access path)
+    agent: AgentConfig = AgentConfig()
+    database: DatabaseConfig = DatabaseConfig()
+    monitor: MonitorConfig = MonitorConfig()
+    routing: RoutingConfig = RoutingConfig()
+    server: ServerConfig = ServerConfig()
+    prometheus: PrometheusConfig = PrometheusConfig()
+
+    # --- Flat fields (env-var backed, synced to nested in model_post_init) ---
+
     # Agent
     model: str = "claude-opus-4-6"
     max_tokens: int = 16000
     harness: bool = True
+    memory: bool = True
+    prompt_experiment: str = ""
+    dev_user: str = ""
+    cb_threshold: int = 3
+    cb_timeout: float = 60.0
+    tool_timeout: int = 30
+    token_forwarding: bool = True
 
-    # Database (PostgreSQL required)
+    # Database
     database_url: str = ""
     db_pool_min: int = 2
     db_pool_max: int = 20
-
-    # Memory
-    memory: bool = True
 
     # Monitor
     scan_interval: int = 60
@@ -43,75 +132,105 @@ class PulseAgentSettings(BaseSettings):
     security_followup: bool = False
     noise_threshold: float = 0.7
     max_trust_level: int = 3
+    investigation_categories: str = (
+        "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa"
+    )
+    max_concurrent_investigations: int = 3
 
-    # Scaling
-    max_conversation_messages: int = 50
-    max_agent_sessions: int = 20
-    max_monitor_clients: int = 50
-
-    # WebSocket
-    ws_token: str = ""
-
-    # Skills
-    user_skills_dir: str = "/tmp/pulse_agent/skills"
-
-    # Prompt experiment (e.g., "legacy" for A/B testing)
-    prompt_experiment: str = ""
-
-    # Dev
-    dev_user: str = ""
-
-    # Circuit breaker
-    cb_threshold: int = 3
-    cb_timeout: float = 60.0
-
-    # Prometheus / Thanos
-    thanos_url: str = ""
-    acm_thanos_url: str = ""
-    acm_thanos_enabled: bool | None = None
-    prometheus_insecure: bool = False
-
-    # Tool timeout
-    tool_timeout: int = 30
+    # Routing
+    multi_skill: bool = True
+    multi_skill_threshold: float = 0.15
+    multi_skill_max: int = 2
+    chain_hints: bool = True
+    chain_min_probability: float = 0.6
+    chain_min_frequency: int = 3
+    temporal_cache_ttl: int = 60
 
     # Server
     host: str = "0.0.0.0"
     port: int = 8080
     socket: str = ""
-
-    # Webhook
+    ws_token: str = ""
     webhook_url: str = ""
     webhook_secret: str = ""
-
-    # Trusted registries (comma-separated string)
+    max_conversation_messages: int = 50
+    max_agent_sessions: int = 20
+    max_monitor_clients: int = 50
+    user_skills_dir: str = "/tmp/pulse_agent/skills"
     trusted_registries: str = (
         "registry.redhat.io,registry.access.redhat.com,quay.io,image-registry.openshift-image-registry.svc"
     )
 
+    # Prometheus
+    thanos_url: str = ""
+    acm_thanos_url: str = ""
+    acm_thanos_enabled: bool | None = None
+    prometheus_insecure: bool = False
+
+    def model_post_init(self, __context: object) -> None:
+        """Sync flat env-parsed fields into nested sub-models."""
+        self.agent = AgentConfig(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            harness=self.harness,
+            memory=self.memory,
+            prompt_experiment=self.prompt_experiment,
+            dev_user=self.dev_user,
+            tool_timeout=self.tool_timeout,
+            cb_threshold=self.cb_threshold,
+            cb_timeout=self.cb_timeout,
+            token_forwarding=self.token_forwarding,
+        )
+        self.database = DatabaseConfig(
+            url=self.database_url,
+            pool_min=self.db_pool_min,
+            pool_max=self.db_pool_max,
+        )
+        self.monitor = MonitorConfig(
+            scan_interval=self.scan_interval,
+            crashloop_threshold=self.crashloop_threshold,
+            max_daily_investigations=self.max_daily_investigations,
+            investigations_max_per_scan=self.investigations_max_per_scan,
+            investigation_timeout=self.investigation_timeout,
+            investigation_cooldown=self.investigation_cooldown,
+            autofix_enabled=self.autofix_enabled,
+            security_followup=self.security_followup,
+            noise_threshold=self.noise_threshold,
+            max_trust_level=self.max_trust_level,
+            investigation_categories=self.investigation_categories,
+            max_concurrent_investigations=self.max_concurrent_investigations,
+        )
+        self.routing = RoutingConfig(
+            multi_skill=self.multi_skill,
+            multi_skill_threshold=self.multi_skill_threshold,
+            multi_skill_max=self.multi_skill_max,
+            chain_hints=self.chain_hints,
+            chain_min_probability=self.chain_min_probability,
+            chain_min_frequency=self.chain_min_frequency,
+            temporal_cache_ttl=self.temporal_cache_ttl,
+        )
+        self.server = ServerConfig(
+            host=self.host,
+            port=self.port,
+            socket=self.socket,
+            ws_token=self.ws_token,
+            webhook_url=self.webhook_url,
+            webhook_secret=self.webhook_secret,
+            max_conversation_messages=self.max_conversation_messages,
+            max_agent_sessions=self.max_agent_sessions,
+            max_monitor_clients=self.max_monitor_clients,
+            user_skills_dir=self.user_skills_dir,
+            trusted_registries=self.trusted_registries,
+        )
+        self.prometheus = PrometheusConfig(
+            thanos_url=self.thanos_url,
+            acm_thanos_url=self.acm_thanos_url,
+            acm_thanos_enabled=self.acm_thanos_enabled,
+            insecure=self.prometheus_insecure,
+        )
+
     def get_trusted_registries(self) -> list[str]:
         return [s.strip() for s in self.trusted_registries.split(",") if s.strip()]
-
-    # Temporal channel
-    temporal_cache_ttl: int = 60
-
-    # Multi-skill parallel execution
-    multi_skill: bool = True
-    multi_skill_threshold: float = 0.15
-    multi_skill_max: int = 2
-
-    # Tool chain intelligence
-    chain_hints: bool = True
-    chain_min_probability: float = 0.6
-    chain_min_frequency: int = 3
-
-    # Token forwarding
-    token_forwarding: bool = True
-
-    # Investigation settings
-    investigation_categories: str = (
-        "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa"
-    )
-    max_concurrent_investigations: int = 3
 
     @field_validator("model")
     @classmethod

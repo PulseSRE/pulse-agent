@@ -23,7 +23,7 @@ _USER_CACHE_MAX = 500  # evict oldest entries beyond this
 def _verify_ws_token(websocket) -> str:
     """Verify WebSocket token and return the client token. Closes with 4001 if invalid."""
     client_token = websocket.query_params.get("token", "")
-    expected = get_settings().ws_token
+    expected = get_settings().server.ws_token
     if not expected or not hmac.compare_digest(client_token, expected):
         return ""
     return client_token
@@ -31,7 +31,7 @@ def _verify_ws_token(websocket) -> str:
 
 def _verify_rest_token(authorization: str | None = Header(None), token: str | None = Query(None)):
     """Verify token for REST endpoints -- accepts Bearer header or query param."""
-    expected = get_settings().ws_token
+    expected = get_settings().server.ws_token
     if not expected:
         raise HTTPException(status_code=503, detail="Server not configured")
     client_token = ""
@@ -53,7 +53,7 @@ def _get_current_user(
     The OAuth proxy sets X-Forwarded-User with the authenticated username -- this is
     the most reliable source since OpenShift tokens are opaque (sha256~...), not JWTs.
     """
-    dev_user = get_settings().dev_user
+    dev_user = get_settings().agent.dev_user
     if dev_user:
         return dev_user
 
@@ -140,7 +140,7 @@ def extract_user_token(headers) -> str | None:
     """Extract user OAuth token from request/websocket headers. Returns None if absent or disabled."""
     from ..config import get_settings
 
-    if not get_settings().token_forwarding:
+    if not get_settings().agent.token_forwarding:
         return None
     token = headers.get("x-forwarded-access-token") if hasattr(headers, "get") else None
     return token or None
@@ -152,7 +152,7 @@ def get_user_token(
     """FastAPI dependency — extracts user OAuth token from proxy header."""
     from ..config import get_settings
 
-    if not get_settings().token_forwarding:
+    if not get_settings().agent.token_forwarding:
         return None
     return x_forwarded_access_token or None
 

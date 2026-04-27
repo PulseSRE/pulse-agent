@@ -8,11 +8,15 @@ with the OpenShift Pulse web UI. V2 adds /ws/monitor for autonomous scanning.
 
 from __future__ import annotations
 
+import contextvars
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from importlib.metadata import version as pkg_version
 
-from fastapi import Depends, FastAPI
+import structlog
+from fastapi import Depends, FastAPI, Request, Response
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from ..agent import ALL_TOOLS as SRE_ALL_TOOLS
 from ..config import get_settings
@@ -38,6 +42,23 @@ from .ws_endpoints import websocket_auto_agent, websocket_monitor
 
 logger = logging.getLogger("pulse_agent.api")
 
+request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="")
+
+
+class CorrelationMiddleware(BaseHTTPMiddleware):
+    """Injects a request ID into structlog context for every HTTP request."""
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+        request_id_var.set(rid)
+        structlog.contextvars.bind_contextvars(request_id=rid)
+        try:
+            response = await call_next(request)
+            response.headers["x-request-id"] = rid
+            return response
+        finally:
+            structlog.contextvars.unbind_contextvars("request_id")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -48,7 +69,7 @@ async def lifespan(app: FastAPI):
     # Ensure pulse_agent loggers are at INFO so monitor scan output is visible
     logging.getLogger("pulse_agent").setLevel(logging.INFO)
 
-    if not get_settings().ws_token:
+    if not get_settings().server.ws_token:
         logger.critical(
             "PULSE_AGENT_WS_TOKEN is not set. WebSocket endpoint is UNAUTHENTICATED. "
             "Set this variable or connections will be rejected."
@@ -88,7 +109,7 @@ async def lifespan(app: FastAPI):
         logger.warning("Skill loading failed: %s", e)
 
     # Initialize memory system if enabled
-    if get_settings().memory:
+    if get_settings().agent.memory:
         try:
             from ..memory import MemoryManager, set_manager
 
@@ -131,6 +152,7 @@ def _get_agent_version() -> str:
 
 
 app = FastAPI(title="Pulse Agent API", version=_get_agent_version(), lifespan=lifespan)
+app.add_middleware(CorrelationMiddleware)
 
 PROTOCOL_VERSION = "2"
 

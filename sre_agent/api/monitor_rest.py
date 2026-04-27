@@ -38,10 +38,10 @@ def _compute_kpi_dashboard_sync(days: int) -> dict:
 
         kpis["mttd"] = {
             "label": "Mean Time to Detect",
-            "value": get_settings().scan_interval,
+            "value": get_settings().monitor.scan_interval,
             "unit": "seconds",
             "target": 30,
-            "status": "pass" if get_settings().scan_interval <= 60 else "fail",
+            "status": "pass" if get_settings().monitor.scan_interval <= 60 else "fail",
         }
 
         # 2. MTTR — Mean Time to Remediate

@@ -17,6 +17,10 @@ from typing import Any
 import anthropic
 
 from .config import get_settings
+
+# Import tool modules to trigger @beta_tool auto-registration in TOOL_REGISTRY.
+# ALL_TOOLS remains the curated SRE-mode default set (skills select additional
+# tools dynamically). The full registry is available via tool_discovery.discover_tools().
 from .fleet_tools import FLEET_TOOLS
 from .git_tools import GIT_TOOLS
 from .gitops_tools import GITOPS_TOOLS
@@ -28,7 +32,6 @@ from .harness import (
 )
 from .inbox import create_inbox_task
 from .k8s_tools import ALL_TOOLS as _K8S_TOOLS
-from .k8s_tools import WRITE_TOOLS
 from .predict_tools import PREDICT_TOOLS
 from .runbooks import ALERT_TRIAGE_CONTEXT, RUNBOOKS  # noqa: F401 — RUNBOOKS re-exported for backward compat
 from .self_tools import (
@@ -46,6 +49,7 @@ from .self_tools import (
     list_ui_components,
 )
 from .timeline_tools import TIMELINE_TOOLS
+from .tool_registry import get_write_tools
 from .view_tools import (
     cluster_metrics,
     namespace_summary,
@@ -78,14 +82,8 @@ ALL_TOOLS: list[Any] = (
     ]
 )
 
-# Add tools that require confirmation
-WRITE_TOOLS = WRITE_TOOLS | {
-    "propose_git_change",
-    "install_gitops_operator",
-    "create_argo_application",
-    "exec_command",
-    "test_connectivity",
-}
+# Write tools: registry-tracked (populated by @beta_tool(is_write=True) and register_tool calls)
+WRITE_TOOLS = get_write_tools()
 
 logger = logging.getLogger("pulse_agent")
 
@@ -165,8 +163,8 @@ class CircuitBreaker:
 
 # Global circuit breaker instance
 _circuit_breaker = CircuitBreaker(
-    failure_threshold=get_settings().cb_threshold,
-    recovery_timeout=get_settings().cb_timeout,
+    failure_threshold=get_settings().agent.cb_threshold,
+    recovery_timeout=get_settings().agent.cb_timeout,
 )
 
 _FEW_SHOT_EXAMPLE = """
@@ -231,7 +229,7 @@ def _build_system_prompt() -> str:
     """Build system prompt. Default is optimized; set PULSE_AGENT_PROMPT_EXPERIMENT for variants."""
     from .config import get_settings
 
-    experiment = get_settings().prompt_experiment
+    experiment = get_settings().agent.prompt_experiment
 
     if experiment == "legacy":
         return _LEGACY_PROMPT + ALERT_TRIAGE_CONTEXT
@@ -429,7 +427,7 @@ def _execute_tool(
             return f"Error executing {name}: {type(e).__name__}", None, meta
 
 
-TOOL_TIMEOUT = get_settings().tool_timeout
+TOOL_TIMEOUT = get_settings().agent.tool_timeout
 
 
 def _execute_tool_with_timeout(
@@ -487,6 +485,7 @@ async def run_agent_streaming(
     mode: str = "sre",
     thinking: dict | None = None,
     user_token: str | None = None,
+    event_bus=None,
 ) -> str:
     """Run an agent turn with streaming, handling the tool loop manually.
 
@@ -507,19 +506,35 @@ async def run_agent_streaming(
         on_tool_result: Callback fired after each tool execution with full metadata dict.
         on_usage: Callback fired after each API response with token usage kwargs
             (input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens).
+        event_bus: Optional EventBus instance. If provided, replaces individual
+            callbacks. If None, an EventBus is auto-constructed from the individual
+            callback parameters.
 
     Returns the full final text response.
     """
+    from .event_bus import EventBus
+
     if write_tools is None:
         write_tools = set()
+
+    if event_bus is None:
+        event_bus = EventBus.from_callbacks(
+            on_text=on_text,
+            on_thinking=on_thinking,
+            on_tool_use=on_tool_use,
+            on_confirm=on_confirm,
+            on_component=on_component,
+            on_tool_result=on_tool_result,
+            on_usage=on_usage,
+        )
 
     full_text_parts = []
     iterations = 0
 
     settings = get_settings()
-    model = settings.model
-    max_tokens = settings.max_tokens
-    use_harness = settings.harness
+    model = settings.agent.model
+    max_tokens = settings.agent.max_tokens
+    use_harness = settings.agent.harness
 
     # Circuit breaker check — reject immediately if API is in Silent Mode
     if not _circuit_breaker.allow_request():
@@ -619,8 +634,7 @@ async def run_agent_streaming(
                     logger.warning(
                         "API %d, retrying in %ds (attempt %d/%d)", e.status_code, delay, attempt + 1, max_retries
                     )
-                    if on_text:
-                        await _invoke(on_text, f"\n*Rate limited, retrying in {delay}s...*\n")
+                    await event_bus.on_text(f"\n*Rate limited, retrying in {delay}s...*\n")
                     await asyncio.sleep(min(delay, 30))
                     continue
                 _circuit_breaker.record_failure()
@@ -651,24 +665,20 @@ async def run_agent_streaming(
             async for event in stream:
                 if event.type == "content_block_start":
                     if hasattr(event.content_block, "name"):
-                        if on_tool_use:
-                            await _invoke(on_tool_use, event.content_block.name)
+                        await event_bus.on_tool_use(event.content_block.name)
                 elif event.type == "content_block_delta":
                     if event.delta.type == "text_delta":
-                        if on_text:
-                            await _invoke(on_text, event.delta.text)
+                        await event_bus.on_text(event.delta.text)
                         full_text_parts.append(event.delta.text)
                     elif event.delta.type == "thinking_delta":
-                        if on_thinking:
-                            await _invoke(on_thinking, event.delta.thinking)
+                        await event_bus.on_thinking(event.delta.thinking)
 
             response = await stream.get_final_message()
 
         # Extract token usage from API response
         _usage = getattr(response, "usage", None)
-        if _usage and on_usage:
-            await _invoke(
-                on_usage,
+        if _usage:
+            await event_bus.on_usage(
                 input_tokens=getattr(_usage, "input_tokens", 0),
                 output_tokens=getattr(_usage, "output_tokens", 0),
                 cache_read_tokens=getattr(_usage, "cache_read_input_tokens", 0),
@@ -711,14 +721,47 @@ async def run_agent_streaming(
                     block = task_to_block[p]
                     elapsed_ms = int((time.time() - start_time) * 1000)
                     results_map[block.id] = (f"Error: {block.name} timed out", None)
-                    if on_tool_result:
-                        await _invoke(
-                            on_tool_result,
+                    await event_bus.on_tool_result(
+                        {
+                            "tool_name": block.name,
+                            "input": block.input,
+                            "status": "error",
+                            "error_message": f"{block.name} timed out",
+                            "error_category": "server",
+                            "duration_ms": elapsed_ms,
+                            "result_bytes": 0,
+                            "was_confirmed": None,
+                            "turn_number": iterations,
+                        },
+                    )
+
+                for task in done:
+                    block = task_to_block[task]
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+                    try:
+                        text, component, exec_meta = task.result()
+                        results_map[block.id] = (text, component)
+                        await event_bus.on_tool_result(
+                            {
+                                "tool_name": block.name,
+                                "input": block.input,
+                                "status": exec_meta["status"],
+                                "error_message": exec_meta["error_message"],
+                                "error_category": exec_meta["error_category"],
+                                "duration_ms": elapsed_ms,
+                                "result_bytes": exec_meta["result_bytes"],
+                                "was_confirmed": None,
+                                "turn_number": iterations,
+                            },
+                        )
+                    except Exception:
+                        results_map[block.id] = (f"Error executing {block.name}", None)
+                        await event_bus.on_tool_result(
                             {
                                 "tool_name": block.name,
                                 "input": block.input,
                                 "status": "error",
-                                "error_message": f"{block.name} timed out",
+                                "error_message": f"Error executing {block.name}",
                                 "error_category": "server",
                                 "duration_ms": elapsed_ms,
                                 "result_bytes": 0,
@@ -727,65 +770,24 @@ async def run_agent_streaming(
                             },
                         )
 
-                for task in done:
-                    block = task_to_block[task]
-                    elapsed_ms = int((time.time() - start_time) * 1000)
-                    try:
-                        text, component, exec_meta = task.result()
-                        results_map[block.id] = (text, component)
-                        if on_tool_result:
-                            await _invoke(
-                                on_tool_result,
-                                {
-                                    "tool_name": block.name,
-                                    "input": block.input,
-                                    "status": exec_meta["status"],
-                                    "error_message": exec_meta["error_message"],
-                                    "error_category": exec_meta["error_category"],
-                                    "duration_ms": elapsed_ms,
-                                    "result_bytes": exec_meta["result_bytes"],
-                                    "was_confirmed": None,
-                                    "turn_number": iterations,
-                                },
-                            )
-                    except Exception:
-                        results_map[block.id] = (f"Error executing {block.name}", None)
-                        if on_tool_result:
-                            await _invoke(
-                                on_tool_result,
-                                {
-                                    "tool_name": block.name,
-                                    "input": block.input,
-                                    "status": "error",
-                                    "error_message": f"Error executing {block.name}",
-                                    "error_category": "server",
-                                    "duration_ms": elapsed_ms,
-                                    "result_bytes": 0,
-                                    "was_confirmed": None,
-                                    "turn_number": iterations,
-                                },
-                            )
-
             # Execute write tools sequentially (need confirmation gate)
             for block in write_blocks:
-                confirmed = await _invoke(on_confirm, block.name, block.input) if on_confirm else False
+                confirmed = await event_bus.on_confirm(block.name, block.input)
                 if not confirmed:
                     results_map[block.id] = ("Operation denied. No confirmation callback or user rejected.", None)
-                    if on_tool_result:
-                        await _invoke(
-                            on_tool_result,
-                            {
-                                "tool_name": block.name,
-                                "input": block.input,
-                                "status": "denied",
-                                "error_message": None,
-                                "error_category": None,
-                                "duration_ms": 0,
-                                "result_bytes": 0,
-                                "was_confirmed": False,
-                                "turn_number": iterations,
-                            },
-                        )
+                    await event_bus.on_tool_result(
+                        {
+                            "tool_name": block.name,
+                            "input": block.input,
+                            "status": "denied",
+                            "error_message": None,
+                            "error_category": None,
+                            "duration_ms": 0,
+                            "result_bytes": 0,
+                            "was_confirmed": False,
+                            "turn_number": iterations,
+                        },
+                    )
                     continue
                 write_start = time.time()
                 loop = asyncio.get_running_loop()
@@ -801,21 +803,19 @@ async def run_agent_streaming(
                 )
                 write_elapsed_ms = int((time.time() - write_start) * 1000)
                 results_map[block.id] = (text, component)
-                if on_tool_result:
-                    await _invoke(
-                        on_tool_result,
-                        {
-                            "tool_name": block.name,
-                            "input": block.input,
-                            "status": exec_meta["status"],
-                            "error_message": exec_meta["error_message"],
-                            "error_category": exec_meta["error_category"],
-                            "duration_ms": write_elapsed_ms,
-                            "result_bytes": exec_meta["result_bytes"],
-                            "was_confirmed": True,
-                            "turn_number": iterations,
-                        },
-                    )
+                await event_bus.on_tool_result(
+                    {
+                        "tool_name": block.name,
+                        "input": block.input,
+                        "status": exec_meta["status"],
+                        "error_message": exec_meta["error_message"],
+                        "error_category": exec_meta["error_category"],
+                        "duration_ms": write_elapsed_ms,
+                        "result_bytes": exec_meta["result_bytes"],
+                        "was_confirmed": True,
+                        "turn_number": iterations,
+                    },
+                )
 
             # Assemble results in original order
             for block in tool_blocks:
@@ -827,8 +827,8 @@ async def run_agent_streaming(
                         "content": text,
                     }
                 )
-                if component and on_component:
-                    await _invoke(on_component, block.name, component)
+                if component:
+                    await event_bus.on_component(block.name, component)
 
             messages.append({"role": "user", "content": tool_results})
         elif response.stop_reason == "pause_turn":

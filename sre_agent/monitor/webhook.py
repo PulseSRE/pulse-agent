@@ -14,11 +14,11 @@ logger = logging.getLogger("pulse_agent.monitor")
 
 
 def _get_webhook_url() -> str:
-    return get_settings().webhook_url
+    return get_settings().server.webhook_url
 
 
 def _get_webhook_secret() -> str:
-    return get_settings().webhook_secret
+    return get_settings().server.webhook_secret
 
 
 async def _send_webhook(finding: dict) -> None:

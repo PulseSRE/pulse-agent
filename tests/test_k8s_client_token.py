@@ -125,6 +125,6 @@ class TestUserTokenContext:
         from sre_agent.k8s_client import _user_token_var, user_token_context
 
         with patch("sre_agent.config.get_settings") as mock_settings:
-            mock_settings.return_value = MagicMock(token_forwarding=False)
+            mock_settings.return_value = MagicMock(agent=MagicMock(token_forwarding=False))
             with user_token_context("should-be-ignored"):
                 assert _user_token_var.get() is None

@@ -58,7 +58,7 @@ class ClusterMonitor:
 
     def __init__(self) -> None:
         self.running = False
-        self.scan_interval = get_settings().scan_interval
+        self.scan_interval = get_settings().monitor.scan_interval
         self._subscribers: list[MonitorClient] = []
         self._subscribers_lock = asyncio.Lock()
 
@@ -81,7 +81,7 @@ class ClusterMonitor:
         self._last_daily_run: float = 0.0
         self._last_weekly_run: float = 0.0
         self._transient_counts: dict[str, int] = {}
-        self._noise_threshold = get_settings().noise_threshold
+        self._noise_threshold = get_settings().monitor.noise_threshold
         self._noise_suppressed = 0
         self._noise_suppressed_last_scan = 0
         self._session_id = f"mon-{uuid.uuid4().hex[:12]}"
@@ -213,7 +213,7 @@ class ClusterMonitor:
             logger.info("Auto-fix paused — skipping")
             return
 
-        if not get_settings().autofix_enabled:
+        if not get_settings().monitor.autofix_enabled:
             logger.info("Auto-fix disabled via PULSE_AGENT_AUTOFIX_ENABLED — skipping")
             return
 
@@ -698,7 +698,7 @@ class ClusterMonitor:
             return
 
         _settings = get_settings()
-        max_daily = _settings.max_daily_investigations
+        max_daily = _settings.monitor.max_daily_investigations
         if time.time() - self._daily_investigation_reset > 86400:
             self._daily_investigation_count = 0
             self._daily_investigation_reset = time.time()
@@ -710,12 +710,14 @@ class ClusterMonitor:
             )
             return
 
-        max_per_scan = _settings.investigations_max_per_scan
-        timeout_seconds = _settings.investigation_timeout
-        cooldown_seconds = _settings.investigation_cooldown
-        allowed_categories = {item.strip() for item in _settings.investigation_categories.split(",") if item.strip()}
+        max_per_scan = _settings.monitor.investigations_max_per_scan
+        timeout_seconds = _settings.monitor.investigation_timeout
+        cooldown_seconds = _settings.monitor.investigation_cooldown
+        allowed_categories = {
+            item.strip() for item in _settings.monitor.investigation_categories.split(",") if item.strip()
+        }
 
-        security_followup_enabled = _settings.security_followup
+        security_followup_enabled = _settings.monitor.security_followup
         security_followup_cooldown = 600
         security_followup_done_this_scan = False
 
@@ -778,7 +780,7 @@ class ClusterMonitor:
                 template = match_template(category=finding.get("category", ""))
                 if template:
                     self._investigation_tasks = [t for t in self._investigation_tasks if not t.done()]
-                    if len(self._investigation_tasks) >= get_settings().max_concurrent_investigations:
+                    if len(self._investigation_tasks) >= get_settings().monitor.max_concurrent_investigations:
                         logger.info(
                             "Skipping investigation for %s — %d tasks already running",
                             finding.get("title", "")[:40],
@@ -888,7 +890,7 @@ class ClusterMonitor:
                     except Exception as e:
                         logger.warning("Security followup failed for finding %s: %s", finding.get("id", ""), e)
 
-                if get_settings().memory and result.get("confidence", 0) >= 0.7:
+                if get_settings().agent.memory and result.get("confidence", 0) >= 0.7:
                     try:
                         from ..memory import get_manager
 
@@ -1062,7 +1064,7 @@ class ClusterMonitor:
                 )
             )
 
-            if status == "verified" and get_settings().memory:
+            if status == "verified" and get_settings().agent.memory:
                 try:
                     from ..memory import get_manager
 
@@ -1419,7 +1421,7 @@ class ClusterMonitor:
 
     async def process_handoffs(self) -> None:
         db = get_database()
-        timeout_seconds = get_settings().investigation_timeout
+        timeout_seconds = get_settings().monitor.investigation_timeout
 
         cutoff = int(time.time() * 1000) - 300_000
         try:

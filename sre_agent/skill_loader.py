@@ -61,7 +61,7 @@ _SKILLS_DIR = Path(__file__).parent / "skills"
 def _get_user_skills_dir() -> Path:
     from .config import get_settings
 
-    return Path(get_settings().user_skills_dir)
+    return Path(get_settings().server.user_skills_dir)
 
 
 @dataclass
@@ -93,6 +93,7 @@ class Skill:
     success_criteria: str = ""  # measurable resolution condition
     risk_level: str = "low"  # low | medium | high — high triggers approval gate
     trigger_patterns: list[str] = field(default_factory=list)  # regex patterns for hard pre-route
+    route_priority: int = 50  # lower = checked first in hard pre-route (built-in skills: 10-30)
     conflicts_with: list[str] = field(default_factory=list)  # conflicting skill names
     exclusive: bool = False  # if True, never run a secondary skill alongside this one
     supported_components: list[str] = field(default_factory=list)  # UI component types this skill renders
@@ -225,6 +226,7 @@ def _parse_skill_md(path: Path) -> Skill | None:
         success_criteria=meta.get("success_criteria", ""),
         risk_level=meta.get("risk_level", "low"),
         trigger_patterns=meta.get("trigger_patterns", []),
+        route_priority=meta.get("route_priority", 50),
         conflicts_with=[c.replace("-", "_") for c in meta.get("conflicts_with", [])],
         exclusive=meta.get("exclusive", False),
         supported_components=meta.get("supported_components", []),
@@ -361,6 +363,10 @@ def load_skills(skills_dir: Path | None = None) -> dict[str, Skill]:
     """Load all skill packages from built-in and user-created directories."""
     global _skills, _load_timestamp, _keyword_index, _selector
     _selector = None  # force re-initialization when skills change
+
+    from .skill_router import reset_hard_pre_route
+
+    reset_hard_pre_route()  # force rebuild of pre-route patterns from updated skill files
 
     loaded: dict[str, Skill] = {}
 

@@ -69,8 +69,8 @@ class TestConfigureLogging:
             is_json = False
         assert not is_json, f"Expected non-JSON output, got: {line}"
 
-        # Should contain the human-readable markers
-        assert "[INFO]" in line
+        # Should contain the human-readable markers (structlog uses lowercase level)
+        assert "[info" in line.lower()
         assert "test.text_output" in line
         assert "human readable message" in line
 

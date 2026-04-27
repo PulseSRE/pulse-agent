@@ -22,7 +22,7 @@ logger = logging.getLogger("pulse_agent.monitor")
 
 def scan_crashlooping_pods(pods=None) -> list[dict]:
     """Find pods in CrashLoopBackOff or high restart counts."""
-    crashloop_threshold = get_settings().crashloop_threshold
+    crashloop_threshold = get_settings().monitor.crashloop_threshold
     findings: list[dict[str, Any]] = []
     try:
         if pods is None:
@@ -476,6 +476,90 @@ def _get_all_scanners() -> list[tuple[str, Callable[..., Any]]]:
         ("slo_burn", scan_slo_burn_rate),
         ("security", scan_security_posture),
     ]
+
+
+# ── Protocol-based scanner instances ──────────────────────────────────────
+# Wraps existing functions as Scanner protocol instances.  The scanner_protocol
+# module is the canonical interface for new code; ALL_SCANNERS and
+# _get_all_scanners remain for backward compatibility.
+
+from .registry import SCANNER_REGISTRY
+from .scanner_protocol import FunctionScanner, ScannerMeta
+
+
+def _meta(name: str) -> ScannerMeta:
+    """Build ScannerMeta from SCANNER_REGISTRY entry."""
+    r = SCANNER_REGISTRY[name]
+    return ScannerMeta(
+        name=name,
+        display_name=r["displayName"],
+        description=r["description"],
+        category=r["category"],
+        checks=r.get("checks", []),
+        auto_fixable=r.get("auto_fixable", False),
+        scan_every=r.get("scan_every", 1),
+    )
+
+
+ALL_SCANNER_INSTANCES: list[FunctionScanner] = [
+    FunctionScanner(_meta("crashloop"), scan_crashlooping_pods, accepts_pods=True),
+    FunctionScanner(_meta("pending"), scan_pending_pods),
+    FunctionScanner(_meta("workloads"), scan_failed_deployments),
+    FunctionScanner(_meta("nodes"), scan_node_pressure),
+    FunctionScanner(_meta("cert_expiry"), scan_expiring_certs),
+    FunctionScanner(_meta("alerts"), scan_firing_alerts),
+    FunctionScanner(_meta("oom"), scan_oom_killed_pods, accepts_pods=True),
+    FunctionScanner(_meta("image_pull"), scan_image_pull_errors, accepts_pods=True),
+    FunctionScanner(_meta("operators"), scan_degraded_operators),
+    FunctionScanner(_meta("daemonsets"), scan_daemonset_gaps),
+    FunctionScanner(_meta("hpa"), scan_hpa_saturation),
+]
+
+
+def get_all_scanner_instances() -> list[FunctionScanner]:
+    """Return all scanner instances including audit, SLO, security, and trend scanners."""
+    from ..audit_scanner import (
+        scan_auth_events,
+        scan_config_changes,
+        scan_rbac_changes,
+        scan_recent_deployments,
+        scan_warning_events,
+    )
+    from .trend_scanners import (
+        scan_disk_pressure_forecast,
+        scan_error_rate_acceleration,
+        scan_hpa_exhaustion_trend,
+        scan_memory_pressure_forecast,
+    )
+
+    return ALL_SCANNER_INSTANCES + [
+        FunctionScanner(_meta("audit_config"), scan_config_changes),
+        FunctionScanner(_meta("audit_rbac"), scan_rbac_changes),
+        FunctionScanner(_meta("audit_deployment"), scan_recent_deployments),
+        FunctionScanner(_meta("audit_events"), scan_warning_events),
+        FunctionScanner(_meta("audit_auth"), scan_auth_events),
+        FunctionScanner(_meta("slo_burn"), scan_slo_burn_rate),
+        FunctionScanner(_meta("security"), scan_security_posture),
+        FunctionScanner(_meta("trend_memory"), scan_memory_pressure_forecast),
+        FunctionScanner(_meta("trend_disk"), scan_disk_pressure_forecast),
+        FunctionScanner(_meta("trend_hpa"), scan_hpa_exhaustion_trend),
+        FunctionScanner(_meta("trend_errors"), scan_error_rate_acceleration),
+    ]
+
+
+def build_registry_from_instances() -> dict[str, dict]:
+    """Build SCANNER_REGISTRY-format dict from scanner instances."""
+    return {
+        s.meta.name: {
+            "displayName": s.meta.display_name,
+            "description": s.meta.description,
+            "category": s.meta.category,
+            "checks": list(s.meta.checks),
+            "auto_fixable": s.meta.auto_fixable,
+            "scan_every": s.meta.scan_every,
+        }
+        for s in get_all_scanner_instances()
+    }
 
 
 def scan_slo_burn_rate() -> list[dict]:

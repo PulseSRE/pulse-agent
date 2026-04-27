@@ -155,6 +155,6 @@ class TestEndToEndTokenFlow:
     def test_config_toggle_disables_forwarding(self):
         """When token_forwarding=False, user_token_context is a noop."""
         with patch("sre_agent.config.get_settings") as mock_settings:
-            mock_settings.return_value = MagicMock(token_forwarding=False)
+            mock_settings.return_value = MagicMock(agent=MagicMock(token_forwarding=False))
             with user_token_context("should-be-ignored"):
                 assert _user_token_var.get() is None

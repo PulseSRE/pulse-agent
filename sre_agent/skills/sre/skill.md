@@ -31,11 +31,17 @@ handoff_to:
   view_designer: [dashboard, view, create view, build view, overview dashboard]
   security: [scan, rbac, vulnerability, compliance, audit security, scc]
   plan_builder: [create a skill, create skill, build a skill, build skill, new skill, create a plan, build a plan, custom skill, build me a skill, create me a skill]
+route_priority: 10
 trigger_patterns:
+  - "helm\\s+(release|chart|list|install|upgrade|rollback|uninstall|history|values)"
+  - "(tekton|pipeline|pipelinerun|taskrun)\\b"
+  - "(service\\s+mesh|istio|kiali|ossm)\\b"
+  - "(kubevirt|virtual\\s+machine)\\b"
+  - "(since\\s+(the\\s+)?upgrade|after\\s+(the\\s+)?upgrade|post.?upgrade|unstable)"
   - "pod.*crash|crashloop|restart.*loop"
   - "deploy.*fail|rollout.*stuck"
   - "node.*pressure|not.?ready|cordoned"
-  - "oom|out.of.memory|memory.*limit"
+  - "\\boom|out.of.memory|memory.*limit"
   - "pending|unschedulable|insufficient"
   - "hpa.*max|autoscal"
   - "pvc.*bound|volume.*mount"

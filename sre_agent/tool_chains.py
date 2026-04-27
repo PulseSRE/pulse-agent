@@ -157,7 +157,7 @@ def refresh_chain_hints(
             from .config import get_settings
 
             settings = get_settings()
-            min_probability = settings.chain_min_probability
+            min_probability = settings.routing.chain_min_probability
         except (ImportError, AttributeError):
             min_probability = 0.3
 
@@ -166,7 +166,7 @@ def refresh_chain_hints(
             from .config import get_settings
 
             settings = get_settings()
-            min_frequency = settings.chain_min_frequency
+            min_frequency = settings.routing.chain_min_frequency
         except (ImportError, AttributeError):
             min_frequency = 3
 
@@ -218,7 +218,7 @@ def ensure_hints_fresh(max_age: float = 300) -> None:
     try:
         from .config import get_settings
 
-        if not get_settings().chain_hints:
+        if not get_settings().routing.chain_hints:
             return
     except (ImportError, AttributeError):
         # If config not available, default to enabled

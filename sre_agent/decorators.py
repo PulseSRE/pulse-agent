@@ -3,6 +3,11 @@
 Wraps anthropic.beta_tool with a relaxed return type so tools can return
 either str or tuple[str, dict] (text + component spec) without mypy errors.
 Includes optional timing instrumentation for performance tracking.
+
+Supports both ``@beta_tool`` (no args) and ``@beta_tool(category="views", is_write=True)``.
+When ``category`` or ``is_write`` are specified, the tool is auto-registered
+in the central TOOL_REGISTRY. Otherwise, registration is left to the calling
+module (preserving existing explicit ``register_tool()`` patterns).
 """
 
 from __future__ import annotations
@@ -47,25 +52,47 @@ def reset_tool_timings() -> None:
     tool_timings.clear()
 
 
-def beta_tool(fn: F) -> F:
+def beta_tool(fn: F | None = None, *, category: str = "", is_write: bool = False) -> F | Callable[[F], F]:
     """Typed wrapper around anthropic.beta_tool.
 
-    Allows tool functions to return str | tuple[str, dict] for component specs
-    without mypy return-value errors. The single type: ignore here replaces
-    30+ ignores across tool files.
+    Supports both ``@beta_tool`` (no args) and ``@beta_tool(category="views", is_write=True)``.
+
+    When ``category`` or ``is_write`` is set, auto-registers the tool in the
+    central TOOL_REGISTRY. The plain ``@beta_tool`` form does NOT auto-register,
+    preserving backward compatibility with modules that call ``register_tool()``
+    explicitly.
     """
 
-    @functools.wraps(fn)
-    def _timed(*args: Any, **kwargs: Any) -> Any:
-        if not _PERF_TRACE:
-            return fn(*args, **kwargs)
-        start = time.monotonic()
-        try:
-            return fn(*args, **kwargs)
-        finally:
-            elapsed = time.monotonic() - start
-            tool_timings.setdefault(fn.__name__, deque(maxlen=_MAX_TIMING_ENTRIES)).append(elapsed)
-            if elapsed > 2.0:
-                _logger.warning("Slow tool %s: %.2fs", fn.__name__, elapsed)
+    def decorator(f: F) -> F:
+        @functools.wraps(f)
+        def _timed(*args: Any, **kwargs: Any) -> Any:
+            if not _PERF_TRACE:
+                return f(*args, **kwargs)
+            start = time.monotonic()
+            try:
+                return f(*args, **kwargs)
+            finally:
+                elapsed = time.monotonic() - start
+                tool_timings.setdefault(f.__name__, deque(maxlen=_MAX_TIMING_ENTRIES)).append(elapsed)
+                if elapsed > 2.0:
+                    _logger.warning("Slow tool %s: %.2fs", f.__name__, elapsed)
 
-    return _anthropic_beta_tool(_timed)  # type: ignore[return-value]
+        tool = _anthropic_beta_tool(_timed)  # type: ignore[return-value]
+
+        # Store metadata for introspection
+        tool._category = category  # type: ignore[attr-defined]
+        tool._is_write = is_write  # type: ignore[attr-defined]
+
+        # Auto-register only when metadata is explicitly provided
+        if category or is_write:
+            from .tool_registry import register_tool
+
+            register_tool(tool, is_write=is_write, category=category or "general")
+
+        return tool
+
+    if fn is not None:
+        # Called as @beta_tool (no parentheses) — no auto-registration
+        return decorator(fn)
+    # Called as @beta_tool(...) (with parentheses)
+    return decorator  # type: ignore[return-value]

@@ -150,7 +150,7 @@ def test_classify_query_multi_disabled():
         patch("sre_agent.skill_router.classify_query", return_value=_mock_skill("sre")),
         patch("sre_agent.config.get_settings") as mock_settings,
     ):
-        mock_settings.return_value.multi_skill = False
+        mock_settings.return_value.routing = MagicMock(multi_skill=False, temporal_cache_ttl=60)
         _primary, secondary = classify_query_multi("check crashes and scan CVEs")
     assert secondary is None
 

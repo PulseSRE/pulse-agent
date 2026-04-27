@@ -45,7 +45,14 @@ requires_tools:
 handoff_to:
   sre: [remediate, scale, restart, drain, cordon, apply, delete, fix pod, fix deployment, fix node]
   security: [scan rbac, scan security, vulnerability, compliance, audit security]
+route_priority: 20
 trigger_patterns:
+  - "(create|build|make|design)\\s+(me\\s+)?(a\\s+)?(\\w+\\s+)?(dashboard|view|live\\s+table)"
+  - "(edit|update|modify|fix|optimize)\\s+(the\\s+)?(dashboard|view|layout|widget)"
+  - "add\\s+(a\\s+)?(chart|table|widget|metric|column)"
+  - "(remove|hide|show|rename|reorder)\\s+.{0,30}(column|widget|chart)"
+  - "(sort|filter)\\s+(by|the)\\s+"
+  - "custom_view|/custom/"
   - "dashboard|\\bview\\b|widget|chart|\\btable\\b"
   - "build.*dashboard|create.*dashboard|make.*dashboard"
   - "build.*view|create.*view|make.*view"

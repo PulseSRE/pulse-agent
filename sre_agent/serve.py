@@ -15,7 +15,7 @@ def _cleanup_socket():
     """Remove any leftover Unix socket file to prevent zombie locks on restart."""
     from .config import get_settings
 
-    socket_path = get_settings().socket
+    socket_path = get_settings().server.socket
     if socket_path and os.path.exists(socket_path):
         try:
             os.unlink(socket_path)
@@ -53,9 +53,9 @@ def main():
     from .config import get_settings
 
     settings = get_settings()
-    host = settings.host
-    port = settings.port
-    socket_path = settings.socket
+    host = settings.server.host
+    port = settings.server.port
+    socket_path = settings.server.socket
 
     # Write PID for process management
     with open("/tmp/pulse_agent.pid", "w") as f:

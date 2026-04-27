@@ -62,7 +62,7 @@ def user_token_context(token: str | None):
     """Set the user's bearer token for the duration of the context."""
     from .config import get_settings
 
-    if not get_settings().token_forwarding or not token:
+    if not get_settings().agent.token_forwarding or not token:
         yield
         return
     reset_req = _require_user_token_var.set(True)

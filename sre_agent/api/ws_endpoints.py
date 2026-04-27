@@ -44,7 +44,7 @@ def _cap_messages(messages: list[dict], max_msgs: int) -> None:
 
 async def _check_agent_limit(websocket: WebSocket) -> bool:
     """Check agent connection limit. Returns True if over limit (caller should return)."""
-    if _active_agent_count >= get_settings().max_agent_sessions:
+    if _active_agent_count >= get_settings().server.max_agent_sessions:
         await websocket.close(4008, "Too many connections")
         return True
     return False
@@ -236,7 +236,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                 full_response = _result[0] if isinstance(_result, tuple) else _result
                 messages.append({"role": "assistant", "content": full_response})
                 # Cap conversation history to prevent unbounded memory growth
-                _cap_messages(messages, get_settings().max_conversation_messages)
+                _cap_messages(messages, get_settings().server.max_conversation_messages)
 
                 # Persist messages to chat history (single commit)
                 try:
@@ -526,7 +526,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                 effective_system = build_cached_system_prompt(_static, shared_context or "")
 
             # --- Multi-skill parallel execution ---
-            if secondary_skill and get_settings().multi_skill:
+            if secondary_skill and get_settings().routing.multi_skill:
                 try:
                     from ..agent import _circuit_breaker
 
@@ -696,7 +696,7 @@ async def websocket_auto_agent(websocket: WebSocket):
                 else:
                     full_response, turn_meta = result, {}
                 messages.append({"role": "assistant", "content": full_response})
-                _cap_messages(messages, get_settings().max_conversation_messages)
+                _cap_messages(messages, get_settings().server.max_conversation_messages)
 
                 # Persist messages to chat history (single commit)
                 try:
@@ -822,7 +822,7 @@ async def websocket_monitor(websocket: WebSocket):
         return
 
     # Connection limit
-    if len(_active_monitor_sessions) >= get_settings().max_monitor_clients:
+    if len(_active_monitor_sessions) >= get_settings().server.max_monitor_clients:
         await websocket.close(4008, "Too many monitor connections")
         return
 
@@ -831,7 +831,7 @@ async def websocket_monitor(websocket: WebSocket):
 
     # Wait for subscribe_monitor message to get config
     # Server-side trust level cap: client cannot escalate beyond this
-    max_trust_level = get_settings().max_trust_level
+    max_trust_level = get_settings().monitor.max_trust_level
     trust_level = 1
     auto_fix_categories: list[str] = []
 

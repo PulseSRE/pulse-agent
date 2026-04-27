@@ -40,7 +40,7 @@ def set_manager(manager: MemoryManager | None) -> None:
 def is_memory_enabled() -> bool:
     from ..config import get_settings
 
-    return get_settings().memory
+    return get_settings().agent.memory
 
 
 class MemoryManager:

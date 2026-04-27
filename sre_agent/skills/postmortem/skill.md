@@ -14,8 +14,9 @@ categories:
 write_tools: false
 priority: 3
 skip_component_hints: true
+route_priority: 30
 trigger_patterns:
-  - "postmortem|post.?mortem|incident.review"
+  - "(postmortem|post.mortem|incident\\s+review|root\\s+cause\\s+report)\\b"
   - "root.cause.report|rca|what.happened"
   - "lessons.learned|prevention|action.items"
 investigation_framework: |

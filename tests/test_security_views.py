@@ -55,7 +55,7 @@ class TestViewOwnershipBypass:
             patch("sre_agent.view_tools.get_current_user", return_value="user-B"),
             patch("sre_agent.db.list_views", return_value=[]),  # User-scoped query returns empty
             patch("sre_agent.db.get_database") as mock_get_db,
-            patch("sre_agent.db._deserialize_view_row") as mock_deserialize,
+            patch("sre_agent.repositories.view_repo._deserialize_view_row") as mock_deserialize,
         ):
             # Mock database for ownerless fallback attempt
             mock_db_instance = MagicMock()

@@ -158,7 +158,7 @@ async def monitor_capabilities(_auth=Depends(verify_token)):
     """Expose monitor trust/capability limits so UI can align controls."""
     from ..monitor import AUTO_FIX_HANDLERS
 
-    max_trust_level = get_settings().max_trust_level
+    max_trust_level = get_settings().monitor.max_trust_level
     return {
         "max_trust_level": max(0, min(max_trust_level, 4)),
         "supported_auto_fix_categories": sorted(AUTO_FIX_HANDLERS.keys()),
