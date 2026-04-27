@@ -141,8 +141,8 @@ class InboxRepository(BaseRepository):
 
     def update_metadata(self, item_id: str, metadata: dict[str, Any], now: int) -> None:
         self.db.execute(
-            "UPDATE inbox_items SET metadata = ? WHERE id = ?",
-            (json.dumps(metadata), item_id),
+            "UPDATE inbox_items SET metadata = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(metadata), now, item_id),
         )
         self.db.commit()
 
@@ -233,23 +233,17 @@ class InboxRepository(BaseRepository):
 
     # -- Escalation ----------------------------------------------------------
 
-    def resolve_item(self, item_id: str, now: int) -> None:
-        self.db.execute(
-            "UPDATE inbox_items SET status = 'resolved', updated_at = ?, resolved_at = ? WHERE id = ?",
-            (now, now, item_id),
-        )
-        self.db.commit()
-
-    def update_metadata_field(
-        self,
-        item_id: str,
-        metadata: dict[str, Any],
-        now: int,
-    ) -> None:
-        self.db.execute(
-            "UPDATE inbox_items SET metadata = ?, updated_at = ? WHERE id = ?",
-            (json.dumps(metadata), now, item_id),
-        )
+    def resolve_item(self, item_id: str, now: int, metadata: dict[str, Any] | None = None) -> None:
+        if metadata is not None:
+            self.db.execute(
+                "UPDATE inbox_items SET status = 'resolved', resolved_at = ?, metadata = ?, updated_at = ? WHERE id = ?",
+                (now, json.dumps(metadata), now, item_id),
+            )
+        else:
+            self.db.execute(
+                "UPDATE inbox_items SET status = 'resolved', updated_at = ?, resolved_at = ? WHERE id = ?",
+                (now, now, item_id),
+            )
         self.db.commit()
 
     # -- Pin -----------------------------------------------------------------
@@ -289,12 +283,6 @@ class InboxRepository(BaseRepository):
         )
 
     # -- Bridge (monitor integration) ----------------------------------------
-
-    def find_by_finding_id(self, finding_id: str) -> Any | None:
-        return self.db.fetchone(
-            "SELECT * FROM inbox_items WHERE finding_id = ? AND status NOT IN ('resolved', 'archived')",
-            (finding_id,),
-        )
 
     def find_active_by_correlation_task(self, corr_key: str) -> Any | None:
         return self.db.fetchone(
@@ -336,18 +324,6 @@ class InboxRepository(BaseRepository):
             LIMIT ?""",
             (limit,),
         )
-
-    def auto_resolve_item(
-        self,
-        item_id: str,
-        metadata: dict[str, Any],
-        now: int,
-    ) -> None:
-        self.db.execute(
-            "UPDATE inbox_items SET status = 'resolved', resolved_at = ?, metadata = ?, updated_at = ? WHERE id = ?",
-            (now, json.dumps(metadata), now, item_id),
-        )
-        self.db.commit()
 
     def update_resources(
         self,

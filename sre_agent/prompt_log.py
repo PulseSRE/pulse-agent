@@ -74,9 +74,7 @@ def record_prompt(
     and INSERTs into the prompt_log table.
     """
     try:
-        from .db import get_database
-
-        db = get_database()
+        from .repositories.prompt_log_repo import get_prompt_log_repo
 
         combined = static + dynamic
         prompt_hash = hashlib.sha256(combined.encode("utf-8")).hexdigest()[:16]
@@ -85,29 +83,21 @@ def record_prompt(
         usage = token_usage or {}
         total_tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
 
-        db.execute(
-            "INSERT INTO prompt_log "
-            "(session_id, turn_number, skill_name, skill_version, prompt_hash, "
-            "static_chars, dynamic_chars, total_tokens, sections, "
-            "input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            (
-                session_id,
-                turn_number,
-                skill_name,
-                skill_version,
-                prompt_hash,
-                len(static),
-                len(dynamic),
-                total_tokens,
-                json.dumps(sections),
-                usage.get("input_tokens"),
-                usage.get("output_tokens"),
-                usage.get("cache_read_tokens"),
-                usage.get("cache_creation_tokens"),
-            ),
+        get_prompt_log_repo().insert_prompt(
+            session_id=session_id,
+            turn_number=turn_number,
+            skill_name=skill_name,
+            skill_version=skill_version,
+            prompt_hash=prompt_hash,
+            static_chars=len(static),
+            dynamic_chars=len(dynamic),
+            total_tokens=total_tokens,
+            sections_json=json.dumps(sections),
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            cache_read_tokens=usage.get("cache_read_tokens"),
+            cache_creation_tokens=usage.get("cache_creation_tokens"),
         )
-        db.commit()
         logger.debug(
             "Recorded prompt log: skill=%s hash=%s static=%d dynamic=%d tokens=%d",
             skill_name,
@@ -126,44 +116,18 @@ def get_prompt_stats(days: int = 30) -> dict:
     Returns dict with total_prompts, avg_tokens, by_skill, cache_hit_rate, section_avg.
     """
     try:
-        from .db import get_database
+        from .repositories.prompt_log_repo import get_prompt_log_repo
 
-        db = get_database()
+        repo = get_prompt_log_repo()
 
         # Overall stats
-        overall = db.fetchone(
-            "SELECT COUNT(*) AS total, "
-            "COALESCE(ROUND(AVG(total_tokens)), 0) AS avg_tokens, "
-            "COALESCE(ROUND(AVG(static_chars)), 0) AS avg_static, "
-            "COALESCE(ROUND(AVG(dynamic_chars)), 0) AS avg_dynamic "
-            "FROM prompt_log "
-            "WHERE timestamp > NOW() - INTERVAL '1 day' * %s",
-            (days,),
-        )
+        overall = repo.fetch_overall_stats(days)
 
         # By skill
-        by_skill_rows = db.fetchall(
-            "SELECT skill_name, COUNT(*) AS count, "
-            "COALESCE(ROUND(AVG(total_tokens)), 0) AS avg_tokens, "
-            "COALESCE(ROUND(AVG(static_chars)), 0) AS avg_static, "
-            "COALESCE(ROUND(AVG(dynamic_chars)), 0) AS avg_dynamic, "
-            "COUNT(DISTINCT prompt_hash) AS prompt_versions "
-            "FROM prompt_log "
-            "WHERE timestamp > NOW() - INTERVAL '1 day' * %s "
-            "GROUP BY skill_name ORDER BY count DESC",
-            (days,),
-        )
+        by_skill_rows = repo.fetch_by_skill(days)
 
         # Cache hit rate (turns with cache_read_tokens > 0)
-        cache_row = db.fetchone(
-            "SELECT "
-            "COUNT(*) FILTER (WHERE cache_read_tokens > 0) AS cache_hits, "
-            "COUNT(*) AS total "
-            "FROM prompt_log "
-            "WHERE timestamp > NOW() - INTERVAL '1 day' * %s "
-            "AND input_tokens IS NOT NULL",
-            (days,),
-        )
+        cache_row = repo.fetch_cache_hit_rate(days)
         cache_total = cache_row["total"] if cache_row else 0
         cache_hits = cache_row["cache_hits"] if cache_row else 0
         cache_hit_rate = cache_hits / cache_total if cache_total > 0 else 0.0
@@ -171,14 +135,9 @@ def get_prompt_stats(days: int = 30) -> dict:
         # Section averages — aggregate across all prompts
         section_avg: dict[str, float] = {}
         try:
-            section_rows = db.fetchall(
-                "SELECT sections FROM prompt_log "
-                "WHERE timestamp > NOW() - INTERVAL '1 day' * %s "
-                "AND sections IS NOT NULL",
-                (days,),
-            )
+            section_rows = repo.fetch_sections(days)
             section_counts: dict[str, list[int]] = {}
-            for row in section_rows or []:
+            for row in section_rows:
                 secs = row["sections"]
                 if isinstance(secs, str):
                     secs = json.loads(secs)
@@ -223,40 +182,14 @@ def get_prompt_versions(skill_name: str, days: int = 30) -> list[dict]:
     size metrics, section breakdown, and active duration.
     """
     try:
-        from .db import get_database
+        from .repositories.prompt_log_repo import get_prompt_log_repo
 
-        db = get_database()
+        repo = get_prompt_log_repo()
 
-        rows = db.fetchall(
-            "SELECT prompt_hash, "
-            "COUNT(*) AS count, "
-            "MIN(timestamp) AS first_seen, "
-            "MAX(timestamp) AS last_seen, "
-            "MAX(skill_version) AS skill_version, "
-            "COALESCE(ROUND(AVG(total_tokens)), 0) AS avg_tokens, "
-            "COALESCE(ROUND(AVG(input_tokens)), 0) AS avg_input_tokens, "
-            "COALESCE(ROUND(AVG(output_tokens)), 0) AS avg_output_tokens, "
-            "COALESCE(ROUND(AVG(cache_read_tokens)), 0) AS avg_cache_read, "
-            "MAX(static_chars) AS static_chars, "
-            "COALESCE(ROUND(AVG(dynamic_chars)), 0) AS avg_dynamic_chars "
-            "FROM prompt_log "
-            "WHERE skill_name = %s "
-            "AND timestamp > NOW() - INTERVAL '1 day' * %s "
-            "GROUP BY prompt_hash "
-            "ORDER BY MIN(timestamp) DESC",
-            (skill_name, days),
-        )
+        rows = repo.fetch_prompt_versions(skill_name, days)
 
         # Get section breakdown for each hash (use most recent entry per hash)
-        section_rows = db.fetchall(
-            "SELECT DISTINCT ON (prompt_hash) prompt_hash, sections "
-            "FROM prompt_log "
-            "WHERE skill_name = %s "
-            "AND timestamp > NOW() - INTERVAL '1 day' * %s "
-            "AND sections IS NOT NULL "
-            "ORDER BY prompt_hash, timestamp DESC",
-            (skill_name, days),
-        )
+        section_rows = repo.fetch_section_breakdown_by_hash(skill_name, days)
         sections_by_hash: dict[str, dict] = {}
         for sr in section_rows or []:
             secs = sr["sections"]

@@ -632,7 +632,7 @@ def escalate_assessment(item_id: str) -> str | None:
 
     metadata = item.get("metadata", {})
     metadata["escalated_to"] = finding_id
-    repo.update_metadata_field(item_id, metadata, now)
+    repo.update_metadata(item_id, metadata, now)
 
     return finding_id
 
@@ -745,7 +745,7 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
     finding_id = finding.get("id", "")
     repo = get_inbox_repo()
 
-    existing = repo.find_by_finding_id(finding_id)
+    existing = repo.find_active_by_finding_id(finding_id)
 
     if existing is None:
         corr_key = _finding_corr_key(finding)
@@ -906,7 +906,7 @@ def _phase_b_investigate() -> int:
                 ts = int(time.time())
                 metadata = item.get("metadata", {})
                 metadata["dismiss_reason"] = "Resource no longer exists"
-                repo.auto_resolve_item(item["id"], metadata, ts)
+                repo.resolve_item(item["id"], ts, metadata=metadata)
                 _publish_event("inbox_item_resolved", item["id"], {"resolved_at": ts})
                 continue
             if len(alive) < len(resources):

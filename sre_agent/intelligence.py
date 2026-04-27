@@ -107,23 +107,13 @@ def get_intelligence_context(mode: str = "sre", max_age_days: int = 7) -> str:
 
 def _fetch_query_reliability_data(days: int) -> dict:
     """Fetch query reliability data (shared by text and structured versions)."""
-    from .db import get_database
+    from .repositories.intelligence_repo import get_intelligence_repo
 
-    db = get_database()
-    rows = db.fetchall(
-        "SELECT query_template, success_count, failure_count "
-        "FROM promql_queries "
-        "WHERE (last_success > NOW() - INTERVAL '1 day' * ? "
-        "   OR last_failure > NOW() - INTERVAL '1 day' * ?) "
-        "AND success_count + failure_count >= 3 "
-        "ORDER BY success_count + failure_count DESC "
-        "LIMIT 20",
-        (days, days),
-    )
+    rows = get_intelligence_repo().fetch_query_reliability(days)
     preferred: list[dict] = []
     unreliable: list[dict] = []
 
-    for row in rows or []:
+    for row in rows:
         template = row["query_template"]
         success = row["success_count"]
         failure = row["failure_count"]
@@ -165,31 +155,12 @@ def _compute_query_reliability(days: int) -> str:
 
 def _fetch_dashboard_patterns_data(days: int) -> dict:
     """Fetch dashboard pattern data (shared by text and structured versions)."""
-    from .db import get_database
+    from .repositories.intelligence_repo import get_intelligence_repo
 
-    db = get_database()
-    tool_rows = db.fetchall(
-        "SELECT tool_name, COUNT(*) as call_count "
-        "FROM tool_usage "
-        "WHERE agent_mode = 'view_designer' "
-        "  AND timestamp > NOW() - INTERVAL '1 day' * ? "
-        "  AND status = 'success' "
-        "GROUP BY tool_name "
-        "ORDER BY call_count DESC "
-        "LIMIT 10",
-        (days,),
-    )
-    avg_row = db.fetchone(
-        "SELECT AVG(tool_count)::int as avg_tools FROM ("
-        "    SELECT session_id, COUNT(*) as tool_count "
-        "    FROM tool_usage "
-        "    WHERE agent_mode = 'view_designer' "
-        "      AND timestamp > NOW() - INTERVAL '1 day' * ? "
-        "    GROUP BY session_id"
-        ") sub",
-        (days,),
-    )
-    top_components = [{"kind": r["tool_name"], "count": r["call_count"]} for r in tool_rows or []]
+    repo = get_intelligence_repo()
+    tool_rows = repo.fetch_dashboard_tool_usage(days)
+    avg_row = repo.fetch_avg_widgets_per_session(days)
+    top_components = [{"kind": r["tool_name"], "count": r["call_count"]} for r in tool_rows]
     avg_widgets = avg_row["avg_tools"] if avg_row and avg_row.get("avg_tools") else 0
     return {"top_components": top_components, "avg_widgets": avg_widgets}
 
@@ -214,44 +185,12 @@ def _compute_dashboard_patterns(days: int) -> str:
 
 def _fetch_error_hotspots(days: int) -> list[dict]:
     """Fetch error hotspot data with top error messages in a single batch query."""
-    from .db import get_database
+    from .repositories.intelligence_repo import get_intelligence_repo
 
-    db = get_database()
-
-    # Single query: hotspots + top error message per tool via window function
-    rows = db.fetchall(
-        "WITH hotspots AS ("
-        "    SELECT tool_name, "
-        "           COUNT(*) FILTER (WHERE status = 'error') as error_count, "
-        "           COUNT(*) as total_count "
-        "    FROM tool_usage "
-        "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? "
-        "    GROUP BY tool_name "
-        "    HAVING COUNT(*) > 5 "
-        "       AND COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) > 0.05 "
-        "    ORDER BY COUNT(*) FILTER (WHERE status = 'error')::float / COUNT(*) DESC "
-        "    LIMIT 5"
-        "), "
-        "top_errors AS ("
-        "    SELECT tool_name, error_message, COUNT(*) as cnt, "
-        "           ROW_NUMBER() OVER (PARTITION BY tool_name ORDER BY COUNT(*) DESC) as rn "
-        "    FROM tool_usage "
-        "    WHERE tool_name IN (SELECT tool_name FROM hotspots) "
-        "      AND status = 'error' "
-        "      AND timestamp > NOW() - INTERVAL '1 day' * ? "
-        "      AND error_message IS NOT NULL "
-        "    GROUP BY tool_name, error_message"
-        ") "
-        "SELECT h.tool_name, h.error_count, h.total_count, "
-        "       COALESCE(SUBSTRING(te.error_message, 1, 80), '') as common_error "
-        "FROM hotspots h "
-        "LEFT JOIN top_errors te ON h.tool_name = te.tool_name AND te.rn = 1 "
-        "ORDER BY h.error_count::float / h.total_count DESC",
-        (days, days),
-    )
+    rows = get_intelligence_repo().fetch_error_hotspots(days)
 
     result = []
-    for row in rows or []:
+    for row in rows:
         total = row["total_count"]
         errors = row["error_count"]
         result.append(
@@ -288,19 +227,9 @@ def _compute_error_hotspots(days: int) -> str:
 
 def _fetch_token_efficiency_data(days: int) -> dict:
     """Fetch token efficiency data (shared by text and structured versions)."""
-    from .db import get_database
+    from .repositories.intelligence_repo import get_intelligence_repo
 
-    db = get_database()
-    row = db.fetchone(
-        "SELECT COALESCE(ROUND(AVG(input_tokens)), 0) AS avg_input, "
-        "COALESCE(ROUND(AVG(output_tokens)), 0) AS avg_output, "
-        "COALESCE(ROUND(AVG(cache_read_tokens)), 0) AS avg_cache, "
-        "COUNT(*) AS total_turns "
-        "FROM tool_turns "
-        "WHERE input_tokens IS NOT NULL "
-        "AND timestamp > NOW() - INTERVAL '1 day' * ?",
-        (days,),
-    )
+    row = get_intelligence_repo().fetch_token_efficiency(days)
     if not row or not row.get("total_turns"):
         return {"avg_input": 0, "avg_output": 0, "cache_hit_rate": 0.0, "total_turns": 0}
     avg_input = int(row["avg_input"])
@@ -333,59 +262,26 @@ def _compute_token_efficiency(days: int) -> str:
         return ""
 
 
-def _query_wasted_tools(db, days: int, threshold: float = 0.05, limit: int | None = 10) -> list[dict]:
+def _query_wasted_tools(days: int, threshold: float = 0.05, limit: int | None = 10) -> list[dict]:
     """Query tools that are offered frequently but rarely called."""
-    query = (
-        "WITH offered AS ("
-        "    SELECT unnest(tools_offered) as tool_name, COUNT(*) as offered_count "
-        "    FROM tool_turns "
-        "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? AND tools_offered IS NOT NULL "
-        "    GROUP BY 1"
-        "), "
-        "called AS ("
-        "    SELECT unnest(tools_called) as tool_name, COUNT(*) as called_count "
-        "    FROM tool_turns "
-        "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? AND tools_called IS NOT NULL "
-        "    GROUP BY 1"
-        ") "
-        "SELECT o.tool_name, o.offered_count, COALESCE(c.called_count, 0) as called_count "
-        "FROM offered o "
-        "LEFT JOIN called c ON o.tool_name = c.tool_name "
-        "WHERE o.offered_count >= 20 "
-        f"AND COALESCE(c.called_count, 0)::float / o.offered_count < {threshold} "
-        "ORDER BY o.offered_count DESC"
-    )
-    if limit is not None:
-        query += f" LIMIT {limit}"
-    return db.fetchall(query, (days, days)) or []
+    from .repositories.intelligence_repo import get_intelligence_repo
+
+    return get_intelligence_repo().fetch_wasted_tools(days, threshold=threshold, limit=limit)
 
 
 def _fetch_harness_effectiveness_data(days: int) -> dict:
     """Fetch harness effectiveness data (shared by text and structured versions)."""
-    from .db import get_database
+    from .repositories.intelligence_repo import get_intelligence_repo
 
-    db = get_database()
+    repo = get_intelligence_repo()
     # Accuracy = what fraction of called tools were in the offered set.
     # This measures whether the harness predicted the right tools.
     # A tool_called array may include tools not in tools_offered (MCP, self-tools)
     # so we count the overlap.
-    acc_row = db.fetchone(
-        "SELECT AVG(CASE "
-        "  WHEN array_length(tools_called, 1) IS NULL OR array_length(tools_called, 1) = 0 THEN NULL "
-        "  ELSE LEAST(array_length(tools_called, 1)::float "
-        "       / NULLIF(array_length(tools_offered, 1), 0), 1.0) "
-        "END) as accuracy, "
-        "COALESCE(ROUND(AVG(array_length(tools_called, 1))), 0) as avg_called, "
-        "COALESCE(ROUND(AVG(array_length(tools_offered, 1))), 0) as avg_offered "
-        "FROM tool_turns "
-        "WHERE tools_offered IS NOT NULL AND tools_called IS NOT NULL "
-        "AND array_length(tools_called, 1) > 0 "
-        "AND timestamp > NOW() - INTERVAL '1 day' * ?",
-        (days,),
-    )
+    acc_row = repo.fetch_harness_accuracy(days)
     if not acc_row or acc_row.get("accuracy") is None:
         return {"accuracy": 0.0, "avg_called": 0, "avg_offered": 0, "wasted": []}
-    wasted_rows = _query_wasted_tools(db, days, threshold=0.05, limit=10)
+    wasted_rows = _query_wasted_tools(days, threshold=0.05, limit=10)
     wasted = [{"tool": r["tool_name"], "offered": r["offered_count"], "used": r["called_count"]} for r in wasted_rows]
     return {
         "accuracy": round(min(acc_row["accuracy"] * 100, 100.0), 1),
@@ -419,22 +315,10 @@ def _compute_harness_effectiveness(days: int) -> str:
 
 def _fetch_routing_accuracy_data(days: int) -> dict:
     """Fetch routing accuracy data including misroute details."""
-    from .db import get_database
+    from .repositories.intelligence_repo import get_intelligence_repo
 
-    db = get_database()
-    row = db.fetchone(
-        "SELECT "
-        "    COUNT(*) FILTER (WHERE agent_mode != prev_mode) as switches, "
-        "    COUNT(*) as total "
-        "FROM ("
-        "    SELECT agent_mode, "
-        "           LAG(agent_mode) OVER (PARTITION BY session_id ORDER BY turn_number) as prev_mode "
-        "    FROM tool_turns "
-        "    WHERE timestamp > NOW() - INTERVAL '1 day' * ?"
-        ") sub "
-        "WHERE prev_mode IS NOT NULL",
-        (days,),
-    )
+    repo = get_intelligence_repo()
+    row = repo.fetch_mode_switch_rate(days)
     if not row or not row.get("total"):
         return {"mode_switch_rate": 0.0, "total_sessions": 0, "misroutes": []}
     switches = row["switches"]
@@ -443,23 +327,8 @@ def _fetch_routing_accuracy_data(days: int) -> dict:
 
     # Fetch misroute details: which skill was routed to, what it switched to, and the query
     misroutes: list[dict] = []
-    misroute_rows = db.fetchall(
-        "SELECT prev_skill, next_skill, query_summary, prev_score "
-        "FROM ("
-        "    SELECT routing_skill as prev_skill, "
-        "           LEAD(routing_skill) OVER (PARTITION BY session_id ORDER BY turn_number) as next_skill, "
-        "           query_summary, "
-        "           routing_score as prev_score "
-        "    FROM tool_turns "
-        "    WHERE timestamp > NOW() - INTERVAL '1 day' * ? "
-        "      AND routing_skill IS NOT NULL"
-        ") sub "
-        "WHERE next_skill IS NOT NULL AND prev_skill != next_skill "
-        "ORDER BY prev_score ASC NULLS FIRST "
-        "LIMIT 20",
-        (days,),
-    )
-    for mr in misroute_rows or []:
+    misroute_rows = repo.fetch_misroutes(days)
+    for mr in misroute_rows:
         misroutes.append(
             {
                 "from_skill": mr["prev_skill"],
@@ -499,24 +368,10 @@ def _compute_routing_accuracy(days: int) -> str:
 
 def _fetch_feedback_analysis_data(days: int) -> dict:
     """Fetch feedback analysis data (shared by text and structured versions)."""
-    from .db import get_database
+    from .repositories.intelligence_repo import get_intelligence_repo
 
-    db = get_database()
-    rows = db.fetchall(
-        "SELECT u.tool_name, "
-        "       COUNT(*) FILTER (WHERE t.feedback = 'negative') as negative, "
-        "       COUNT(*) as total "
-        "FROM tool_turns t "
-        "JOIN tool_usage u ON t.session_id = u.session_id AND t.turn_number = u.turn_number "
-        "WHERE t.feedback IS NOT NULL "
-        "AND t.timestamp > NOW() - INTERVAL '1 day' * ? "
-        "GROUP BY u.tool_name "
-        "HAVING COUNT(*) FILTER (WHERE t.feedback = 'negative') > 0 "
-        "ORDER BY COUNT(*) FILTER (WHERE t.feedback = 'negative')::float / COUNT(*) DESC "
-        "LIMIT 5",
-        (days,),
-    )
-    return {"negative": [{"tool": r["tool_name"], "count": r["negative"]} for r in rows or []]}
+    rows = get_intelligence_repo().fetch_negative_feedback(days)
+    return {"negative": [{"tool": r["tool_name"], "count": r["negative"]} for r in rows]}
 
 
 def _compute_feedback_analysis(days: int) -> str:
@@ -536,24 +391,9 @@ def _compute_feedback_analysis(days: int) -> str:
 
 def _fetch_token_trending_data(days: int) -> dict:
     """Fetch token trending data (shared by text and structured versions)."""
-    from .db import get_database
+    from .repositories.intelligence_repo import get_intelligence_repo
 
-    db = get_database()
-    row = db.fetchone(
-        "SELECT "
-        "    AVG(input_tokens) FILTER (WHERE timestamp > NOW() - INTERVAL '1 day' * ?) as current_input, "
-        "    AVG(input_tokens) FILTER (WHERE timestamp BETWEEN "
-        "NOW() - INTERVAL '1 day' * ? AND NOW() - INTERVAL '1 day' * ?) as prev_input, "
-        "    AVG(output_tokens) FILTER (WHERE timestamp > NOW() - INTERVAL '1 day' * ?) as current_output, "
-        "    AVG(output_tokens) FILTER (WHERE timestamp BETWEEN "
-        "NOW() - INTERVAL '1 day' * ? AND NOW() - INTERVAL '1 day' * ?) as prev_output, "
-        "    AVG(cache_read_tokens) FILTER (WHERE timestamp > NOW() - INTERVAL '1 day' * ?) as current_cache, "
-        "    AVG(cache_read_tokens) FILTER (WHERE timestamp BETWEEN "
-        "NOW() - INTERVAL '1 day' * ? AND NOW() - INTERVAL '1 day' * ?) as prev_cache "
-        "FROM tool_turns "
-        "WHERE input_tokens IS NOT NULL",
-        (days, days * 2, days, days, days * 2, days, days, days * 2, days),
-    )
+    row = get_intelligence_repo().fetch_token_trending(days)
     if not row or row.get("current_input") is None:
         return {"input_delta_pct": 0.0, "output_delta_pct": 0.0, "cache_delta_pct": 0.0}
 
@@ -598,22 +438,9 @@ def _compute_token_trending(days: int) -> str:
 def _compute_fix_outcomes(days: int) -> str:
     """Compute fix strategy effectiveness from verification outcomes."""
     try:
-        from .db import get_database
+        from .repositories.intelligence_repo import get_intelligence_repo
 
-        db = get_database()
-        rows = db.fetchall(
-            "SELECT tool, category, "
-            "COUNT(*) AS total, "
-            "SUM(CASE WHEN verification_status = 'verified' THEN 1 ELSE 0 END) AS resolved "
-            "FROM actions "
-            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000 "
-            "AND tool IS NOT NULL AND tool != '' "
-            "GROUP BY tool, category "
-            "HAVING COUNT(*) >= 2 "
-            "ORDER BY COUNT(*) DESC "
-            "LIMIT 10",
-            (days,),
-        )
+        rows = get_intelligence_repo().fetch_fix_outcomes(days)
         if not rows:
             return ""
 
@@ -655,10 +482,7 @@ def get_wasted_tools(days: int = 7) -> list[str]:
     Used by harness.py to auto-deprioritize unused tools.
     """
     try:
-        from .db import get_database
-
-        db = get_database()
-        rows = _query_wasted_tools(db, days, threshold=0.02, limit=None)
+        rows = _query_wasted_tools(days, threshold=0.02, limit=None)
         return [row["tool_name"] for row in rows]
     except Exception:
         logger.debug("Failed to get wasted tools", exc_info=True)

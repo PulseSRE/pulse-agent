@@ -94,35 +94,25 @@ def record_tool_call(
     tool_source is 'native' for built-in Pulse tools or 'mcp' for MCP server tools.
     """
     try:
-        from .db import get_database
+        from .repositories.tool_usage_repo import get_tool_usage_repo
 
-        db = get_database()
         sanitized = sanitize_input(input_data)
-
-        db.execute(
-            "INSERT INTO tool_usage "
-            "(session_id, turn_number, agent_mode, tool_name, tool_category, "
-            "input_summary, status, error_message, error_category, "
-            "duration_ms, result_bytes, requires_confirmation, was_confirmed, tool_source) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            (
-                session_id,
-                turn_number,
-                agent_mode,
-                tool_name,
-                tool_category,
-                json.dumps(sanitized) if sanitized is not None else None,
-                status,
-                error_message,
-                error_category,
-                duration_ms,
-                result_bytes,
-                requires_confirmation,
-                was_confirmed,
-                tool_source,
-            ),
+        get_tool_usage_repo().insert_tool_call(
+            session_id=session_id,
+            turn_number=turn_number,
+            agent_mode=agent_mode,
+            tool_name=tool_name,
+            tool_category=tool_category,
+            input_summary=json.dumps(sanitized) if sanitized is not None else None,
+            status=status,
+            error_message=error_message,
+            error_category=error_category,
+            duration_ms=duration_ms,
+            result_bytes=result_bytes,
+            requires_confirmation=requires_confirmation,
+            was_confirmed=was_confirmed,
+            tool_source=tool_source,
         )
-        db.commit()
         logger.debug(
             f"Recorded tool call: {tool_name} (session={session_id}, turn={turn_number}, status={status}, source={tool_source})"
         )
@@ -195,9 +185,7 @@ def record_turn(
     try:
         import json as _json
 
-        from .db import get_database
-
-        db = get_database()
+        from .repositories.tool_usage_repo import get_tool_usage_repo
 
         if len(query_summary) > 200:
             query_summary = query_summary[:200]
@@ -211,40 +199,22 @@ def record_turn(
         )
         routing_used_llm = routing_decision.get("used_llm_fallback", False) if routing_decision else False
 
-        db.execute(
-            "INSERT INTO tool_turns "
-            "(session_id, turn_number, agent_mode, query_summary, tools_offered, tools_called, "
-            "input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, "
-            "routing_skill, routing_score, routing_competing, routing_used_llm) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-            "ON CONFLICT (session_id, turn_number) DO UPDATE SET "
-            "tools_called = EXCLUDED.tools_called, "
-            "input_tokens = EXCLUDED.input_tokens, "
-            "output_tokens = EXCLUDED.output_tokens, "
-            "cache_read_tokens = EXCLUDED.cache_read_tokens, "
-            "cache_creation_tokens = EXCLUDED.cache_creation_tokens, "
-            "routing_skill = EXCLUDED.routing_skill, "
-            "routing_score = EXCLUDED.routing_score, "
-            "routing_competing = EXCLUDED.routing_competing, "
-            "routing_used_llm = EXCLUDED.routing_used_llm",
-            (
-                session_id,
-                turn_number,
-                agent_mode,
-                query_summary,
-                tools_offered,
-                tools_called,
-                input_tokens or None,
-                output_tokens or None,
-                cache_read_tokens or None,
-                cache_creation_tokens or None,
-                routing_skill,
-                routing_score,
-                routing_competing,
-                routing_used_llm,
-            ),
+        get_tool_usage_repo().upsert_turn(
+            session_id=session_id,
+            turn_number=turn_number,
+            agent_mode=agent_mode,
+            query_summary=query_summary,
+            tools_offered=tools_offered,
+            tools_called=tools_called,
+            input_tokens=input_tokens or None,
+            output_tokens=output_tokens or None,
+            cache_read_tokens=cache_read_tokens or None,
+            cache_creation_tokens=cache_creation_tokens or None,
+            routing_skill=routing_skill,
+            routing_score=routing_score,
+            routing_competing=routing_competing,
+            routing_used_llm=routing_used_llm,
         )
-        db.commit()
 
         # Feed adaptive tool predictor
         try:
@@ -303,16 +273,9 @@ def update_turn_feedback(
     Uses subquery to find the latest turn by turn_number.
     """
     try:
-        from .db import get_database
+        from .repositories.tool_usage_repo import get_tool_usage_repo
 
-        db = get_database()
-
-        db.execute(
-            "UPDATE tool_turns SET feedback = %s "
-            "WHERE id = (SELECT id FROM tool_turns WHERE session_id = %s ORDER BY turn_number DESC LIMIT 1)",
-            (feedback, session_id),
-        )
-        db.commit()
+        get_tool_usage_repo().update_turn_feedback(session_id=session_id, feedback=feedback)
         logger.debug(f"Updated turn feedback: session={session_id}, feedback={feedback}")
     except Exception as e:
         logger.debug(f"Failed to update turn feedback: {e}")
@@ -350,9 +313,9 @@ def query_usage(
             "per_page": int
         }
     """
-    from .db import get_database
+    from .repositories.tool_usage_repo import get_tool_usage_repo
 
-    db = get_database()
+    repo = get_tool_usage_repo()
 
     # Cap per_page at 200
     per_page = min(per_page, 200)
@@ -395,26 +358,10 @@ def query_usage(
         where_sql = "WHERE " + " AND ".join(where_clauses)
 
     # Count total matching rows
-    count_sql = f"SELECT COUNT(*) AS total FROM tool_usage u {where_sql}"
-    count_row = db.fetchone(count_sql, tuple(params))
-    total = count_row["total"] if count_row else 0
+    total = repo.count_usage(where_sql, tuple(params))
 
     # Fetch paginated results with LEFT JOIN on tool_turns
-    query_sql = f"""
-        SELECT
-            u.id, u.timestamp, u.session_id, u.turn_number, u.agent_mode,
-            u.tool_name, u.tool_category, u.input_summary, u.status,
-            u.error_message, u.error_category, u.duration_ms, u.result_bytes,
-            u.requires_confirmation, u.was_confirmed, u.tool_source,
-            t.query_summary
-        FROM tool_usage u
-        LEFT JOIN tool_turns t ON u.session_id = t.session_id AND u.turn_number = t.turn_number
-        {where_sql}
-        ORDER BY u.timestamp DESC
-        LIMIT %s OFFSET %s
-    """
-
-    rows = db.fetchall(query_sql, tuple(params) + (per_page, offset))
+    rows = repo.fetch_usage_page(where_sql, tuple(params), per_page, offset)
 
     # Convert rows to dicts with ISO timestamps and parsed input_summary
     entries = []
@@ -458,9 +405,9 @@ def get_usage_stats(
             "by_status": {"success": int, "error": int}
         }
     """
-    from .db import get_database
+    from .repositories.tool_usage_repo import get_tool_usage_repo
 
-    db = get_database()
+    repo = get_tool_usage_repo()
 
     # Build WHERE clause for time filters
     where_clauses = []
@@ -479,81 +426,23 @@ def get_usage_stats(
         where_sql = "WHERE " + " AND ".join(where_clauses)
 
     # Overall stats
-    overall_sql = f"""
-        SELECT
-            COUNT(*) AS total_calls,
-            COUNT(DISTINCT tool_name) AS unique_tools_used,
-            COALESCE(AVG(CASE WHEN status = 'error' THEN 1.0 ELSE 0.0 END), 0) AS error_rate,
-            COALESCE(ROUND(AVG(duration_ms)), 0) AS avg_duration_ms,
-            COALESCE(ROUND(AVG(result_bytes)), 0) AS avg_result_bytes
-        FROM tool_usage
-        {where_sql}
-    """
-    overall = db.fetchone(overall_sql, tuple(params))
+    overall = repo.fetch_overall_stats(where_sql, tuple(params))
 
     # By tool
-    by_tool_sql = f"""
-        SELECT
-            tool_name,
-            COUNT(*) AS count,
-            SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_count,
-            COALESCE(ROUND(AVG(duration_ms)), 0) AS avg_duration_ms,
-            COALESCE(ROUND(AVG(result_bytes)), 0) AS avg_result_bytes
-        FROM tool_usage
-        {where_sql}
-        GROUP BY tool_name
-        ORDER BY count DESC
-    """
-    by_tool = db.fetchall(by_tool_sql, tuple(params))
+    by_tool = repo.fetch_stats_by_tool(where_sql, tuple(params))
 
     # By mode
-    by_mode_sql = f"""
-        SELECT agent_mode AS mode, COUNT(*) AS count
-        FROM tool_usage
-        {where_sql}
-        GROUP BY agent_mode
-        ORDER BY count DESC
-    """
-    by_mode = db.fetchall(by_mode_sql, tuple(params))
+    by_mode = repo.fetch_stats_by_mode(where_sql, tuple(params))
 
     # By category (filter out NULLs)
-    category_where_sql = where_sql
-    if category_where_sql:
-        category_where_sql += " AND tool_category IS NOT NULL"
-    else:
-        category_where_sql = "WHERE tool_category IS NOT NULL"
-
-    by_category_sql = f"""
-        SELECT tool_category AS category, COUNT(*) AS count
-        FROM tool_usage
-        {category_where_sql}
-        GROUP BY tool_category
-        ORDER BY count DESC
-    """
-    by_category = db.fetchall(by_category_sql, tuple(params))
+    by_category = repo.fetch_stats_by_category(where_sql, tuple(params))
 
     # By status
-    by_status_sql = f"""
-        SELECT status, COUNT(*) AS count
-        FROM tool_usage
-        {where_sql}
-        GROUP BY status
-    """
-    by_status_rows = db.fetchall(by_status_sql, tuple(params))
+    by_status_rows = repo.fetch_stats_by_status(where_sql, tuple(params))
     by_status = {row["status"]: row["count"] for row in by_status_rows}
 
     # By source (native vs mcp) with error rate and avg duration
-    by_source_sql = f"""
-        SELECT COALESCE(tool_source, 'native') AS source,
-            COUNT(*) AS count,
-            SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_count,
-            COALESCE(ROUND(AVG(duration_ms)), 0) AS avg_duration_ms,
-            COUNT(DISTINCT tool_name) AS unique_tools
-        FROM tool_usage
-        {where_sql}
-        GROUP BY COALESCE(tool_source, 'native')
-    """
-    by_source_rows = db.fetchall(by_source_sql, tuple(params))
+    by_source_rows = repo.fetch_stats_by_source(where_sql, tuple(params))
     by_source = [
         {
             "source": row["source"],
@@ -569,17 +458,7 @@ def get_usage_stats(
     # Token usage averages from tool_turns
     token_avg = {}
     try:
-        token_where = where_sql.replace("timestamp", "t.timestamp") if where_sql else ""
-        token_sql = f"""
-            SELECT
-                COALESCE(ROUND(AVG(input_tokens)), 0) AS avg_input,
-                COALESCE(ROUND(AVG(output_tokens)), 0) AS avg_output,
-                COALESCE(ROUND(AVG(cache_read_tokens)), 0) AS avg_cache_read
-            FROM tool_turns t
-            {token_where}
-            {"AND" if token_where else "WHERE"} input_tokens IS NOT NULL
-        """
-        avg_row = db.fetchone(token_sql, tuple(params))
+        avg_row = repo.fetch_token_averages(where_sql, tuple(params))
         if avg_row:
             token_avg = {
                 "input": int(avg_row["avg_input"]),
@@ -674,21 +553,9 @@ def get_learned_eval_prompts(days: int = 30, limit: int = 50) -> list[tuple[str,
     session is a new topic (not a retry/correction detected by keyword check).
     """
     try:
-        from .db import get_database
+        from .repositories.tool_usage_repo import get_tool_usage_repo
 
-        db = get_database()
-        rows = db.fetchall(
-            "SELECT t1.query_summary, t1.tools_called, t1.agent_mode, t2.query_summary AS next_query "
-            "FROM tool_turns t1 "
-            "JOIN tool_turns t2 ON t1.session_id = t2.session_id AND t2.turn_number = t1.turn_number + 1 "
-            "WHERE t1.tools_called IS NOT NULL "
-            "AND array_length(t1.tools_called, 1) > 0 "
-            "AND t1.query_summary IS NOT NULL AND t1.query_summary != '' "
-            "AND t1.timestamp > NOW() - INTERVAL '1 day' * ? "
-            "ORDER BY t1.timestamp DESC "
-            "LIMIT ?",
-            (days, limit * 3),
-        )
+        rows = get_tool_usage_repo().fetch_learned_eval_turns(days, limit * 3)
     except Exception:
         logger.debug("Failed to query learned eval prompts", exc_info=True)
         return []
