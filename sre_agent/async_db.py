@@ -25,6 +25,9 @@ from typing import Any
 logger = logging.getLogger("pulse_agent.async_db")
 
 
+_PLACEHOLDER_RE = re.compile(r"\?")
+
+
 def _translate_placeholders(query: str) -> str:
     """Convert ``?`` placeholders to asyncpg-style ``$1, $2, ...``."""
     counter = 0
@@ -34,7 +37,7 @@ def _translate_placeholders(query: str) -> str:
         counter += 1
         return f"${counter}"
 
-    return re.sub(r"\?", _replace, query)
+    return _PLACEHOLDER_RE.sub(_replace, query)
 
 
 class AsyncDatabase:

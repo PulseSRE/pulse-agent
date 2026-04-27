@@ -28,6 +28,19 @@ class ScannerMeta:
     auto_fixable: bool = False
     scan_every: int = 1
 
+    @classmethod
+    def from_registry(cls, name: str, entry: dict[str, Any]) -> ScannerMeta:
+        """Build from a SCANNER_REGISTRY dict entry."""
+        return cls(
+            name=name,
+            display_name=entry["displayName"],
+            description=entry["description"],
+            category=entry["category"],
+            checks=entry.get("checks", []),
+            auto_fixable=entry.get("auto_fixable", False),
+            scan_every=entry.get("scan_every", 1),
+        )
+
 
 @runtime_checkable
 class Scanner(Protocol):

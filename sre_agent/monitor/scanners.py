@@ -489,16 +489,7 @@ from .scanner_protocol import FunctionScanner, ScannerMeta
 
 def _meta(name: str) -> ScannerMeta:
     """Build ScannerMeta from SCANNER_REGISTRY entry."""
-    r = SCANNER_REGISTRY[name]
-    return ScannerMeta(
-        name=name,
-        display_name=r["displayName"],
-        description=r["description"],
-        category=r["category"],
-        checks=r.get("checks", []),
-        auto_fixable=r.get("auto_fixable", False),
-        scan_every=r.get("scan_every", 1),
-    )
+    return ScannerMeta.from_registry(name, SCANNER_REGISTRY[name])
 
 
 ALL_SCANNER_INSTANCES: list[FunctionScanner] = [

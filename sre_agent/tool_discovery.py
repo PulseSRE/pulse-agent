@@ -41,7 +41,7 @@ def discover_tools() -> dict[str, Any]:
             try:
                 importlib.import_module(mod_name)
             except ImportError:
-                _logger.debug("Tool module %s not available", mod_name)
+                _logger.warning("Tool module %s not available", mod_name)
         _discovered = True
 
     from .tool_registry import get_tool_map

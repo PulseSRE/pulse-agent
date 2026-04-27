@@ -63,7 +63,9 @@ class SortBy(ViewMutation):
         try:
             rows.sort(key=lambda r: r.get(column, ""), reverse=reverse)
         except TypeError:
-            pass
+            import logging
+
+            logging.getLogger("pulse_agent.mutations").debug("Mixed types in column %s, leaving unsorted", column)
         widget["rows"] = rows
         widget["_sort"] = {"column": column, "direction": direction}
         self._save_layout(ctx, layout)

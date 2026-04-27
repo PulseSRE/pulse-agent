@@ -65,7 +65,7 @@ def update_view_widgets(
                      set_render_override: {"render_as": "bar_list", "render_options": {"label_column": "name"}}
     """
     from .mutations.base import MutationContext
-    from .mutations.registry import get_mutation
+    from .mutations.registry import get_all_actions, get_mutation
 
     view, actual_owner = _resolve_view(view_id)
     if not view:
@@ -73,11 +73,7 @@ def update_view_widgets(
 
     mutation = get_mutation(action)
     if not mutation:
-        return (
-            f"Unknown action '{action}'. Use: rename_widget, update_widget_description, "
-            "change_chart_type, remove_widget, move_widget, rename, update_description, "
-            "update_columns, sort_by, filter_by, change_kind, update_query, set_render_override."
-        )
+        return f"Unknown action '{action}'. Use: {', '.join(get_all_actions())}."
 
     try:
         params = json.loads(params_json) if params_json else {}

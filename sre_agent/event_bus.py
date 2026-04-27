@@ -58,24 +58,32 @@ class EventBus:
     _on_usage: Any = None
 
     async def on_text(self, text: str) -> None:
-        await _invoke_optional(self._on_text, text)
+        if self._on_text is not None:
+            await _invoke_optional(self._on_text, text)
 
     async def on_thinking(self, text: str) -> None:
-        await _invoke_optional(self._on_thinking, text)
+        if self._on_thinking is not None:
+            await _invoke_optional(self._on_thinking, text)
 
     async def on_tool_use(self, tool_name: str) -> None:
-        await _invoke_optional(self._on_tool_use, tool_name)
+        if self._on_tool_use is not None:
+            await _invoke_optional(self._on_tool_use, tool_name)
 
     async def on_tool_result(self, result: dict) -> None:
-        await _invoke_optional(self._on_tool_result, result)
+        if self._on_tool_result is not None:
+            await _invoke_optional(self._on_tool_result, result)
 
     async def on_component(self, tool_name: str, spec: dict) -> None:
-        await _invoke_optional(self._on_component, tool_name, spec)
+        if self._on_component is not None:
+            await _invoke_optional(self._on_component, tool_name, spec)
 
     async def on_usage(self, **kwargs: Any) -> None:
-        await _invoke_optional(self._on_usage, **kwargs)
+        if self._on_usage is not None:
+            await _invoke_optional(self._on_usage, **kwargs)
 
     async def on_confirm(self, tool_name: str, input_data: dict) -> bool:
+        if self._on_confirm is None:
+            return False
         result = await _invoke_optional(self._on_confirm, tool_name, input_data)
         return bool(result) if result is not None else False
 
