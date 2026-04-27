@@ -92,7 +92,7 @@ def load_mcp_config(mcp_yaml_path: Path) -> dict | None:
         return None
 
 
-def connect_mcp_server(name: str, config: dict) -> MCPConnection:
+def connect_mcp_server(name: str, config: dict, *, max_retries: int = 5) -> MCPConnection:
     """Connect to an MCP server from config.
 
     For stdio transport, spawns the server process.
@@ -121,7 +121,7 @@ def connect_mcp_server(name: str, config: dict) -> MCPConnection:
         if transport == "stdio":
             conn = _connect_stdio(conn)
         elif transport == "sse":
-            conn = _connect_sse(conn)
+            conn = _connect_sse(conn, max_retries=max_retries)
         else:
             conn.error = f"Unknown transport: {transport}"
     except Exception as e:
@@ -205,15 +205,13 @@ def _mcp_post(base_url: str, payload: dict, session_id: str = "") -> tuple[dict,
     return _parse_sse_response(raw), sid
 
 
-def _connect_sse(conn: MCPConnection) -> MCPConnection:
+def _connect_sse(conn: MCPConnection, *, max_retries: int = 5) -> MCPConnection:
     """Connect via SSE/streamable HTTP transport to MCP server."""
     import time
     import urllib.error
 
     base_url = conn.url.rstrip("/")
 
-    # Retry with backoff — MCP sidecar may take 15-30s to accept connections
-    max_retries = 5
     retry_delays = [3, 5, 8, 10]  # total wait: up to 26s
     for attempt in range(max_retries):
         try:
@@ -544,7 +542,7 @@ def register_mcp_tools(conn: MCPConnection) -> int:
     return count
 
 
-def connect_skill_mcp(skill_name: str, skill_path: Path) -> MCPConnection | None:
+def connect_skill_mcp(skill_name: str, skill_path: Path, *, max_retries: int = 5) -> MCPConnection | None:
     """Connect to the MCP server defined in a skill's mcp.yaml.
 
     Deduplicates by server URL: if another skill already connected to the
@@ -564,7 +562,7 @@ def connect_skill_mcp(skill_name: str, skill_path: Path) -> MCPConnection | None
             logger.info("MCP reused existing connection for skill '%s' (same server)", skill_name)
             return existing_conn
 
-    conn = connect_mcp_server(skill_name, config)
+    conn = connect_mcp_server(skill_name, config, max_retries=max_retries)
     _connections[skill_name] = conn
 
     if conn.connected:

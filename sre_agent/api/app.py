@@ -87,6 +87,8 @@ async def lifespan(app: FastAPI):
     _tools = discover_tools()
     logger.info("Discovered %d tools in registry", len(_tools))
 
+    import asyncio
+
     # Load skill packages
     try:
         from ..skill_loader import load_skills
@@ -94,20 +96,27 @@ async def lifespan(app: FastAPI):
         skills = load_skills()
         logger.info("Loaded %d skill packages", len(skills))
 
-        # Connect MCP servers for skills that have mcp.yaml
-        from ..mcp_client import connect_skill_mcp
+        # Connect MCP servers in background (non-blocking — sidecar may take 15-30s)
+        async def _connect_mcp_background():
+            from ..mcp_client import connect_skill_mcp
 
-        for skill in skills.values():
-            if (skill.path / "mcp.yaml").exists():
-                try:
-                    conn = connect_skill_mcp(skill.name, skill.path)
-                    if conn and conn.connected:
-                        logger.info("MCP connected for skill '%s': %d tools", skill.name, len(conn.tools))
-                    elif conn:
-                        logger.warning("MCP failed for skill '%s': %s", skill.name, conn.error)
-                except Exception as e:
-                    logger.warning("MCP init failed for skill '%s': %s", skill.name, e)
-        # Re-validate skills now that TOOL_REGISTRY is populated
+            for skill in skills.values():
+                if (skill.path / "mcp.yaml").exists():
+                    try:
+                        conn = await asyncio.to_thread(connect_skill_mcp, skill.name, skill.path)
+                        if conn and conn.connected:
+                            logger.info("MCP connected for skill '%s': %d tools", skill.name, len(conn.tools))
+                        elif conn:
+                            logger.warning("MCP failed for skill '%s': %s", skill.name, conn.error)
+                    except Exception as e:
+                        logger.warning("MCP init failed for skill '%s': %s", skill.name, e)
+            from ..skill_loader import revalidate_skills
+
+            revalidate_skills()
+
+        asyncio.create_task(_connect_mcp_background())
+
+        # Re-validate skills now that TOOL_REGISTRY is populated (MCP tools added in background)
         from ..skill_loader import revalidate_skills
 
         revalidate_skills()
@@ -124,9 +133,8 @@ async def lifespan(app: FastAPI):
             logger.info("Memory system initialized")
         except Exception as e:
             logger.warning("Memory system init failed: %s", e)
-    # Event loop health watchdog — logs when the loop is blocked
-    import asyncio
 
+    # Event loop health watchdog — logs when the loop is blocked
     async def _event_loop_watchdog():
         while True:
             start = asyncio.get_running_loop().time()
