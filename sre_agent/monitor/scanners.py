@@ -484,7 +484,7 @@ def _get_all_scanners() -> list[tuple[str, Callable[..., Any]]]:
 # _get_all_scanners remain for backward compatibility.
 
 from .registry import SCANNER_REGISTRY
-from .scanner_protocol import FunctionScanner, ScannerMeta
+from .scanner_protocol import AsyncScanner, FunctionScanner, ScannerMeta
 
 
 def _meta(name: str) -> ScannerMeta:
@@ -492,9 +492,52 @@ def _meta(name: str) -> ScannerMeta:
     return ScannerMeta.from_registry(name, SCANNER_REGISTRY[name])
 
 
-ALL_SCANNER_INSTANCES: list[FunctionScanner] = [
+class AsyncPendingPodsScanner(AsyncScanner):
+    """First async-native scanner — validates the kubernetes_asyncio stack."""
+
+    meta = _meta("pending")
+    is_async = True
+
+    async def async_scan(self, shared_resources=None):
+        findings: list[dict] = []
+        try:
+            from ..async_k8s import get_async_core_client, safe_async
+
+            core = await get_async_core_client()
+            pods = await safe_async(core.list_pod_for_all_namespaces(field_selector="status.phase=Pending"))
+            if isinstance(pods, ToolError):
+                return findings
+            for pod in pods.items:
+                ns = pod.metadata.namespace
+                name = pod.metadata.name
+                if _skip_namespace(ns):
+                    continue
+                created = pod.metadata.creation_timestamp
+                if created:
+                    age_minutes = (datetime.now(UTC) - created).total_seconds() / 60
+                    if age_minutes > 5:
+                        reason = ""
+                        for cond in pod.status.conditions or []:
+                            if cond.type == "PodScheduled" and cond.status == "False":
+                                reason = cond.message or cond.reason or "Unschedulable"
+                                break
+                        findings.append(
+                            _make_finding(
+                                severity=SEVERITY_WARNING if age_minutes < 30 else SEVERITY_CRITICAL,
+                                category="scheduling",
+                                title=f"Pod {name} pending for {int(age_minutes)}m",
+                                summary=f"Pod has been pending for {int(age_minutes)} minutes. {reason}",
+                                resources=[{"kind": "Pod", "name": name, "namespace": ns}],
+                            )
+                        )
+        except Exception as e:
+            logger.error("Async pending pod scan failed: %s", e)
+        return findings
+
+
+ALL_SCANNER_INSTANCES: list = [
     FunctionScanner(_meta("crashloop"), scan_crashlooping_pods, accepts_pods=True),
-    FunctionScanner(_meta("pending"), scan_pending_pods),
+    AsyncPendingPodsScanner(),
     FunctionScanner(_meta("workloads"), scan_failed_deployments),
     FunctionScanner(_meta("nodes"), scan_node_pressure),
     FunctionScanner(_meta("cert_expiry"), scan_expiring_certs),

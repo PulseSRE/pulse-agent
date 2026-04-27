@@ -26,8 +26,8 @@ from .investigations import (
     _run_security_followup,
     _sanitize_for_prompt,
 )
-from .registry import SCANNER_REGISTRY, SEVERITY_CRITICAL, SEVERITY_WARNING
-from .scanners import ALL_SCANNERS, _get_all_scanners
+from .registry import SEVERITY_CRITICAL, SEVERITY_WARNING
+from .scanners import ALL_SCANNERS, get_all_scanner_instances
 from .webhook import _send_webhook
 
 if TYPE_CHECKING:
@@ -1109,10 +1109,11 @@ class ClusterMonitor:
         all_findings: list[dict] = []
         scanner_results: list[dict] = []
 
-        _POD_SCANNERS = {"crashloop", "oom", "image_pull"}
-        shared_pods = None
+        shared_resources: dict = {}
         try:
             shared_pods = await asyncio.to_thread(lambda: safe(lambda: get_core_client().list_pod_for_all_namespaces()))
+            if shared_pods is not None:
+                shared_resources["pods"] = shared_pods
         except Exception as e:
             logger.error("Failed to fetch shared pod list: %s", e)
 
@@ -1120,51 +1121,50 @@ class ClusterMonitor:
         globally_disabled = self.effective_disabled_scanners
 
         active_scanners = [
-            (category, scanner)
-            for category, scanner in _get_all_scanners()
-            if category not in globally_disabled
-            and self._scan_counter % SCANNER_REGISTRY.get(category, {}).get("scan_every", 1) == 0
+            s
+            for s in get_all_scanner_instances()
+            if s.meta.name not in globally_disabled and self._scan_counter % s.meta.scan_every == 0
         ]
 
-        async def _run_scanner(category: str, scanner):
+        async def _run_scanner(scanner):
             scanner_start = time.monotonic()
+            meta = scanner.meta
             try:
-                if category in _POD_SCANNERS and shared_pods is not None:
-                    findings = await asyncio.to_thread(scanner, shared_pods)
+                if getattr(scanner, "is_async", False):
+                    findings = await scanner.async_scan(shared_resources)
                 else:
-                    findings = await asyncio.to_thread(scanner)
+                    findings = await asyncio.to_thread(scanner.scan, shared_resources)
                 elapsed_ms = int((time.monotonic() - scanner_start) * 1000)
-                registry = SCANNER_REGISTRY.get(category, {})
                 return {
                     "result": {
-                        "name": category,
-                        "displayName": registry.get("displayName", category),
-                        "description": registry.get("description", ""),
+                        "name": meta.name,
+                        "displayName": meta.display_name,
+                        "description": meta.description,
                         "duration_ms": elapsed_ms,
                         "findings_count": len(findings) if isinstance(findings, list) else 0,
-                        "checks": registry.get("checks", []),
+                        "checks": list(meta.checks),
                         "status": "warning" if findings else "clean",
                     },
                     "findings": findings if isinstance(findings, list) else [],
                 }
             except Exception as e:
                 elapsed_ms = int((time.monotonic() - scanner_start) * 1000)
-                logger.error("Scanner %s failed: %s", category, e)
+                logger.error("Scanner %s failed: %s", meta.name, e)
                 return {
                     "result": {
-                        "name": category,
-                        "displayName": SCANNER_REGISTRY.get(category, {}).get("displayName", category),
-                        "description": SCANNER_REGISTRY.get(category, {}).get("description", ""),
+                        "name": meta.name,
+                        "displayName": meta.display_name,
+                        "description": meta.description,
                         "duration_ms": elapsed_ms,
                         "findings_count": 0,
                         "status": "error",
                         "error": str(e)[:100],
-                        "checks": SCANNER_REGISTRY.get(category, {}).get("checks", []),
+                        "checks": list(meta.checks),
                     },
                     "findings": [],
                 }
 
-        parallel_results = await asyncio.gather(*[_run_scanner(cat, scanner) for cat, scanner in active_scanners])
+        parallel_results = await asyncio.gather(*[_run_scanner(s) for s in active_scanners])
         for pr in parallel_results:
             scanner_results.append(pr["result"])
             all_findings.extend(pr["findings"])

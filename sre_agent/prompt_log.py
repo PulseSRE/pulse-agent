@@ -240,19 +240,9 @@ def get_prompt_log(session_id: str) -> list[dict]:
     Returns list of dicts with all prompt_log columns.
     """
     try:
-        from .db import get_database
+        from .repositories.prompt_log_repo import get_prompt_log_repo
 
-        db = get_database()
-
-        rows = db.fetchall(
-            "SELECT id, timestamp, session_id, turn_number, skill_name, skill_version, "
-            "prompt_hash, static_chars, dynamic_chars, total_tokens, sections, "
-            "input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens "
-            "FROM prompt_log "
-            "WHERE session_id = %s "
-            "ORDER BY turn_number ASC",
-            (session_id,),
-        )
+        rows = get_prompt_log_repo().fetch_session_log(session_id)
 
         results = []
         for row in rows:

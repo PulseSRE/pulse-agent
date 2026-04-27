@@ -51,6 +51,23 @@ class Scanner(Protocol):
     def scan(self, shared_resources: dict[str, Any] | None = None) -> list[dict]: ...
 
 
+class AsyncScanner:
+    """Base for scanners that use async K8s clients natively.
+
+    Subclass and implement ``async_scan()``.  ``cluster_monitor`` will
+    ``await`` it directly instead of dispatching to a thread pool.
+    """
+
+    meta: ScannerMeta
+    is_async: bool = True
+
+    async def async_scan(self, shared_resources: dict[str, Any] | None = None) -> list[dict]:
+        raise NotImplementedError
+
+    def scan(self, shared_resources: dict[str, Any] | None = None) -> list[dict]:
+        raise NotImplementedError("Use async_scan() for async scanners")
+
+
 class FunctionScanner:
     """Wraps an existing ``scan_*()`` function as a ``Scanner`` instance.
 

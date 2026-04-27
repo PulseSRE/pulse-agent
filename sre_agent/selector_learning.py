@@ -11,24 +11,17 @@ def recompute_channel_weights(days: int = 7) -> dict[str, float]:
     """Analyze skill_selection_log to recompute optimal channel weights.
 
     For each logged selection:
-    - If skill was NOT overridden and tools were used → positive
-    - If skill was overridden → negative
-    - If tools_requested_missing is non-empty → partial negative
+    - If skill was NOT overridden and tools were used -> positive
+    - If skill was overridden -> negative
+    - If tools_requested_missing is non-empty -> partial negative
 
     Returns new weights dict (normalized to sum=1.0).
     """
     try:
-        from .db import get_database
+        from .repositories.selector_learning_repo import get_selector_learning_repo
 
-        db = get_database()
-        rows = db.fetchall(
-            "SELECT channel_scores, selected_skill, skill_overridden, "
-            "tools_requested_missing "
-            "FROM skill_selection_log "
-            "WHERE timestamp > NOW() - INTERVAL '%s days' "
-            "AND channel_scores IS NOT NULL",
-            (days,),
-        )
+        repo = get_selector_learning_repo()
+        rows = repo.fetch_selection_log(days)
 
         if len(rows) < 10:
             logger.info("Not enough data for weight recomputation (%d rows, need 10+)", len(rows))
@@ -83,7 +76,7 @@ def recompute_channel_weights(days: int = 7) -> dict[str, float]:
         logger.info("Recomputed channel weights: %s (from %d samples)", new_weights, len(rows))
 
         # Persist weights to DB for next startup
-        _persist_weights(db, new_weights)
+        repo.persist_weights(new_weights)
 
         return new_weights
 
@@ -92,53 +85,17 @@ def recompute_channel_weights(days: int = 7) -> dict[str, float]:
         return {}
 
 
-def _persist_weights(db, weights: dict[str, float]) -> None:
-    """Save learned weights to DB so they survive pod restarts."""
-    import json
-
-    try:
-        db.execute(
-            "INSERT INTO skill_selection_log (session_id, query_summary, selected_skill, "
-            "threshold_used, selection_ms, channel_weights) "
-            "VALUES (%s, %s, %s, %s, %s, %s)",
-            (
-                "__weight_snapshot__",
-                "learned_weights",
-                "__system__",
-                0.0,
-                0,
-                json.dumps(weights),
-            ),
-        )
-        db.commit()
-        logger.info("Persisted learned weights to DB")
-    except Exception:
-        logger.debug("Failed to persist weights", exc_info=True)
-
-
 def load_learned_weights() -> dict[str, float] | None:
     """Load the most recently persisted weights from DB.
 
     Returns None if no learned weights exist.
     """
     try:
-        import json
+        from .repositories.selector_learning_repo import get_selector_learning_repo
 
-        from .db import get_database
-
-        db = get_database()
-        row = db.fetchone(
-            "SELECT channel_weights FROM skill_selection_log "
-            "WHERE session_id = '__weight_snapshot__' "
-            "ORDER BY timestamp DESC LIMIT 1"
-        )
-        if not row or not row.get("channel_weights"):
-            return None
-
-        weights = (
-            json.loads(row["channel_weights"]) if isinstance(row["channel_weights"], str) else row["channel_weights"]
-        )
-        logger.info("Loaded learned weights from DB: %s", weights)
+        weights = get_selector_learning_repo().load_learned_weights()
+        if weights:
+            logger.info("Loaded learned weights from DB: %s", weights)
         return weights
     except Exception:
         logger.debug("Failed to load learned weights", exc_info=True)
@@ -148,18 +105,9 @@ def load_learned_weights() -> dict[str, float] | None:
 def identify_skill_gaps(days: int = 30) -> list[dict]:
     """Find recurring query patterns with no good skill match."""
     try:
-        from .db import get_database
+        from .repositories.selector_learning_repo import get_selector_learning_repo
 
-        db = get_database()
-        rows = db.fetchall(
-            "SELECT query_summary, selected_skill, threshold_used "
-            "FROM skill_selection_log "
-            "WHERE timestamp > NOW() - INTERVAL '%s days' "
-            "AND (tools_requested_missing IS NOT NULL AND array_length(tools_requested_missing, 1) > 0) "
-            "ORDER BY timestamp DESC "
-            "LIMIT 50",
-            (days,),
-        )
+        rows = get_selector_learning_repo().fetch_missing_tool_queries(days)
 
         if not rows:
             return []
@@ -189,19 +137,9 @@ def identify_skill_gaps(days: int = 30) -> list[dict]:
 def prune_low_performers(days: int = 30, min_invocations: int = 10) -> list[str]:
     """Identify skills with high override rate."""
     try:
-        from .db import get_database
+        from .repositories.selector_learning_repo import get_selector_learning_repo
 
-        db = get_database()
-        rows = db.fetchall(
-            "SELECT selected_skill, "
-            "COUNT(*) as total, "
-            "SUM(CASE WHEN skill_overridden IS NOT NULL THEN 1 ELSE 0 END) as overrides "
-            "FROM skill_selection_log "
-            "WHERE timestamp > NOW() - INTERVAL '%s days' "
-            "GROUP BY selected_skill "
-            "HAVING COUNT(*) >= %s",
-            (days, min_invocations),
-        )
+        rows = get_selector_learning_repo().fetch_override_rates(days, min_invocations)
 
         flagged = []
         for row in rows:
