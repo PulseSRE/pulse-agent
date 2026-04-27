@@ -29,7 +29,12 @@ _PLACEHOLDER_RE = re.compile(r"\?")
 
 
 def _translate_placeholders(query: str) -> str:
-    """Convert ``?`` placeholders to asyncpg-style ``$1, $2, ...``."""
+    """Convert ``?`` placeholders to asyncpg-style ``$1, $2, ...``.
+
+    WARNING: This does naive replacement — do NOT use PostgreSQL's jsonb ``?``
+    operator in queries passed through this translator.  Use ``jsonb_exists()``
+    instead, or pass pre-translated queries with ``$N`` placeholders directly.
+    """
     counter = 0
 
     def _replace(_match: re.Match) -> str:
@@ -112,6 +117,7 @@ class AsyncDatabase:
                 await conn.fetchval("SELECT 1")
             return True
         except Exception:
+            logger.debug("Async health check failed", exc_info=True)
             return False
 
 

@@ -11,7 +11,6 @@ import functools
 import json
 import logging
 import math
-import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -41,14 +40,9 @@ def _db_safe(fn):
     def wrapper(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError, psycopg2.Error):
             logger.exception("View database operation failed: %s", fn.__name__)
             return None
-        except Exception:
-            if isinstance(sys.exc_info()[1], psycopg2.Error):
-                logger.exception("View database operation failed: %s", fn.__name__)
-                return None
-            raise
 
     return wrapper
 

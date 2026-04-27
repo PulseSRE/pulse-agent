@@ -8,7 +8,6 @@ processor chain.  Existing modules keep working without changes.
 from __future__ import annotations
 
 import logging
-import os
 import sys
 
 import structlog
@@ -30,8 +29,11 @@ def _rename_and_enrich(
 
 def configure_logging() -> None:
     """Configure structured JSON logging for production, human-readable for dev."""
-    log_format = os.environ.get("PULSE_AGENT_LOG_FORMAT", "json")
-    log_level = os.environ.get("PULSE_AGENT_LOG_LEVEL", "INFO").upper()
+    from .config import get_settings
+
+    _s = get_settings()
+    log_format = _s.server.log_format
+    log_level = _s.server.log_level.upper()
 
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,

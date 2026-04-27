@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("pulse_agent")
@@ -15,6 +15,7 @@ logger = logging.getLogger("pulse_agent")
 
 
 class AgentConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
     model: str = "claude-opus-4-6"
     max_tokens: int = 16000
     harness: bool = True
@@ -28,12 +29,14 @@ class AgentConfig(BaseModel):
 
 
 class DatabaseConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
     url: str = ""
     pool_min: int = 2
     pool_max: int = 20
 
 
 class MonitorConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
     scan_interval: int = 60
     crashloop_threshold: int = 3
     max_daily_investigations: int = 20
@@ -51,6 +54,7 @@ class MonitorConfig(BaseModel):
 
 
 class RoutingConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
     multi_skill: bool = True
     multi_skill_threshold: float = 0.15
     multi_skill_max: int = 2
@@ -61,6 +65,7 @@ class RoutingConfig(BaseModel):
 
 
 class ServerConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
     host: str = "0.0.0.0"
     port: int = 8080
     socket: str = ""
@@ -71,12 +76,15 @@ class ServerConfig(BaseModel):
     max_agent_sessions: int = 20
     max_monitor_clients: int = 50
     user_skills_dir: str = "/tmp/pulse_agent/skills"
+    log_format: str = "json"
+    log_level: str = "INFO"
     trusted_registries: str = (
         "registry.redhat.io,registry.access.redhat.com,quay.io,image-registry.openshift-image-registry.svc"
     )
 
 
 class PrometheusConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
     thanos_url: str = ""
     acm_thanos_url: str = ""
     acm_thanos_enabled: bool | None = None
@@ -157,6 +165,8 @@ class PulseAgentSettings(BaseSettings):
     max_agent_sessions: int = 20
     max_monitor_clients: int = 50
     user_skills_dir: str = "/tmp/pulse_agent/skills"
+    log_format: str = "json"
+    log_level: str = "INFO"
     trusted_registries: str = (
         "registry.redhat.io,registry.access.redhat.com,quay.io,image-registry.openshift-image-registry.svc"
     )
@@ -220,6 +230,8 @@ class PulseAgentSettings(BaseSettings):
             max_agent_sessions=self.max_agent_sessions,
             max_monitor_clients=self.max_monitor_clients,
             user_skills_dir=self.user_skills_dir,
+            log_format=self.log_format,
+            log_level=self.log_level,
             trusted_registries=self.trusted_registries,
         )
         self.prometheus = PrometheusConfig(
