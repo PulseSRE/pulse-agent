@@ -371,7 +371,18 @@ get_agent_pod() {
   echo "$CACHED_AGENT_POD"
 }
 
-# Check if agent detected a finding matching a pattern (via WS findings file)
+# Snapshot the findings file line count before deploying a scenario.
+# Only findings appended AFTER this point belong to the current scenario.
+SCENARIO_BASELINE=0
+mark_scenario_start() {
+  if [[ -f "$FINDINGS_FILE" ]]; then
+    SCENARIO_BASELINE=$(wc -l < "$FINDINGS_FILE" | tr -d ' ')
+  else
+    SCENARIO_BASELINE=0
+  fi
+}
+
+# Check findings appended AFTER the scenario baseline
 check_finding() {
   local pattern="$1"
 
@@ -380,12 +391,20 @@ check_finding() {
     return
   fi
 
+  local total_lines
+  total_lines=$(wc -l < "$FINDINGS_FILE" | tr -d ' ')
+  if [[ "$total_lines" -le "$SCENARIO_BASELINE" ]]; then
+    echo "0"
+    return
+  fi
+
+  local new_lines=$((total_lines - SCENARIO_BASELINE))
   local count
-  count=$(grep -cE "$pattern" "$FINDINGS_FILE" 2>/dev/null || true)
+  count=$(tail -n "$new_lines" "$FINDINGS_FILE" | grep -cE "$pattern" 2>/dev/null || true)
   echo "${count:-0}" | tr -d '[:space:]'
 }
 
-# Check if an action_report was received for a category
+# Check if an action_report was received for a category (after baseline)
 check_remediation() {
   local category="$1"
 
@@ -394,12 +413,20 @@ check_remediation() {
     return
   fi
 
+  local total_lines
+  total_lines=$(wc -l < "$FINDINGS_FILE" | tr -d ' ')
+  if [[ "$total_lines" -le "$SCENARIO_BASELINE" ]]; then
+    echo "0"
+    return
+  fi
+
+  local new_lines=$((total_lines - SCENARIO_BASELINE))
   local count
-  count=$(grep '"type".*"action_report"' "$FINDINGS_FILE" 2>/dev/null | grep -cE "$category" 2>/dev/null || true)
+  count=$(tail -n "$new_lines" "$FINDINGS_FILE" | grep '"type".*"action_report"' 2>/dev/null | grep -cE "$category" 2>/dev/null || true)
   echo "${count:-0}" | tr -d '[:space:]'
 }
 
-# Wait for agent to detect something via WebSocket findings
+# Wait for agent to detect a finding matching pattern
 wait_for_detection() {
   local pattern="$1"
   local max_wait="$2"
@@ -418,6 +445,30 @@ wait_for_detection() {
     elapsed=$((elapsed + 10))
   done
   echo -e " ${RED}timeout (${max_wait}s)${NC}"
+  return 1
+}
+
+# Wait for investigation or remediation after detection
+wait_for_event() {
+  local label="$1"
+  local check_fn="$2"
+  local pattern="$3"
+  local max_wait="${4:-120}"
+  local elapsed=0
+
+  echo -n "  Waiting for ${label}"
+  while [[ $elapsed -lt $max_wait ]]; do
+    local found
+    found=$($check_fn "$pattern")
+    if [[ "$found" -gt 0 ]]; then
+      echo -e " ${GREEN}${label} (${elapsed}s)${NC}"
+      return 0
+    fi
+    echo -n "."
+    sleep 10
+    elapsed=$((elapsed + 10))
+  done
+  echo -e " ${YELLOW}no ${label} (${max_wait}s)${NC}"
   return 1
 }
 
@@ -447,61 +498,102 @@ score_scenario() {
 # ── Scenarios ──────────────────────────────────────────────────────────
 
 run_crashloop() {
-  echo -e "\n${CYAN}Scenario 1: Crashlooping Pod${NC}"
-  echo "  Deploy: pod that exits with code 1 → should CrashLoopBackOff"
+  echo -e "\n${CYAN}Scenario 1: Crashlooping Deployment${NC}"
+  echo "  Deploy: healthy → push broken update → agent should rollback to working revision"
 
   if $DRY_RUN; then
     echo "  [dry-run] Would create crashloop pod"
     return
   fi
 
-  $CMD run chaos-crashloop --image=busybox --restart=Always -n "$NAMESPACE" \
-    -- /bin/sh -c "echo 'chaos-crashloop' && exit 1" 2>/dev/null
+  # Deploy healthy version first, then push a broken update.
+  # The agent should detect the crashloop AND roll back to the working revision.
+  $CMD create deployment chaos-crashloop --image=busybox --replicas=1 -n "$NAMESPACE" \
+    -- /bin/sh -c "echo healthy && sleep 3600" 2>/dev/null
+  $CMD rollout status deployment/chaos-crashloop -n "$NAMESPACE" --timeout=30s 2>/dev/null || true
+
+  mark_scenario_start
+
+  # Push broken update — now revision 2 crashes, revision 1 was healthy
+  $CMD set env deployment/chaos-crashloop CHAOS=true -n "$NAMESPACE" 2>/dev/null
+  $CMD patch deployment chaos-crashloop -n "$NAMESPACE" --type=json \
+    -p='[{"op":"replace","path":"/spec/template/spec/containers/0/command","value":["/bin/sh","-c","echo chaos-crashloop && exit 1"]}]' 2>/dev/null
 
   local detected=0 diagnosed=0 remediated=0 speed=0
 
   if wait_for_detection "crashloop|CrashLoopBackOff|chaos-crashloop" "$TIMEOUT"; then
     detected=1
     speed=1
-    # Check if investigation report was received
-    local inv_count
-    inv_count=$(check_finding "investigation_report|diagnos")
-    [[ "$inv_count" -gt 0 ]] && diagnosed=1
-    # Check if auto-fix action was taken
-    local fix_count
-    fix_count=$(check_remediation "crashloop")
-    [[ "$fix_count" -gt 0 ]] && remediated=1
+    wait_for_event "diagnosis" check_finding "investigation_report|diagnos" 120 && diagnosed=1
+    wait_for_event "remediation" check_remediation "crashloop|rollback|rollout" 180 && remediated=1
   fi
 
-  # Cleanup
-  $CMD delete pod chaos-crashloop -n "$NAMESPACE" --wait=false 2>/dev/null || true
+  $CMD delete deployment chaos-crashloop -n "$NAMESPACE" --wait=false 2>/dev/null || true
 
   score_scenario "crashloop" $detected $diagnosed $remediated $speed
 }
 
 run_oom() {
   echo -e "\n${CYAN}Scenario 2: OOM Kill${NC}"
-  echo "  Deploy: pod requesting 10Mi but trying to allocate 50Mi (restarts to stay visible)"
+  echo "  Deploy: healthy (64Mi) → squeeze to 10Mi with allocator → agent should rollback or scale"
 
   if $DRY_RUN; then
     echo "  [dry-run] Would create OOM pod"
     return
   fi
 
+  # Deploy healthy version with generous memory, then squeeze it to trigger OOM.
+  # The agent should detect OOM and scale down or adjust the limit.
   cat <<EOF | $CMD apply -n "$NAMESPACE" -f -
-apiVersion: v1
-kind: Pod
+apiVersion: apps/v1
+kind: Deployment
 metadata:
   name: chaos-oom
 spec:
-  containers:
-  - name: oom
-    image: busybox
-    command: ["/bin/sh", "-c", "dd if=/dev/zero of=/dev/shm/fill bs=1M count=50 2>/dev/null; sleep 3600"]
-    resources:
-      limits:
-        memory: "10Mi"
-  restartPolicy: Always
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chaos-oom
+  template:
+    metadata:
+      labels:
+        app: chaos-oom
+    spec:
+      containers:
+      - name: oom
+        image: busybox
+        command: ["/bin/sh", "-c", "sleep 3600"]
+        resources:
+          limits:
+            memory: "64Mi"
+EOF
+  $CMD rollout status deployment/chaos-oom -n "$NAMESPACE" --timeout=30s 2>/dev/null || true
+
+  mark_scenario_start
+
+  # Squeeze memory limit and add allocator — triggers OOM
+  cat <<EOF | $CMD apply -n "$NAMESPACE" -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chaos-oom
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chaos-oom
+  template:
+    metadata:
+      labels:
+        app: chaos-oom
+    spec:
+      containers:
+      - name: oom
+        image: busybox
+        command: ["/bin/sh", "-c", "dd if=/dev/zero of=/dev/shm/fill bs=1M count=50 2>/dev/null; sleep 3600"]
+        resources:
+          limits:
+            memory: "10Mi"
 EOF
 
   local detected=0 diagnosed=0 remediated=0 speed=0
@@ -509,12 +601,11 @@ EOF
   if wait_for_detection "oom|OOMKilled|chaos-oom" "$TIMEOUT"; then
     detected=1
     speed=1
-    local inv_count
-    inv_count=$(check_finding "investigation_report|diagnos|OOM|memory")
-    [[ "$inv_count" -gt 0 ]] && diagnosed=1
+    wait_for_event "diagnosis" check_finding "investigation_report|diagnos|OOM|memory" 120 && diagnosed=1
+    wait_for_event "remediation" check_remediation "oom|rollback|rollout|scale" 180 && remediated=1
   fi
 
-  $CMD delete pod chaos-oom -n "$NAMESPACE" --wait=false 2>/dev/null || true
+  $CMD delete deployment chaos-oom -n "$NAMESPACE" --wait=false 2>/dev/null || true
 
   score_scenario "oom" $detected $diagnosed $remediated $speed
 }
@@ -535,6 +626,9 @@ run_image_pull() {
   # Wait for healthy
   $CMD rollout status deployment/chaos-image -n "$NAMESPACE" --timeout=30s 2>/dev/null || true
 
+  # Mark baseline AFTER healthy deploy so we don't match the healthy pod
+  mark_scenario_start
+
   # Push bad update
   $CMD set image deployment/chaos-image httpd-24=registry.access.redhat.com/ubi9/httpd-24:nonexistent \
     -n "$NAMESPACE" 2>/dev/null || true
@@ -544,13 +638,8 @@ run_image_pull() {
   if wait_for_detection "image_pull|ImagePullBackOff|ErrImagePull|chaos-image" "$TIMEOUT"; then
     detected=1
     speed=1
-    local inv_count
-    inv_count=$(check_finding "investigation_report|diagnos|image|pull")
-    [[ "$inv_count" -gt 0 ]] && diagnosed=1
-    # Check if auto-fix rollback action was taken
-    local fix_count
-    fix_count=$(check_remediation "image_pull")
-    [[ "$fix_count" -gt 0 ]] && remediated=1
+    wait_for_event "diagnosis" check_finding "investigation_report|diagnos|image|pull" 120 && diagnosed=1
+    wait_for_event "remediation" check_remediation "image_pull|rollback|rollout|undo" 180 && remediated=1
   fi
 
   $CMD delete deployment chaos-image -n "$NAMESPACE" --wait=false 2>/dev/null || true
@@ -573,12 +662,13 @@ run_cert_expiry() {
   openssl req -x509 -newkey rsa:2048 -keyout "$tmpdir/key.pem" -out "$tmpdir/cert.pem" \
     -days 0 -nodes -subj "/CN=chaos-expired.test" 2>/dev/null || true
 
+  mark_scenario_start
+
   if [[ -f "$tmpdir/cert.pem" ]]; then
     $CMD create secret tls chaos-expired-cert \
       --cert="$tmpdir/cert.pem" --key="$tmpdir/key.pem" \
       -n "$NAMESPACE" 2>/dev/null || true
   fi
-  # #7: Clean temp files immediately
   rm -rf "$tmpdir"
 
   local detected=0 diagnosed=0 remediated=0 speed=0
@@ -613,6 +703,8 @@ spec:
     pods: "1"
 EOF
 
+  mark_scenario_start
+
   $CMD create deployment chaos-quota --image=busybox --replicas=3 -n "$NAMESPACE" \
     -- /bin/sh -c "sleep 3600" 2>/dev/null || true
 
@@ -646,9 +738,9 @@ if [[ "$DRY_RUN" != "true" ]]; then
   if ! start_ws_client; then
     echo -e "${RED}Failed to start WebSocket monitor client — detection will fall back to log grep${NC}"
   fi
-  # Wait for first scan cycle to complete
+  # Wait for first scan cycle to complete (scan interval default: 60s)
   echo -e "${CYAN}Waiting for initial scan cycle...${NC}"
-  sleep 5
+  sleep 15
 fi
 
 case $SCENARIO in
