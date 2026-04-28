@@ -591,7 +591,7 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
         tool_names: list[str] = []
         for skill in _list_skills():
             if (skill.path / "mcp.yaml").exists():
-                conn = connect_skill_mcp(skill.name, skill.path)
+                conn = connect_skill_mcp(skill.name, skill.path, builtin=skill.builtin)
                 if conn and conn.connected:
                     # Override toolsets to match what the deployment is actually running
                     conn.toolsets = toolsets

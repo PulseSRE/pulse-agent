@@ -143,10 +143,9 @@ def _connect_stdio(conn: MCPConnection) -> MCPConnection:
     cmd = parts[0]
     args = parts[1:] if len(parts) > 1 else []
 
-    # Validate command against allowlist to prevent arbitrary command execution
-    if cmd not in _STDIO_ALLOWED_COMMANDS and not (cmd.startswith("/opt/") or cmd.startswith("/usr/")):
-        logger.warning("stdio command not allowed: %s", cmd)
-        conn.error = f"stdio command not allowed: {cmd}"
+    if cmd not in _STDIO_ALLOWED_COMMANDS:
+        logger.warning("stdio command not in allowlist: %s", cmd)
+        conn.error = f"stdio command not allowed: {cmd}. Allowed: {_STDIO_ALLOWED_COMMANDS}"
         return conn
 
     # Add toolset flags
@@ -569,21 +568,13 @@ def connect_skill_mcp(
     if not config:
         return None
 
-    # Block stdio transport for user-created skills
-    transport = config.get("server", {}).get("transport", "stdio")
-    if not builtin and transport == "stdio":
-        logger.warning("stdio transport not allowed for user skill '%s'", skill_name)
-        conn = MCPConnection(
-            name=skill_name,
-            url=config.get("server", {}).get("url", ""),
-            transport=transport,
-            toolsets=config.get("toolsets", []),
-        )
-        conn.error = "stdio transport not allowed for user skills"
-        _connections[skill_name] = conn
-        return conn
+    server_cfg = config.get("server", {})
+    transport = server_cfg.get("transport", "stdio")
+    server_url = server_cfg.get("url", "")
 
-    server_url = config.get("server", {}).get("url", "")
+    if not builtin and transport == "stdio":
+        logger.warning("stdio transport blocked for user skill '%s'", skill_name)
+        return None
 
     # Reuse existing connection to the same server URL
     for existing_conn in _connections.values():
