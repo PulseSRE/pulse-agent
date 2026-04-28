@@ -650,6 +650,76 @@ class AsyncDegradedOperatorsScanner(AsyncScanner):
         return findings
 
 
+class AsyncDaemonsetGapsScanner(AsyncScanner):
+    meta = _meta("daemonsets")
+    is_async = True
+
+    async def async_scan(self, shared_resources=None):
+        findings: list[dict] = []
+        try:
+            from ..async_k8s import get_async_apps_client, safe_async
+
+            apps = await get_async_apps_client()
+            dsets = await safe_async(apps.list_daemon_set_for_all_namespaces())
+            if isinstance(dsets, ToolError):
+                return findings
+            for ds in dsets.items:
+                ns = ds.metadata.namespace
+                name = ds.metadata.name
+                if _skip_namespace(ns):
+                    continue
+                desired = ds.status.desired_number_scheduled or 0
+                ready = ds.status.number_ready or 0
+                if desired > 0 and ready < desired:
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_WARNING if ready > 0 else SEVERITY_CRITICAL,
+                            category="daemonsets",
+                            title=f"DaemonSet {name} not fully ready ({ready}/{desired})",
+                            summary=f"Only {ready} of {desired} desired pods are ready",
+                            resources=[{"kind": "DaemonSet", "name": name, "namespace": ns}],
+                        )
+                    )
+        except Exception as e:
+            logger.error("Async daemonset gap scan failed: %s", e)
+        return findings
+
+
+class AsyncHpaSaturationScanner(AsyncScanner):
+    meta = _meta("hpa")
+    is_async = True
+
+    async def async_scan(self, shared_resources=None):
+        findings: list[dict] = []
+        try:
+            from ..async_k8s import get_async_autoscaling_client, safe_async
+
+            autoscaling = await get_async_autoscaling_client()
+            hpas = await safe_async(autoscaling.list_horizontal_pod_autoscaler_for_all_namespaces())
+            if isinstance(hpas, ToolError):
+                return findings
+            for hpa in hpas.items:
+                ns = hpa.metadata.namespace
+                name = hpa.metadata.name
+                if _skip_namespace(ns):
+                    continue
+                max_replicas = hpa.spec.max_replicas or 0
+                current = hpa.status.current_replicas or 0
+                if max_replicas > 0 and current >= max_replicas:
+                    findings.append(
+                        _make_finding(
+                            severity=SEVERITY_WARNING,
+                            category="hpa",
+                            title=f"HPA {name} at max replicas ({current}/{max_replicas})",
+                            summary=f"HPA is at maximum capacity ({current}/{max_replicas} replicas)",
+                            resources=[{"kind": "HorizontalPodAutoscaler", "name": name, "namespace": ns}],
+                        )
+                    )
+        except Exception as e:
+            logger.error("Async HPA saturation scan failed: %s", e)
+        return findings
+
+
 ALL_SCANNER_INSTANCES: list = [
     FunctionScanner(_meta("crashloop"), scan_crashlooping_pods, accepts_pods=True),
     AsyncPendingPodsScanner(),
@@ -660,8 +730,8 @@ ALL_SCANNER_INSTANCES: list = [
     FunctionScanner(_meta("oom"), scan_oom_killed_pods, accepts_pods=True),
     FunctionScanner(_meta("image_pull"), scan_image_pull_errors, accepts_pods=True),
     AsyncDegradedOperatorsScanner(),
-    FunctionScanner(_meta("daemonsets"), scan_daemonset_gaps),
-    FunctionScanner(_meta("hpa"), scan_hpa_saturation),
+    AsyncDaemonsetGapsScanner(),
+    AsyncHpaSaturationScanner(),
 ]
 
 
