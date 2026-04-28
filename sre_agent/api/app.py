@@ -90,6 +90,7 @@ async def lifespan(app: FastAPI):
     import asyncio
 
     # Load skill packages
+    mcp_task = None
     try:
         from ..skill_loader import load_skills
 
@@ -103,7 +104,7 @@ async def lifespan(app: FastAPI):
             for skill in skills.values():
                 if (skill.path / "mcp.yaml").exists():
                     try:
-                        conn = await asyncio.to_thread(connect_skill_mcp, skill.name, skill.path)
+                        conn = await asyncio.to_thread(connect_skill_mcp, skill.name, skill.path, builtin=skill.builtin)
                         if conn and conn.connected:
                             logger.info("MCP connected for skill '%s': %d tools", skill.name, len(conn.tools))
                         elif conn:
@@ -143,7 +144,7 @@ async def lifespan(app: FastAPI):
     yield
 
     watchdog_task.cancel()
-    if not mcp_task.done():
+    if mcp_task is not None and not mcp_task.done():
         mcp_task.cancel()
 
     # Cleanup MCP connections and async clients on shutdown

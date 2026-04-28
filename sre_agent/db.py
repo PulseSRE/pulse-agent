@@ -77,19 +77,21 @@ class Database:
             raise
 
     def executescript(self, script: str) -> None:
-        """Execute a multi-statement schema script."""
+        """Execute a multi-statement schema script.
+
+        Fails fast on the first bad statement — rolls back and re-raises.
+        """
         conn = self._pool.getconn()
         try:
             cur = conn.cursor()
             for stmt in script.split(";"):
                 stmt = stmt.strip()
                 if stmt:
-                    try:
-                        cur.execute(stmt)
-                    except Exception as e:
-                        logger.debug("executescript statement skipped: %s — %s", stmt[:80], e)
-                        conn.rollback()
+                    cur.execute(stmt)
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             self._pool.putconn(conn)
 

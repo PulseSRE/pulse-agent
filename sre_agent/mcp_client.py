@@ -133,12 +133,21 @@ def connect_mcp_server(name: str, config: dict, *, max_retries: int = 5) -> MCPC
     return conn
 
 
+_STDIO_ALLOWED_COMMANDS = {"node", "npx", "python3", "python", "uvx"}
+
+
 def _connect_stdio(conn: MCPConnection) -> MCPConnection:
     """Connect via stdio transport (spawn process)."""
     # Parse command: "npx @openshift/openshift-mcp-server" → ["npx", "@openshift/openshift-mcp-server"]
     parts = conn.url.split()
     cmd = parts[0]
     args = parts[1:] if len(parts) > 1 else []
+
+    # Validate command against allowlist to prevent arbitrary command execution
+    if cmd not in _STDIO_ALLOWED_COMMANDS and not (cmd.startswith("/opt/") or cmd.startswith("/usr/")):
+        logger.warning("stdio command not allowed: %s", cmd)
+        conn.error = f"stdio command not allowed: {cmd}"
+        return conn
 
     # Add toolset flags
     for ts in conn.toolsets:
@@ -544,16 +553,35 @@ def register_mcp_tools(conn: MCPConnection) -> int:
     return count
 
 
-def connect_skill_mcp(skill_name: str, skill_path: Path, *, max_retries: int = 5) -> MCPConnection | None:
+def connect_skill_mcp(
+    skill_name: str, skill_path: Path, *, builtin: bool = True, max_retries: int = 5
+) -> MCPConnection | None:
     """Connect to the MCP server defined in a skill's mcp.yaml.
 
     Deduplicates by server URL: if another skill already connected to the
     same server, reuse that connection instead of opening a new one.
+
+    Non-builtin (user-created) skills are blocked from using stdio transport
+    to prevent arbitrary command execution.
     """
     mcp_yaml = skill_path / "mcp.yaml"
     config = load_mcp_config(mcp_yaml)
     if not config:
         return None
+
+    # Block stdio transport for user-created skills
+    transport = config.get("server", {}).get("transport", "stdio")
+    if not builtin and transport == "stdio":
+        logger.warning("stdio transport not allowed for user skill '%s'", skill_name)
+        conn = MCPConnection(
+            name=skill_name,
+            url=config.get("server", {}).get("url", ""),
+            transport=transport,
+            toolsets=config.get("toolsets", []),
+        )
+        conn.error = "stdio transport not allowed for user skills"
+        _connections[skill_name] = conn
+        return conn
 
     server_url = config.get("server", {}).get("url", "")
 

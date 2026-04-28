@@ -138,6 +138,7 @@ class PrometheusClient:
 
         settings = self._get_settings()
         if settings.prometheus_insecure:
+            logger.warning("prometheus_insecure=True — TLS verification disabled for Prometheus")
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
@@ -153,12 +154,9 @@ class PrometheusClient:
                 except Exception:
                     logger.debug("Failed to load CA from %s", ca_path)
 
-        logger.warning("No CA certificate found — falling back to CERT_NONE")
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        self._ssl_ctx = ctx
-        return ctx
+        raise RuntimeError(
+            "No CA certificate found for Prometheus TLS. Set PULSE_AGENT_PROMETHEUS_INSECURE=true to skip verification."
+        )
 
     def _get_token(self) -> str:
         now = _time.monotonic()

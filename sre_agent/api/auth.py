@@ -30,7 +30,7 @@ def _verify_ws_token(websocket) -> str:
 
 
 def _verify_rest_token(authorization: str | None = Header(None), token: str | None = Query(None)):
-    """Verify token for REST endpoints -- accepts Bearer header or query param."""
+    """Verify token for REST endpoints. Prefers Authorization header; query param is deprecated."""
     expected = get_settings().server.ws_token
     if not expected:
         raise HTTPException(status_code=503, detail="Server not configured")
@@ -39,6 +39,7 @@ def _verify_rest_token(authorization: str | None = Header(None), token: str | No
         client_token = authorization[7:]
     elif token:
         client_token = token
+        logger.warning("REST token via query param (deprecated) — use Authorization: Bearer header instead")
     if not client_token or not hmac.compare_digest(client_token, expected):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
