@@ -73,8 +73,8 @@ def _migrate_004_token_tracking(db: Database) -> None:
         try:
             db.execute(f"ALTER TABLE tool_turns ADD COLUMN {col} INTEGER")
             db.commit()
-        except Exception:
-            pass  # Column may already exist (execute rolls back on error)
+        except Exception as e:
+            logger.debug("migration statement skipped (likely already applied): %s", e)
 
 
 def _migrate_005_scan_runs(db: Database) -> None:

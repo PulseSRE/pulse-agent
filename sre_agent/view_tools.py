@@ -7,7 +7,7 @@ import json
 import logging
 import uuid
 
-from .decorators import beta_tool
+from .decorators import PulseTool, beta_tool
 
 logger = logging.getLogger("pulse_agent.view_tools")
 from .quality_engine import critique_view
@@ -835,7 +835,7 @@ VALID_LAYOUT_HINTS = frozenset({"top-down", "left-to-right", "grouped"})
 _MAX_GROUP_SIZE = 20
 
 
-def get_topology_graph(
+def _get_topology_graph_impl(
     namespace: str = "",
     kinds: str = "",
     relationships: str = "",
@@ -1065,8 +1065,12 @@ def get_topology_graph(
     return (text, component)
 
 
-get_topology_graph_raw = get_topology_graph
-get_topology_graph = beta_tool(get_topology_graph)  # type: ignore[assignment]
+get_topology_graph_raw = _get_topology_graph_impl
+# Wrap impl as a BetaFunctionTool; functools.wraps preserves __name__ from the impl,
+# so we restore the public tool name for the registry and Claude tool routing.
+_get_topology_graph_impl.__name__ = "get_topology_graph"
+_get_topology_graph_impl.__qualname__ = "get_topology_graph"
+get_topology_graph: PulseTool = beta_tool(_get_topology_graph_impl)
 
 register_tool(get_topology_graph)
 

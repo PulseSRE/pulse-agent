@@ -545,7 +545,8 @@ async def update_plan_template(incident_type: str, request: Request, _auth=Depen
             if data.get("incident_type") == incident_type or data.get("id") == template.id:
                 target_path = path
                 break
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to parse plan template %s: %s", path, e)
             continue
 
     if not target_path:
@@ -616,7 +617,8 @@ async def delete_plan_template(incident_type: str, _auth=Depends(verify_token)):
             if data.get("incident_type") == incident_type or data.get("id") == template.id:
                 target_path = path
                 break
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to parse plan template %s: %s", path, e)
             continue
 
     if not target_path:

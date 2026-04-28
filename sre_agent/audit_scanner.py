@@ -378,8 +378,8 @@ def scan_auth_events() -> list[dict]:
                             )
                         )
                         break
-        except Exception:
-            pass  # user.openshift.io may not exist on non-OCP clusters
+        except Exception as e:
+            logger.debug("user.openshift.io lookup skipped (non-OCP cluster): %s", e)
 
         # 2. Check for failed auth events in openshift-authentication namespace
         try:
@@ -409,8 +409,8 @@ def scan_auth_events() -> list[dict]:
                             confidence=0.82,
                         )
                     )
-        except Exception:
-            pass  # Namespace may not exist on non-OCP clusters
+        except Exception as e:
+            logger.debug("openshift-authentication namespace not available (non-OCP cluster): %s", e)
 
         # 3. Check for recently created ServiceAccount tokens (potential token theft vector)
         secrets = safe(

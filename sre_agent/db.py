@@ -86,9 +86,9 @@ class Database:
                 if stmt:
                     try:
                         cur.execute(stmt)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("executescript statement skipped: %s — %s", stmt[:80], e)
                         conn.rollback()
-                        continue
             conn.commit()
         finally:
             self._pool.putconn(conn)

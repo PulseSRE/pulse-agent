@@ -170,7 +170,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 ### Helm Chart (`chart/`)
 - `values.yaml` — requires `vertexAI.projectId` or `anthropicApiKey.existingSecret`
 - WS token and PG password auto-generated with `lookup()` to preserve existing values on upgrade
-- RollingUpdate strategy with maxUnavailable=1/maxSurge=0 (old pod dies first to free RWO PVC)
+- Recreate strategy (old pod terminates before new one starts — required because memory PVC is RWO)
 - `chart/templates/deployment.yaml` — validates credentials at install time via `_helpers.tpl`
 - `chart/templates/postgresql.yaml` — PostgreSQL **StatefulSet** (RHEL 9, runAsNonRoot, NetworkPolicy, headless Service)
 

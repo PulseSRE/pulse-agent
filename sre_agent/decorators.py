@@ -17,14 +17,18 @@ import logging
 import time
 from collections import deque
 from collections.abc import Callable
-from typing import Any, TypeVar, Union
+from typing import Any, TypeVar, Union, cast, overload
 
 from anthropic import beta_tool as _anthropic_beta_tool
+from anthropic.lib.tools._beta_functions import BetaFunctionTool
 
 F = TypeVar("F", bound=Callable[..., Any])
 
 #: Return type for tool functions — plain text or text + optional component spec.
 ToolReturn = Union[str, "tuple[str, dict[str, Any] | None]"]
+
+#: Type alias for a BetaFunctionTool with optional Pulse metadata attributes.
+PulseTool = BetaFunctionTool[Callable[..., Any]]
 
 _logger = logging.getLogger("pulse_agent.tools")
 
@@ -52,7 +56,23 @@ def reset_tool_timings() -> None:
     tool_timings.clear()
 
 
-def beta_tool(fn: F | None = None, *, category: str = "", is_write: bool = False) -> F | Callable[[F], F]:
+def _set_tool_metadata(tool: PulseTool, category: str, is_write: bool) -> None:
+    """Attach Pulse-specific metadata to a BetaFunctionTool instance."""
+    object.__setattr__(tool, "_category", category)
+    object.__setattr__(tool, "_is_write", is_write)
+
+
+@overload
+def beta_tool(fn: F, *, category: str = "", is_write: bool = False) -> PulseTool: ...
+
+
+@overload
+def beta_tool(fn: None = None, *, category: str = "", is_write: bool = False) -> Callable[[F], PulseTool]: ...
+
+
+def beta_tool(
+    fn: F | None = None, *, category: str = "", is_write: bool = False
+) -> PulseTool | Callable[[F], PulseTool]:
     """Typed wrapper around anthropic.beta_tool.
 
     Supports both ``@beta_tool`` (no args) and ``@beta_tool(category="views", is_write=True)``.
@@ -63,7 +83,7 @@ def beta_tool(fn: F | None = None, *, category: str = "", is_write: bool = False
     explicitly.
     """
 
-    def decorator(f: F) -> F:
+    def decorator(f: F) -> PulseTool:
         @functools.wraps(f)
         def _timed(*args: Any, **kwargs: Any) -> Any:
             if not _PERF_TRACE:
@@ -77,11 +97,10 @@ def beta_tool(fn: F | None = None, *, category: str = "", is_write: bool = False
                 if elapsed > 2.0:
                     _logger.warning("Slow tool %s: %.2fs", f.__name__, elapsed)
 
-        tool = _anthropic_beta_tool(_timed)  # type: ignore[return-value]
+        tool = cast("PulseTool", _anthropic_beta_tool(_timed))
 
         # Store metadata for introspection
-        tool._category = category  # type: ignore[attr-defined]
-        tool._is_write = is_write  # type: ignore[attr-defined]
+        _set_tool_metadata(tool, category, is_write)
 
         # Auto-register only when metadata is explicitly provided
         if category or is_write:
@@ -89,10 +108,10 @@ def beta_tool(fn: F | None = None, *, category: str = "", is_write: bool = False
 
             register_tool(tool, is_write=is_write, category=category or "general")
 
-        return tool  # type: ignore[return-value]
+        return tool
 
     if fn is not None:
         # Called as @beta_tool (no parentheses) — no auto-registration
         return decorator(fn)
     # Called as @beta_tool(...) (with parentheses)
-    return decorator  # type: ignore[return-value]
+    return decorator

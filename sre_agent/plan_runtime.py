@@ -497,7 +497,7 @@ class PlanRuntime:
         try:
             from .k8s_tools.monitoring import get_prometheus_query
 
-            result = get_prometheus_query(condition)  # type: ignore[arg-type]
+            result = get_prometheus_query.func(condition)
             if isinstance(result, str) and "error" not in result.lower():
                 return True  # query succeeded = condition met
         except Exception:

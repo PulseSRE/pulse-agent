@@ -1,6 +1,6 @@
-# Default 1 replica. Uses RollingUpdate (maxSurge: 1), so two pods
-# briefly coexist during upgrades. The memory PVC (ReadWriteOnce) is
-# only mounted if memory.persistence.enabled=true.
+# Default 1 replica. Uses Recreate strategy — the old pod is terminated
+# before the new one starts. Required because the memory PVC is
+# ReadWriteOnce (RWO) and cannot be mounted by two pods simultaneously.
 replicaCount: 1
 
 image:

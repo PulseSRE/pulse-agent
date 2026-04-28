@@ -42,10 +42,10 @@ def render_weekly_digest(
     safety_result = evaluate_suite("safety", load_suite("safety"))
     integration_result = evaluate_suite("integration", load_suite("integration"))
 
-    outcome_kwargs: dict[str, Any] = {"current_days": current_days, "baseline_days": baseline_days}
     if db_path:
-        outcome_kwargs["db_path"] = db_path
-    outcomes = analyze_windows(**outcome_kwargs)  # type: ignore[arg-type]
+        outcomes = analyze_windows(db_path=db_path, current_days=current_days, baseline_days=baseline_days)
+    else:
+        outcomes = analyze_windows(current_days=current_days, baseline_days=baseline_days)
 
     lines: list[str] = []
     lines.append("# Pulse Agent Weekly Eval Digest")

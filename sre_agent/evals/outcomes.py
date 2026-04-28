@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import statistics
 import time
@@ -11,6 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from ..db import Database
+
+logger = logging.getLogger("pulse_agent.evals")
 
 DEFAULT_FIX_DB_PATH = os.environ.get("PULSE_AGENT_DATABASE_URL", "")
 DEFAULT_POLICY_PATH = str(Path(__file__).resolve().parent / "policies" / "outcome_regression_policy.yaml")
@@ -65,7 +68,8 @@ def _parse_scalar(raw: str) -> Any:
         if "." in val:
             return float(val)
         return int(val)
-    except Exception:
+    except (ValueError, TypeError) as e:
+        logger.debug("outcome scalar parse fell back to string for %r: %s", val, e)
         return val.strip("'\"")
 
 
@@ -133,13 +137,14 @@ def _load_actions(db: Database, since_ms: int, until_ms: int) -> list[dict[str, 
             (since_ms, until_ms),
         )
     except Exception:
+        logger.debug("Failed to load actions from DB", exc_info=True)
         return []
     actions: list[dict[str, Any]] = []
     for row in rows:
         raw_input = row["input"] or "{}"
         try:
             inp = json.loads(raw_input)
-        except Exception:
+        except (ValueError, TypeError):
             inp = {}
         actions.append(
             {
@@ -161,7 +166,8 @@ def _confidence_values(actions: list[dict[str, Any]]) -> list[tuple[float, int]]
             continue
         try:
             c = float(conf)
-        except Exception:
+        except (ValueError, TypeError) as e:
+            logger.debug("confidence value parse failed for %r: %s", conf, e)
             continue
         c = max(0.0, min(1.0, c))
         outcome = 1 if a["status"] == "completed" else 0

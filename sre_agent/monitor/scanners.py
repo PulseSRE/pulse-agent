@@ -192,8 +192,14 @@ def scan_expiring_certs() -> list[dict]:
                     f.write(cert_bytes)
                     f.flush()
                     try:
-                        cert_info = ssl._ssl._test_decode_cert(f.name)  # type: ignore[attr-defined]
-                    except (AttributeError, Exception) as cert_err:
+                        _ssl_mod: object = getattr(ssl, "_ssl", None)
+                        _decode_fn: Callable[..., dict[str, Any]] | None = (
+                            getattr(_ssl_mod, "_test_decode_cert", None) if _ssl_mod else None
+                        )
+                        if _decode_fn is None:
+                            raise AttributeError("_test_decode_cert not available")
+                        cert_info = _decode_fn(f.name)
+                    except Exception as cert_err:
                         logger.warning(
                             "Cannot decode cert %s/%s (CPython-specific API): %s",
                             ns,
@@ -829,11 +835,12 @@ def scan_security_posture() -> list[dict]:
     try:
         from ..security_tools import get_security_summary
 
-        summary = get_security_summary()  # type: ignore[call-arg]
+        # Access the underlying function through the BetaFunctionTool wrapper
+        summary_result: str = get_security_summary.func()
 
         # Parse the summary string to extract findings
         # Format: "  [!!!] [CRITICAL] Category: detail"
-        for line in summary.split("\n"):  # type: ignore[union-attr]
+        for line in summary_result.split("\n"):
             line = line.strip()
             if not line or not line.startswith("["):
                 continue

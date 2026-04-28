@@ -321,7 +321,7 @@ async def rest_query(
 
     from ..k8s_tools import get_prometheus_query
 
-    result = get_prometheus_query(q, time_range)  # type: ignore[arg-type, call-arg]
+    result = get_prometheus_query.func(q, time_range)
 
     if isinstance(result, tuple) and len(result) == 2:
         _text_result, component = result

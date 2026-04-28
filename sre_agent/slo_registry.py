@@ -121,7 +121,7 @@ class SLORegistry:
                 query = self._build_prom_query(slo)
                 if not query:
                     continue
-                result = get_prometheus_query(query)  # type: ignore[arg-type]
+                result = get_prometheus_query.func(query)
                 if isinstance(result, str) and "error" not in result.lower():
                     # Parse the value from the result
                     try:

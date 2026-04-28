@@ -510,7 +510,7 @@ def get_agents_metadata() -> list[dict]:
         if mode == "both":
             continue
 
-        config = build_orchestrated_config(mode)  # type: ignore[arg-type]
+        config = build_orchestrated_config(mode)
 
         agents.append(
             {

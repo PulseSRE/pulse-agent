@@ -28,7 +28,8 @@ class BaseRepository:
     @property
     def db(self) -> Database:
         if self._db_injected:
-            return self._db  # type: ignore[return-value]
+            assert self._db is not None  # guaranteed by __init__ when _db_injected=True
+            return self._db
         from ..db import get_database
 
         return get_database()

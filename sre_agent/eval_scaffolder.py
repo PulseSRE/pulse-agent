@@ -13,12 +13,14 @@ from __future__ import annotations
 import json
 import logging
 import re
+import types
 from pathlib import Path
 
+_fcntl: types.ModuleType | None
 try:
-    import fcntl
+    import fcntl as _fcntl
 except ImportError:
-    fcntl = None  # type: ignore[assignment]
+    _fcntl = None
 
 logger = logging.getLogger("pulse_agent.eval_scaffolder")
 
@@ -49,8 +51,8 @@ def _append_scenario(scenario: dict) -> bool:
         _SCENARIOS_DIR.mkdir(parents=True, exist_ok=True)
 
         with open(_SUITE_FILE, "a+", encoding="utf-8") as fh:
-            if fcntl is not None:
-                fcntl.flock(fh, fcntl.LOCK_EX)
+            if _fcntl is not None:
+                _fcntl.flock(fh, _fcntl.LOCK_EX)
             try:
                 fh.seek(0)
                 content = fh.read()
@@ -71,8 +73,8 @@ def _append_scenario(scenario: dict) -> bool:
                 json.dump(suite, fh, indent=2, ensure_ascii=False)
                 fh.write("\n")
             finally:
-                if fcntl is not None:
-                    fcntl.flock(fh, fcntl.LOCK_UN)
+                if _fcntl is not None:
+                    _fcntl.flock(fh, _fcntl.LOCK_UN)
 
         logger.info("Appended eval scenario: %s", scenario["scenario_id"])
         return True

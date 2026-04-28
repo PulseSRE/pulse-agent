@@ -39,6 +39,8 @@ class MCPConnection:
     prompt_schemas: dict[str, dict] = field(default_factory=dict)  # name → {description, arguments}
     process: Any = None  # subprocess for stdio transport
     error: str = ""
+    _sse_base_url: str = ""
+    _sse_session_id: str = ""
 
 
 # Global MCP connections
@@ -314,8 +316,8 @@ def _connect_sse_attempt(conn: MCPConnection, base_url: str) -> MCPConnection:
             logger.debug("Prompt discovery failed for '%s': %s", conn.name, e)
 
         conn.connected = True
-        conn._sse_base_url = base_url  # type: ignore[attr-defined]
-        conn._sse_session_id = session_id  # type: ignore[attr-defined]
+        conn._sse_base_url = base_url
+        conn._sse_session_id = session_id
         logger.info("MCP SSE '%s' connected: %d tools, %d prompts", conn.name, len(conn.tools), len(conn.prompts))
 
     except urllib.error.URLError:

@@ -1240,7 +1240,7 @@ class ClusterMonitor:
         if len(self._recent_fix_ids) > 500:
             self._recent_fix_ids = set(list(self._recent_fix_ids)[-500:])
         if len(self._transient_counts) > 1000:
-            sorted_keys = sorted(self._transient_counts, key=self._transient_counts.get, reverse=True)  # type: ignore[arg-type]
+            sorted_keys = sorted(self._transient_counts, key=lambda k: self._transient_counts[k], reverse=True)
             self._transient_counts = {k: self._transient_counts[k] for k in sorted_keys[:500]}
         if len(self._investigation_fingerprints) > 1000:
             self._investigation_fingerprints = {

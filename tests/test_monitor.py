@@ -1047,11 +1047,10 @@ class TestExecuteRollback:
         finding = {"_rollback_meta": {"name": "web", "namespace": "prod", "revision": "3"}}
         save_action(action, category="workloads", resources=[], finding=finding)
 
-        with patch(
-            "sre_agent.k8s_tools.rollback_deployment", return_value="Rolled back prod/web to revision 3"
-        ) as mock_rb:
+        with patch("sre_agent.k8s_tools.rollback_deployment") as mock_rb:
+            mock_rb.func.return_value = "Rolled back prod/web to revision 3"
             result = execute_rollback(action["id"])
-            mock_rb.assert_called_once_with("prod", "web", 3)
+            mock_rb.func.assert_called_once_with("prod", "web", 3)
             assert result["status"] == "rolled_back"
             assert result["actionId"] == action["id"]
 

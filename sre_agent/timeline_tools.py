@@ -307,21 +307,16 @@ def correlate_incident(
         normalized = _normalize_resource(resource)
         lanes_by_resource[normalized].append(entry)
 
-    component = {
-        "kind": "timeline",
-        "title": f"Incident Timeline — {namespace} (last {minutes_back}m)",
-        "description": f"{len(timeline)} events correlated across {len(lanes_by_resource)} resources",
-        "lanes": [],
-    }
+    lanes: list[dict[str, object]] = []
 
     for resource, entries in lanes_by_resource.items():
         # Determine category from the most common source in this resource's events
         source_counts: dict[str, int] = defaultdict(int)
         for e in entries:
             source_counts[e["source"]] += 1
-        dominant_source = max(source_counts, key=source_counts.get)  # type: ignore[arg-type]
+        dominant_source = max(source_counts, key=lambda k: source_counts[k])
 
-        lane = {
+        lane: dict[str, object] = {
             "label": resource,
             "category": category_map.get(dominant_source, "event"),
             "events": [
@@ -334,7 +329,14 @@ def correlate_incident(
                 for e in entries
             ],
         }
-        component["lanes"].append(lane)  # type: ignore[attr-defined]
+        lanes.append(lane)
+
+    component: dict[str, object] = {
+        "kind": "timeline",
+        "title": f"Incident Timeline — {namespace} (last {minutes_back}m)",
+        "description": f"{len(timeline)} events correlated across {len(lanes_by_resource)} resources",
+        "lanes": lanes,
+    }
 
     return (text_summary, component)
 
