@@ -180,7 +180,7 @@ def list_inbox_items(
     elif status == "agent_cleared":
         exclude_clause = "status NOT IN ('archived')"
     elif status == "__needs_attention__":
-        exclude_clause = "status NOT IN ('archived', 'agent_cleared', 'new', 'agent_reviewing', 'agent_review_failed') AND (severity IS NULL OR severity != 'info')"
+        exclude_clause = "status NOT IN ('archived', 'agent_cleared', 'resolved', 'new', 'agent_reviewing', 'agent_review_failed') AND (severity IS NULL OR severity != 'info')"
         status = None
     else:
         exclude_clause = "status NOT IN ('archived', 'agent_cleared')"
@@ -261,7 +261,9 @@ def _compute_stats(items: list[dict[str, Any]]) -> dict[str, int]:
     return stats
 
 
-_NEEDS_ATTENTION_EXCLUDE = frozenset({"archived", "agent_cleared", "new", "agent_reviewing", "agent_review_failed"})
+_NEEDS_ATTENTION_EXCLUDE = frozenset(
+    {"archived", "agent_cleared", "resolved", "new", "agent_reviewing", "agent_review_failed"}
+)
 
 
 def get_inbox_stats() -> dict[str, int]:
