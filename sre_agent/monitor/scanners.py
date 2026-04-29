@@ -299,7 +299,17 @@ def scan_firing_alerts() -> list[dict]:
             )
         )
     except Exception as e:
-        logger.debug("Alert scan failed (monitoring may not be available): %s", e)
+        logger.warning("Alert scan failed (Prometheus runtime error): %s", e)
+        findings.append(
+            _make_finding(
+                severity="info",
+                category="monitoring",
+                title="Prometheus monitoring degraded",
+                summary=f"Alert scan failed: {type(e).__name__}: {e}",
+                resources=[],
+                auto_fixable=False,
+            )
+        )
     return findings
 
 

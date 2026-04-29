@@ -82,10 +82,20 @@ class InboxRepository(BaseRepository):
 
     def get_stats_rows(self, now: int) -> list[Any]:
         return self.db.fetchall(
-            """SELECT status, COUNT(*) as cnt FROM inbox_items
+            """SELECT status, COUNT(*) as cnt,
+            COUNT(DISTINCT correlation_key) as unique_cnt
+            FROM inbox_items
             WHERE (snoozed_until IS NULL OR snoozed_until <= ?)
             GROUP BY status""",
             (now,),
+        )
+
+    def fetch_stale_agent_reviewing(self, stale_cutoff: int) -> list[Any]:
+        return self.db.fetchall(
+            """SELECT * FROM inbox_items
+            WHERE status IN ('agent_reviewing', 'agent_review_failed')
+            AND updated_at < ?""",
+            (stale_cutoff,),
         )
 
     # -- Status updates ------------------------------------------------------

@@ -135,6 +135,16 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("Memory system init failed: %s", e)
 
+    # Sweep inbox items stuck in agent_reviewing from previous run
+    try:
+        from ..inbox import sweep_stale_items
+
+        swept = sweep_stale_items()
+        if swept:
+            logger.info("Swept %d stale inbox items back to 'new'", swept)
+    except Exception:
+        logger.debug("Inbox startup sweep failed", exc_info=True)
+
     # Event loop health watchdog — logs when the loop is blocked
     async def _event_loop_watchdog():
         while True:

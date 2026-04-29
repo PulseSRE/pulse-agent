@@ -71,86 +71,83 @@ class ContextBus:
 
     def publish(self, entry: ContextEntry) -> None:
         """Publish a context entry from any agent."""
-        if entry.parallel_task_id and entry.parallel_task_id in self._buffers:
+        if entry.parallel_task_id:
             with self._lock:
                 if entry.parallel_task_id in self._buffers:
                     self._buffers[entry.parallel_task_id].append(entry)
                     return
-        with self._lock:
-            try:
-                from .repositories import get_context_bus_repo
+        try:
+            from .repositories import get_context_bus_repo
 
-                repo = get_context_bus_repo()
-                repo.ensure_tables()
-                timestamp_ms = int(entry.timestamp * 1000)
-                repo.insert_entry(
-                    entry.source,
-                    entry.category,
-                    entry.summary,
-                    json.dumps(entry.details),
-                    timestamp_ms,
-                    entry.namespace,
-                    json.dumps(entry.resources),
-                )
-                # Prune old entries beyond max_entries (same connection, single commit)
-                repo.prune_old_entries(self._max_entries)
-                repo.commit()
-            except Exception as e:
-                logger.warning("Failed to publish context entry: %s", e)
+            repo = get_context_bus_repo()
+            repo.ensure_tables()
+            timestamp_ms = int(entry.timestamp * 1000)
+            repo.insert_entry(
+                entry.source,
+                entry.category,
+                entry.summary,
+                json.dumps(entry.details),
+                timestamp_ms,
+                entry.namespace,
+                json.dumps(entry.resources),
+            )
+            repo.prune_old_entries(self._max_entries)
+            repo.commit()
+        except Exception as e:
+            logger.warning("Failed to publish context entry: %s", e)
 
     def get_context_for(self, namespace: str = "", category: str = "", limit: int = 5) -> list[ContextEntry]:
         """Get recent context entries, optionally filtered."""
-        with self._lock:
-            try:
-                from .repositories import get_context_bus_repo
+        try:
+            from .repositories import get_context_bus_repo
 
-                repo = get_context_bus_repo()
-                repo.ensure_tables()
-                now_ms = int(time.time() * 1000)
-                cutoff_ms = now_ms - self._ttl * 1000
+            repo = get_context_bus_repo()
+            repo.ensure_tables()
+            now_ms = int(time.time() * 1000)
+            cutoff_ms = now_ms - self._ttl * 1000
 
-                where_parts = ["timestamp > ?"]
-                params: list = [cutoff_ms]
+            where_parts = ["timestamp > ?"]
+            params: list = [cutoff_ms]
 
-                if namespace:
-                    where_parts.append("(namespace = ? OR namespace = '')")
-                    params.append(namespace)
-                if category:
-                    where_parts.append("category = ?")
-                    params.append(category)
+            if namespace:
+                where_parts.append("(namespace = ? OR namespace = '')")
+                params.append(namespace)
+            if category:
+                where_parts.append("category = ?")
+                params.append(category)
 
-                where = " AND ".join(where_parts)
-                rows = repo.fetch_entries(where, tuple(params), limit)
+            where = " AND ".join(where_parts)
+            rows = repo.fetch_entries(where, tuple(params), limit)
 
-                entries = []
-                for r in rows:
-                    details = r["details"]
-                    if isinstance(details, str):
-                        try:
-                            details = json.loads(details)
-                        except Exception:
-                            details = {}
-                    resources = r["resources"]
-                    if isinstance(resources, str):
-                        try:
-                            resources = json.loads(resources)
-                        except Exception:
-                            resources = []
-                    entries.append(
-                        ContextEntry(
-                            source=r["source"],
-                            category=r["category"],
-                            summary=r["summary"],
-                            details=details,
-                            timestamp=r["timestamp"] / 1000.0,  # convert ms back to seconds
-                            namespace=r["namespace"],
-                            resources=resources,
-                        )
+            entries = []
+            for r in rows:
+                details = r["details"]
+                if isinstance(details, str):
+                    try:
+                        details = json.loads(details)
+                    except Exception:
+                        details = {}
+                resources = r["resources"]
+                if isinstance(resources, str):
+                    try:
+                        resources = json.loads(resources)
+                    except Exception:
+                        resources = []
+                entries.append(
+                    ContextEntry(
+                        source=r["source"],
+                        category=r["category"],
+                        summary=r["summary"],
+                        details=details,
+                        timestamp=r["timestamp"] / 1000.0,
+                        namespace=r["namespace"],
+                        resources=resources,
                     )
-                return entries
-            except Exception as e:
-                logger.warning("Failed to get context entries: %s", e)
-                return []
+                )
+            return entries
+        except Exception as e:
+            logger.warning("Failed to get context entries: %s", e)
+            return []
 
     def build_context_prompt(self, namespace: str = "", limit: int = 5) -> str:
         """Build a context injection string for agent system prompts."""

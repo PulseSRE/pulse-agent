@@ -624,3 +624,109 @@ class TestFindingCorrKey:
             "resources": [{"kind": "Pod", "name": "worker-def-456", "namespace": "prod"}],
         }
         assert _finding_corr_key(f1) != _finding_corr_key(f2)
+
+
+class TestSweepStaleItems:
+    """Tests for startup sweep of stale agent_reviewing items."""
+
+    def test_sweep_resets_stale_agent_reviewing(self):
+        from sre_agent.inbox import create_inbox_item, get_inbox_item, sweep_stale_items
+        from sre_agent.repositories.inbox_repo import get_inbox_repo
+
+        item = _make_item(title="Stale item")
+        item_id = create_inbox_item(item)
+        repo = get_inbox_repo()
+        stale_time = int(time.time()) - 600
+        repo.update_triage_result(item_id, "agent_reviewing", {"triaged": True}, "summary", stale_time)
+        repo.db.execute("UPDATE inbox_items SET updated_at = ? WHERE id = ?", (stale_time, item_id))
+        repo.db.commit()
+
+        swept = sweep_stale_items()
+        assert swept == 1
+        result = get_inbox_item(item_id)
+        assert result["status"] == "new"
+        assert result.get("metadata", {}).get("triaged") is None
+
+    def test_sweep_ignores_recently_updated(self):
+        from sre_agent.inbox import create_inbox_item, get_inbox_item, sweep_stale_items
+        from sre_agent.repositories.inbox_repo import get_inbox_repo
+
+        item = _make_item(title="Fresh item")
+        item_id = create_inbox_item(item)
+        repo = get_inbox_repo()
+        now = int(time.time())
+        repo.update_triage_result(item_id, "agent_reviewing", {}, "summary", now)
+
+        swept = sweep_stale_items()
+        assert swept == 0
+        result = get_inbox_item(item_id)
+        assert result["status"] == "agent_reviewing"
+
+    def test_sweep_handles_empty_table(self):
+        from sre_agent.inbox import sweep_stale_items
+
+        swept = sweep_stale_items()
+        assert swept == 0
+
+
+class TestStatsDedup:
+    """Tests for unique_issues dedup in stats."""
+
+    def test_unique_issues_less_than_total(self):
+        from sre_agent.inbox import create_inbox_item, get_inbox_stats
+        from sre_agent.repositories.inbox_repo import get_inbox_repo
+
+        repo = get_inbox_repo()
+        now = int(time.time())
+        for i in range(3):
+            item = _make_item(title=f"Dup {i}", correlation_key="same:key")
+            create_inbox_item(item)
+        item = _make_item(title="Unique", correlation_key="other:key")
+        create_inbox_item(item)
+
+        # Transition all to triaged so they count in needs_attention
+        for row in repo.db.fetchall("SELECT id FROM inbox_items"):
+            repo.update_triage_result(row["id"], "triaged", {}, "s", now)
+
+        stats = get_inbox_stats()
+        assert stats["total"] == 4
+        assert stats["unique_issues"] == 2
+
+
+class TestCorrelationKeyDeterministic:
+    """Verify generator correlation keys are stable."""
+
+    def test_make_assessment_deterministic(self):
+        from sre_agent.inbox_generators import _make_assessment
+
+        item1 = _make_assessment(
+            title="Test",
+            summary="test",
+            severity="info",
+            urgency_hours=24,
+            generator="cert_expiry",
+            namespace="prod",
+        )
+        item2 = _make_assessment(
+            title="Test",
+            summary="test",
+            severity="info",
+            urgency_hours=24,
+            generator="cert_expiry",
+            namespace="prod",
+        )
+        assert item1["correlation_key"] == item2["correlation_key"]
+        assert item1["correlation_key"] == "cert_expiry:prod"
+
+    def test_cluster_scoped_key(self):
+        from sre_agent.inbox_generators import _make_assessment
+
+        item = _make_assessment(
+            title="Test",
+            summary="test",
+            severity="info",
+            urgency_hours=24,
+            generator="privileged_workloads",
+            namespace=None,
+        )
+        assert item["correlation_key"] == "privileged_workloads:cluster"

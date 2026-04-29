@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from ..prometheus import PrometheusConfigError, get_prometheus_client
@@ -11,9 +12,13 @@ from .registry import SEVERITY_WARNING
 
 logger = logging.getLogger("pulse_agent.monitor")
 
+_last_prometheus_error_time: float = 0.0
+_PROMETHEUS_ERROR_COOLDOWN = 300
+
 
 def _query_prometheus(query: str) -> list[dict]:
     """Query Prometheus via unified client and return results."""
+    global _last_prometheus_error_time
     try:
         data = get_prometheus_client().query(query, timeout=15)
         if data.get("status") != "success":
@@ -24,7 +29,12 @@ def _query_prometheus(query: str) -> list[dict]:
         logger.warning("Prometheus config error: %s", e)
         return []
     except Exception as e:
-        logger.debug("Prometheus query error: %s", e)
+        now = time.time()
+        if now - _last_prometheus_error_time > _PROMETHEUS_ERROR_COOLDOWN:
+            _last_prometheus_error_time = now
+            logger.warning("Prometheus query error (suppressing for %ds): %s", _PROMETHEUS_ERROR_COOLDOWN, e)
+        else:
+            logger.debug("Prometheus query error (suppressed): %s", e)
         return []
 
 

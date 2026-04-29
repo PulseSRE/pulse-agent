@@ -267,6 +267,46 @@ class TestConcurrentConnectSkillMcp:
                 assert _connections[name].connected
 
 
+class TestStdioArgBlocking:
+    """Verify dangerous stdio arguments are blocked."""
+
+    def test_blocked_eval_flag(self):
+        config = {"server": {"url": "node --eval console.log(1)", "transport": "stdio"}, "toolsets": []}
+        conn = connect_mcp_server("test-eval", config)
+        assert not conn.connected
+        assert "Blocked" in conn.error
+        assert "--eval" in conn.error
+
+    def test_blocked_yes_flag(self):
+        config = {"server": {"url": "npx --yes @malicious/pkg", "transport": "stdio"}, "toolsets": []}
+        conn = connect_mcp_server("test-yes", config)
+        assert not conn.connected
+        assert "Blocked" in conn.error
+        assert "--yes" in conn.error
+
+    def test_blocked_python_c_flag(self):
+        config = {"server": {"url": "python3 -c import os", "transport": "stdio"}, "toolsets": []}
+        conn = connect_mcp_server("test-c", config)
+        assert not conn.connected
+        assert "Blocked" in conn.error
+
+    def test_blocked_prefix_form(self):
+        config = {"server": {"url": "node --eval=console.log(1)", "transport": "stdio"}, "toolsets": []}
+        conn = connect_mcp_server("test-prefix", config)
+        assert not conn.connected
+        assert "Blocked" in conn.error
+
+    def test_allowed_normal_args(self):
+        """Normal args like package names should not be blocked."""
+        config = {
+            "server": {"url": "npx @openshift/openshift-mcp-server --port 3000", "transport": "stdio"},
+            "toolsets": [],
+        }
+        conn = connect_mcp_server("test-normal", config)
+        # Will fail on actual process spawn (no npx available in test), but should NOT fail on arg validation
+        assert "Blocked" not in (conn.error or "")
+
+
 class TestNonBuiltinStdioBlocked:
     """Verify user-created skills cannot use stdio transport."""
 

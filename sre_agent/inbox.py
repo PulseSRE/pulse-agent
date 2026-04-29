@@ -272,21 +272,46 @@ def get_inbox_stats() -> dict[str, int]:
     cleared = 0
     archived = 0
     needs_attention = 0
+    unique_total = 0
     for row in rows:
         stats[row["status"]] = row["cnt"]
+        unique_cnt = row.get("unique_cnt", row["cnt"])
         if row["status"] == "agent_cleared":
             cleared += row["cnt"]
         elif row["status"] == "archived":
             archived += row["cnt"]
         else:
             total += row["cnt"]
+            unique_total += unique_cnt
         if row["status"] not in _NEEDS_ATTENTION_EXCLUDE:
             needs_attention += row["cnt"]
     stats["total"] = total
     stats["agent_cleared"] = cleared
     stats["archived"] = archived
     stats["needs_attention"] = needs_attention
+    stats["unique_issues"] = unique_total
     return stats
+
+
+_STALE_THRESHOLD = 300  # 5 minutes
+
+
+def sweep_stale_items() -> int:
+    """Reset items stuck in agent_reviewing after restart (>5 min stale)."""
+    repo = get_inbox_repo()
+    now = int(time.time())
+    stale_cutoff = now - _STALE_THRESHOLD
+    rows = repo.fetch_stale_agent_reviewing(stale_cutoff)
+    swept = 0
+    for row in rows:
+        item = _deserialize_row(row)
+        metadata = item.get("metadata", {})
+        metadata.pop("triaged", None)
+        repo.update_triage_result(row["id"], "new", metadata, item.get("summary", ""), now)
+        swept += 1
+    if swept:
+        _inbox_logger.info("Startup sweep: reset %d stale agent_reviewing items to new", swept)
+    return swept
 
 
 def update_item_status(item_id: str, new_status: str, actor: str = "") -> bool:

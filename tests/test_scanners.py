@@ -754,12 +754,14 @@ class TestScanFiringAlerts:
             findings = scan_firing_alerts()
         assert findings == []
 
-    def test_api_error_returns_empty(self):
+    def test_api_error_emits_degraded_finding(self):
         mock_client = MagicMock()
         mock_client.request.side_effect = Exception("no monitoring")
         with patch("sre_agent.monitor.scanners.get_prometheus_client", return_value=mock_client):
             findings = scan_firing_alerts()
-        assert findings == []
+        assert len(findings) == 1
+        assert findings[0]["category"] == "monitoring"
+        assert "degraded" in findings[0]["title"].lower()
 
     def test_info_severity_alert(self):
         alert = {
@@ -1137,6 +1139,32 @@ class TestScanFiringAlertsPrometheusConfigError:
         assert "unavailable" in findings[0]["title"].lower()
         assert "No CA cert found" in findings[0]["summary"]
         assert findings[0]["severity"] == SEVERITY_WARNING
+
+
+class TestScanFiringAlertsRuntimeError:
+    """scan_firing_alerts must emit a degraded finding on runtime errors
+    (network timeouts, DNS failures) — not silently swallow them."""
+
+    def test_emits_degraded_finding_on_connection_error(self):
+        mock_client = MagicMock()
+        mock_client.request.side_effect = ConnectionError("Connection refused")
+        with patch("sre_agent.monitor.scanners.get_prometheus_client", return_value=mock_client):
+            findings = scan_firing_alerts()
+
+        assert len(findings) == 1
+        assert findings[0]["category"] == "monitoring"
+        assert "degraded" in findings[0]["title"].lower()
+        assert "ConnectionError" in findings[0]["summary"]
+        assert findings[0]["severity"] == SEVERITY_INFO
+
+    def test_emits_degraded_finding_on_timeout(self):
+        mock_client = MagicMock()
+        mock_client.request.side_effect = TimeoutError("timed out")
+        with patch("sre_agent.monitor.scanners.get_prometheus_client", return_value=mock_client):
+            findings = scan_firing_alerts()
+
+        assert len(findings) == 1
+        assert "degraded" in findings[0]["title"].lower()
 
 
 class TestParallelScannerErrorIsolation:

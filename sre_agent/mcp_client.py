@@ -136,6 +136,8 @@ def connect_mcp_server(name: str, config: dict, *, max_retries: int = 5) -> MCPC
 
 
 _STDIO_ALLOWED_COMMANDS = {"node", "npx", "python3", "python", "uvx"}
+_STDIO_BLOCKED_ARGS = frozenset({"--yes", "-y", "-c", "--eval", "-e", "--exec", "--import"})
+_STDIO_BLOCKED_PREFIXES = ("--eval=", "-c=", "--exec=", "--import=")
 
 
 def _connect_stdio(conn: MCPConnection) -> MCPConnection:
@@ -148,6 +150,12 @@ def _connect_stdio(conn: MCPConnection) -> MCPConnection:
     if cmd not in _STDIO_ALLOWED_COMMANDS:
         logger.warning("stdio command not in allowlist: %s", cmd)
         conn.error = f"stdio command not allowed: {cmd}. Allowed: {_STDIO_ALLOWED_COMMANDS}"
+        return conn
+
+    blocked = [a for a in args if a in _STDIO_BLOCKED_ARGS or a.startswith(_STDIO_BLOCKED_PREFIXES)]
+    if blocked:
+        logger.warning("Blocked dangerous stdio args for '%s': %s", cmd, blocked)
+        conn.error = f"Blocked stdio arguments: {blocked}"
         return conn
 
     # Add toolset flags
