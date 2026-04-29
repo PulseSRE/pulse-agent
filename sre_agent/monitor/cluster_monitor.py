@@ -36,12 +36,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger("pulse_agent.monitor")
 
 
-def _resolve_finding_inbox(finding_id: str) -> None:
+def _resolve_finding_inbox(finding_id: str, finding: dict | None = None) -> None:
     """Resolve inbox items linked to a resolved finding."""
     try:
         from ..inbox import resolve_finding_inbox_item
 
-        resolve_finding_inbox_item(finding_id)
+        resolve_finding_inbox_item(finding_id, finding)
     except Exception:
         logger.debug("Failed to resolve inbox item for finding %s", finding_id, exc_info=True)
 
@@ -332,7 +332,7 @@ class ClusterMonitor:
 
                         if isinstance(e, _ApiEx) and e.status == 404:
                             logger.info("Auto-fix: pod gone (404) for %s — resolving", finding["id"])
-                            _resolve_finding_inbox(finding.get("id", ""))
+                            _resolve_finding_inbox(finding.get("id", ""), finding)
                         else:
                             logger.warning(
                                 "Auto-fix skipped: could not verify ownerReferences for %s: %s", r.get("name"), e
@@ -481,7 +481,7 @@ class ClusterMonitor:
                     action_report["afterState"] = "Resource no longer exists — resolved"
                     action_report["durationMs"] = duration_ms
                     self._recent_fix_ids.add(finding["id"])
-                    _resolve_finding_inbox(finding["id"])
+                    _resolve_finding_inbox(finding["id"], finding)
                 else:
                     action_report["status"] = "failed"
                     action_report["error"] = str(e)
@@ -1230,7 +1230,7 @@ class ClusterMonitor:
             )
             if finding_id:
                 asyncio.get_running_loop().run_in_executor(None, mark_finding_actions_resolved, finding_id)
-                asyncio.get_running_loop().run_in_executor(None, _resolve_finding_inbox, finding_id)
+                asyncio.get_running_loop().run_in_executor(None, _resolve_finding_inbox, finding_id, resolved_finding)
 
         # Track transient findings
         for key in stale_keys:

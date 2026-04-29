@@ -1083,10 +1083,20 @@ def _phase_c_plan() -> int:
     return planned
 
 
-def resolve_finding_inbox_item(finding_id: str) -> bool:
-    """Resolve an inbox item when its linked finding resolves."""
+def resolve_finding_inbox_item(finding_id: str, finding: dict[str, Any] | None = None) -> bool:
+    """Resolve an inbox item when its linked finding resolves.
+
+    Matches by finding_id first, then falls back to correlation_key so
+    items claimed during a previous scan cycle still get resolved.
+    """
     repo = get_inbox_repo()
     row = repo.find_active_by_finding_id(finding_id)
+
+    if row is None and finding:
+        corr_key = _finding_corr_key(finding)
+        if corr_key:
+            row = repo.find_active_by_correlation_task(corr_key)
+
     if row is None:
         return False
 
