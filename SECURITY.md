@@ -2,7 +2,7 @@
 
 ## Reporting Vulnerabilities
 
-Report security issues to [GitHub Issues](https://github.com/alimobrem/pulse-agent/issues) with the `security` label.
+Report security issues to [GitHub Issues](https://github.com/PulseSRE/pulse-agent/issues) with the `security` label.
 
 ## Authentication
 

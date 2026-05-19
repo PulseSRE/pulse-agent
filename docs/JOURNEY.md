@@ -2,7 +2,7 @@
 
 How two repos, 2,488 commits, and 47 days built an AI-powered SRE platform from scratch.
 
-**Repos:** [pulse-agent](https://github.com/alimobrem/pulse-agent) | [OpenshiftPulse](https://github.com/alimobrem/OpenshiftPulse)
+**Repos:** [pulse-agent](https://github.com/PulseSRE/pulse-agent) | [pulse-ui](https://github.com/PulseSRE/pulse-ui)
 
 **Key docs:** [DESIGN_PRINCIPLES.md](../DESIGN_PRINCIPLES.md) | [ARCHITECTURE.md](ARCHITECTURE.md) | [API_CONTRACT.md](../API_CONTRACT.md) | [SECURITY.md](../SECURITY.md) | [TESTING.md](../TESTING.md) | [DATABASE.md](../DATABASE.md) | [CHANGELOG.md](../CHANGELOG.md)
 

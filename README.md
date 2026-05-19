@@ -5,7 +5,7 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v2.7.0"><img src="https://img.shields.io/badge/release-v2.7.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/PulseSRE/pulse-agent/releases/tag/v2.7.0"><img src="https://img.shields.io/badge/release-v2.7.0-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-154_(118+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
   <img src="https://img.shields.io/badge/scanners-23-10b981?style=for-the-badge" alt="Scanners">
@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 
-AI-powered OpenShift/Kubernetes SRE and Security Agent built on Claude. Pulse Agent connects to your cluster via the Kubernetes API and uses Claude Opus for diagnostics, incident triage, security audits, and automated remediation -- all through natural language. It pairs with the [OpenShift Pulse](https://github.com/alimobrem/OpenshiftPulse) UI for rich incident management, or runs standalone as a CLI.
+AI-powered OpenShift/Kubernetes SRE and Security Agent built on Claude. Pulse Agent connects to your cluster via the Kubernetes API and uses Claude Opus for diagnostics, incident triage, security audits, and automated remediation -- all through natural language. It pairs with the [OpenShift Pulse](https://github.com/PulseSRE/pulse-ui) UI for rich incident management, or runs standalone as a CLI.
 
 **Docs:** [API Contract](API_CONTRACT.md) | [Architecture](docs/ARCHITECTURE.md) | [Database](DATABASE.md) | [Security](SECURITY.md) | [Design Principles](DESIGN_PRINCIPLES.md) | [Testing & Evals](TESTING.md) | [Skill Developer Guide](docs/SKILL_DEVELOPER_GUIDE.md) | [Contributing](CONTRIBUTING.md) | [Changelog](CHANGELOG.md)
 
@@ -149,7 +149,7 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 ### Install
 
 ```bash
-git clone https://github.com/alimobrem/pulse-agent.git
+git clone https://github.com/PulseSRE/pulse-agent.git
 cd pulse-agent
 pip install -e .
 ```
@@ -228,8 +228,8 @@ oc login https://api.your-cluster:6443
 podman login quay.io  # or your registry
 
 # Clone both repos
-git clone https://github.com/alimobrem/pulse-agent.git
-git clone https://github.com/alimobrem/OpenshiftPulse.git
+git clone https://github.com/PulseSRE/pulse-agent.git
+git clone https://github.com/PulseSRE/pulse-ui.git
 
 # Deploy everything (UI + Agent)
 cd OpenshiftPulse
@@ -273,7 +273,7 @@ The chart requires either `vertexAI.projectId` or `anthropicApiKey.existingSecre
 
 ## UI (OpenShift Pulse)
 
-The [OpenShift Pulse](https://github.com/alimobrem/OpenshiftPulse) frontend is a React/TypeScript application that connects to the agent via WebSocket. Key surfaces:
+The [OpenShift Pulse](https://github.com/PulseSRE/pulse-ui) frontend is a React/TypeScript application that connects to the agent via WebSocket. Key surfaces:
 
 ### Incident Center
 6 tabs for full incident lifecycle management:
@@ -416,9 +416,9 @@ All WebSocket endpoints require `?token=...` query parameter (constant-time comp
 </p>
 
 <p align="center">
-  <a href="https://github.com/alimobrem/pulse-agent/releases">Releases</a> &bull;
-  <a href="https://github.com/alimobrem/OpenshiftPulse">Pulse UI</a> &bull;
-  <a href="https://github.com/alimobrem/pulse-agent/issues">Issues</a>
+  <a href="https://github.com/PulseSRE/pulse-agent/releases">Releases</a> &bull;
+  <a href="https://github.com/PulseSRE/pulse-ui">Pulse UI</a> &bull;
+  <a href="https://github.com/PulseSRE/pulse-agent/issues">Issues</a>
 </p>
 
 <p align="center">MIT License</p>
