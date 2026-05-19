@@ -53,6 +53,16 @@ ACTIVE_FINDINGS = Gauge(
     "Number of currently active findings",
 )
 
+COST_BUDGET_REMAINING_USD = Gauge(
+    "pulse_agent_cost_budget_remaining_usd",
+    "Remaining daily cost budget in USD",
+)
+
+COST_BUDGET_EXHAUSTION_TOTAL = Counter(
+    "pulse_agent_cost_budget_exhaustion_total",
+    "Number of times the daily cost budget was exhausted",
+)
+
 BUILD_INFO = Info(
     "pulse_agent",
     "Pulse Agent build information",

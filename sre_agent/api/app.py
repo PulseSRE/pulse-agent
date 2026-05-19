@@ -178,6 +178,19 @@ async def lifespan(app: FastAPI):
         except (asyncio.CancelledError, TimeoutError):
             pass
 
+    # Stop monitor scan loop gracefully
+    try:
+        from ..monitor.cluster_monitor import _cluster_monitor
+
+        if _cluster_monitor is not None:
+            _cluster_monitor.running = False
+            for task in _cluster_monitor._investigation_tasks:
+                if not task.done():
+                    task.cancel()
+            logger.info("Monitor scan loop stopped")
+    except Exception:
+        logger.debug("Monitor shutdown failed", exc_info=True)
+
     try:
         from ..async_db import reset_async_database
         from ..async_k8s import close_async_clients
@@ -255,12 +268,21 @@ async def version():
 @app.get("/health")
 async def health(_auth=Depends(verify_token)):
     from ..agent import _circuit_breaker
+    from ..db import get_database
     from ..error_tracker import get_tracker
 
     tracker = get_tracker()
     summary = tracker.get_summary()
+
+    try:
+        db_healthy = get_database().health_check()
+    except Exception:
+        db_healthy = False
+
+    degraded = _circuit_breaker.is_open or not db_healthy
     return {
-        "status": "degraded" if _circuit_breaker.is_open else "ok",
+        "status": "degraded" if degraded else "ok",
+        "database": "ok" if db_healthy else "unavailable",
         "circuit_breaker": {
             "state": _circuit_breaker.state,
             "failure_count": _circuit_breaker.failure_count,

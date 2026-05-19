@@ -96,6 +96,27 @@ class TestGaugeOperations:
         assert ACTIVE_FINDINGS._value.get() == 7
 
 
+class TestCostBudgetMetrics:
+    def test_cost_budget_gauges_exist(self):
+        from sre_agent.observability import COST_BUDGET_EXHAUSTION_TOTAL, COST_BUDGET_REMAINING_USD
+
+        assert COST_BUDGET_REMAINING_USD._name == "pulse_agent_cost_budget_remaining_usd"
+        assert COST_BUDGET_EXHAUSTION_TOTAL._name == "pulse_agent_cost_budget_exhaustion"
+
+    def test_cost_budget_remaining_set(self):
+        from sre_agent.observability import COST_BUDGET_REMAINING_USD
+
+        COST_BUDGET_REMAINING_USD.set(42.5)
+        assert COST_BUDGET_REMAINING_USD._value.get() == 42.5
+
+    def test_cost_budget_exhaustion_inc(self):
+        from sre_agent.observability import COST_BUDGET_EXHAUSTION_TOTAL
+
+        before = COST_BUDGET_EXHAUSTION_TOTAL._value.get()
+        COST_BUDGET_EXHAUSTION_TOTAL.inc()
+        assert COST_BUDGET_EXHAUSTION_TOTAL._value.get() == before + 1
+
+
 class TestCounterLabels:
     def test_scanner_labels(self):
         before = SCANNER_RUNS_TOTAL.labels(scanner="crashloop")._value.get()

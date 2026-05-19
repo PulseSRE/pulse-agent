@@ -46,7 +46,7 @@ class MonitorConfig(BaseModel):
     autofix_enabled: bool = True
     security_followup: bool = False
     noise_threshold: float = 0.7
-    max_trust_level: int = 3
+    max_trust_level: int = 2
     investigation_categories: str = (
         "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa"
     )
@@ -139,7 +139,7 @@ class PulseAgentSettings(BaseSettings):
     autofix_enabled: bool = True
     security_followup: bool = False
     noise_threshold: float = 0.7
-    max_trust_level: int = 3
+    max_trust_level: int = 2
     investigation_categories: str = (
         "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa"
     )

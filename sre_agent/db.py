@@ -125,8 +125,35 @@ class Database:
     def commit(self) -> None:
         """Commit the current thread-local transaction and return the connection."""
         if hasattr(self._local, "conn") and self._local.conn is not None:
-            self._local.conn.commit()
-            self._put_conn()
+            try:
+                self._local.conn.commit()
+            finally:
+                self._put_conn()
+
+    def transaction(self):
+        """Context manager that auto-commits on success, rolls back on error.
+
+        Usage::
+
+            with db.transaction():
+                db.execute("INSERT ...", (...))
+                db.execute("UPDATE ...", (...))
+        """
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _txn():
+            try:
+                yield self
+                self.commit()
+            except Exception:
+                conn = getattr(self._local, "conn", None)
+                if conn is not None:
+                    conn.rollback()
+                    self._put_conn()
+                raise
+
+        return _txn()
 
     def close(self) -> None:
         """Return any thread-local connection and close all pool connections."""

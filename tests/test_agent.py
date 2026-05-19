@@ -603,3 +603,48 @@ class TestTokenForwarding:
 
         _execute_tool("t", {}, tool_map, user_token=None)
         assert captured == [None]
+
+
+# ---------------------------------------------------------------------------
+# Circuit breaker thread safety
+# ---------------------------------------------------------------------------
+
+
+class TestCircuitBreakerThreadSafety:
+    def test_has_lock(self):
+        from sre_agent.agent import CircuitBreaker
+
+        cb = CircuitBreaker(failure_threshold=3)
+        assert hasattr(cb, "_lock")
+
+    def test_concurrent_failures_trip_breaker(self):
+        import concurrent.futures
+
+        from sre_agent.agent import CircuitBreaker
+
+        cb = CircuitBreaker(failure_threshold=5, recovery_timeout=60)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+            futures = [pool.submit(cb.record_failure) for _ in range(10)]
+            concurrent.futures.wait(futures)
+        assert cb.state == CircuitBreaker.OPEN
+        assert cb.failure_count == 10
+
+    def test_record_success_resets_under_contention(self):
+        import concurrent.futures
+
+        from sre_agent.agent import CircuitBreaker
+
+        cb = CircuitBreaker(failure_threshold=100, recovery_timeout=60)
+
+        def fail_then_succeed(i):
+            cb.record_failure()
+            if i == 0:
+                cb.record_success()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
+            futures = [pool.submit(fail_then_succeed, i) for i in range(5)]
+            concurrent.futures.wait(futures)
+        # After record_success, state should be CLOSED and count 0,
+        # but other threads may have called record_failure after.
+        # The important thing is no exception was raised (no race crash).
+        assert cb.state in (CircuitBreaker.CLOSED, CircuitBreaker.OPEN)

@@ -150,6 +150,8 @@ class TestHealthAndTools:
         assert r.status_code == 200
         data = r.json()
         assert "status" in data
+        assert "database" in data
+        assert data["database"] in ("ok", "unavailable")
 
     def test_tools_lists_modes(self, api_client, api_headers):
         r = api_client.get("/tools", headers=api_headers)

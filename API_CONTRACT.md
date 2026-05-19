@@ -99,6 +99,7 @@ The `agent` version is read dynamically from the installed package metadata. The
 ```json
 {
   "status": "ok",
+  "database": "ok",
   "circuit_breaker": {
     "state": "closed",
     "failure_count": 0,

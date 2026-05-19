@@ -33,6 +33,8 @@ try:
     from ..observability import (
         ACTIVE_FINDINGS,
         AUTOFIX_TOTAL,
+        COST_BUDGET_EXHAUSTION_TOTAL,
+        COST_BUDGET_REMAINING_USD,
         INVESTIGATION_BUDGET_MAX,
         INVESTIGATION_BUDGET_REMAINING,
         INVESTIGATIONS_TOTAL,
@@ -752,12 +754,16 @@ class ClusterMonitor:
                     else:
                         today_cost = 0.0
                     self._cost_budget_cache = (now_t, today_cost)
+                if _METRICS_AVAILABLE:
+                    COST_BUDGET_REMAINING_USD.set(max(0, _budget_usd - today_cost))
                 if today_cost >= _budget_usd:
                     logger.warning(
                         "Daily cost budget exceeded ($%.2f / $%.2f) — pausing investigations",
                         today_cost,
                         _budget_usd,
                     )
+                    if _METRICS_AVAILABLE:
+                        COST_BUDGET_EXHAUSTION_TOTAL.inc()
                     return
             except Exception:
                 logger.debug("Cost budget check failed", exc_info=True)

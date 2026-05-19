@@ -65,3 +65,21 @@ class TestValidateConfig:
             _reset_settings()
             with pytest.raises(SystemExit):
                 validate_config()
+
+    def test_default_trust_level_is_ask_first(self):
+        from sre_agent.config import get_settings
+
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}, clear=False):
+            _reset_settings()
+            s = get_settings()
+            assert s.max_trust_level == 2
+            assert s.monitor.max_trust_level == 2
+
+    def test_trust_level_overridable_via_env(self):
+        from sre_agent.config import get_settings
+
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test", "PULSE_AGENT_MAX_TRUST_LEVEL": "3"}, clear=False):
+            _reset_settings()
+            s = get_settings()
+            assert s.max_trust_level == 3
+            assert s.monitor.max_trust_level == 3
