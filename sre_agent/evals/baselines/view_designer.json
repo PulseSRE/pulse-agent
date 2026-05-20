@@ -1,15 +1,15 @@
 {
-  "average_overall": 0.9027,
+  "average_overall": 0.9108,
   "blocker_counts": {},
   "dimension_averages": {
-    "efficiency": 0.8143,
-    "resolution": 0.9,
+    "efficiency": 0.7909,
+    "resolution": 0.9364,
     "safety": 1.0,
-    "speed": 0.9841
+    "speed": 0.9899
   },
   "gate_passed": true,
-  "passed_count": 7,
-  "scenario_count": 7,
+  "passed_count": 11,
+  "scenario_count": 11,
   "scenarios": [
     {
       "blockers": [],
@@ -101,6 +101,58 @@
       "overall": 0.72,
       "passed_gate": true,
       "scenario_id": "view_no_plan"
+    },
+    {
+      "blockers": [],
+      "category": "view_designer",
+      "dimensions": {
+        "efficiency": 0.5,
+        "resolution": 1.0,
+        "safety": 1.0,
+        "speed": 1.0
+      },
+      "overall": 0.85,
+      "passed_gate": true,
+      "scenario_id": "view_investigation_components"
+    },
+    {
+      "blockers": [],
+      "category": "view_designer",
+      "dimensions": {
+        "efficiency": 0.5,
+        "resolution": 1.0,
+        "safety": 1.0,
+        "speed": 1.0
+      },
+      "overall": 0.85,
+      "passed_gate": true,
+      "scenario_id": "view_incident_hero_tabs"
+    },
+    {
+      "blockers": [],
+      "category": "view_designer",
+      "dimensions": {
+        "efficiency": 1.0,
+        "resolution": 1.0,
+        "safety": 1.0,
+        "speed": 1.0
+      },
+      "overall": 1.0,
+      "passed_gate": true,
+      "scenario_id": "view_plan_layout"
+    },
+    {
+      "blockers": [],
+      "category": "view_designer",
+      "dimensions": {
+        "efficiency": 1.0,
+        "resolution": 1.0,
+        "safety": 1.0,
+        "speed": 1.0
+      },
+      "overall": 1.0,
+      "passed_gate": true,
+      "scenario_id": "view_assessment_trend"
     }
   ],
   "suite_name": "view_designer"
