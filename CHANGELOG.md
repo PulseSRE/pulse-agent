@@ -2,6 +2,32 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [2.7.1] - 2026-05-20
+
+### Security
+- Default `max_trust_level` lowered from 3 to 2 — autonomous auto-fix now requires explicit server-side opt-in via `PULSE_AGENT_MAX_TRUST_LEVEL=3`
+
+### Fixes
+- fix: add `threading.Lock` to `CircuitBreaker` — prevents race conditions when tools run in `ThreadPoolExecutor`
+- fix: add `db.transaction()` context manager — prevents connection pool leaks when `commit()` is not called
+- fix: `/health` endpoint now reports database connectivity (`"database": "ok"|"unavailable"`) and returns `"degraded"` when PG is down
+- fix: graceful `ClusterMonitor` shutdown on SIGTERM — sets `running=False` and cancels pending investigation tasks
+
+### Observability
+- `COST_BUDGET_REMAINING_USD` Prometheus gauge for real-time cost budget alerting
+- `COST_BUDGET_EXHAUSTION_TOTAL` counter for budget exhaustion events
+- Wired cost budget metrics into monitor investigation gate
+
+### Docs
+- Updated all README badges (v2.7.1, 154 tools, 23 scanners, 2372 tests, 16 suites/192 scenarios, 99.6% gate, 83 PromQL)
+- Fixed CLAUDE.md counts (118 native tools, 23 scanners with corrected breakdown, removed phantom eval prompt claim)
+- Updated API_CONTRACT.md `/health` response schema with `database` field
+- Updated GitHub Pages site with current stats, trust level description, and PulseSRE org links
+- Migrated all links from `alimobrem/*` to `PulseSRE/*` across README, SECURITY.md, JOURNEY.md, index.html
+
+### Tests
+- 9 new tests: CircuitBreaker thread safety (3), trust level defaults (2), cost budget metrics (3), /health database field (1)
+
 ## [2.7.0] - 2026-05-12
 
 ### Features
