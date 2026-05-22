@@ -225,13 +225,13 @@ class MonitorRepository(BaseRepository):
                 finding.get("severity", ""),
                 report.get("status", ""),
                 report.get("summary", ""),
-                report.get("suspectedCause", ""),
-                report.get("recommendedFix", ""),
+                report.get("suspected_cause", "") or report.get("suspectedCause", ""),
+                report.get("recommended_fix", "") or report.get("recommendedFix", ""),
                 float(report.get("confidence") or 0.0),
                 report.get("error"),
                 json.dumps(finding.get("resources", [])),
                 json.dumps(report.get("evidence", [])),
-                json.dumps(report.get("alternativesConsidered", [])),
+                json.dumps(report.get("alternatives_considered", []) or report.get("alternativesConsidered", [])),
             ),
         )
         db.commit()
@@ -616,7 +616,8 @@ class MonitorRepository(BaseRepository):
         return self.db.fetchall(
             "SELECT resources FROM findings "
             "WHERE category = 'audit_deployment' "
-            f"AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '{minutes} minutes')::BIGINT * 1000"
+            "AND timestamp > EXTRACT(EPOCH FROM NOW() - MAKE_INTERVAL(mins => ?))::BIGINT * 1000",
+            (minutes,),
         )
 
     def fetch_deployment_risk_findings(self) -> list[dict]:

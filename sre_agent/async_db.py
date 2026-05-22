@@ -26,15 +26,15 @@ from typing import Any
 logger = logging.getLogger("pulse_agent.async_db")
 
 
-_PLACEHOLDER_RE = re.compile(r"\?")
+_PLACEHOLDER_RE = re.compile(r"(?<![@?])\?(?![?|&])")
 
 
 def _translate_placeholders(query: str) -> str:
     """Convert ``?`` placeholders to asyncpg-style ``$1, $2, ...``.
 
-    WARNING: This does naive replacement — do NOT use PostgreSQL's jsonb ``?``
-    operator in queries passed through this translator.  Use ``jsonb_exists()``
-    instead, or pass pre-translated queries with ``$N`` placeholders directly.
+    Preserves JSONB operators ``?``, ``?|``, ``?&``, ``@?``.
+    For bare JSONB ``?`` (key-existence), prefer ``jsonb_exists()`` to avoid
+    ambiguity with parameter placeholders.
     """
     counter = 0
 

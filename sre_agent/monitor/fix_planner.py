@@ -112,8 +112,8 @@ def plan_fix(investigation: dict, finding: dict) -> FixPlan | None:
     Returns a FixPlan if a targeted strategy is available and confidence
     is sufficient. Returns None to fall back to blunt handlers.
     """
-    suspected_cause = investigation.get("suspectedCause", "") or investigation.get("suspected_cause", "")
-    recommended_fix = investigation.get("recommendedFix", "") or investigation.get("recommended_fix", "")
+    suspected_cause = investigation.get("suspected_cause", "") or investigation.get("suspectedCause", "")
+    recommended_fix = investigation.get("recommended_fix", "") or investigation.get("recommendedFix", "")
     confidence = float(investigation.get("confidence", 0))
 
     if confidence < _MIN_TARGETED_CONFIDENCE:

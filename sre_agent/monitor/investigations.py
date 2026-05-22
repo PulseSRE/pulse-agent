@@ -306,12 +306,12 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
         view_plan = []
     return {
         "summary": summary,
-        "suspectedCause": suspected_cause,
-        "recommendedFix": recommended_fix,
+        "suspected_cause": suspected_cause,
+        "recommended_fix": recommended_fix,
         "confidence": round(confidence, 2),
         "evidence": [str(e) for e in evidence[:10]],
-        "alternativesConsidered": [str(a) for a in alternatives[:10]],
-        "viewPlan": view_plan,
+        "alternatives_considered": [str(a) for a in alternatives[:10]],
+        "view_plan": view_plan,
     }
 
 

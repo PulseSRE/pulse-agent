@@ -12,6 +12,7 @@ Queries use ``?`` placeholders which are auto-translated to ``%s`` for PostgreSQ
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from typing import Any
 
@@ -19,6 +20,11 @@ import psycopg2
 import psycopg2.pool
 
 logger = logging.getLogger("pulse_agent.db")
+
+# Matches ``?`` parameter placeholders but NOT JSONB operators ``?``, ``?|``,
+# ``?&``, or ``@?``.  Lookbehind excludes ``@`` and ``?`` before the match;
+# lookahead excludes ``?``, ``|``, and ``&`` after the match.
+_PARAM_RE = re.compile(r"(?<![@?])\?(?![?|&])")
 
 
 class Database:
@@ -43,6 +49,12 @@ class Database:
         if not hasattr(self._local, "conn") or self._local.conn is None:
             self._local.conn = self._pool.getconn()
             self._local.conn.autocommit = False
+            try:
+                from .observability import DB_POOL_CHECKED_OUT
+
+                DB_POOL_CHECKED_OUT.inc()
+            except ImportError:
+                pass
         return self._local.conn
 
     def _put_conn(self):
@@ -50,14 +62,23 @@ class Database:
         if hasattr(self._local, "conn") and self._local.conn is not None:
             self._pool.putconn(self._local.conn)
             self._local.conn = None
+            try:
+                from .observability import DB_POOL_CHECKED_OUT
+
+                DB_POOL_CHECKED_OUT.dec()
+            except ImportError:
+                pass
 
     # ------------------------------------------------------------------
     # Query helpers
     # ------------------------------------------------------------------
 
     def _translate_query(self, query: str) -> str:
-        """Translate ``?`` placeholders to PostgreSQL ``%s``."""
-        return query.replace("?", "%s")
+        """Translate ``?`` placeholders to PostgreSQL ``%s``.
+
+        Preserves JSONB operators ``?``, ``?|``, ``?&``, ``@?``.
+        """
+        return _PARAM_RE.sub("%s", query)
 
     def execute(self, query: str, params: tuple = ()) -> Any:
         """Execute a query with parameter translation.

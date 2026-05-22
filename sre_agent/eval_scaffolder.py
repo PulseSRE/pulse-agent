@@ -222,7 +222,9 @@ def scaffold_eval_from_investigation(
         return False
 
     summary = investigation_result.get("summary", "")
-    suspected_cause = investigation_result.get("suspectedCause", "unknown")
+    suspected_cause = investigation_result.get("suspected_cause", "") or investigation_result.get(
+        "suspectedCause", "unknown"
+    )
 
     final_response = f"{summary[:200]}. Suspected cause: {suspected_cause}"
 

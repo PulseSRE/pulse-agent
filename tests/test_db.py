@@ -88,11 +88,45 @@ class TestDatabasePostgres:
 
 
 class TestQueryTranslation:
+    """Tests for _PARAM_RE regex — JSONB operator preservation."""
+
+    def _translate(self, query: str) -> str:
+        from sre_agent.db import _PARAM_RE
+
+        return _PARAM_RE.sub("%s", query)
+
     def test_replaces_question_marks(self):
-        db = Database(_TEST_DB_URL)
-        result = db._translate_query("INSERT INTO t VALUES (?, ?, ?)")
+        result = self._translate("INSERT INTO t VALUES (?, ?, ?)")
         assert result == "INSERT INTO t VALUES (%s, %s, %s)"
-        db.close()
+
+    def test_single_placeholder(self):
+        assert self._translate("SELECT * FROM t WHERE id = ?") == "SELECT * FROM t WHERE id = %s"
+
+    def test_jsonb_has_any_preserved(self):
+        result = self._translate("SELECT * FROM t WHERE data ?| array['a','b']")
+        assert "?|" in result
+
+    def test_jsonb_has_all_preserved(self):
+        result = self._translate("SELECT * FROM t WHERE data ?& array['a','b']")
+        assert "?&" in result
+
+    def test_jsonb_path_exists_preserved(self):
+        result = self._translate("SELECT * FROM t WHERE data @? '$.name'")
+        assert "@?" in result
+
+    def test_jsonb_double_question_preserved(self):
+        result = self._translate("SELECT * FROM t WHERE data ?? 'key'")
+        assert "??" in result
+
+    def test_mixed_jsonb_and_placeholder(self):
+        result = self._translate("SELECT * FROM t WHERE data ?| array['a'] AND id = ?")
+        assert "?|" in result
+        assert result.endswith("id = %s")
+
+    def test_mixed_path_exists_and_placeholder(self):
+        result = self._translate("SELECT * FROM t WHERE data @? '$.x' AND id = ?")
+        assert "@?" in result
+        assert result.endswith("id = %s")
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +384,42 @@ class TestConnectionPoolLeaks:
 # ---------------------------------------------------------------------------
 # BaseRepository async_db stale-pool regression
 # ---------------------------------------------------------------------------
+
+
+class TestAsyncPlaceholderTranslation:
+    """Tests for async_db._translate_placeholders JSONB safety."""
+
+    def test_simple_placeholders(self):
+        from sre_agent.async_db import _translate_placeholders
+
+        assert _translate_placeholders("SELECT * FROM t WHERE id = ? AND name = ?") == (
+            "SELECT * FROM t WHERE id = $1 AND name = $2"
+        )
+
+    def test_jsonb_has_any_preserved(self):
+        from sre_agent.async_db import _translate_placeholders
+
+        result = _translate_placeholders("SELECT * FROM t WHERE data ?| array['a']")
+        assert "?|" in result
+
+    def test_jsonb_has_all_preserved(self):
+        from sre_agent.async_db import _translate_placeholders
+
+        result = _translate_placeholders("SELECT * FROM t WHERE data ?& array['a']")
+        assert "?&" in result
+
+    def test_jsonb_path_exists_preserved(self):
+        from sre_agent.async_db import _translate_placeholders
+
+        result = _translate_placeholders("SELECT * FROM t WHERE data @? '$.name'")
+        assert "@?" in result
+
+    def test_mixed_jsonb_and_placeholder(self):
+        from sre_agent.async_db import _translate_placeholders
+
+        result = _translate_placeholders("SELECT * FROM t WHERE data ?| array['a'] AND id = ?")
+        assert "?|" in result
+        assert result.endswith("id = $1")
 
 
 class TestBaseRepositoryAsyncDbStalePool:

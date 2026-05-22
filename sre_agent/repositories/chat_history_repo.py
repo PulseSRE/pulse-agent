@@ -69,8 +69,8 @@ class ChatHistoryRepository(BaseRepository):
     def increment_message_count(self, session_id: str, count: int = 1) -> None:
         """Increment message_count and update timestamp."""
         self.db.execute(
-            f"UPDATE chat_sessions SET message_count = message_count + {count}, updated_at = NOW() WHERE id = ?",
-            (session_id,),
+            "UPDATE chat_sessions SET message_count = message_count + ?, updated_at = NOW() WHERE id = ?",
+            (count, session_id),
         )
 
     # -- Messages --------------------------------------------------------------

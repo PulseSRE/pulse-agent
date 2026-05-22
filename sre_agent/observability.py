@@ -63,6 +63,16 @@ COST_BUDGET_EXHAUSTION_TOTAL = Counter(
     "Number of times the daily cost budget was exhausted",
 )
 
+DB_POOL_CHECKED_OUT = Gauge(
+    "pulse_agent_db_pool_checked_out",
+    "Number of DB connections currently checked out from the pool",
+)
+
+CACHE_HIT_RATE = Gauge(
+    "pulse_agent_cache_hit_rate",
+    "Prompt cache hit rate (cache_read_tokens / total_input_tokens)",
+)
+
 BUILD_INFO = Info(
     "pulse_agent",
     "Pulse Agent build information",
@@ -94,3 +104,6 @@ def record_token_metrics(
         if count:
             TOKENS_TOTAL.labels(type=label).inc(count)
             COST_USD_TOTAL.labels(type=label).inc(count * TOKEN_PRICES[label] / 1_000_000)
+    total_input = input_tokens + cache_read_tokens
+    if total_input > 0:
+        CACHE_HIT_RATE.set(cache_read_tokens / total_input)

@@ -6,7 +6,9 @@ from sre_agent.observability import (
     ACTIVE_FINDINGS,
     AUTOFIX_TOTAL,
     BUILD_INFO,
+    CACHE_HIT_RATE,
     COST_USD_TOTAL,
+    DB_POOL_CHECKED_OUT,
     INVESTIGATION_BUDGET_MAX,
     INVESTIGATION_BUDGET_REMAINING,
     INVESTIGATIONS_TOTAL,
@@ -128,3 +130,28 @@ class TestCounterLabels:
             before = AUTOFIX_TOTAL.labels(outcome=outcome)._value.get()
             AUTOFIX_TOTAL.labels(outcome=outcome).inc()
             assert AUTOFIX_TOTAL.labels(outcome=outcome)._value.get() == before + 1
+
+
+class TestDbPoolMetric:
+    def test_db_pool_gauge_exists(self):
+        assert DB_POOL_CHECKED_OUT._name == "pulse_agent_db_pool_checked_out"
+
+    def test_db_pool_inc_dec(self):
+        before = DB_POOL_CHECKED_OUT._value.get()
+        DB_POOL_CHECKED_OUT.inc()
+        assert DB_POOL_CHECKED_OUT._value.get() == before + 1
+        DB_POOL_CHECKED_OUT.dec()
+        assert DB_POOL_CHECKED_OUT._value.get() == before
+
+
+class TestCacheHitRate:
+    def test_cache_hit_rate_gauge_exists(self):
+        assert CACHE_HIT_RATE._name == "pulse_agent_cache_hit_rate"
+
+    def test_cache_hit_rate_computed(self):
+        record_token_metrics(input_tokens=250, cache_read_tokens=750)
+        assert abs(CACHE_HIT_RATE._value.get() - 0.75) < 0.01
+
+    def test_cache_hit_rate_zero_when_no_cache(self):
+        record_token_metrics(input_tokens=1000, cache_read_tokens=0)
+        assert CACHE_HIT_RATE._value.get() == 0.0
