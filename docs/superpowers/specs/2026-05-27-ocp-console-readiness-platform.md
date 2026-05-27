@@ -163,8 +163,10 @@ Latency-sensitive, batch workloads.
 The system auto-detects the likely cluster profile based on:
 - Node count and topology (SNO → Edge, 3+ masters → Production)
 - Installed operators (GPU Operator → AI/ML, RHACM hub → Multi-cluster, Performance Addon → HPC)
+- Node hardware capabilities (nodes with `nvidia.com/gpu` or `amd.com/gpu` allocatable resources → AI/ML, even without GPU Operator)
 - Infrastructure provider (baremetal + 1 node → Edge, cloud → Production/Dev)
 - Namespace patterns (many small namespaces → Multi-tenant)
+- Workload signatures (RHOAI/KServe CRDs present → AI/ML, Kiali/OSSM CRDs → Service Mesh profile)
 
 Administrators can override the auto-detected profile at any time.
 
