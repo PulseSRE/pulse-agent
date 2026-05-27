@@ -162,7 +162,7 @@ Latency-sensitive, batch workloads.
 
 The system auto-detects the likely cluster profile based on:
 - Node count and topology (SNO → Edge, 3+ masters → Production)
-- Installed operators (GPU Operator → AI/ML, Submariner → Multi-cluster)
+- Installed operators (GPU Operator → AI/ML, RHACM hub → Multi-cluster, Performance Addon → HPC)
 - Infrastructure provider (baremetal + 1 node → Edge, cloud → Production/Dev)
 - Namespace patterns (many small namespaces → Multi-tenant)
 
