@@ -429,11 +429,15 @@ The Readiness Platform integrates with **OpenShift Lightspeed** to provide AI-po
 - Lightspeed integration deflects questions to AI before human support
 
 ### 3. Competitive Differentiation
-- **Rancher** has no equivalent readiness system
-- **Tanzu** has limited health scoring, no profile-based checklists
-- **EKS Console** has no best-practice enforcement
-- **AKS Advisor** has basic recommendations but no custom checklists or profile system
-- This would be a **first-in-industry** comprehensive readiness platform for Kubernetes
+
+| Platform | What They Have | What They Lack |
+|----------|---------------|----------------|
+| **Rancher/SUSE** | Production checklist docs, CIS benchmark scanning (pass/fail), NeuVector security | No unified scoring dashboard, no profile-based checklists, no AI advisor, no custom checks |
+| **Tanzu/Broadcom** | MachineHealthCheck status conditions, OSS Health Assessment (compliance scoring), Tanzu Labs Health Check (professional services) | Fragmented across separate tools, no integrated readiness dashboard, no cluster profiles, no custom checks |
+| **AWS EKS** | Cluster Insights (upgrade readiness scanning), hardeneks CLI (best-practice checks), EKS Best Practices Guide | Console-only shows upgrade readiness, no domain-specific scoring, no custom checks, no AI recommendations |
+| **Azure AKS** | Azure Advisor (operational excellence, cost, reliability, security recommendations), community AKS Checklist (100+ items), VPA recommendations | Advisor is generic Azure (not K8s-native), no cluster profile system, no custom check CRDs, no AI-driven usage analysis |
+
+**Our differentiator:** No platform combines profile-aware readiness scoring + domain-specific audit panels + custom check CRDs + AI-powered usage recommendations in a single integrated console experience. Each competitor has pieces; none has the unified platform.
 
 ### 4. Premium Tier Differentiation
 - Basic readiness checks available in all tiers
