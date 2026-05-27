@@ -71,30 +71,36 @@ This is NOT a standalone plugin. It enhances the existing OCP console with:
 └─────────────────────────────────────────────────┘
 ```
 
-### Proposed UI Reference
+### Proposed UI Mockups
 
-The following screenshots from OpenShift Pulse demonstrate the UX patterns being proposed. These would be adapted to PatternFly and OCP console design guidelines.
+PatternFly-styled mockups for the proposed OCP console experience:
 
-**Production Readiness Dashboard** — Overall score with per-category breakdown:
-![Production Readiness](https://raw.githubusercontent.com/PulseSRE/pulse-ui/main/docs/screenshots/pulse.png)
+**Readiness Dashboard** — Overall score ring, 9 domain cards with pass/fail ratios, Lightspeed Advisor recommendations:
+![Readiness Dashboard](../../mockups/readiness-dashboard.png)
 
-**Security Overview with Audit Checks** — Domain-specific checks with pass/fail/warning:
-![Security View](https://raw.githubusercontent.com/PulseSRE/pulse-ui/main/docs/screenshots/security.png)
+**Cluster Profile Wizard** — Auto-detection banner, 7 profile cards with required/recommended check counts:
+![Profile Wizard](../../mockups/profile-wizard.png)
 
-**Networking Overview** — Service/route inventory with TLS and policy audits:
-![Networking View](https://raw.githubusercontent.com/PulseSRE/pulse-ui/main/docs/screenshots/networking.png)
+**Security Audit** — 12 checks with pass/fail icons, severity badges, inline remediation with "Ask Lightspeed" CTA:
+![Security Audit](../../mockups/security-audit.png)
 
-**Storage Overview** — PVC/PV status with StorageClass audits:
-![Storage View](https://raw.githubusercontent.com/PulseSRE/pulse-ui/main/docs/screenshots/storage.png)
+**Networking Audit** — TLS, network policy coverage, NodePort exposure, ingress controller checks:
+![Networking Audit](../../mockups/networking-audit.png)
 
-**Compute Overview** — Node health with resource utilization:
-![Compute View](https://raw.githubusercontent.com/PulseSRE/pulse-ui/main/docs/screenshots/compute.png)
+**Storage Audit** — StorageClass, CSI drivers, backup solution, volume snapshot checks:
+![Storage Audit](../../mockups/storage-audit.png)
 
-**Workloads Overview** — Deployment health with best-practice audits:
-![Workloads View](https://raw.githubusercontent.com/PulseSRE/pulse-ui/main/docs/screenshots/workloads.png)
+**Workloads Audit** — Resource limits, health probes, PDBs, replica count, restart detection:
+![Workloads Audit](../../mockups/workloads-audit.png)
 
-**Alerts Overview** — Firing alerts grouped by severity:
-![Alerts View](https://raw.githubusercontent.com/PulseSRE/pulse-ui/main/docs/screenshots/alerts.png)
+**Compute Audit** — HA control plane, worker availability, autoscaling, node pressure:
+![Compute Audit](../../mockups/compute-audit.png)
+
+**Observability Audit** — Monitoring stack, log forwarding, audit logging, custom alerts:
+![Observability Audit](../../mockups/observability-audit.png)
+
+**Identity & Access Audit** — RBAC least privilege, wildcard detection, stale bindings:
+![Identity Audit](../../mockups/identity-audit.png)
 
 ---
 
