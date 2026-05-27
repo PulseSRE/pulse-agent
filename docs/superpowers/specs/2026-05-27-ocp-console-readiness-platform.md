@@ -76,25 +76,25 @@ This is NOT a standalone plugin. It enhances the existing OCP console with:
 The following screenshots from OpenShift Pulse demonstrate the UX patterns being proposed. These would be adapted to PatternFly and OCP console design guidelines.
 
 **Production Readiness Dashboard** — Overall score with per-category breakdown:
-![Production Readiness](../../../OpenshiftPulse/docs/screenshots/pulse.png)
+![Production Readiness](https://raw.githubusercontent.com/PulseSRE/pulse-ui/main/docs/screenshots/pulse.png)
 
 **Security Overview with Audit Checks** — Domain-specific checks with pass/fail/warning:
-![Security View](../../../OpenshiftPulse/docs/screenshots/security.png)
+![Security View](https://raw.githubusercontent.com/PulseSRE/pulse-ui/main/docs/screenshots/security.png)
 
 **Networking Overview** — Service/route inventory with TLS and policy audits:
-![Networking View](../../../OpenshiftPulse/docs/screenshots/networking.png)
+![Networking View](https://raw.githubusercontent.com/PulseSRE/pulse-ui/main/docs/screenshots/networking.png)
 
 **Storage Overview** — PVC/PV status with StorageClass audits:
-![Storage View](../../../OpenshiftPulse/docs/screenshots/storage.png)
+![Storage View](https://raw.githubusercontent.com/PulseSRE/pulse-ui/main/docs/screenshots/storage.png)
 
 **Compute Overview** — Node health with resource utilization:
-![Compute View](../../../OpenshiftPulse/docs/screenshots/compute.png)
+![Compute View](https://raw.githubusercontent.com/PulseSRE/pulse-ui/main/docs/screenshots/compute.png)
 
 **Workloads Overview** — Deployment health with best-practice audits:
-![Workloads View](../../../OpenshiftPulse/docs/screenshots/workloads.png)
+![Workloads View](https://raw.githubusercontent.com/PulseSRE/pulse-ui/main/docs/screenshots/workloads.png)
 
 **Alerts Overview** — Firing alerts grouped by severity:
-![Alerts View](../../../OpenshiftPulse/docs/screenshots/alerts.png)
+![Alerts View](https://raw.githubusercontent.com/PulseSRE/pulse-ui/main/docs/screenshots/alerts.png)
 
 ---
 
