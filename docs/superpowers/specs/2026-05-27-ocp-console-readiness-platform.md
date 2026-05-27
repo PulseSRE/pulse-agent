@@ -448,26 +448,26 @@ The Readiness Platform integrates with **OpenShift Lightspeed** to provide AI-po
 
 ## Implementation Approach
 
-### Phase 1: Foundation (OCP 4.19)
+### Phase 1: Foundation (OCP 5.1)
 - Readiness Dashboard with overall score + 9 domain scores
 - 60+ built-in checks across all domains
 - 7 cluster profiles with auto-detection
 - Domain overview pages with audit panels (PatternFly-native)
 
-### Phase 2: Customization (OCP 4.20)
+### Phase 2: Customization (OCP 5.2)
 - Custom ReadinessCheck CRD
 - Organization-level sharing via `openshift-config`
 - ACM policy integration for fleet-wide distribution
 - Import/export of checklist definitions
 
-### Phase 3: Intelligence (OCP 4.21)
+### Phase 3: Intelligence (OCP 5.3)
 - Lightspeed Advisor integration
 - Usage pattern analysis
 - Proactive recommendation engine
 - "Ask Lightspeed About This" on every failing check
 - BYO Knowledge for org-specific guidance
 
-### Phase 4: Fleet (OCP 4.22)
+### Phase 4: Fleet (OCP 5.4)
 - ACM hub aggregation of readiness scores across clusters
 - Fleet-wide readiness dashboard
 - Cross-cluster recommendation patterns
