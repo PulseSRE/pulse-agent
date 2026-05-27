@@ -5,7 +5,7 @@
 OpenShift customers consistently struggle with one question: **"Is my cluster production-ready?"** Today, the OCP console shows cluster health — pods running, operators available, nodes ready — but it doesn't tell customers whether their cluster follows best practices, whether it's configured correctly for their workload profile, or what they should do next to harden it.
 
 This proposal introduces a **Readiness & Best Practices Platform** as an enhancement to the OCP console that:
-- Scores cluster production readiness across 9 domains with 60+ checks
+- Scores cluster production readiness across 7 domains with 56 built-in checks
 - Tailors checklists to cluster type (production, development, edge, AI/ML, multi-tenant, disconnected)
 - Provides domain-specific overview pages with actionable audit panels
 - Allows organizations to define custom best-practice checklists
@@ -15,22 +15,87 @@ This proposal introduces a **Readiness & Best Practices Platform** as an enhance
 
 ---
 
-## Customer Pain Points
+## Why This Matters
 
-### 1. "Day 2 Cliff" — Clusters go live without readiness validation
+### Customer Pain Points
+
+**1. "Day 2 Cliff" — Clusters go live without readiness validation**
 Customers deploy OpenShift successfully (Day 1) but lack structured guidance for hardening (Day 2). Common gaps: no network policies, default SCCs, missing monitoring, no encryption at rest. These become support tickets — or worse, security incidents.
 
-### 2. No unified view of best-practice compliance
+**2. No unified view of best-practice compliance**
 Customers must manually check dozens of configurations across multiple console pages. There's no single view that says "your security posture is 72% — here's what's missing."
 
-### 3. One-size-fits-all guidance doesn't work
+**3. One-size-fits-all guidance doesn't work**
 A production cluster needs HA control planes and encryption at rest. A dev cluster needs fast iteration and doesn't need the same security hardening. Edge clusters have entirely different constraints (single-node, disconnected, resource-constrained). Existing documentation treats all clusters the same.
 
-### 4. No proactive intelligence
+**4. No proactive intelligence**
 The console shows what IS. It doesn't tell customers what SHOULD BE. Customers who heavily use GitOps don't get prompted to adopt Tekton pipelines. Customers running service mesh don't get recommendations about mTLS enforcement.
 
-### 5. Organization-specific practices can't be codified
+**5. Organization-specific practices can't be codified**
 Every organization has internal standards — naming conventions, required labels, specific node configurations, mandatory operators. There's no way to encode these as automated checks in the console.
+
+---
+
+## Customer Value
+
+### 1. Risk Reduction
+- **Prevent production incidents** before they happen by catching misconfigurations proactively
+- Internal testing with OpenShift Pulse suggests clusters scoring 90%+ readiness experience significantly fewer preventable incidents
+- Security posture checks prevent compliance violations that could cost millions in regulated industries
+
+### 2. Faster Time to Production
+- New clusters go from "installed" to "production-ready" with a guided checklist instead of guesswork
+- Reduces Day 2 hardening from weeks of tribal knowledge to hours of guided automation
+- Profile-based checklists eliminate "which checks apply to me?" paralysis
+
+### 3. Reduced Support Burden
+- A significant portion of Day 2 support tickets stem from preventable misconfigurations (missing probes, no resource limits, default SCCs)
+- Self-service readiness checks deflect tickets before they're filed
+- "Why it matters" explanations on each check educate customers in-context
+
+### 4. Platform Adoption Depth
+- AI recommendations surface OpenShift capabilities customers are paying for but not using
+- Deeper platform adoption correlates with higher renewal rates — recommendations drive capability discovery
+- Turns "we're just running containers" into "we're using the full platform"
+
+### 5. Organizational Knowledge Capture
+- Custom checklists codify tribal knowledge that otherwise lives in wikis or people's heads
+- New team members inherit standards automatically
+- Compliance requirements become automated checks instead of manual audits
+
+---
+
+## Business Value
+
+### 1. Customer Retention & Expansion
+- Readiness scoring creates a **measurable journey** — customers see progress and invest in reaching higher scores
+- AI recommendations drive adoption of additional Red Hat products (ACM, ACS, RHOAI, Service Mesh)
+- Custom checklists increase switching costs — organizations encode their standards into the platform
+
+### 2. Support Cost Reduction
+- Proactive checks prevent the most common support tickets
+- "Why it matters" education reduces repeat contacts for the same issue class
+- Lightspeed integration deflects questions to AI before human support
+
+### 3. Competitive Differentiation
+
+| Platform | What They Have | What They Lack |
+|----------|---------------|----------------|
+| **Rancher/SUSE** | Production checklist docs, CIS benchmark scanning (pass/fail), NeuVector security | No unified scoring dashboard, no profile-based checklists, no AI advisor, no custom checks |
+| **Tanzu/Broadcom** | MachineHealthCheck status conditions, OSS Health Assessment (compliance scoring), Tanzu Labs Health Check (professional services) | Fragmented across separate tools, no integrated readiness dashboard, no cluster profiles, no custom checks |
+| **AWS EKS** | Cluster Insights (upgrade readiness scanning), hardeneks CLI (best-practice checks), EKS Best Practices Guide | Console-only shows upgrade readiness, no domain-specific scoring, no custom checks, no AI recommendations |
+| **Azure AKS** | Azure Advisor (operational excellence, cost, reliability, security recommendations), community AKS Checklist (100+ items), VPA recommendations | Advisor is generic Azure (not K8s-native), no cluster profile system, no custom check CRDs, no AI-driven usage analysis |
+
+**Our differentiator:** No platform combines profile-aware readiness scoring + domain-specific audit panels + custom check CRDs + AI-powered usage recommendations in a single integrated console experience. Each competitor has pieces; none has the unified platform.
+
+### 4. Premium Tier Differentiation
+- Basic readiness checks available in all tiers
+- AI-powered recommendations and custom checklists as premium/plus features
+- Drives upgrade conversations from self-managed to managed (ROSA/ARO get enhanced checks)
+
+### 5. Data-Driven Product Insights
+- Anonymized readiness scores across the fleet reveal which checks fail most often — informing docs, defaults, and product improvements
+- Usage pattern data reveals which capabilities are underutilized — informing training and enablement investment
 
 ---
 
@@ -39,8 +104,8 @@ Every organization has internal standards — naming conventions, required label
 ### Architecture: Enhancement to Existing Console
 
 This is NOT a standalone plugin. It enhances the existing OCP console with:
-- A new **Readiness** perspective/section in the administrator view
-- Enhanced **Overview pages** for each domain (Security, Networking, Storage, Workloads, Compute, Observability, Identity)
+- A new **Readiness** section in the administrator sidebar with sub-navigation per domain
+- Enhanced **Overview pages** for each domain (Security, Networking, Storage, Workloads, Compute, Observability, Identity) with metric cards + audit checklists
 - **Cluster Profile** selection that tailors all checks and scoring
 - **Custom Checklist** management for organization-defined standards
 - **Lightspeed Advisor** integration for AI-powered recommendations
@@ -71,35 +136,46 @@ This is NOT a standalone plugin. It enhances the existing OCP console with:
 └─────────────────────────────────────────────────┘
 ```
 
-### Proposed UI Mockups
+---
 
-PatternFly-styled mockups for the proposed OCP console experience:
+## Proposed UI Mockups
 
-**Readiness Dashboard** — Overall score ring, 9 domain cards with pass/fail ratios, Lightspeed Advisor recommendations:
+PatternFly 6 (Compass theme) mockups showing the proposed experience integrated into the OCP console:
+
+### Readiness Dashboard
+Overall score ring, 9 domain cards with pass/fail ratios, Lightspeed Advisor recommendation cards:
 ![Readiness Dashboard](../../mockups/readiness-dashboard.png)
 
-**Cluster Profile Wizard** — Auto-detection banner, 7 profile cards with required/recommended check counts:
+### Cluster Profile Wizard
+PF6 sidebar-nav wizard with auto-detection banner and 7 profile cards (Production, Development, Edge/SNO, AI/ML, Multi-Tenant, Disconnected, HPC):
 ![Profile Wizard](../../mockups/profile-wizard.png)
 
-**Security Audit** — 12 checks with pass/fail icons, severity badges, inline remediation with "Ask Lightspeed" CTA:
+### Security Overview + Audit
+Metric cards (identity providers, users, network policy coverage, TLS profile, encryption status, SCC violations) with 12 readiness checks below:
 ![Security Audit](../../mockups/security-audit.png)
 
-**Networking Audit** — TLS, network policy coverage, NodePort exposure, ingress controller checks:
+### Networking Overview + Audit
+Service type breakdown, route inventory, ingress cert status, network policy coverage bar, service mesh status:
 ![Networking Audit](../../mockups/networking-audit.png)
 
-**Storage Audit** — StorageClass, CSI drivers, backup solution, volume snapshot checks:
+### Storage Overview + Audit
+PVC status bar (bound/pending/lost), StorageClass inventory, CSI drivers, registry backend, backup solution status:
 ![Storage Audit](../../mockups/storage-audit.png)
 
-**Workloads Audit** — Resource limits, health probes, PDBs, replica count, restart detection:
+### Workloads Overview + Audit
+Pod status bar, deployment health, deployments without limits/probes counts, high restart detection:
 ![Workloads Audit](../../mockups/workloads-audit.png)
 
-**Compute Audit** — HA control plane, worker availability, autoscaling, node pressure:
+### Compute Overview + Audit
+Control plane HA, worker count, CPU/memory usage bars, autoscaling status:
 ![Compute Audit](../../mockups/compute-audit.png)
 
-**Observability Audit** — Monitoring stack, log forwarding, audit logging, custom alerts:
+### Observability Overview + Audit
+Prometheus/Alertmanager health, firing alert counts, log forwarding status, PrometheusRule count:
 ![Observability Audit](../../mockups/observability-audit.png)
 
-**Identity & Access Audit** — RBAC least privilege, wildcard detection, stale bindings:
+### Identity & Access Overview + Audit
+User/group counts, cluster-admin count, ClusterRoleBinding audit, stale binding detection:
 ![Identity Audit](../../mockups/identity-audit.png)
 
 ---
@@ -180,7 +256,7 @@ Administrators can override the auto-detected profile at any time.
 
 ## Domain Checklists (Deep Dive)
 
-Each domain has a dedicated overview page with an audit panel. Checks are categorized as **Required**, **Recommended**, or **Informational** based on the active cluster profile.
+Each domain has a dedicated overview page with metric cards and an audit panel. Checks are categorized as **Required**, **Recommended**, or **Informational** based on the active cluster profile.
 
 ### Security (12 checks)
 
@@ -393,74 +469,11 @@ The Readiness Platform integrates with **OpenShift Lightspeed** to provide AI-po
 
 ---
 
-## Customer Value
-
-### 1. Risk Reduction
-- **Prevent production incidents** before they happen by catching misconfigurations proactively
-- Customers running at 90%+ readiness score have historically seen 60-70% fewer P1 incidents (based on Pulse field data)
-- Security posture checks prevent compliance violations that could cost millions in regulated industries
-
-### 2. Faster Time to Production
-- New clusters go from "installed" to "production-ready" with a guided checklist instead of guesswork
-- Reduces Day 2 hardening from weeks of tribal knowledge to hours of guided automation
-- Profile-based checklists eliminate "which checks apply to me?" paralysis
-
-### 3. Reduced Support Burden
-- 40%+ of Day 2 support tickets are preventable misconfigurations (missing probes, no resource limits, default SCCs)
-- Self-service readiness checks deflect tickets before they're filed
-- "Why it matters" explanations on each check educate customers in-context
-
-### 4. Platform Adoption Depth
-- AI recommendations surface OpenShift capabilities customers are paying for but not using
-- Customers who adopt 3+ recommended capabilities have 2x higher renewal rates (industry benchmark)
-- Turns "we're just running containers" into "we're using the full platform"
-
-### 5. Organizational Knowledge Capture
-- Custom checklists codify tribal knowledge that otherwise lives in wikis or people's heads
-- New team members inherit standards automatically
-- Compliance requirements become automated checks instead of manual audits
-
----
-
-## Business Value
-
-### 1. Customer Retention & Expansion
-- Readiness scoring creates a **measurable journey** — customers see progress and invest in reaching higher scores
-- AI recommendations drive adoption of additional Red Hat products (ACM, ACS, RHOAI, Service Mesh)
-- Custom checklists increase switching costs — organizations encode their standards into the platform
-
-### 2. Support Cost Reduction
-- Proactive checks prevent the most common support tickets
-- "Why it matters" education reduces repeat contacts for the same issue class
-- Lightspeed integration deflects questions to AI before human support
-
-### 3. Competitive Differentiation
-
-| Platform | What They Have | What They Lack |
-|----------|---------------|----------------|
-| **Rancher/SUSE** | Production checklist docs, CIS benchmark scanning (pass/fail), NeuVector security | No unified scoring dashboard, no profile-based checklists, no AI advisor, no custom checks |
-| **Tanzu/Broadcom** | MachineHealthCheck status conditions, OSS Health Assessment (compliance scoring), Tanzu Labs Health Check (professional services) | Fragmented across separate tools, no integrated readiness dashboard, no cluster profiles, no custom checks |
-| **AWS EKS** | Cluster Insights (upgrade readiness scanning), hardeneks CLI (best-practice checks), EKS Best Practices Guide | Console-only shows upgrade readiness, no domain-specific scoring, no custom checks, no AI recommendations |
-| **Azure AKS** | Azure Advisor (operational excellence, cost, reliability, security recommendations), community AKS Checklist (100+ items), VPA recommendations | Advisor is generic Azure (not K8s-native), no cluster profile system, no custom check CRDs, no AI-driven usage analysis |
-
-**Our differentiator:** No platform combines profile-aware readiness scoring + domain-specific audit panels + custom check CRDs + AI-powered usage recommendations in a single integrated console experience. Each competitor has pieces; none has the unified platform.
-
-### 4. Premium Tier Differentiation
-- Basic readiness checks available in all tiers
-- AI-powered recommendations and custom checklists as premium/plus features
-- Drives upgrade conversations from self-managed to managed (ROSA/ARO get enhanced checks)
-
-### 5. Data-Driven Product Insights
-- Anonymized readiness scores across the fleet reveal which checks fail most often — informing docs, defaults, and product improvements
-- Usage pattern data reveals which capabilities are underutilized — informing training and enablement investment
-
----
-
 ## Implementation Approach
 
 ### Phase 1: Foundation (OCP 5.1)
 - Readiness Dashboard with overall score + 9 domain scores
-- 60+ built-in checks across all domains
+- 56 built-in checks across 7 domains
 - 7 cluster profiles with auto-detection
 - Domain overview pages with audit panels (PatternFly-native)
 
