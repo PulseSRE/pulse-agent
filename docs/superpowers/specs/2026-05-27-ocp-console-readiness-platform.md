@@ -11,7 +11,7 @@ This proposal introduces a **Readiness & Best Practices Platform** as an enhance
 - Allows organizations to define custom best-practice checklists
 - Integrates with **OpenShift Lightspeed** to analyze cluster usage patterns and make proactive recommendations
 
-**Proven at scale:** This system has been validated in OpenShift Pulse, where 40+ readiness checks and 7 domain overview pages with audit panels have been running in production environments. This proposal brings that capability natively into the OCP console where every OpenShift customer can benefit.
+**Proven concept:** This approach has been validated through internal prototyping with 40+ readiness checks and 7 domain overview pages running against production OpenShift clusters. This proposal brings that capability natively into the OCP console where every customer can benefit — and more importantly, helps customers **discover and adopt the full value of the OpenShift platform** they're already paying for.
 
 ---
 
@@ -40,7 +40,7 @@ Every organization has internal standards — naming conventions, required label
 
 ### 1. Risk Reduction
 - **Prevent production incidents** before they happen by catching misconfigurations proactively
-- Internal testing with OpenShift Pulse suggests clusters scoring 90%+ readiness experience significantly fewer preventable incidents
+- Internal prototyping suggests clusters scoring 90%+ readiness experience significantly fewer preventable incidents
 - Security posture checks prevent compliance violations that could cost millions in regulated industries
 
 ### 2. Faster Time to Production
@@ -53,10 +53,11 @@ Every organization has internal standards — naming conventions, required label
 - Self-service readiness checks deflect tickets before they're filed
 - "Why it matters" explanations on each check educate customers in-context
 
-### 4. Platform Adoption Depth
-- AI recommendations surface OpenShift capabilities customers are paying for but not using
-- Deeper platform adoption correlates with higher renewal rates — recommendations drive capability discovery
-- Turns "we're just running containers" into "we're using the full platform"
+### 4. Platform Value Discovery
+- Most customers use a fraction of the OpenShift platform they're paying for — readiness checks and AI recommendations **surface capabilities they didn't know existed**
+- Each failing check becomes a learning moment: "you should use PodDisruptionBudgets" teaches a concept while solving a real gap
+- Recommendations connect the dots between what customers are doing and what they could be doing better — e.g., "you use ArgoCD heavily, have you considered Tekton + GitOps Promoter for a complete app lifecycle?"
+- Transforms the platform from "just running containers" into a fully adopted, differentiated infrastructure investment
 
 ### 5. Organizational Knowledge Capture
 - Custom checklists codify tribal knowledge that otherwise lives in wikis or people's heads
@@ -67,9 +68,10 @@ Every organization has internal standards — naming conventions, required label
 
 ## Business Value
 
-### 1. Customer Retention & Expansion
+### 1. Customer Retention & Platform Value Realization
 - Readiness scoring creates a **measurable journey** — customers see progress and invest in reaching higher scores
-- AI recommendations drive adoption of additional Red Hat products (ACM, ACS, RHOAI, Service Mesh)
+- AI recommendations **drive discovery and adoption** of platform capabilities customers are paying for but not using (ACM, ACS, RHOAI, Service Mesh, Tekton, OADP)
+- Every recommendation answered is a capability adopted — this is the most direct path to customers realizing the full value of their OpenShift investment
 - Custom checklists increase switching costs — organizations encode their standards into the platform
 
 ### 2. Support Cost Reduction
@@ -518,4 +520,3 @@ The Readiness Platform integrates with **OpenShift Lightspeed** to provide AI-po
 - [Lightspeed Console Plugin](https://github.com/openshift/lightspeed-console)
 - [Red Hat AI Platform (RHAE)](https://www.redhat.com/en/about/press-releases/red-hat-delivers-accessible-open-source-generative-ai-innovation-red-hat-enterprise-linux-ai)
 - [InstructLab / Granite Models](https://www.redhat.com/en/topics/ai/what-are-granite-models)
-- [OpenShift Pulse — Production Readiness Implementation](https://pulsesre.github.io/pulse-agent/) (validated prototype)
