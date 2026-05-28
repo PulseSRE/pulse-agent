@@ -68,29 +68,38 @@ An enhancement to the existing OCP console (not a standalone plugin):
 - **Lightspeed Advisor** — AI-powered recommendations based on cluster usage patterns
 
 ```
-┌─────────────────────────────────────────────────┐
-│  OCP Console (Administrator View)               │
-│  ┌───────────────────────────────────────────┐  │
-│  │  Readiness Dashboard                      │  │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐  │  │
-│  │  │ Overall  │ │ Cluster  │ │ Custom   │  │  │
-│  │  │ Score    │ │ Profile  │ │ Checks   │  │  │
-│  │  │  78%     │ │Production│ │  3 orgs  │  │  │
-│  │  └──────────┘ └──────────┘ └──────────┘  │  │
-│  │                                           │  │
-│  │  Domain Scores                            │  │
-│  │  ┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐   │  │
-│  │  │Sec  ││Net  ││Store││Work ││Obs  │   │  │
-│  │  │ 85% ││ 70% ││ 90% ││ 65% ││ 80% │   │  │
-│  │  └─────┘└─────┘└─────┘└─────┘└─────┘   │  │
-│  │                                           │  │
-│  │  ┌─ Lightspeed Advisor ────────────────┐  │  │
-│  │  │ "Based on your GitOps usage, consider│  │  │
-│  │  │  adopting Tekton + GitOps Promoter   │  │  │
-│  │  │  for automated promotion pipelines." │  │  │
-│  │  └─────────────────────────────────────┘  │  │
-│  └───────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  OCP Console (Administrator View)                        │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  Readiness Dashboard                               │  │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐           │  │
+│  │  │ Overall  │ │ Cluster  │ │ Compliance│           │  │
+│  │  │ Score    │ │ Profile  │ │ SOC2: 85% │           │  │
+│  │  │  78%     │ │Production│ │ PCI:  72% │           │  │
+│  │  └──────────┘ └──────────┘ └──────────┘           │  │
+│  │                                                    │  │
+│  │  Domain Scores                                     │  │
+│  │  ┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────────┐ │  │
+│  │  │Sec  ││Net  ││Store││Work ││Obs  ││+ Custom │ │  │
+│  │  │ 85% ││ 70% ││ 90% ││ 65% ││ 80% ││  3 orgs │ │  │
+│  │  └─────┘└─────┘└─────┘└─────┘└─────┘└─────────┘ │  │
+│  │                                                    │  │
+│  │  ┌─ Failing Check ────────────────────────────┐   │  │
+│  │  │ ✗ Encryption at Rest       [Fix Now] [Ask] │   │  │
+│  │  │   etcd unencrypted ──→ opens API Server pg │   │  │
+│  │  └────────────────────────────────────────────┘   │  │
+│  │                                                    │  │
+│  │  ┌─ Lightspeed Advisor ───────────────────────┐   │  │
+│  │  │ "Based on your GitOps usage, consider       │   │  │
+│  │  │  adopting Tekton + GitOps Promoter for      │   │  │
+│  │  │  automated promotion pipelines."            │   │  │
+│  │  └────────────────────────────────────────────┘   │  │
+│  │                                                    │  │
+│  │  ┌─ Readiness-as-Code ────────────────────────┐   │  │
+│  │  │ [Export Config]  [Import]  [View in Git ↗]  │   │  │
+│  │  └────────────────────────────────────────────┘   │  │
+│  └────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ---
