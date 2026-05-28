@@ -2,115 +2,64 @@
 
 ## Executive Summary
 
-OpenShift customers consistently struggle with one question: **"Is my cluster production-ready?"** Today, the OCP console shows cluster health — pods running, operators available, nodes ready — but it doesn't tell customers whether their cluster follows best practices, whether it's configured correctly for their workload profile, or what they should do next to harden it.
+OpenShift customers consistently struggle with one question: **"Is my cluster production-ready?"**
 
-This proposal introduces a **Readiness & Best Practices Platform** as an enhancement to the OCP console that:
-- Scores cluster production readiness across 7 domains with 56 built-in checks
-- Tailors checklists to cluster type (production, development, edge, AI/ML, multi-tenant, disconnected)
-- Provides domain-specific overview pages with actionable audit panels
-- Allows organizations to define custom best-practice checklists
-- Integrates with **OpenShift Lightspeed** to analyze cluster usage patterns and make proactive recommendations
+The OCP console shows cluster health — pods running, operators available, nodes ready — but it doesn't tell customers whether their cluster follows best practices, whether it's configured correctly for their workload profile, or what they should do next. More critically, most customers use a fraction of the platform they're paying for and have no way to discover what they're missing.
 
-**Proven concept:** This approach has been validated through internal prototyping with 40+ readiness checks and 7 domain overview pages running against production OpenShift clusters. This proposal brings that capability natively into the OCP console where every customer can benefit — and more importantly, helps customers **discover and adopt the full value of the OpenShift platform** they're already paying for.
+This proposal adds a **Readiness & Best Practices Platform** to the OCP console: profile-aware readiness scoring across 7 domains (56 checks), organization-defined custom checklists, and OpenShift Lightspeed integration that analyzes cluster usage to recommend platform capabilities customers should adopt.
 
 ---
 
 ## Why This Matters
 
-### Customer Pain Points
+**1. "Day 2 Cliff"** — Clusters go live without readiness validation. No network policies, default SCCs, missing monitoring, no encryption at rest. These become support tickets or security incidents.
 
-**1. "Day 2 Cliff" — Clusters go live without readiness validation**
-Customers deploy OpenShift successfully (Day 1) but lack structured guidance for hardening (Day 2). Common gaps: no network policies, default SCCs, missing monitoring, no encryption at rest. These become support tickets — or worse, security incidents.
+**2. No unified compliance view** — Checking best practices requires navigating dozens of console pages. No single view says "your security posture is 72% — here's what's missing."
 
-**2. No unified view of best-practice compliance**
-Customers must manually check dozens of configurations across multiple console pages. There's no single view that says "your security posture is 72% — here's what's missing."
+**3. One-size-fits-all guidance** — A production cluster needs HA and encryption. A dev cluster doesn't. Edge clusters are single-node. The same checklist can't serve all of them.
 
-**3. One-size-fits-all guidance doesn't work**
-A production cluster needs HA control planes and encryption at rest. A dev cluster needs fast iteration and doesn't need the same security hardening. Edge clusters have entirely different constraints (single-node, disconnected, resource-constrained). Existing documentation treats all clusters the same.
+**4. No value discovery** — The console shows what IS, not what SHOULD BE. Customers running ArgoCD don't get prompted to adopt Tekton. Customers with service mesh don't get told to enable mTLS. The platform has capabilities customers are paying for but never find.
 
-**4. No proactive intelligence**
-The console shows what IS. It doesn't tell customers what SHOULD BE. Customers who heavily use GitOps don't get prompted to adopt Tekton pipelines. Customers running service mesh don't get recommendations about mTLS enforcement.
-
-**5. Organization-specific practices can't be codified**
-Every organization has internal standards — naming conventions, required labels, specific node configurations, mandatory operators. There's no way to encode these as automated checks in the console.
+**5. No way to codify org standards** — Every organization has internal requirements (labels, operators, node configs) that can't be automated as console checks today.
 
 ---
 
-## Customer Value
+## Value Proposition
 
-### 1. Risk Reduction
-- **Prevent production incidents** before they happen by catching misconfigurations proactively
-- Internal prototyping suggests clusters scoring 90%+ readiness experience significantly fewer preventable incidents
-- Security posture checks prevent compliance violations that could cost millions in regulated industries
+| | Customer Impact | Business Impact |
+|---|---|---|
+| **Risk reduction** | Catch misconfigurations before they become incidents or compliance violations | Fewer P1 escalations, lower support cost |
+| **Faster Day 2** | Guided checklists replace weeks of tribal knowledge with hours of automation | Faster time-to-production = faster expansion |
+| **Platform discovery** | Every check and AI recommendation teaches customers about capabilities they're paying for but not using | Drives adoption of ACM, ACS, RHOAI, Service Mesh, Tekton, OADP — each adopted capability deepens investment |
+| **Org knowledge capture** | Custom checklists codify tribal knowledge; new team members inherit standards automatically | Increases switching costs — organizations encode their processes into the platform |
+| **Support deflection** | "Why it matters" on every check educates in-context; Lightspeed handles remediation questions | Reduces repeat contacts and ticket volume |
 
-### 2. Faster Time to Production
-- New clusters go from "installed" to "production-ready" with a guided checklist instead of guesswork
-- Reduces Day 2 hardening from weeks of tribal knowledge to hours of guided automation
-- Profile-based checklists eliminate "which checks apply to me?" paralysis
-
-### 3. Reduced Support Burden
-- A significant portion of Day 2 support tickets stem from preventable misconfigurations (missing probes, no resource limits, default SCCs)
-- Self-service readiness checks deflect tickets before they're filed
-- "Why it matters" explanations on each check educate customers in-context
-
-### 4. Platform Value Discovery
-- Most customers use a fraction of the OpenShift platform they're paying for — readiness checks and AI recommendations **surface capabilities they didn't know existed**
-- Each failing check becomes a learning moment: "you should use PodDisruptionBudgets" teaches a concept while solving a real gap
-- Recommendations connect the dots between what customers are doing and what they could be doing better — e.g., "you use ArgoCD heavily, have you considered Tekton + GitOps Promoter for a complete app lifecycle?"
-- Transforms the platform from "just running containers" into a fully adopted, differentiated infrastructure investment
-
-### 5. Organizational Knowledge Capture
-- Custom checklists codify tribal knowledge that otherwise lives in wikis or people's heads
-- New team members inherit standards automatically
-- Compliance requirements become automated checks instead of manual audits
-
----
-
-## Business Value
-
-### 1. Customer Retention & Platform Value Realization
-- Readiness scoring creates a **measurable journey** — customers see progress and invest in reaching higher scores
-- AI recommendations **drive discovery and adoption** of platform capabilities customers are paying for but not using (ACM, ACS, RHOAI, Service Mesh, Tekton, OADP)
-- Every recommendation answered is a capability adopted — this is the most direct path to customers realizing the full value of their OpenShift investment
-- Custom checklists increase switching costs — organizations encode their standards into the platform
-
-### 2. Support Cost Reduction
-- Proactive checks prevent the most common support tickets
-- "Why it matters" education reduces repeat contacts for the same issue class
-- Lightspeed integration deflects questions to AI before human support
-
-### 3. Competitive Differentiation
+### Competitive Position
 
 | Platform | What They Have | What They Lack |
 |----------|---------------|----------------|
-| **Rancher/SUSE** | Production checklist docs, CIS benchmark scanning (pass/fail), NeuVector security | No unified scoring dashboard, no profile-based checklists, no AI advisor, no custom checks |
-| **Tanzu/Broadcom** | MachineHealthCheck status conditions, OSS Health Assessment (compliance scoring), Tanzu Labs Health Check (professional services) | Fragmented across separate tools, no integrated readiness dashboard, no cluster profiles, no custom checks |
-| **AWS EKS** | Cluster Insights (upgrade readiness scanning), hardeneks CLI (best-practice checks), EKS Best Practices Guide | Console-only shows upgrade readiness, no domain-specific scoring, no custom checks, no AI recommendations |
-| **Azure AKS** | Azure Advisor (operational excellence, cost, reliability, security recommendations), community AKS Checklist (100+ items), VPA recommendations | Advisor is generic Azure (not K8s-native), no cluster profile system, no custom check CRDs, no AI-driven usage analysis |
+| **Rancher/SUSE** | Production checklist docs, CIS benchmark scanning, NeuVector | No unified scoring dashboard, no profiles, no AI, no custom checks |
+| **Tanzu/Broadcom** | MachineHealthCheck, OSS Health Assessment, Tanzu Labs (professional services) | Fragmented tools, no integrated dashboard, no profiles, no custom checks |
+| **AWS EKS** | Cluster Insights (upgrade readiness), hardeneks CLI | Console only shows upgrade readiness, no domain scoring, no custom checks |
+| **Azure AKS** | Azure Advisor (generic recommendations), community AKS Checklist | Generic Azure tool (not K8s-native), no profiles, no custom CRDs |
 
-**Our differentiator:** No platform combines profile-aware readiness scoring + domain-specific audit panels + custom check CRDs + AI-powered usage recommendations in a single integrated console experience. Each competitor has pieces; none has the unified platform.
+**Our differentiator:** No platform combines profile-aware scoring + domain audit panels + custom check CRDs + AI-powered usage recommendations in a single integrated console experience.
 
-### 4. Premium Tier Differentiation
-- Basic readiness checks available in all tiers
-- AI-powered recommendations and custom checklists as premium/plus features
-- Drives upgrade conversations from self-managed to managed (ROSA/ARO get enhanced checks)
-
-### 5. Data-Driven Product Insights
-- Anonymized readiness scores across the fleet reveal which checks fail most often — informing docs, defaults, and product improvements
-- Usage pattern data reveals which capabilities are underutilized — informing training and enablement investment
+### Tier & Insights Opportunity
+- Basic readiness checks in all tiers; AI recommendations and custom checklists as premium features
+- Anonymized fleet-wide readiness data reveals which checks fail most often — informs docs, defaults, and product investment
 
 ---
 
 ## Feature Overview
 
-### Architecture: Enhancement to Existing Console
+An enhancement to the existing OCP console (not a standalone plugin):
 
-This is NOT a standalone plugin. It enhances the existing OCP console with:
-- A new **Readiness** section in the administrator sidebar with sub-navigation per domain
-- Enhanced **Overview pages** for each domain (Security, Networking, Storage, Workloads, Compute, Observability, Identity) with metric cards + audit checklists
-- **Cluster Profile** selection that tailors all checks and scoring
-- **Custom Checklist** management for organization-defined standards
-- **Lightspeed Advisor** integration for AI-powered recommendations
+- **Readiness Dashboard** — Overall score + per-domain scores with drill-down
+- **7 Domain Overview Pages** — Security, Networking, Storage, Workloads, Compute, Observability, Identity — each with metric cards and audit checklists
+- **7 Cluster Profiles** — Production, Development, Edge/SNO, AI/ML, Multi-Tenant, Disconnected, HPC — each tailors which checks are required, recommended, or N/A
+- **Custom Checklists** — `ReadinessCheck` CRD for organization-defined checks, distributed via ACM policies
+- **Lightspeed Advisor** — AI-powered recommendations based on cluster usage patterns
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -142,123 +91,129 @@ This is NOT a standalone plugin. It enhances the existing OCP console with:
 
 ## Proposed UI Mockups
 
-PatternFly 6 (Compass theme) mockups showing the proposed experience integrated into the OCP console:
+PatternFly 6 (Compass theme), integrated into OCP console with sidebar navigation:
 
 ### Readiness Dashboard
-Overall score ring, 9 domain cards with pass/fail ratios, Lightspeed Advisor recommendation cards:
 ![Readiness Dashboard](../../mockups/readiness-dashboard.png)
 
 ### Cluster Profile Wizard
-PF6 sidebar-nav wizard with auto-detection banner and 7 profile cards (Production, Development, Edge/SNO, AI/ML, Multi-Tenant, Disconnected, HPC):
 ![Profile Wizard](../../mockups/profile-wizard.png)
 
 ### Security Overview + Audit
-Metric cards (identity providers, users, network policy coverage, TLS profile, encryption status, SCC violations) with 12 readiness checks below:
 ![Security Audit](../../mockups/security-audit.png)
 
 ### Networking Overview + Audit
-Service type breakdown, route inventory, ingress cert status, network policy coverage bar, service mesh status:
 ![Networking Audit](../../mockups/networking-audit.png)
 
 ### Storage Overview + Audit
-PVC status bar (bound/pending/lost), StorageClass inventory, CSI drivers, registry backend, backup solution status:
 ![Storage Audit](../../mockups/storage-audit.png)
 
 ### Workloads Overview + Audit
-Pod status bar, deployment health, deployments without limits/probes counts, high restart detection:
 ![Workloads Audit](../../mockups/workloads-audit.png)
 
 ### Compute Overview + Audit
-Control plane HA, worker count, CPU/memory usage bars, autoscaling status:
 ![Compute Audit](../../mockups/compute-audit.png)
 
 ### Observability Overview + Audit
-Prometheus/Alertmanager health, firing alert counts, log forwarding status, PrometheusRule count:
 ![Observability Audit](../../mockups/observability-audit.png)
 
 ### Identity & Access Overview + Audit
-User/group counts, cluster-admin count, ClusterRoleBinding audit, stale binding detection:
 ![Identity Audit](../../mockups/identity-audit.png)
 
 ---
 
-## Cluster Profile System
+## Cluster Profiles
 
-### Problem
-A single readiness checklist cannot serve all cluster types. HA requirements for production are overkill for development. Edge clusters need single-node optimizations. AI/ML clusters need GPU scheduling and model serving checks.
+Administrators select (or auto-detect) a profile that tailors every check's severity:
 
-### Solution: Cluster Profiles
+| Profile | Use Case | Required | Recommended | Key Differentiators |
+|---------|----------|----------|-------------|-------------------|
+| **Production** | Full hardening | 48 | 14 | HA, encryption, TLS, PDBs, backups, quotas |
+| **Development** | Fast iteration | 12 | 20 | Identity + quotas required; HA, encryption N/A |
+| **Edge / SNO** | Resource-constrained | 15 | 10 | Workload partitioning, local storage; HA N/A |
+| **AI/ML** | GPU workloads | 22 | 16 | GPU operator, RHOAI, node feature discovery |
+| **Multi-Tenant** | Strong isolation | 30 | 12 | Network policies + quotas + RBAC per tenant |
+| **Disconnected** | Air-gapped | 18 | 8 | Mirror registry, internal catalogs, CA trust |
+| **HPC** | Low-latency batch | 16 | 10 | CPU pinning, NUMA, hugepages, SR-IOV |
 
-Administrators select a cluster profile during setup (auto-detected when possible). Each profile defines:
-- Which checks are **required** (must-pass for readiness)
-- Which checks are **recommended** (best-practice, informational)
-- Which checks are **not applicable** (excluded from scoring)
-- Profile-specific thresholds (e.g., "2+ workers" for dev vs "5+ workers" for production)
-
-### Profiles
-
-#### 1. Production
-The gold standard. Full hardening required.
-- **Required:** HA control plane (3+ masters), encryption at rest, identity providers (no kubeadmin), network policies, TLS on all routes, monitoring stack, log forwarding, PDBs on critical workloads, etcd backups, resource quotas, stable update channel
-- **Recommended:** Service mesh, external secrets management, cluster autoscaling, GitOps, audit logging
-- **Thresholds:** 5+ worker nodes, <80% node utilization, <5 critical alerts
-
-#### 2. Development
-Fast iteration, reduced security requirements.
-- **Required:** Identity providers, monitoring stack, resource quotas (prevent dev sprawl), at least 1 StorageClass
-- **Recommended:** Network policies (per-namespace), log forwarding, GitOps for app delivery
-- **Not applicable:** HA control plane (single-master OK), encryption at rest, etcd backups, PDBs
-- **Thresholds:** 2+ worker nodes
-
-#### 3. Edge / Single-Node OpenShift (SNO)
-Resource-constrained, possibly disconnected.
-- **Required:** Custom ingress certificate, monitoring stack (local), workload partitioning, image registry with persistent storage, MachineConfig for edge-specific tuning
-- **Recommended:** Local storage operator, disconnected registry mirror, workload pinning
-- **Not applicable:** HA control plane, cluster autoscaling, multiple StorageClasses, machine health checks
-- **Thresholds:** 1 node, optimized for <32GB RAM
-
-#### 4. AI/ML Training & Inference
-GPU-heavy, scale-out workloads.
-- **Required:** GPU operator installed, NVIDIA/AMD device plugin, node feature discovery, resource quotas (GPU limits), monitoring with GPU metrics, persistent storage for datasets
-- **Recommended:** OpenShift AI (RHOAI) installed, KServe/ModelMesh for serving, node autoscaling (GPU pools), RDMA/GPUDirect for multi-node training, S3-compatible storage
-- **Not applicable:** Service mesh (unless serving), edge-specific checks
-- **Thresholds:** GPU utilization monitoring, training job queue health
-
-#### 5. Multi-Tenant
-Shared infrastructure, strong isolation.
-- **Required:** Network policies (mandatory per-namespace), resource quotas (all namespaces), LimitRanges, separate identity providers per tenant, namespace-scoped RBAC (no cluster-admin for tenants), pod security admission enforced
-- **Recommended:** Hierarchical namespaces, cost attribution labels, per-tenant monitoring, egress network policies, dedicated node pools per tenant
-- **Thresholds:** No namespace without quotas, no tenant with cluster-admin
-
-#### 6. Disconnected / Air-Gapped
-No internet access, strict compliance.
-- **Required:** Mirror registry configured, catalog sources pointing to internal registry, update service (OSUS) deployed, image content source policies, certificate authorities trusted, NTP configured
-- **Recommended:** Internal Helm chart repository, disconnected OperatorHub catalog, local Quay registry, backup/restore procedures documented
-- **Not applicable:** Cluster autoscaling (cloud-based), external log forwarding (unless internal), Let's Encrypt certificates
-
-#### 7. HPC / High-Performance Computing
-Latency-sensitive, batch workloads.
-- **Required:** Performance addon operator, real-time kernel (where needed), CPU manager policy (static), topology manager, hugepages configured, NUMA-aware scheduling
-- **Recommended:** SR-IOV for network-intensive workloads, node tuning operator profiles, dedicated compute nodes, job scheduling (e.g., Kueue)
-- **Not applicable:** Service mesh, GitOps (batch jobs are typically imperative)
-
-### Auto-Detection
-
-The system auto-detects the likely cluster profile based on:
-- Node count and topology (SNO → Edge, 3+ masters → Production)
-- Installed operators (GPU Operator → AI/ML, RHACM hub → Multi-cluster, Performance Addon → HPC)
-- Node hardware capabilities (nodes with `nvidia.com/gpu` or `amd.com/gpu` allocatable resources → AI/ML, even without GPU Operator)
-- Infrastructure provider (baremetal + 1 node → Edge, cloud → Production/Dev)
-- Namespace patterns (many small namespaces → Multi-tenant)
-- Workload signatures (RHOAI/KServe CRDs present → AI/ML, Kiali/OSSM CRDs → Service Mesh profile)
-
-Administrators can override the auto-detected profile at any time.
+**Auto-detection** uses: node topology (SNO → Edge, 3+ masters → Production), installed operators (GPU Operator → AI/ML, RHACM → Multi-cluster), hardware capabilities (`nvidia.com/gpu` → AI/ML), infrastructure provider, namespace patterns, and workload CRDs. Administrators override at any time.
 
 ---
 
-## Domain Checklists (Deep Dive)
+## Custom Checklists
 
-Each domain has a dedicated overview page with metric cards and an audit panel. Checks are categorized as **Required**, **Recommended**, or **Informational** based on the active cluster profile.
+Organizations define checks as `ReadinessCheck` custom resources:
+
+```yaml
+apiVersion: console.openshift.io/v1alpha1
+kind: ReadinessCheck
+metadata:
+  name: require-cost-center-label
+  namespace: openshift-config
+spec:
+  displayName: "Cost Center Label Required"
+  description: "All deployments must have a 'cost-center' label for chargeback"
+  severity: required
+  check:
+    type: resource-label
+    resource: { apiVersion: apps/v1, kind: Deployment }
+    label: cost-center
+  remediation:
+    description: "Add metadata.labels.cost-center to the deployment"
+```
+
+**8 check types:** `resource-label`, `resource-annotation`, `operator-installed`, `operator-version`, `resource-exists`, `resource-field`, `prometheus-query`, `script` (CEL expression).
+
+**Sharing:** Cluster-wide via `openshift-config`, namespace-scoped for teams, fleet-wide via ACM policies.
+
+---
+
+## Lightspeed Advisor
+
+Extends OpenShift Lightspeed's cluster interaction capabilities with readiness-specific intelligence:
+
+1. **Usage pattern analysis** — Detects what customers are doing (ArgoCD, service mesh, GPU workloads) and recommends what they should do next
+2. **"Ask Lightspeed" on every failing check** — One-click remediation guidance
+3. **Proactive recommendation cards** on the Readiness Dashboard
+4. **BYO Knowledge** — Organizations feed internal runbooks for org-specific recommendations
+
+**Example recommendations:**
+
+| Pattern Detected | Recommendation |
+|-----------------|----------------|
+| ArgoCD with 23 apps, no CI/CD | Adopt Tekton + GitOps Promoter for automated promotion |
+| Service mesh installed, mTLS permissive | Enable strict mTLS for zero-trust networking |
+| 50+ deployments, no PDBs | Add PodDisruptionBudgets for upgrade safety |
+| GPU nodes at 30% utilization | GPU time-slicing or MIG partitioning |
+| Multiple clusters, no ACM | RHACM for unified policy and lifecycle |
+| PVs at 85% capacity | Volume expansion + alerting before full |
+
+---
+
+## Implementation Phases
+
+| Phase | Release | Scope |
+|-------|---------|-------|
+| **Foundation** | OCP 5.1 | Dashboard, 56 checks, 7 profiles with auto-detection, domain overview pages |
+| **Customization** | OCP 5.2 | ReadinessCheck CRD, org-level sharing, ACM policy distribution |
+| **Intelligence** | OCP 5.3 | Lightspeed Advisor, usage analysis, proactive recommendations |
+| **Fleet** | OCP 5.4 | ACM hub readiness aggregation, fleet dashboard, compliance exports (SOC2, FedRAMP) |
+
+---
+
+## Success Metrics
+
+| Metric | Target | Source |
+|--------|--------|--------|
+| Readiness adoption | 60% of clusters scored within 30 days | Telemetry |
+| Support deflection | 25% fewer Day 2 config tickets | Support data |
+| Capability adoption | 15% increase in operator installs from recommendations | Telemetry |
+| Custom check usage | 30% of enterprise customers define ≥1 check in 90 days | Telemetry |
+| Lightspeed engagement | 40% click-through on "Ask Lightspeed" | Analytics |
+
+---
+
+## Appendix: Domain Checklist Details
 
 ### Security (12 checks)
 
@@ -282,12 +237,12 @@ Each domain has a dedicated overview page with metric cards and an audit panel. 
 | Check | Description | Prod | Dev | Edge | Multi-T |
 |-------|-------------|------|-----|------|---------|
 | Custom Ingress Certificate | Not using self-signed default | Req | Rec | Req | Req |
-| TLS on All Routes | No edge-terminated or passthrough without TLS | Req | Rec | Req | Req |
+| TLS on All Routes | All routes have TLS termination | Req | Rec | Req | Req |
 | Network Policy Coverage | % of namespaces with policies | Req | Rec | N/A | Req |
 | Egress Restrictions | Default-deny egress in sensitive namespaces | Rec | N/A | N/A | Req |
 | Service Mesh | Istio/OSSM installed for mTLS | Rec | N/A | N/A | Rec |
-| NodePort Exposure | Audit NodePort services (should be minimal) | Req | Info | N/A | Req |
-| DNS Configuration | Custom DNS resolvers if needed | Req | Info | Req | Req |
+| NodePort Exposure | Minimize NodePort services | Req | Info | N/A | Req |
+| DNS Configuration | Custom DNS resolvers | Req | Info | Req | Req |
 | Ingress Controller Sharding | Multiple IngressControllers for isolation | Rec | N/A | N/A | Req |
 
 ### Storage (8 checks)
@@ -325,7 +280,7 @@ Each domain has a dedicated overview page with metric cards and an audit panel. 
 | Audit Logging | API server audit policy (not None) | Req | N/A | Rec | Req |
 | Custom Alerts | At least one PrometheusRule defined | Rec | N/A | Rec | Rec |
 | Dashboard Templates | Grafana dashboards for key metrics | Rec | N/A | N/A | Rec |
-| Cluster Observability Operator | COO installed for unified observability | Rec | N/A | N/A | Rec |
+| Cluster Observability Operator | COO installed | Rec | N/A | N/A | Rec |
 
 ### Reliability (8 checks)
 
@@ -346,170 +301,10 @@ Each domain has a dedicated overview page with metric cards and an audit panel. 
 |-------|-------------|------|-----|------|---------|
 | RBAC Least Privilege | No unnecessary cluster-admin bindings | Req | Rec | Rec | Req |
 | Service Account Audit | No SA with cluster-admin | Req | Rec | Rec | Req |
-| Group-Based Access | Users assigned via groups, not individual bindings | Rec | N/A | N/A | Req |
+| Group-Based Access | Users assigned via groups | Rec | N/A | N/A | Req |
 | Stale Binding Detection | Bindings for deleted users/SAs | Info | Info | Info | Info |
 | Namespace Isolation | Per-team namespace boundaries | Rec | Rec | N/A | Req |
 | Wildcard RBAC Detection | No `*` verbs or resources in roles | Req | Rec | Rec | Req |
-
----
-
-## Custom Checklists
-
-### Problem
-Every organization has standards beyond platform defaults — required labels (`app.kubernetes.io/managed-by`), mandatory annotations, specific node taints, operator versions, naming conventions.
-
-### Solution: Custom Check Definition
-
-Organizations define custom checks as YAML resources stored as ConfigMaps or a Custom Resource:
-
-```yaml
-apiVersion: console.openshift.io/v1alpha1
-kind: ReadinessCheck
-metadata:
-  name: require-cost-center-label
-  namespace: openshift-config
-  labels:
-    readiness.openshift.io/domain: workloads
-    readiness.openshift.io/profile: production
-spec:
-  displayName: "Cost Center Label Required"
-  description: "All deployments must have a 'cost-center' label for chargeback"
-  severity: required  # required | recommended | informational
-  check:
-    type: resource-label
-    resource:
-      apiVersion: apps/v1
-      kind: Deployment
-    label: cost-center
-    namespaceSelector:
-      matchExpressions:
-        - key: environment
-          operator: NotIn
-          values: ["system"]
-  remediation:
-    description: "Add `metadata.labels.cost-center: <your-cost-center>` to the deployment"
-    yamlExample: |
-      metadata:
-        labels:
-          cost-center: "engineering-42"
-```
-
-### Check Types
-
-| Type | Description | Example |
-|------|-------------|---------|
-| `resource-label` | Required label on resources | cost-center label on deployments |
-| `resource-annotation` | Required annotation | `backup.kubernetes.io/schedule` |
-| `operator-installed` | Operator must be installed | Compliance Operator |
-| `operator-version` | Operator minimum version | ACS >= 4.5 |
-| `resource-exists` | Resource must exist in namespace | NetworkPolicy in every ns |
-| `resource-field` | Field value check | `spec.replicas >= 2` |
-| `prometheus-query` | PromQL query threshold | `avg(node_cpu_seconds_total) < 0.8` |
-| `script` | Custom CEL expression | Complex multi-field validation |
-
-### Organization-Level Sharing
-
-Custom checks defined in `openshift-config` namespace apply cluster-wide. Teams can define namespace-scoped checks. ACM/RHACM can distribute checks across fleet via policies.
-
----
-
-## AI-Powered Advisor (OpenShift Lightspeed Integration)
-
-### Vision
-
-The Readiness Platform integrates with **OpenShift Lightspeed** to provide AI-powered, context-aware recommendations that go beyond static checklists. Lightspeed already has cluster interaction capabilities (Tech Preview) — this extends it with readiness-specific intelligence.
-
-### How It Works
-
-```
-┌─────────────────────────────────────────────┐
-│  Lightspeed Advisor Pipeline                │
-│                                             │
-│  1. Collect cluster telemetry               │
-│     ├── Installed operators                 │
-│     ├── Resource usage patterns             │
-│     ├── API call frequency by resource type │
-│     ├── Namespace/workload topology         │
-│     └── Alert/incident history              │
-│                                             │
-│  2. Analyze usage patterns                  │
-│     ├── "Heavy GitOps user (ArgoCD)"        │
-│     ├── "Service mesh deployed but no mTLS" │
-│     ├── "GPU nodes idle 60% of time"        │
-│     └── "No network policies in 80% of ns"  │
-│                                             │
-│  3. Generate contextual recommendations     │
-│     ├── Platform capability suggestions     │
-│     ├── Architecture improvement hints      │
-│     ├── Cost optimization opportunities     │
-│     └── Security hardening priorities       │
-│                                             │
-│  4. Present in Readiness Dashboard          │
-│     └── Actionable cards with "Apply" CTAs  │
-└─────────────────────────────────────────────┘
-```
-
-### Example Recommendations
-
-| Detected Pattern | Recommendation | Value |
-|-----------------|----------------|-------|
-| Heavy ArgoCD usage, no CI/CD | "Adopt Tekton Pipelines + GitOps Promoter for automated promotion across environments" | Reduce manual promotion errors, enforce pipeline gates |
-| Service mesh installed, no mTLS | "Enable strict mTLS in your OSSM ServiceMeshControlPlane to encrypt all service-to-service traffic" | Zero-trust networking without app changes |
-| 50+ deployments, no PDBs | "Add PodDisruptionBudgets to your critical workloads to prevent downtime during node maintenance" | Prevent outages during upgrades |
-| GPU nodes at 30% avg utilization | "Consider GPU time-slicing or MIG partitioning to improve utilization from 30% to 70%+" | $50K+/yr infrastructure savings |
-| High API server audit log volume | "Configure audit policy to reduce noise — your current policy logs 10x more than typical production clusters" | Reduce storage costs, improve signal-to-noise |
-| Multiple clusters, no ACM | "Red Hat Advanced Cluster Management can unify policy, observability, and lifecycle across your 12 clusters" | Single pane of glass, consistent policy |
-| Persistent volumes at 85% capacity | "Configure volume expansion and alerting — 3 PVCs will exhaust capacity within 2 weeks at current growth" | Prevent data loss from full volumes |
-| No disaster recovery plan | "Deploy OADP (OpenShift API for Data Protection) for automated backup/restore of cluster resources and PVs" | RPO/RTO guarantees |
-
-### Lightspeed Integration Points
-
-1. **Readiness Context Provider** — Passes current readiness scores, failing checks, and cluster profile to Lightspeed as context for more targeted responses
-2. **"Ask Lightspeed About This" buttons** — On any failing check, users can click to ask Lightspeed for help with remediation
-3. **Proactive Advisor Cards** — Lightspeed analyzes cluster state periodically and surfaces recommendations in the Readiness Dashboard
-4. **BYO Knowledge Integration** — Organizations can feed their internal runbooks and standards into Lightspeed (using the existing BYO Knowledge feature) for organization-specific recommendations
-
----
-
-## Implementation Approach
-
-### Phase 1: Foundation (OCP 5.1)
-- Readiness Dashboard with overall score + 9 domain scores
-- 56 built-in checks across 7 domains
-- 7 cluster profiles with auto-detection
-- Domain overview pages with audit panels (PatternFly-native)
-
-### Phase 2: Customization (OCP 5.2)
-- Custom ReadinessCheck CRD
-- Organization-level sharing via `openshift-config`
-- ACM policy integration for fleet-wide distribution
-- Import/export of checklist definitions
-
-### Phase 3: Intelligence (OCP 5.3)
-- Lightspeed Advisor integration
-- Usage pattern analysis
-- Proactive recommendation engine
-- "Ask Lightspeed About This" on every failing check
-- BYO Knowledge for org-specific guidance
-
-### Phase 4: Fleet (OCP 5.4)
-- ACM hub aggregation of readiness scores across clusters
-- Fleet-wide readiness dashboard
-- Cross-cluster recommendation patterns
-- Compliance reporting exports (SOC2, FedRAMP, PCI-DSS mapping)
-
----
-
-## Success Metrics
-
-| Metric | Target | Measurement |
-|--------|--------|-------------|
-| Readiness score adoption | 60% of clusters have a score within 30 days of upgrade | Telemetry |
-| Support ticket deflection | 25% reduction in Day 2 config tickets | Support data |
-| Platform capability adoption | 15% increase in operator installations driven by recommendations | Telemetry |
-| Custom checklist adoption | 30% of enterprise customers define ≥1 custom check within 90 days | Telemetry |
-| Lightspeed engagement | 40% of users click "Ask Lightspeed" on failing checks | Console analytics |
-| Net Promoter Score impact | +5 NPS among users who engage with readiness features | Survey |
 
 ---
 
