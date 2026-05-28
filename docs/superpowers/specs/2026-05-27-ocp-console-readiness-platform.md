@@ -32,6 +32,9 @@ This proposal adds a **Readiness & Best Practices Platform** to the OCP console:
 | **Faster Day 2** | Guided checklists replace weeks of tribal knowledge with hours of automation | Faster time-to-production = faster expansion |
 | **Platform discovery** | Every check and AI recommendation teaches customers about capabilities they're paying for but not using | Drives adoption of ACM, ACS, RHOAI, Service Mesh, Tekton, OADP — each adopted capability deepens investment |
 | **Org knowledge capture** | Custom checklists codify tribal knowledge; new team members inherit standards automatically | Increases switching costs — organizations encode their processes into the platform |
+| **Guided remediation** | "Fix Now" buttons navigate to the right page, pre-fill YAML, or trigger operator installs — checks become a workbench, not just a report card | Faster resolution = fewer escalations, higher self-service rate |
+| **Compliance mapping** | Each check maps to SOC2, FedRAMP, PCI-DSS, HIPAA controls — one-click audit evidence export replaces weeks of manual gathering | Opens regulated-industry segments (finance, healthcare, government); competitive moat |
+| **Readiness-as-code** | Export entire readiness config as YAML — version in Git, bootstrap new clusters, promote across environments | GitOps for governance; fleet consistency without manual drift correction |
 | **Support deflection** | "Why it matters" on every check educates in-context; Lightspeed handles remediation questions | Reduces repeat contacts and ticket volume |
 
 ### Competitive Position
@@ -58,7 +61,10 @@ An enhancement to the existing OCP console (not a standalone plugin):
 - **Readiness Dashboard** — Overall score + per-domain scores with drill-down
 - **7 Domain Overview Pages** — Security, Networking, Storage, Workloads, Compute, Observability, Identity — each with metric cards and audit checklists
 - **7 Cluster Profiles** — Production, Development, Edge/SNO, AI/ML, Multi-Tenant, Disconnected, HPC — each tailors which checks are required, recommended, or N/A
+- **Guided Remediation** — "Fix Now" buttons that navigate to the right console page, pre-fill YAML, or trigger operator installs
 - **Custom Checklists** — `ReadinessCheck` CRD for organization-defined checks, distributed via ACM policies
+- **Compliance Mapping** — Each check maps to SOC2, FedRAMP, PCI-DSS, HIPAA controls with one-click audit export
+- **Readiness-as-Code** — Export/import `ReadinessConfig` YAML for GitOps governance and fleet bootstrapping
 - **Lightspeed Advisor** — AI-powered recommendations based on cluster usage patterns
 
 ```
@@ -168,6 +174,82 @@ spec:
 
 ---
 
+## Guided Remediation
+
+Failing checks shouldn't just report problems — they should fix them. Every check includes a remediation path:
+
+| Remediation Type | Example | UX |
+|-----------------|---------|-----|
+| **Console navigation** | "Enable encryption at rest" | "Fix Now" opens the API Server config page with the relevant field highlighted |
+| **Operator install** | "Install OADP for backup" | "Install" opens OperatorHub filtered to the operator, pre-selected |
+| **YAML apply** | "Add NetworkPolicy to namespace" | "Apply Fix" shows a pre-filled YAML editor with the correct resource, one-click apply |
+| **Lightspeed guided** | "Configure ClusterLogForwarder" | "Ask Lightspeed" opens the advisor panel with the failing check as context |
+
+For checks that require multiple steps (e.g., setting up etcd encryption requires editing the API server config, then waiting for encryption to complete, then verifying), the remediation becomes a **mini-wizard** with progress tracking.
+
+Checks that can be auto-remediated safely (e.g., creating a default LimitRange, adding a missing label) offer a **"Fix All"** bulk action with a dry-run preview.
+
+---
+
+## Compliance Framework Mapping
+
+Every readiness check maps to industry compliance frameworks. Customers in regulated industries can view their readiness through a compliance lens:
+
+| Check | SOC 2 | FedRAMP | PCI-DSS | HIPAA |
+|-------|-------|---------|---------|-------|
+| Encryption at Rest | CC6.1 (Encryption) | SC-28 (Protection at Rest) | 3.4 (Render PAN unreadable) | §164.312(a)(2)(iv) |
+| Audit Log Forwarding | CC7.2 (Monitoring) | AU-6 (Audit Review) | 10.5 (Secure audit trails) | §164.312(b) |
+| Identity Providers | CC6.1 (Access Control) | IA-2 (Identification) | 8.1 (Unique IDs) | §164.312(d) |
+| Network Policies | CC6.6 (Boundary Protection) | SC-7 (Boundary Protection) | 1.3 (Firewall config) | §164.312(e)(1) |
+| RBAC Least Privilege | CC6.3 (Role-based Access) | AC-6 (Least Privilege) | 7.1 (Limit access) | §164.312(a)(1) |
+| TLS Security Profile | CC6.7 (Encryption in Transit) | SC-8 (Transmission Confidentiality) | 4.1 (Strong cryptography) | §164.312(e)(2)(ii) |
+
+**Compliance Dashboard View:** A dedicated tab on the readiness dashboard that groups checks by framework instead of domain. Shows "SOC 2: 85% compliant (17/20 controls mapped)" — giving compliance teams a single pane for audit preparation.
+
+**Export:** One-click compliance report generation (PDF/CSV) mapping each control to its check status, evidence, and remediation plan. Replaces weeks of manual audit evidence gathering.
+
+---
+
+## Readiness-as-Code
+
+The entire readiness configuration is exportable, versionable, and bootstrappable:
+
+```yaml
+apiVersion: console.openshift.io/v1alpha1
+kind: ReadinessConfig
+metadata:
+  name: acme-corp-production
+spec:
+  profile: production
+  overrides:
+    - check: cluster-autoscaling
+      severity: required    # upgraded from recommended
+    - check: service-mesh
+      severity: required    # org mandate
+  customChecks:
+    - name: require-cost-center
+      type: resource-label
+      resource: { apiVersion: apps/v1, kind: Deployment }
+      label: cost-center
+      severity: required
+    - name: require-backup-annotation
+      type: resource-annotation
+      resource: { apiVersion: apps/v1, kind: StatefulSet }
+      annotation: backup.acme.com/schedule
+      severity: recommended
+  complianceFrameworks:
+    - soc2
+    - pci-dss
+```
+
+**Workflows enabled:**
+- **Bootstrap new clusters** — `oc apply -f readiness-config.yaml` on a fresh cluster immediately applies the organization's standards
+- **GitOps governance** — Store readiness configs in Git alongside cluster manifests. PR reviews for standard changes. Drift detection.
+- **Fleet consistency** — ACM distributes `ReadinessConfig` as a policy. Every cluster in the fleet inherits the same standards.
+- **Environment promotion** — Dev clusters use a relaxed config, staging uses production config. Promotion gates require readiness score thresholds.
+
+---
+
 ## Lightspeed Advisor
 
 Extends OpenShift Lightspeed's cluster interaction capabilities with readiness-specific intelligence:
@@ -194,10 +276,10 @@ Extends OpenShift Lightspeed's cluster interaction capabilities with readiness-s
 
 | Phase | Release | Scope |
 |-------|---------|-------|
-| **Foundation** | OCP 5.1 | Dashboard, 56 checks, 7 profiles with auto-detection, domain overview pages |
-| **Customization** | OCP 5.2 | ReadinessCheck CRD, org-level sharing, ACM policy distribution |
-| **Intelligence** | OCP 5.3 | Lightspeed Advisor, usage analysis, proactive recommendations |
-| **Fleet** | OCP 5.4 | ACM hub readiness aggregation, fleet dashboard, compliance exports (SOC2, FedRAMP) |
+| **Foundation** | OCP 5.1 | Dashboard, 56 checks, 7 profiles with auto-detection, domain overview pages, guided remediation (console navigation + YAML apply) |
+| **Customization** | OCP 5.2 | ReadinessCheck CRD, ReadinessConfig (readiness-as-code), org-level sharing, ACM policy distribution, GitOps export/import |
+| **Intelligence** | OCP 5.3 | Lightspeed Advisor, usage analysis, proactive recommendations, compliance framework mapping (SOC2, FedRAMP, PCI-DSS, HIPAA) |
+| **Fleet** | OCP 5.4 | ACM hub readiness aggregation, fleet dashboard, compliance report export (PDF/CSV), environment promotion gates |
 
 ---
 
@@ -208,7 +290,10 @@ Extends OpenShift Lightspeed's cluster interaction capabilities with readiness-s
 | Readiness adoption | 60% of clusters scored within 30 days | Telemetry |
 | Support deflection | 25% fewer Day 2 config tickets | Support data |
 | Capability adoption | 15% increase in operator installs from recommendations | Telemetry |
+| Guided remediation | 50% of failing checks remediated via "Fix Now" within 7 days | Telemetry |
 | Custom check usage | 30% of enterprise customers define ≥1 check in 90 days | Telemetry |
+| Readiness-as-code | 20% of enterprise customers export/import ReadinessConfig | Telemetry |
+| Compliance mapping | 40% of regulated-industry customers use compliance view | Telemetry |
 | Lightspeed engagement | 40% click-through on "Ask Lightspeed" | Analytics |
 
 ---
