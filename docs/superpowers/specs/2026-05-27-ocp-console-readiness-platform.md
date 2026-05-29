@@ -145,13 +145,46 @@ Administrators select (or auto-detect) a profile that tailors every check's seve
 |---------|----------|----------|-------------|-------------------|
 | **Production** | Full hardening | 48 | 14 | HA, encryption, TLS, PDBs, backups, quotas |
 | **Development** | Fast iteration | 12 | 20 | Identity + quotas required; HA, encryption N/A |
+| **Virtualization (Prod)** | Production VMs | 38 | 16 | OCP Virt operator, live migration, HA for VMs, storage for VM disks, backup/DR |
+| **Virtualization (Dev)** | Dev/test VMs | 14 | 18 | OCP Virt operator, basic storage; live migration, HA, DR not required |
 | **Edge / SNO** | Resource-constrained | 15 | 10 | Workload partitioning, local storage; HA N/A |
 | **AI/ML** | GPU workloads | 22 | 16 | GPU operator, RHOAI, node feature discovery |
 | **Multi-Tenant** | Strong isolation | 30 | 12 | Network policies + quotas + RBAC per tenant |
 | **Disconnected** | Air-gapped | 18 | 8 | Mirror registry, internal catalogs, CA trust |
 | **HPC** | Low-latency batch | 16 | 10 | CPU pinning, NUMA, hugepages, SR-IOV |
 
-**Auto-detection** uses: node topology (SNO → Edge, 3+ masters → Production), installed operators (GPU Operator → AI/ML, RHACM → Multi-cluster), hardware capabilities (`nvidia.com/gpu` → AI/ML), infrastructure provider, namespace patterns, and workload CRDs. Administrators override at any time.
+### Virtualization Profiles — Production vs Development
+
+Clusters running OpenShift Virtualization have fundamentally different needs than container-only clusters. VM workloads need dedicated storage backends, live migration infrastructure, and hardware-aware scheduling that containers don't require. The two VM profiles address opposite ends of the spectrum:
+
+**Virtualization (Production)** — Running business-critical VMs migrated from VMware, Hyper-V, or RHEV. These are the workloads customers can't afford to lose — databases, legacy apps, stateful services.
+
+| Check | Description | Prod VM | Dev VM |
+|-------|-------------|---------|--------|
+| OCP Virtualization Operator | cnv operator installed and healthy | Req | Req |
+| HyperConverged CR | HyperConverged custom resource configured | Req | Req |
+| VM Live Migration | Live migration enabled and network configured (dedicated migration network) | Req | N/A |
+| VM HA (node eviction) | `evictionStrategy: LiveMigrate` on critical VMs | Req | N/A |
+| Dedicated Migration Network | Separate network for migration traffic (avoids saturating workload network) | Req | N/A |
+| Storage for VM Disks | RWX-capable StorageClass available (ODF, NFS, or equivalent) for live migration | Req | Rec |
+| CDI (Containerized Data Importer) | CDI operator healthy for VM image import | Req | Req |
+| VM Backup/DR | OADP with KubeVirt plugin for VM backup/restore | Req | N/A |
+| CPU Manager (static policy) | Static CPU manager for guaranteed QoS on latency-sensitive VMs | Req | N/A |
+| Node Capacity Planning | Sufficient memory/CPU headroom for VM live migration (at least 1 node worth of spare capacity) | Req | N/A |
+| VM Resource Limits | CPU/memory limits set on all VMs | Req | Rec |
+| Network Attachment Definitions | Secondary networks (Multus/bridge/SR-IOV) for VM traffic isolation | Rec | N/A |
+| VM Monitoring | VM-specific Prometheus rules and Grafana dashboards (KubeVirt metrics) | Req | Rec |
+| GPU Passthrough | GPU/vGPU configured for VMs requiring GPU (if applicable) | Rec | N/A |
+| Machine Type/Instance Type | Instance type CRDs defined for standardized VM sizes | Rec | Rec |
+| VM Templates | Reusable VM templates for common OS images (RHEL, Windows) | Rec | Req |
+| Common Boot Sources | DataSources configured for automatic OS image updates | Rec | Req |
+| SSP (Scheduling, Scale, Performance) | SSP operator configured for common templates and scheduling rules | Rec | Rec |
+
+**Key difference:** Production VM clusters treat VMs like production databases — HA, live migration, dedicated networks, backup/DR, and capacity planning are all required. Development VM clusters treat VMs like dev containers — get the operator running, provide templates and boot sources, and let developers spin up test VMs quickly. No need for live migration or DR in dev.
+
+**Auto-detection:** The system detects VM profiles when the `HyperConverged` CRD exists or the `kubevirt.io` API group is present. Production vs development is inferred from the base profile (3+ masters + VM = Prod VM, single-master + VM = Dev VM) and can be overridden.
+
+**Auto-detection** uses: node topology (SNO → Edge, 3+ masters → Production), installed operators (GPU Operator → AI/ML, RHACM → Multi-cluster, OCP Virtualization → VM profiles), hardware capabilities (`nvidia.com/gpu` → AI/ML), infrastructure provider, namespace patterns, workload CRDs (`HyperConverged` → VM, `RHOAI` → AI/ML), and VM count thresholds. Administrators override at any time.
 
 ---
 
