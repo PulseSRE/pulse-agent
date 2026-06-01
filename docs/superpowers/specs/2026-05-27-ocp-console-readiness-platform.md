@@ -135,6 +135,14 @@ PatternFly 6 (Compass theme), integrated into OCP console with sidebar navigatio
 ### Identity & Access Overview + Audit
 ![Identity Audit](../../mockups/identity-audit.png)
 
+### Virtualization (Production) Overview + Audit
+VM inventory (34 VMs by OS), resource allocation, migration source tracking, live migration status, HA coverage, backup/DR status. 18 checks with "Fix Now" for eviction strategy and OADP install:
+![Virtualization Production Audit](../../mockups/virt-prod-audit.png)
+
+### Virtualization (Development) Overview + Audit
+Developer self-service readiness, boot source freshness, quick-create status, idle VM detection. Lightspeed recommendation for auto-stop policies. N/A checks greyed out (live migration, HA, DR not needed in dev):
+![Virtualization Development Audit](../../mockups/virt-dev-audit.png)
+
 ---
 
 ## Cluster Profiles
