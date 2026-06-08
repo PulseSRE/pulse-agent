@@ -269,6 +269,11 @@ _NEEDS_ATTENTION_EXCLUDE = frozenset(
 def get_inbox_stats() -> dict[str, int]:
     now = int(time.time())
     rows = get_inbox_repo().get_stats_rows(now)
+    return _stats_from_rows(rows)
+
+
+def _stats_from_rows(rows: list[Any]) -> dict[str, int]:
+    """Compute inbox stats from status aggregation rows."""
     stats: dict[str, int] = {}
     total = 0
     cleared = 0
@@ -293,6 +298,102 @@ def get_inbox_stats() -> dict[str, int]:
     stats["needs_attention"] = needs_attention
     stats["unique_issues"] = unique_total
     return stats
+
+
+async def async_list_inbox_items(
+    item_type: str | None = None,
+    status: str | None = None,
+    namespace: str | None = None,
+    claimed_by: str | None = None,
+    severity: str | None = None,
+    group_by: str | None = None,
+    limit: int = 200,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Async version of list_inbox_items — uses asyncpg instead of psycopg2."""
+    exclude_clause = None
+    if status == "archived":
+        exclude_clause = None
+    elif status == "agent_cleared":
+        exclude_clause = "status NOT IN ('archived')"
+    elif status == "__needs_attention__":
+        exclude_clause = "status NOT IN ('archived', 'agent_cleared', 'resolved', 'new', 'agent_reviewing', 'agent_review_failed') AND (severity IS NULL OR severity != 'info')"
+        status = None
+    else:
+        exclude_clause = "status NOT IN ('archived', 'agent_cleared')"
+    where_parts = [
+        "(snoozed_until IS NULL OR snoozed_until <= ?)",
+    ]
+    if exclude_clause:
+        where_parts.append(exclude_clause)
+    params: list[Any] = [int(time.time())]
+
+    if item_type:
+        where_parts.append("item_type = ?")
+        params.append(item_type)
+    if status:
+        where_parts.append("status = ?")
+        params.append(status)
+    if namespace:
+        where_parts.append("namespace = ?")
+        params.append(namespace)
+    if claimed_by == "__null__":
+        where_parts.append("claimed_by IS NULL")
+    elif claimed_by:
+        where_parts.append("claimed_by = ?")
+        params.append(claimed_by)
+    if severity:
+        where_parts.append("severity = ?")
+        params.append(severity)
+
+    where = " AND ".join(where_parts)
+    params.extend([limit, offset])
+    rows = await get_inbox_repo().async_query_items(where, tuple(params))
+    items = [_deserialize_row(r) for r in rows]
+
+    groups: list[dict[str, Any]] = []
+    ungrouped: list[dict[str, Any]] = []
+
+    if group_by == "correlation":
+        corr_map: dict[str, list[dict[str, Any]]] = {}
+        for item in items:
+            key = item.get("correlation_key")
+            if key:
+                corr_map.setdefault(key, []).append(item)
+            else:
+                ungrouped.append(item)
+
+        for key, group_items in corr_map.items():
+            if len(group_items) >= 2:
+                severities = [i.get("severity") for i in group_items if i.get("severity")]
+                top = "critical" if "critical" in severities else ("warning" if "warning" in severities else "info")
+                groups.append(
+                    {
+                        "correlation_key": key,
+                        "items": group_items,
+                        "count": len(group_items),
+                        "top_severity": top,
+                    }
+                )
+            else:
+                ungrouped.extend(group_items)
+    else:
+        ungrouped = items
+
+    all_for_stats = ungrouped + [i for g in groups for i in g["items"]]
+    return {
+        "items": ungrouped,
+        "groups": groups,
+        "stats": _compute_stats(all_for_stats),
+        "total": len(all_for_stats),
+    }
+
+
+async def async_get_inbox_stats() -> dict[str, int]:
+    """Async version of get_inbox_stats — uses asyncpg."""
+    now = int(time.time())
+    rows = await get_inbox_repo().async_get_stats_rows(now)
+    return _stats_from_rows(rows)
 
 
 _STALE_THRESHOLD = 300  # 5 minutes

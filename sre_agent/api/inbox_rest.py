@@ -10,13 +10,13 @@ logger = logging.getLogger("pulse_agent.api")
 
 from ..inbox import (
     VALID_TRANSITIONS,
+    async_get_inbox_stats,
+    async_list_inbox_items,
     claim_item,
     create_inbox_item,
     dismiss_item,
     escalate_assessment,
     get_inbox_item,
-    get_inbox_stats,
-    list_inbox_items,
     pin_item,
     record_interaction,
     snooze_item,
@@ -46,7 +46,7 @@ async def rest_list_inbox(
     elif claimed_by == "__unclaimed__":
         resolved_claimed = "__null__"
 
-    return list_inbox_items(
+    return await async_list_inbox_items(
         item_type=type,
         status=status,
         namespace=namespace,
@@ -60,7 +60,7 @@ async def rest_list_inbox(
 
 @router.get("/inbox/stats")
 async def rest_inbox_stats():
-    return get_inbox_stats()
+    return await async_get_inbox_stats()
 
 
 @router.get("/inbox/{item_id}")

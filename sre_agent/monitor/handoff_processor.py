@@ -27,10 +27,13 @@ async def process_handoffs(monitor: ClusterMonitor) -> None:
 
     cutoff = int(time.time() * 1000) - 300_000
     try:
-        rows = repo.get_pending_handoffs(cutoff)
-    except Exception as e:
-        logger.error("Failed to query handoff requests: %s", e)
-        return
+        rows = await repo.async_get_pending_handoffs(cutoff)
+    except Exception:
+        try:
+            rows = repo.get_pending_handoffs(cutoff)
+        except Exception as e:
+            logger.error("Failed to query handoff requests: %s", e)
+            return
 
     for row in rows:
         details = row.get("details", "{}")
@@ -82,6 +85,9 @@ async def process_handoffs(monitor: ClusterMonitor) -> None:
 
     if rows:
         try:
-            repo.delete_processed_handoffs(cutoff)
-        except Exception as e:
-            logger.error("Failed to clean up handoff requests: %s", e)
+            await repo.async_delete_processed_handoffs(cutoff)
+        except Exception:
+            try:
+                repo.delete_processed_handoffs(cutoff)
+            except Exception as e:
+                logger.error("Failed to clean up handoff requests: %s", e)

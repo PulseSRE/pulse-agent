@@ -203,6 +203,42 @@ class ViewRepository(BaseRepository):
         )
         return [_deserialize_view_row(row) for row in rows]
 
+    async def async_list_views(
+        self,
+        owner: str,
+        limit: int = 50,
+        *,
+        view_type: str | None = None,
+        visibility: str | None = None,
+        exclude_status: str | None = None,
+    ) -> list[dict]:
+        """Async version of list_views using asyncpg."""
+        db = await self.get_async_db()
+        conditions: list[str] = []
+        params: list = []
+
+        if visibility == "team":
+            conditions.append("visibility = 'team'")
+        else:
+            conditions.append("owner = ?")
+            params.append(owner)
+
+        if view_type:
+            conditions.append("view_type = ?")
+            params.append(view_type)
+        if exclude_status:
+            conditions.append("status != ?")
+            params.append(exclude_status)
+
+        where = " AND ".join(conditions)
+        params.append(min(limit, 50))
+
+        rows = await db.fetchall(
+            f"SELECT * FROM views WHERE {where} ORDER BY updated_at DESC LIMIT ?",
+            *params,
+        )
+        return [_deserialize_view_row(row) for row in rows]
+
     @_db_safe
     def get_view_by_title(self, owner: str, title: str) -> dict | None:
         """Find a view by title -- returns full view data for merging."""

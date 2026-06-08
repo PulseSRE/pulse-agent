@@ -21,6 +21,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 logger = logging.getLogger("pulse_agent.async_db")
@@ -103,6 +105,36 @@ class AsyncDatabase:
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
             await conn.executemany(_translate_placeholders(query), args_list)
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[Any]:
+        """Async transaction context manager.
+
+        Usage::
+
+            async with db.transaction() as conn:
+                await conn.execute("INSERT INTO t VALUES ($1)", val)
+                await conn.execute("UPDATE t SET x = $1 WHERE id = $2", x, id)
+            # auto-committed on exit, rolled back on exception
+        """
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                yield conn
+
+    async def execute_in_tx(self, conn: Any, query: str, *args: Any) -> str:
+        """Execute a statement within an existing transaction connection."""
+        return await conn.execute(_translate_placeholders(query), *args)
+
+    async def fetchone_in_tx(self, conn: Any, query: str, *args: Any) -> dict[str, Any] | None:
+        """Fetch one row within an existing transaction connection."""
+        row = await conn.fetchrow(_translate_placeholders(query), *args)
+        return dict(row) if row else None
+
+    async def fetchall_in_tx(self, conn: Any, query: str, *args: Any) -> list[dict[str, Any]]:
+        """Fetch all rows within an existing transaction connection."""
+        rows = await conn.fetch(_translate_placeholders(query), *args)
+        return [dict(r) for r in rows]
 
     async def close(self) -> None:
         """Close the connection pool."""

@@ -282,6 +282,147 @@ class MonitorRepository(BaseRepository):
             session_id,
         )
 
+    # ── Async: Actions ──────────────────────────────────────────────────
+
+    async def async_save_action(
+        self,
+        action: dict,
+        category: str,
+        resources_json: str,
+        rollback_available: int,
+        rollback_action_json: str,
+        timestamp: int,
+    ) -> None:
+        """Persist an action report (async — uses asyncpg)."""
+        adb = await self.get_async_db()
+        await adb.execute(
+            """INSERT INTO actions
+               (id, finding_id, timestamp, category, tool, input, status,
+                before_state, after_state, error, reasoning, duration_ms,
+                rollback_available, rollback_action, resources, verification_status,
+                verification_evidence, verification_timestamp)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (id) DO UPDATE SET
+               status = EXCLUDED.status, after_state = EXCLUDED.after_state,
+               error = EXCLUDED.error, duration_ms = EXCLUDED.duration_ms,
+               verification_status = EXCLUDED.verification_status,
+               verification_evidence = EXCLUDED.verification_evidence,
+               verification_timestamp = EXCLUDED.verification_timestamp""",
+            action["id"],
+            action.get("findingId", ""),
+            timestamp,
+            category,
+            action.get("tool", ""),
+            json.dumps(action.get("input", {})),
+            action.get("status", ""),
+            action.get("beforeState", ""),
+            action.get("afterState", ""),
+            action.get("error"),
+            action.get("reasoning", ""),
+            action.get("durationMs", 0),
+            rollback_available,
+            rollback_action_json,
+            resources_json,
+            action.get("verificationStatus"),
+            action.get("verificationEvidence"),
+            action.get("verificationTimestamp"),
+        )
+
+    async def async_update_action_verification(
+        self, action_id: str, status: str, evidence: str, timestamp: int
+    ) -> None:
+        """Persist verification result for an action (async — uses asyncpg)."""
+        adb = await self.get_async_db()
+        await adb.execute(
+            """UPDATE actions
+               SET verification_status = ?, verification_evidence = ?, verification_timestamp = ?
+               WHERE id = ?""",
+            status,
+            evidence,
+            timestamp,
+            action_id,
+        )
+
+    async def async_mark_finding_actions_resolved(self, finding_id: str) -> int:
+        """Mark all actions for a finding as resolved (async — uses asyncpg). Returns count updated."""
+        adb = await self.get_async_db()
+        result = await adb.execute(
+            "UPDATE actions SET outcome = 'resolved' WHERE finding_id = ? AND outcome = 'unknown'",
+            finding_id,
+        )
+        # asyncpg execute returns status string like 'UPDATE N'
+        try:
+            return int(result.split()[-1]) if result else 0
+        except (ValueError, IndexError, AttributeError):
+            return 0
+
+    # ── Async: Investigations ───────────────────────────────────────────
+
+    async def async_save_investigation(
+        self,
+        report: dict,
+        finding: dict,
+        timestamp: int,
+    ) -> None:
+        """Persist a proactive investigation report (async — uses asyncpg)."""
+        adb = await self.get_async_db()
+        await adb.execute(
+            """INSERT INTO investigations
+               (id, finding_id, timestamp, category, severity, status, summary,
+                suspected_cause, recommended_fix, confidence, error, resources,
+                evidence, alternatives_considered)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (id) DO UPDATE SET
+               status = EXCLUDED.status, summary = EXCLUDED.summary,
+               suspected_cause = EXCLUDED.suspected_cause,
+               recommended_fix = EXCLUDED.recommended_fix,
+               confidence = EXCLUDED.confidence, error = EXCLUDED.error""",
+            report.get("id"),
+            report.get("findingId", ""),
+            timestamp,
+            finding.get("category", ""),
+            finding.get("severity", ""),
+            report.get("status", ""),
+            report.get("summary", ""),
+            report.get("suspected_cause", "") or report.get("suspectedCause", ""),
+            report.get("recommended_fix", "") or report.get("recommendedFix", ""),
+            float(report.get("confidence") or 0.0),
+            report.get("error"),
+            json.dumps(finding.get("resources", [])),
+            json.dumps(report.get("evidence", [])),
+            json.dumps(report.get("alternatives_considered", []) or report.get("alternativesConsidered", [])),
+        )
+
+    async def async_get_investigation_by_finding_id(self, finding_id: str) -> dict | None:
+        """Get investigation id and confidence for a finding (async — uses asyncpg)."""
+        adb = await self.get_async_db()
+        return await adb.fetchone("SELECT id, confidence FROM investigations WHERE finding_id = ?", finding_id)
+
+    async def async_update_investigation_confidence(self, investigation_id: str, confidence: float) -> None:
+        """Update the confidence score of an investigation (async — uses asyncpg)."""
+        adb = await self.get_async_db()
+        await adb.execute("UPDATE investigations SET confidence = ? WHERE id = ?", confidence, investigation_id)
+
+    # ── Async: Handoffs ─────────────────────────────────────────────────
+
+    async def async_get_pending_handoffs(self, cutoff: int) -> list[dict]:
+        """Return pending handoff context_entries since cutoff timestamp (async — uses asyncpg)."""
+        adb = await self.get_async_db()
+        return await adb.fetchall(
+            "SELECT * FROM context_entries WHERE category = ? AND timestamp > ? ORDER BY timestamp DESC LIMIT 5",
+            "handoff_request",
+            cutoff,
+        )
+
+    async def async_delete_processed_handoffs(self, cutoff: int) -> None:
+        """Delete processed handoff requests (async — uses asyncpg)."""
+        adb = await self.get_async_db()
+        await adb.execute(
+            "DELETE FROM context_entries WHERE category = ? AND timestamp > ?",
+            "handoff_request",
+            cutoff,
+        )
+
     # ── Handoffs ─────────────────────────────────────────────────────────
 
     def get_pending_handoffs(self, cutoff: int) -> list[dict]:
@@ -414,6 +555,17 @@ class MonitorRepository(BaseRepository):
             "metrics_impact, confidence, generated_at "
             "FROM postmortems ORDER BY generated_at DESC LIMIT ?",
             (limit,),
+        )
+
+    async def async_fetch_postmortems(self, limit: int) -> list[dict]:
+        """Async version: list postmortems newest first."""
+        db = await self.get_async_db()
+        return await db.fetchall(
+            "SELECT id, incident_type, plan_id, timeline, root_cause, "
+            "contributing_factors, blast_radius, actions_taken, prevention, "
+            "metrics_impact, confidence, generated_at "
+            "FROM postmortems ORDER BY generated_at DESC LIMIT ?",
+            limit,
         )
 
     # ── Fix strategy analytics (monitor_rest.py) ──────────────────────────────
@@ -610,6 +762,11 @@ class MonitorRepository(BaseRepository):
     def fetch_active_findings(self) -> list[dict]:
         """Fetch active (unresolved) findings for topology overlay."""
         return self.db.fetchall("SELECT category, severity, resources FROM findings WHERE resolved = 0")
+
+    async def async_fetch_active_findings(self) -> list[dict]:
+        """Async version: fetch active (unresolved) findings for topology overlay."""
+        db = await self.get_async_db()
+        return await db.fetchall("SELECT category, severity, resources FROM findings WHERE resolved = 0")
 
     def fetch_recent_deployments(self, minutes: int = 15) -> list[dict]:
         """Fetch recent deployment audit findings."""

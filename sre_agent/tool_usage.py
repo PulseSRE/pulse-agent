@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -120,6 +121,48 @@ def record_tool_call(
         logger.debug(f"Failed to record tool call: {e}")
 
 
+async def record_tool_call_async(
+    *,
+    session_id: str,
+    turn_number: int,
+    agent_mode: str,
+    tool_name: str,
+    tool_category: str | None,
+    input_data: dict | None,
+    status: str,
+    error_message: str | None,
+    error_category: str | None,
+    duration_ms: int,
+    result_bytes: int,
+    requires_confirmation: bool,
+    was_confirmed: bool | None,
+    tool_source: str = "native",
+) -> None:
+    """Async version of record_tool_call. Fire-and-forget."""
+    try:
+        from .repositories.tool_usage_repo import get_tool_usage_repo
+
+        sanitized = sanitize_input(input_data)
+        await get_tool_usage_repo().async_insert_tool_call(
+            session_id=session_id,
+            turn_number=turn_number,
+            agent_mode=agent_mode,
+            tool_name=tool_name,
+            tool_category=tool_category,
+            input_summary=json.dumps(sanitized) if sanitized is not None else None,
+            status=status,
+            error_message=error_message,
+            error_category=error_category,
+            duration_ms=duration_ms,
+            result_bytes=result_bytes,
+            requires_confirmation=requires_confirmation,
+            was_confirmed=was_confirmed,
+            tool_source=tool_source,
+        )
+    except Exception as e:
+        logger.debug("Failed to async record tool call: %s", e)
+
+
 def build_tool_result_handler(session_id: str, agent_mode: str, write_tools: set[str] | None = None):
     """Build an on_tool_result callback that records each tool call to the DB.
 
@@ -140,7 +183,7 @@ def build_tool_result_handler(session_id: str, agent_mode: str, write_tools: set
                 mcp_names = set()
             tool_source = "mcp" if tool_name in mcp_names else "native"
 
-            record_tool_call(
+            call_kwargs = dict(
                 session_id=session_id,
                 turn_number=info.get("turn_number", 0),
                 agent_mode=agent_mode,
@@ -156,6 +199,11 @@ def build_tool_result_handler(session_id: str, agent_mode: str, write_tools: set
                 was_confirmed=info.get("was_confirmed"),
                 tool_source=tool_source,
             )
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(record_tool_call_async(**call_kwargs))
+            except RuntimeError:
+                record_tool_call(**call_kwargs)
         except Exception:
             logger.debug("Tool result recording failed", exc_info=True)
 

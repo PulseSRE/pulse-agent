@@ -80,6 +80,17 @@ class InboxRepository(BaseRepository):
             params,
         )
 
+    async def async_query_items(
+        self,
+        where: str,
+        params: tuple[Any, ...],
+    ) -> list[Any]:
+        db = await self.get_async_db()
+        return await db.fetchall(
+            f"SELECT * FROM inbox_items WHERE {where} ORDER BY priority_score DESC LIMIT ? OFFSET ?",
+            *params,
+        )
+
     def get_stats_rows(self, now: int) -> list[Any]:
         return self.db.fetchall(
             """SELECT status, COUNT(*) as cnt,
@@ -88,6 +99,17 @@ class InboxRepository(BaseRepository):
             WHERE (snoozed_until IS NULL OR snoozed_until <= ?)
             GROUP BY status""",
             (now,),
+        )
+
+    async def async_get_stats_rows(self, now: int) -> list[Any]:
+        db = await self.get_async_db()
+        return await db.fetchall(
+            """SELECT status, COUNT(*) as cnt,
+            COUNT(DISTINCT correlation_key) as unique_cnt
+            FROM inbox_items
+            WHERE (snoozed_until IS NULL OR snoozed_until <= ?)
+            GROUP BY status""",
+            now,
         )
 
     def fetch_stale_agent_reviewing(self, stale_cutoff: int) -> list[Any]:

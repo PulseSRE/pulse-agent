@@ -219,7 +219,7 @@ async def list_postmortems(
     try:
         from ..repositories import get_monitor_repo
 
-        rows = get_monitor_repo().fetch_postmortems(limit)
+        rows = await get_monitor_repo().async_fetch_postmortems(limit)
 
         results = []
         for row in rows:

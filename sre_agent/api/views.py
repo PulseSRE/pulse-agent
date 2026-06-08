@@ -45,9 +45,11 @@ async def rest_list_views(
     exclude_status: str | None = Query(None),
 ):
     """List views with optional filtering by type, visibility, and status."""
-    from .. import db
+    from ..repositories.view_repo import get_view_repo
 
-    views = db.list_views(owner, view_type=view_type, visibility=visibility, exclude_status=exclude_status)
+    views = await get_view_repo().async_list_views(
+        owner, view_type=view_type, visibility=visibility, exclude_status=exclude_status
+    )
     return {"views": views or [], "owner": owner}
 
 

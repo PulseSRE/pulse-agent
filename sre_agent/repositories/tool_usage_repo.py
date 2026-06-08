@@ -63,6 +63,48 @@ class ToolUsageRepository(BaseRepository):
         )
         self.db.commit()
 
+    async def async_insert_tool_call(
+        self,
+        *,
+        session_id: str,
+        turn_number: int,
+        agent_mode: str,
+        tool_name: str,
+        tool_category: str | None,
+        input_summary: str | None,
+        status: str,
+        error_message: str | None,
+        error_category: str | None,
+        duration_ms: int,
+        result_bytes: int,
+        requires_confirmation: bool,
+        was_confirmed: bool | None,
+        tool_source: str = "native",
+    ) -> None:
+        """Async version of insert_tool_call for use in async contexts."""
+        db = await self.get_async_db()
+        await db.execute(
+            "INSERT INTO tool_usage "
+            "(session_id, turn_number, agent_mode, tool_name, tool_category, "
+            "input_summary, status, error_message, error_category, "
+            "duration_ms, result_bytes, requires_confirmation, was_confirmed, tool_source) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            session_id,
+            turn_number,
+            agent_mode,
+            tool_name,
+            tool_category,
+            input_summary,
+            status,
+            error_message,
+            error_category,
+            duration_ms,
+            result_bytes,
+            requires_confirmation,
+            was_confirmed,
+            tool_source,
+        )
+
     def upsert_turn(
         self,
         *,

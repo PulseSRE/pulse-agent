@@ -67,7 +67,7 @@ async def get_topology(
         from ..repositories import get_monitor_repo
 
         _topo_repo = get_monitor_repo()
-        active_findings = _topo_repo.fetch_active_findings()
+        active_findings = await _topo_repo.async_fetch_active_findings()
         for f in active_findings or []:
             sev = f.get("severity", "")
             for res_str in (f.get("resources") or "").split(","):

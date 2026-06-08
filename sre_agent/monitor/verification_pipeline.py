@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from ..config import get_settings
 from ..repositories.monitor_repo import get_monitor_repo
-from .actions import update_action_verification
+from .actions import update_action_verification as _sync_update_action_verification
 from .findings import _ts
 
 if TYPE_CHECKING:
@@ -81,19 +81,23 @@ async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -
             "timestamp": _ts(),
         }
         await monitor._broadcast_raw(verification_report)
-        update_action_verification(action_id, status, evidence)
+        try:
+            repo = get_monitor_repo()
+            await repo.async_update_action_verification(action_id, status, evidence, _ts())
+        except Exception:
+            _sync_update_action_verification(action_id, status, evidence)
 
         try:
             repo = get_monitor_repo()
             finding_id = payload.get("finding_id", "")
             if finding_id:
-                inv = repo.get_investigation_by_finding_id(finding_id)
+                inv = await repo.async_get_investigation_by_finding_id(finding_id)
                 if inv:
                     if status == "verified":
                         new_conf = min(1.0, (inv["confidence"] or 0.5) + 0.05)
                     else:
                         new_conf = max(0.0, (inv["confidence"] or 0.5) - 0.1)
-                    repo.update_investigation_confidence(inv["id"], new_conf)
+                    await repo.async_update_investigation_confidence(inv["id"], new_conf)
         except Exception as e:
             logger.debug("Failed to update investigation confidence: %s", e)
 

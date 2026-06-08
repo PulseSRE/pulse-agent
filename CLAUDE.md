@@ -191,7 +191,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `quality_engine.py` — unified dashboard validation + quality scoring (includes `critique_view` moved from view_critic.py)
 - `db.py` — Database class (PostgreSQL pool, `?`→`%s` translation) + thin wrappers delegating to repositories
 - `repositories/` — domain-specific DB access: `ViewRepository` (27 methods), `InboxRepository` (24 methods), `MonitorRepository` (17 methods), `ToolUsageRepository`, `IntelligenceRepository`, `PromptLogRepository`, `ChatHistoryRepository`, `SelectorLearningRepository`. All extend `BaseRepository` with lazy `self.db` property.
-- `async_db.py` — `AsyncDatabase` with asyncpg pool (`$1` placeholders). JSONB operators (`?|`, `?&`, `@?`) preserved by regex; for bare JSONB `?` (key-existence), prefer `jsonb_exists()` to avoid ambiguity.
+- `async_db.py` — `AsyncDatabase` with asyncpg pool (`$1` placeholders), transaction context manager (`async with db.transaction() as conn`), connection-scoped helpers (`execute_in_tx`, `fetchone_in_tx`, `fetchall_in_tx`). Used by tool_usage (fire-and-forget recording), monitor repo (8 async methods), inbox/views REST endpoints. JSONB operators preserved by regex.
 - `k8s_client.py` — lazy-initialized K8s client with `safe()` wrapper
 - `context_bus.py` — shared context bus for cross-agent communication
 - `orchestrator.py` — intent classification + typo correction + agent routing for `/ws/agent`

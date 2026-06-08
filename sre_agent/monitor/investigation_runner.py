@@ -363,6 +363,15 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
             report["error"] = str(e)
 
         await monitor._broadcast_raw(report)
-        from .actions import save_investigation
+        try:
+            from ..repositories.monitor_repo import get_monitor_repo
 
-        save_investigation(report, finding)
+            await get_monitor_repo().async_save_investigation(
+                report=report,
+                finding=finding,
+                timestamp=report.get("timestamp", _ts()),
+            )
+        except Exception:
+            from .actions import save_investigation
+
+            save_investigation(report, finding)
