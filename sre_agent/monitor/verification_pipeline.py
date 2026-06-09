@@ -8,6 +8,13 @@ from typing import TYPE_CHECKING
 
 from ..config import get_settings
 from ..repositories.monitor_repo import get_monitor_repo
+
+try:
+    import asyncpg
+
+    _ASYNC_DB_ERRORS: tuple[type[Exception], ...] = (asyncpg.PostgresError, OSError, ConnectionError)
+except ImportError:
+    _ASYNC_DB_ERRORS = (OSError, ConnectionError)
 from .actions import update_action_verification as _sync_update_action_verification
 from .findings import _ts
 
@@ -84,7 +91,7 @@ async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -
         try:
             repo = get_monitor_repo()
             await repo.async_update_action_verification(action_id, status, evidence, _ts())
-        except Exception:
+        except _ASYNC_DB_ERRORS:
             _sync_update_action_verification(action_id, status, evidence)
 
         try:

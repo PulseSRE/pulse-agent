@@ -9,6 +9,13 @@ import time
 import uuid
 from typing import TYPE_CHECKING
 
+try:
+    import asyncpg
+
+    _ASYNC_DB_ERRORS: tuple[type[Exception], ...] = (asyncpg.PostgresError, OSError, ConnectionError)
+except ImportError:
+    _ASYNC_DB_ERRORS = (OSError, ConnectionError)
+
 from ..config import get_settings
 from ..repositories.monitor_repo import get_monitor_repo
 from .confidence import _sanitize_for_prompt
@@ -28,7 +35,7 @@ async def process_handoffs(monitor: ClusterMonitor) -> None:
     cutoff = int(time.time() * 1000) - 300_000
     try:
         rows = await repo.async_get_pending_handoffs(cutoff)
-    except Exception:
+    except _ASYNC_DB_ERRORS:
         try:
             rows = repo.get_pending_handoffs(cutoff)
         except Exception as e:
@@ -86,7 +93,7 @@ async def process_handoffs(monitor: ClusterMonitor) -> None:
     if rows:
         try:
             await repo.async_delete_processed_handoffs(cutoff)
-        except Exception:
+        except _ASYNC_DB_ERRORS:
             try:
                 repo.delete_processed_handoffs(cutoff)
             except Exception as e:

@@ -9,6 +9,14 @@ import uuid
 from typing import TYPE_CHECKING
 
 from ..config import get_settings
+
+try:
+    import asyncpg
+
+    _ASYNC_DB_ERRORS: tuple[type[Exception], ...] = (asyncpg.PostgresError, OSError, ConnectionError)
+except ImportError:
+    _ASYNC_DB_ERRORS = (OSError, ConnectionError)
+
 from .confidence import _finding_key
 from .findings import _ts
 from .investigations import _run_proactive_investigation, _run_security_followup
@@ -371,7 +379,7 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
                 finding=finding,
                 timestamp=report.get("timestamp", _ts()),
             )
-        except Exception:
+        except _ASYNC_DB_ERRORS:
             from .actions import save_investigation
 
             save_investigation(report, finding)

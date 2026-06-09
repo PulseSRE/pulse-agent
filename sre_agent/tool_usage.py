@@ -5,8 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import weakref
 
 logger = logging.getLogger("pulse_agent.tool_usage")
+
+_pending_record_tasks: weakref.WeakSet = weakref.WeakSet()
 
 # Secret field names to redact
 _SECRET_FIELDS = {
@@ -201,7 +204,9 @@ def build_tool_result_handler(session_id: str, agent_mode: str, write_tools: set
             )
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(record_tool_call_async(**call_kwargs))
+                task = loop.create_task(record_tool_call_async(**call_kwargs))
+                _pending_record_tasks.add(task)
+                task.add_done_callback(_pending_record_tasks.discard)
             except RuntimeError:
                 record_tool_call(**call_kwargs)
         except Exception:
