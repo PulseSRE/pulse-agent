@@ -59,6 +59,13 @@ class TestInboxListEndpoint:
         items = resp.json()["items"]
         assert all(i["item_type"] == "task" for i in items)
 
+    def test_list_includes_current_user(self, client, auth_headers):
+        resp = client.get("/inbox", headers=auth_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "current_user" in data
+        assert data["current_user"] == "test-admin"
+
     def test_list_requires_auth(self, client):
         resp = client.get("/inbox")
         assert resp.status_code == 401

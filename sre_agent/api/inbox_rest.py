@@ -46,7 +46,7 @@ async def rest_list_inbox(
     elif claimed_by == "__unclaimed__":
         resolved_claimed = "__null__"
 
-    return await async_list_inbox_items(
+    result = await async_list_inbox_items(
         item_type=type,
         status=status,
         namespace=namespace,
@@ -56,6 +56,8 @@ async def rest_list_inbox(
         limit=limit,
         offset=offset,
     )
+    result["current_user"] = owner
+    return result
 
 
 @router.get("/inbox/stats")
