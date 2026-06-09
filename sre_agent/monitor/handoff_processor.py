@@ -9,13 +9,7 @@ import time
 import uuid
 from typing import TYPE_CHECKING
 
-try:
-    import asyncpg
-
-    _ASYNC_DB_ERRORS: tuple[type[Exception], ...] = (asyncpg.PostgresError, OSError, ConnectionError)
-except ImportError:
-    _ASYNC_DB_ERRORS = (OSError, ConnectionError)
-
+from ..async_db import ASYNC_DB_ERRORS as _ASYNC_DB_ERRORS
 from ..config import get_settings
 from ..repositories.monitor_repo import get_monitor_repo
 from .confidence import _sanitize_for_prompt

@@ -1,7 +1,7 @@
 """Tests for narrowed async DB exception handling and fire-and-forget task tracking.
 
 Covers:
-- _ASYNC_DB_ERRORS tuple in handoff_processor, investigation_runner, verification_pipeline
+- ASYNC_DB_ERRORS canonical tuple in async_db (re-exported by monitor modules)
 - _pending_record_tasks WeakSet in tool_usage
 - Fallback from async to sync on expected DB errors only
 - Unexpected errors propagate instead of silently falling back
@@ -15,39 +15,51 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+def _run(coro):
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
 class TestAsyncDbErrorsTuple:
-    """Verify _ASYNC_DB_ERRORS contains the right exception types."""
+    """Verify ASYNC_DB_ERRORS is canonical and re-exported consistently."""
 
-    def test_handoff_processor_includes_asyncpg(self):
-        from sre_agent.monitor.handoff_processor import _ASYNC_DB_ERRORS
+    def test_canonical_tuple_in_async_db(self):
+        from sre_agent.async_db import ASYNC_DB_ERRORS
 
-        assert OSError in _ASYNC_DB_ERRORS
-        assert ConnectionError in _ASYNC_DB_ERRORS
+        assert OSError in ASYNC_DB_ERRORS
+        # ConnectionError is a subclass of OSError — caught implicitly
+        assert issubclass(ConnectionError, OSError)
         try:
             import asyncpg
 
-            assert asyncpg.PostgresError in _ASYNC_DB_ERRORS
+            assert asyncpg.PostgresError in ASYNC_DB_ERRORS
         except ImportError:
-            assert len(_ASYNC_DB_ERRORS) == 2
+            assert len(ASYNC_DB_ERRORS) == 1
 
-    def test_investigation_runner_includes_asyncpg(self):
-        from sre_agent.monitor.investigation_runner import _ASYNC_DB_ERRORS
+    def test_all_modules_share_same_tuple(self):
+        from sre_agent.async_db import ASYNC_DB_ERRORS
+        from sre_agent.monitor.handoff_processor import _ASYNC_DB_ERRORS as HP_ERRORS
+        from sre_agent.monitor.investigation_runner import _ASYNC_DB_ERRORS as IR_ERRORS
+        from sre_agent.monitor.verification_pipeline import _ASYNC_DB_ERRORS as VP_ERRORS
 
-        assert OSError in _ASYNC_DB_ERRORS
-        assert ConnectionError in _ASYNC_DB_ERRORS
-
-    def test_verification_pipeline_includes_asyncpg(self):
-        from sre_agent.monitor.verification_pipeline import _ASYNC_DB_ERRORS
-
-        assert OSError in _ASYNC_DB_ERRORS
-        assert ConnectionError in _ASYNC_DB_ERRORS
+        assert HP_ERRORS is ASYNC_DB_ERRORS
+        assert IR_ERRORS is ASYNC_DB_ERRORS
+        assert VP_ERRORS is ASYNC_DB_ERRORS
 
     def test_does_not_include_generic_exception(self):
-        from sre_agent.monitor.handoff_processor import _ASYNC_DB_ERRORS
+        from sre_agent.async_db import ASYNC_DB_ERRORS
 
-        assert Exception not in _ASYNC_DB_ERRORS
-        assert RuntimeError not in _ASYNC_DB_ERRORS
-        assert ValueError not in _ASYNC_DB_ERRORS
+        assert Exception not in ASYNC_DB_ERRORS
+        assert RuntimeError not in ASYNC_DB_ERRORS
+        assert ValueError not in ASYNC_DB_ERRORS
+
+    def test_catches_connection_error_via_oserror(self):
+        from sre_agent.async_db import ASYNC_DB_ERRORS
+
+        assert issubclass(ConnectionError, tuple(ASYNC_DB_ERRORS))
 
 
 class TestHandoffProcessorFallback:
@@ -60,60 +72,42 @@ class TestHandoffProcessorFallback:
         return m
 
     def test_falls_back_to_sync_on_connection_error(self, mock_monitor):
+        from sre_agent.monitor.handoff_processor import process_handoffs
+
         mock_repo = MagicMock()
         mock_repo.async_get_pending_handoffs = AsyncMock(side_effect=ConnectionError("refused"))
         mock_repo.get_pending_handoffs = MagicMock(return_value=[])
 
         with patch("sre_agent.monitor.handoff_processor.get_monitor_repo", return_value=mock_repo):
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(
-                    __import__("sre_agent.monitor.handoff_processor", fromlist=["process_handoffs"]).process_handoffs(
-                        mock_monitor
-                    )
-                )
-            finally:
-                loop.close()
+            _run(process_handoffs(mock_monitor))
 
         mock_repo.get_pending_handoffs.assert_called_once()
 
     def test_falls_back_to_sync_on_os_error(self, mock_monitor):
+        from sre_agent.monitor.handoff_processor import process_handoffs
+
         mock_repo = MagicMock()
         mock_repo.async_get_pending_handoffs = AsyncMock(side_effect=OSError("broken pipe"))
         mock_repo.get_pending_handoffs = MagicMock(return_value=[])
 
         with patch("sre_agent.monitor.handoff_processor.get_monitor_repo", return_value=mock_repo):
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(
-                    __import__("sre_agent.monitor.handoff_processor", fromlist=["process_handoffs"]).process_handoffs(
-                        mock_monitor
-                    )
-                )
-            finally:
-                loop.close()
+            _run(process_handoffs(mock_monitor))
 
         mock_repo.get_pending_handoffs.assert_called_once()
 
     def test_does_not_fall_back_on_value_error(self, mock_monitor):
-        """Non-DB errors should NOT silently fall back to sync."""
         from sre_agent.monitor.handoff_processor import process_handoffs
 
         mock_repo = MagicMock()
         mock_repo.async_get_pending_handoffs = AsyncMock(side_effect=ValueError("bad data"))
 
         with patch("sre_agent.monitor.handoff_processor.get_monitor_repo", return_value=mock_repo):
-            loop = asyncio.new_event_loop()
-            try:
-                with pytest.raises(ValueError, match="bad data"):
-                    loop.run_until_complete(process_handoffs(mock_monitor))
-            finally:
-                loop.close()
+            with pytest.raises(ValueError, match="bad data"):
+                _run(process_handoffs(mock_monitor))
 
         mock_repo.get_pending_handoffs.assert_not_called()
 
     def test_cleanup_falls_back_on_connection_error(self, mock_monitor):
-        """Delete step also falls back to sync on _ASYNC_DB_ERRORS."""
         from sre_agent.monitor.handoff_processor import process_handoffs
 
         mock_repo = MagicMock()
@@ -136,11 +130,7 @@ class TestHandoffProcessorFallback:
                 return_value={},
             ),
         ):
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(process_handoffs(mock_monitor))
-            finally:
-                loop.close()
+            _run(process_handoffs(mock_monitor))
 
         mock_repo.delete_processed_handoffs.assert_called_once()
 
@@ -148,10 +138,10 @@ class TestHandoffProcessorFallback:
 class TestInvestigationRunnerFallback:
     """Verify investigation_runner falls back to sync save on _ASYNC_DB_ERRORS."""
 
-    def test_save_investigation_falls_back_on_connection_error(self):
+    def test_catches_db_errors(self):
         from sre_agent.monitor.investigation_runner import _ASYNC_DB_ERRORS
 
-        assert ConnectionError in _ASYNC_DB_ERRORS
+        assert issubclass(ConnectionError, tuple(_ASYNC_DB_ERRORS))
         assert OSError in _ASYNC_DB_ERRORS
 
     def test_unexpected_error_not_in_tuple(self):
@@ -164,21 +154,24 @@ class TestInvestigationRunnerFallback:
 class TestVerificationPipelineFallback:
     """Verify verification_pipeline falls back to sync on _ASYNC_DB_ERRORS."""
 
-    def test_falls_back_to_sync_update_on_connection_error(self):
-        from sre_agent.monitor.verification_pipeline import process_verifications
-
-        mock_monitor = MagicMock()
-        mock_monitor._pending_verifications = {
-            "act-1": {
+    def _make_monitor(self, action_id, finding_id):
+        m = MagicMock()
+        m._pending_verifications = {
+            action_id: {
                 "target_scan": 0,
                 "category": "crashloop",
                 "resources": [{"kind": "Pod", "namespace": "ns1", "name": "web-1"}],
-                "finding_id": "f-1",
+                "finding_id": finding_id,
             }
         }
-        mock_monitor._scan_counter = 1
-        mock_monitor._broadcast_raw = AsyncMock()
+        m._scan_counter = 1
+        m._broadcast_raw = AsyncMock()
+        return m
 
+    def test_falls_back_to_sync_update_on_connection_error(self):
+        from sre_agent.monitor.verification_pipeline import process_verifications
+
+        mock_monitor = self._make_monitor("act-1", "f-1")
         mock_repo = MagicMock()
         mock_repo.async_update_action_verification = AsyncMock(side_effect=ConnectionError("refused"))
         mock_repo.async_get_investigation_by_finding_id = AsyncMock(return_value=None)
@@ -187,11 +180,7 @@ class TestVerificationPipelineFallback:
             patch("sre_agent.monitor.verification_pipeline.get_monitor_repo", return_value=mock_repo),
             patch("sre_agent.monitor.verification_pipeline._sync_update_action_verification") as mock_sync,
         ):
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(process_verifications(mock_monitor, []))
-            finally:
-                loop.close()
+            _run(process_verifications(mock_monitor, []))
 
         mock_sync.assert_called_once()
         args = mock_sync.call_args[0]
@@ -202,28 +191,13 @@ class TestVerificationPipelineFallback:
     def test_does_not_fall_back_on_runtime_error(self):
         from sre_agent.monitor.verification_pipeline import process_verifications
 
-        mock_monitor = MagicMock()
-        mock_monitor._pending_verifications = {
-            "act-2": {
-                "target_scan": 0,
-                "category": "crashloop",
-                "resources": [{"kind": "Pod", "namespace": "ns1", "name": "web-2"}],
-                "finding_id": "f-2",
-            }
-        }
-        mock_monitor._scan_counter = 1
-        mock_monitor._broadcast_raw = AsyncMock()
-
+        mock_monitor = self._make_monitor("act-2", "f-2")
         mock_repo = MagicMock()
         mock_repo.async_update_action_verification = AsyncMock(side_effect=RuntimeError("unexpected"))
 
         with patch("sre_agent.monitor.verification_pipeline.get_monitor_repo", return_value=mock_repo):
-            loop = asyncio.new_event_loop()
-            try:
-                with pytest.raises(RuntimeError, match="unexpected"):
-                    loop.run_until_complete(process_verifications(mock_monitor, []))
-            finally:
-                loop.close()
+            with pytest.raises(RuntimeError, match="unexpected"):
+                _run(process_verifications(mock_monitor, []))
 
 
 class TestPendingRecordTasks:
@@ -243,7 +217,6 @@ class TestPendingRecordTasks:
 
         async def run():
             original_create_task = asyncio.get_running_loop().create_task
-
             tasks_created = []
 
             def tracking_create_task(coro, **kwargs):
@@ -274,14 +247,9 @@ class TestPendingRecordTasks:
                     await tasks_created[0]
                     assert tasks_created[0] not in _pending_record_tasks
 
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(run())
-        finally:
-            loop.close()
+        _run(run())
 
     def test_handler_sync_fallback_without_event_loop(self):
-        """When no event loop is running, handler falls back to sync record_tool_call."""
         from sre_agent.tool_usage import build_tool_result_handler
 
         handler = build_tool_result_handler("test-sess", "sre", set())
@@ -299,7 +267,6 @@ class TestPendingRecordTasks:
             mock_sync.assert_called_once()
 
     def test_done_callback_removes_from_weakset(self):
-        """The done callback properly discards the task from _pending_record_tasks."""
         from sre_agent.tool_usage import _pending_record_tasks
 
         async def run():
@@ -311,8 +278,4 @@ class TestPendingRecordTasks:
             await asyncio.sleep(0)
             assert task not in _pending_record_tasks
 
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(run())
-        finally:
-            loop.close()
+        _run(run())

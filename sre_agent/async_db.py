@@ -27,6 +27,13 @@ from typing import Any
 
 logger = logging.getLogger("pulse_agent.async_db")
 
+try:
+    import asyncpg
+
+    ASYNC_DB_ERRORS: tuple[type[Exception], ...] = (asyncpg.PostgresError, OSError)
+except ImportError:
+    ASYNC_DB_ERRORS = (OSError,)
+
 
 _PLACEHOLDER_RE = re.compile(r"(?<![@?])\?(?![?|&])")
 

@@ -8,15 +8,8 @@ import time
 import uuid
 from typing import TYPE_CHECKING
 
+from ..async_db import ASYNC_DB_ERRORS as _ASYNC_DB_ERRORS
 from ..config import get_settings
-
-try:
-    import asyncpg
-
-    _ASYNC_DB_ERRORS: tuple[type[Exception], ...] = (asyncpg.PostgresError, OSError, ConnectionError)
-except ImportError:
-    _ASYNC_DB_ERRORS = (OSError, ConnectionError)
-
 from .confidence import _finding_key
 from .findings import _ts
 from .investigations import _run_proactive_investigation, _run_security_followup
