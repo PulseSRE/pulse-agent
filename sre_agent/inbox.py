@@ -75,14 +75,14 @@ def record_interaction(
 # All item types share the same transition map.
 
 _TRANSITIONS: dict[str, list[str]] = {
-    "new": ["agent_reviewing", "triaged", "agent_cleared", "agent_review_failed"],
+    "new": ["agent_reviewing", "triaged", "claimed", "agent_cleared", "agent_review_failed"],
     "agent_reviewing": ["triaged", "agent_cleared", "agent_review_failed"],
-    "agent_review_failed": ["new", "triaged", "archived"],
+    "agent_review_failed": ["new", "triaged", "claimed", "archived"],
     "triaged": ["claimed", "in_progress", "new"],
     "claimed": ["in_progress", "resolved", "archived", "new"],
     "in_progress": ["resolved", "archived", "new"],
     "resolved": ["archived", "new"],
-    "agent_cleared": ["new", "triaged", "archived"],
+    "agent_cleared": ["new", "triaged", "claimed", "archived"],
 }
 
 VALID_TRANSITIONS: dict[str, dict[str, list[str]]] = {
@@ -93,6 +93,10 @@ VALID_TRANSITIONS: dict[str, dict[str, list[str]]] = {
 def _get_transitions(item_type: str) -> dict[str, list[str]]:
     return VALID_TRANSITIONS.get(item_type, VALID_TRANSITIONS["task"])
 
+
+_CLAIMABLE_STATES = frozenset(s for s, targets in _TRANSITIONS.items() if "claimed" in targets)
+
+SYSTEM_CREATORS = frozenset(("system:monitor", "system:agent"))
 
 SEVERITY_WEIGHTS = {"critical": 4, "warning": 2, "info": 1}
 AGE_BONUS_CAP = 2.0
@@ -344,7 +348,9 @@ async def async_list_inbox_items(
         where_parts.append("claimed_by = ?")
         params.append(claimed_by)
     if created_by == "__not_system__":
-        where_parts.append("created_by NOT IN ('system:monitor', 'system:agent')")
+        placeholders = ", ".join("?" for _ in SYSTEM_CREATORS)
+        where_parts.append(f"created_by NOT IN ({placeholders})")
+        params.extend(SYSTEM_CREATORS)
     elif created_by:
         where_parts.append("created_by = ?")
         params.append(created_by)
@@ -453,9 +459,9 @@ def claim_item(item_id: str, username: str) -> bool:
 
     now = int(time.time())
     current = item["status"]
-    if current in ("archived", "resolved"):
+    if current not in _CLAIMABLE_STATES and current != "claimed":
         return False
-    target_status = "claimed" if current in ("triaged", "new", "agent_review_failed", "agent_cleared") else current
+    target_status = "claimed" if current in _CLAIMABLE_STATES else current
 
     get_inbox_repo().update_claim_and_status(item_id, username, target_status, now)
 
