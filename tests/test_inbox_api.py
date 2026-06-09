@@ -181,6 +181,17 @@ class TestInboxActions:
         item = client.get(f"/inbox/{item_id}", headers=auth_headers).json()
         assert item["status"] == "resolved"
 
+    def test_claim_rejected_for_resolved_item(self, client, auth_headers):
+        create = client.post("/inbox", json={"title": "Resolve then claim"}, headers=auth_headers)
+        item_id = create.json()["id"]
+        client.post(f"/inbox/{item_id}/acknowledge", headers=auth_headers)
+        client.post(f"/inbox/{item_id}/claim", headers=auth_headers)
+        client.patch(f"/inbox/{item_id}", json={"status": "in_progress"}, headers=auth_headers)
+        client.post(f"/inbox/{item_id}/resolve", headers=auth_headers)
+
+        resp = client.post(f"/inbox/{item_id}/claim", headers=auth_headers)
+        assert resp.status_code in (400, 404)
+
     def test_pin(self, client, auth_headers):
         create = client.post("/inbox", json={"title": "Pin me"}, headers=auth_headers)
         item_id = create.json()["id"]

@@ -305,6 +305,7 @@ async def async_list_inbox_items(
     status: str | None = None,
     namespace: str | None = None,
     claimed_by: str | None = None,
+    created_by: str | None = None,
     severity: str | None = None,
     group_by: str | None = None,
     limit: int = 200,
@@ -342,6 +343,11 @@ async def async_list_inbox_items(
     elif claimed_by:
         where_parts.append("claimed_by = ?")
         params.append(claimed_by)
+    if created_by == "__not_system__":
+        where_parts.append("created_by NOT IN ('system:monitor', 'system:agent')")
+    elif created_by:
+        where_parts.append("created_by = ?")
+        params.append(created_by)
     if severity:
         where_parts.append("severity = ?")
         params.append(severity)
@@ -447,7 +453,9 @@ def claim_item(item_id: str, username: str) -> bool:
 
     now = int(time.time())
     current = item["status"]
-    target_status = "claimed" if current in ("triaged", "new") else current
+    if current in ("archived", "resolved"):
+        return False
+    target_status = "claimed" if current in ("triaged", "new", "agent_review_failed", "agent_cleared") else current
 
     get_inbox_repo().update_claim_and_status(item_id, username, target_status, now)
 

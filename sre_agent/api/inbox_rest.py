@@ -34,6 +34,7 @@ async def rest_list_inbox(
     status: str | None = Query(None),
     namespace: str | None = Query(None),
     claimed_by: str | None = Query(None),
+    created_by: str | None = Query(None),
     severity: str | None = Query(None),
     group_by: str | None = Query(None),
     limit: int = Query(200, ge=1, le=1000),
@@ -46,11 +47,16 @@ async def rest_list_inbox(
     elif claimed_by == "__unclaimed__":
         resolved_claimed = "__null__"
 
+    resolved_created = created_by
+    if created_by == "__user__":
+        resolved_created = "__not_system__"
+
     result = await async_list_inbox_items(
         item_type=type,
         status=status,
         namespace=namespace,
         claimed_by=resolved_claimed,
+        created_by=resolved_created,
         severity=severity,
         group_by=group_by,
         limit=limit,
