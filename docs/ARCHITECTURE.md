@@ -2,7 +2,7 @@
 
 Comprehensive architecture reference for Pulse Agent v2.7.1, Protocol v2.
 
-**Last updated:** 2026-08-07
+**Last updated:** 2026-06-26
 
 ---
 
@@ -23,7 +23,6 @@ Comprehensive architecture reference for Pulse Agent v2.7.1, Protocol v2.
 13. [Deployment Architecture](#13-deployment-architecture)
 14. [Communication Diagram](#14-communication-diagram)
 15. [Data Flow Diagrams](#15-data-flow-diagrams)
-    - [15b. Agent Intelligence Architecture](#15b-agent-intelligence-architecture) -- **the current, authoritative routing/orchestration design** (see note in §3)
 16. [Future Roadmap](#16-future-roadmap)
 17. [Architecture Decision Record](#17-architecture-decision-record)
 
@@ -75,16 +74,14 @@ React/TypeScript frontend (OpenShift Pulse) providing the user interface.
 ### Key Statistics
 
 
-| Metric           | Value                                                                    |
-| ---------------- | ------------------------------------------------------------------------ |
-| Tools            | 138 (102 native + 36 MCP) across 54 modules + MCP servers                |
-| Skills           | 7 (sre, security, view_designer, capacity_planner, plan_builder, postmortem, slo_management) |
-| Scanners         | 22 (13 reactive + 5 audit + 4 predictive trend)                          |
-| Tests            | 2,414                                                                    |
-| PromQL Recipes   | 83 across 17 categories                                                 |
-| Eval Scenarios   | 192 across 16 suites                                                     |
-| DB Tables        | 28 (migration v022)                                                      |
-| Protocol Version | 2                                                                        |
+| Metric           | Value                                                    |
+| ---------------- | -------------------------------------------------------- |
+| Tools            | 154 (118 native + 36 MCP) across 54 modules + MCP servers |
+| Scanners         | 23 (11 reactive + 5 audit + 1 SLO burn + 1 security posture + 5 predictive trend) |
+| Tests            | 2,432                                                    |
+| PromQL Recipes   | 83 across 16 categories                                  |
+| Eval Prompts     | 192                                                      |
+| Protocol Version | 2                                                        |
 
 
 ---
@@ -121,7 +118,7 @@ agent modes (SRE, Security, View Designer, Auto-routing). The function
 │         │ CLOSED / HALF_OPEN                                │
 │         ▼                                                   │
 │  ┌──────────────┐                                           │
-│  │ Harness:     │  138 tools -> 15-50 relevant tools         │
+│  │ Harness:     │  122 tools -> 15-50 relevant tools         │
 │  │ select_tools │  based on query keywords + agent mode     │
 │  └──────┬───────┘                                           │
 │         ▼                                                   │
@@ -146,7 +143,7 @@ agent modes (SRE, Security, View Designer, Auto-routing). The function
 │  │     │  Separate read vs write tool blocks │   │           │
 │  │     │                                     │   │           │
 │  │     │  READ tools: ThreadPoolExecutor     │   │           │
-│  │     │    (parallel, max_workers=4)        │   │           │
+│  │     │    (parallel, max_workers=2)        │   │           │
 │  │     │                                     │   │           │
 │  │     │  WRITE tools: sequential            │   │           │
 │  │     │    on_confirm() -> confirm_request  │   │           │
@@ -165,7 +162,7 @@ agent modes (SRE, Security, View Designer, Auto-routing). The function
 
 ### Tool Execution Model
 
-- **Read tools** execute in parallel via `ThreadPoolExecutor(max_workers=4)`.
+- **Read tools** execute in parallel via `ThreadPoolExecutor(max_workers=2)`.
   Each tool has a configurable timeout (default 30s via `PULSE_AGENT_TOOL_TIMEOUT`).
 - **Write tools** execute sequentially. Each write triggers a `confirm_request`
   sent to the UI with a JIT nonce. The agent thread blocks until the user
@@ -231,17 +228,7 @@ Data tables support 14 smart column renderers: `resource_name`, `namespace`,
 
 ## 3. Agent Modes and Orchestration
 
-> **Superseded by ORCA.** The design below (four hardcoded modes, pure
-> keyword scoring) predates the ORCA multi-signal skill selector, which is
-> what actually routes traffic today -- see
-> [§15b Agent Intelligence Architecture](#15b-agent-intelligence-architecture)
-> for the current design (7 skill packages, 6-channel weighted fusion,
-> learned routing weights, phased plan execution). This section is left
-> below as historical context for the routing primitives it still shares
-> (sticky sessions, hard pre-route keywords) rather than being deleted
-> outright, but treat §15b as authoritative for anything that conflicts.
-
-### Four Agent Modes (historical -- see note above)
+### Four Agent Modes
 
 The orchestrator (`sre_agent/orchestrator.py`) supports four modes, each with
 its own system prompt, tool set, and write permissions:
@@ -312,23 +299,20 @@ User: "Why are pods crashing in staging?"     -> sre (hard switch)
 
 ## 4. Tool System
 
-### 102 Native Tools (+ 36 MCP) Across 54 Modules
+### 122 Tools Across 36 Modules
 
 
 | Module   | File                          | Tools | Description                                                             |
 | -------- | ----------------------------- | ----- | ----------------------------------------------------------------------- |
-| K8s Core | `sre_agent/k8s_tools/`        | 42    | 12-file package (10 submodules + validators + `__init__`): pods, deployments, nodes, events, metrics, write ops |
+| K8s Core | `sre_agent/k8s_tools/`        | 41    | 11-module package: pods, deployments, nodes, events, metrics, write ops |
 | Security | `sre_agent/security_tools.py` | 9     | Pod security, RBAC, network policies, SCCs, secrets                     |
-| Fleet    | `sre_agent/fleet_tools.py`    | 7     | Multi-cluster tools via ACM                                             |
+| Fleet    | `sre_agent/fleet_tools.py`    | 5     | Multi-cluster tools via ACM                                             |
 | GitOps   | `sre_agent/gitops_tools.py`   | 6     | ArgoCD integration                                                      |
 | Predict  | `sre_agent/predict_tools.py`  | 3     | Quota forecasting, HPA analysis, right-sizing                           |
 | Timeline | `sre_agent/timeline_tools.py` | 1     | Incident event correlation                                              |
-| Git      | `sre_agent/git_tools.py`      | 2     | PR proposal generation                                                  |
+| Git      | `sre_agent/git_tools.py`      | 1     | PR proposal generation                                                  |
 | Handoff  | `sre_agent/handoff_tools.py`  | 2     | Cross-agent handoff (SRE <-> Security)                                  |
-| Views    | `sre_agent/view_tools.py`     | 10    | Dashboard CRUD, namespace_summary, cluster_metrics                      |
-| View Mutations | `sre_agent/view_mutations.py` | 5 | Typed widget mutations (dispatches to `mutations/` package)             |
-| Self     | `sre_agent/self_tools.py`     | 12    | Self-description, skill management (create/edit/delete/list), K8s API introspection -- previously undocumented here |
-| Inbox    | `sre_agent/inbox.py`          | 1     | `create_inbox_task` -- proactive task creation from agent findings      |
+| Views    | `sre_agent/view_tools.py`     | 20+   | Dashboard CRUD, namespace_summary, cluster_metrics                      |
 
 
 ### The `@beta_tool` Pattern
@@ -409,13 +393,6 @@ The harness groups tools into 8 categories for dynamic selection:
 
 ## 5. Harness and Prompt Optimization
 
-> **Note:** Tool *selection* (choosing which tools to offer Claude for a
-> given query) has moved to `skill_loader.py`/`skill_router.py` as part of
-> the ORCA skill system (see §15b and §3) -- `harness.py` no longer has a
-> `select_tools` function. `harness.py` today is prompt-utilities only:
-> prompt caching structure, cluster context injection, and component-hint
-> selection for whatever tools the skill system already picked.
-
 The Claude Harness (`sre_agent/harness.py`) is a set of optimizations enabled
 by default (`PULSE_AGENT_HARNESS=1`) that reduce cost, latency, and improve
 response quality.
@@ -434,7 +411,7 @@ The system prompt is built in 4 tiers, each with different caching behavior:
 ├─────────────────────────────────────────────────────┤
 │  Tier 2: Component Schemas (CACHED with Tier 1)     │
 │  - Only schemas relevant to selected tools          │
-│  - 25 component types, selectively injected         │
+│  - 14 component types, selectively injected         │
 │  - Operational guidance (table rules, PromQL, etc.) │
 ├─────────────────────────────────────────────────────┤
 │  Tier 3: Dynamic Cluster Context (NOT cached)       │
@@ -455,10 +432,9 @@ The system prompt is built in 4 tiers, each with different caching behavior:
 
 The harness achieves a 71% reduction in prompt size through:
 
-1. **Selective tool schema injection** -- Instead of sending all 138 tool
-   schemas, `skill_loader.py` selects the relevant tools for the routed
-   skill's categories (see §3/§15b). Each skill maps to a set of tool
-   categories (11 categories total, defined in `tool_categories.py`).
+1. **Selective tool schema injection** -- Instead of sending all 122 tool
+   schemas, the harness selects 15-50 relevant tools based on the user query
+   and agent mode. Each mode maps to a set of tool categories.
 2. **Selective component schema injection** -- Only component schemas that the
    selected tools can produce are injected (e.g., if no table tools are
    selected, the `data_table` schema is still included as a baseline, but
@@ -526,7 +502,7 @@ expertise (encoded in its system prompt) with SysAdmin domain knowledge.
 │  │  SAVE     │  create_dashboard(title)                  │
 │  │           │  -> Emits __SIGNAL__ with view metadata    │
 │  │           │  -> api.py intercepts signal              │
-│  │           │  -> Validates via quality_engine.py         │
+│  │           │  -> Validates via view_validator.py        │
 │  │           │  -> Deduplicates components                │
 │  │           │  -> Computes layout via layout_engine.py   │
 │  │           │  -> Saves to PostgreSQL                    │
@@ -546,10 +522,9 @@ saves them as a view.
 ### Quality Engine
 
 `sre_agent/quality_engine.py` is the unified validation and scoring module
-(merged from the former `view_validator.py` and `view_critic.py`, both of
-which have been **fully deleted** -- there are no backward-compatible
-wrappers). It runs validation and quality scoring in a single
-`evaluate_components()` call returning a `QualityResult`:
+(merged from the former `view_validator.py` and `view_critic.py`, which remain
+as thin backward-compatible wrappers). It runs validation and quality scoring
+in a single `evaluate_components()` call returning a `QualityResult`:
 
 - Component deduplication (matching PromQL queries or identical kind+title+query triples)
 - Schema conformance for each component kind
@@ -568,17 +543,16 @@ semantic auto-layout engine. It assigns widget sizes and positions based on:
 - **Adaptive grid**: Adjusts columns and row heights based on component count
   and types
 
-### 83 PromQL Recipes
+### 73 PromQL Recipes
 
-`sre_agent/promql_recipes.py` provides 83 production-tested PromQL queries
+`sre_agent/promql_recipes.py` provides 73 production-tested PromQL queries
 curated from 7 OpenShift/Kubernetes repositories:
 
 - Sources: openshift/console, cluster-monitoring-operator, kube-state-metrics,
   node_exporter, prometheus-operator, cluster-version-operator, ACM
-- 17 categories: `cpu`, `memory`, `network`, `storage`, `storage_state`, `pods`,
-  `workload_state`, `node_use`, `scheduler`, `overcommit`, `alerts`,
-  `operators`, `control_plane`, `cluster_health`, `ingress`, `monitoring`,
-  `acm_fleet`
+- 16 categories: CPU, memory, network, disk, pod health, node health, API
+  server, etcd, scheduling, HPA, alerts, operators, containers, namespaces,
+  cluster, custom
 - `discover_metrics` tool queries Prometheus for available metrics before
   writing PromQL
 - `verify_query` tool tests PromQL against the live cluster before embedding
@@ -595,12 +569,7 @@ cluster scanning via the `/ws/monitor` WebSocket endpoint. It pushes findings,
 predictions, investigation reports, and action reports to connected UI clients
 in real time.
 
-### 22 Scanners
-
-> Updated from the original 17 -- the table below adds `slo_burn` (SLO Burn
-> Rate) and the 4 `trend_*` predictive scanners (`trend_memory`, `trend_disk`,
-> `trend_hpa`, `trend_errors`), which use Prometheus `predict_linear()` to
-> forecast issues before they occur (`trend_scanners.py`). 17 + 1 + 4 = 22.
+### 17 Scanners
 
 
 | Scanner                     | Category           | Severity       | Auto-fixable |
@@ -622,11 +591,6 @@ in real time.
 | Deployment rollouts (audit) | `audit_deployment` | INFO           | No           |
 | Warning events (audit)      | `audit_events`     | WARNING        | No           |
 | Auth anomalies (audit)      | `audit_auth`       | WARNING        | No           |
-| SLO burn rate                | `slo_burn`         | WARN/CRIT      | No           |
-| Memory pressure trend        | `trend_memory`     | WARNING        | No           |
-| Disk pressure trend          | `trend_disk`       | WARNING        | No           |
-| HPA exhaustion trend         | `trend_hpa`        | WARNING        | No           |
-| Error rate acceleration     | `trend_errors`     | WARNING        | No           |
 
 
 Pod-based scanners (crashloop, oom, image_pull) share a single pod list fetch
@@ -676,7 +640,7 @@ to reduce API calls.
 
 
 Trust level is set by the UI via `subscribe_monitor` and clamped server-side to
-`PULSE_AGENT_MAX_TRUST_LEVEL` (default 2).
+`PULSE_AGENT_MAX_TRUST_LEVEL` (default 3).
 
 ### Auto-Fix Safety Guardrails
 
@@ -944,15 +908,6 @@ The schema is defined in `sre_agent/db_schema.py`.
 | `prompt_log`        | Prompt version tracking             | hash, sections, tokens                         |
 | `tool_predictions`  | Adaptive tool selection predictions | query_hash, predicted_tools, actual_tools      |
 | `tool_cooccurrence` | Tool co-occurrence matrix           | tool_a, tool_b, frequency                      |
-| `skill_selection_log` | ORCA routing decisions            | channel_scores (JSONB), fused_scores (JSONB), selected_skill |
-| `postmortems`       | Auto-generated incident reports     | incident_type, plan_id, root_cause, timeline   |
-| `slo_definitions`   | SLO/SLI configuration               | service_name, slo_type, target, window_days    |
-| `plan_executions`   | Phased investigation plan runs      | template_id, phase, status, progress_events    |
-| `user_events`       | Raw UI/user event stream            | event_type, user_id, payload (JSONB)           |
-| `inbox_items`       | Unified Ops Inbox worklist item     | finding_id, status, priority, assignee, dedup_key |
-| `user_interactions` | Aggregated interaction outcomes     | interaction_type, outcome, user_id             |
-
-28 tables total (migration v022 is the latest applied).
 
 
 ### Connection Pooling
@@ -1043,8 +998,8 @@ The Helm chart's ClusterRole has three levels:
 ### Trust Level Clamping
 
 The server clamps client-requested trust levels to `PULSE_AGENT_MAX_TRUST_LEVEL`
-(default 2). A client requesting trust level 4 on a server configured with
-max 2 will operate at level 2. This prevents UI-side escalation.
+(default 3). A client requesting trust level 4 on a server configured with
+max 3 will operate at level 3. This prevents UI-side escalation.
 
 ### Container Security
 
@@ -1063,7 +1018,7 @@ max 2 will operate at level 2. This prevents UI-side escalation.
 | Path          | Auth  | Description                                                           |
 | ------------- | ----- | --------------------------------------------------------------------- |
 | `/ws/agent`   | token | Auto-routing orchestrated agent (ORCA classifies intent per message)  |
-| `/ws/monitor` | token | Autonomous cluster monitoring (22 scanners, auto-fix, investigations) |
+| `/ws/monitor` | token | Autonomous cluster monitoring (18 scanners, auto-fix, investigations) |
 
 
 ### Chat Protocol (SRE, Security, Agent)
@@ -1268,7 +1223,7 @@ error if neither is set.
 │  │                │                                                 │    │
 │  │  /ws/monitor ──┤── MonitorSession                                │    │
 │  │                │     │                                           │    │
-│  │                │     ├── 22 Scanners ──── K8s API Server         │    │
+│  │                │     ├── 17 Scanners ──── K8s API Server         │    │
 │  │                │     ├── Investigations ─ Claude API              │    │
 │  │                │     ├── Auto-fix ─────── K8s API Server         │    │
 │  │                │     └── Fix History ──── PostgreSQL              │    │
@@ -1392,7 +1347,7 @@ User: "Build me a production dashboard"
 │                  │
 │ 1. Sanitize      │ Fix PromQL syntax errors
 │    components    │
-│ 2. Validate      │ quality_engine.py (dedup, schema, titles)
+│ 2. Validate      │ view_validator.py (dedup, schema, titles)
 │ 3. Layout        │ layout_engine.py (semantic auto-layout)
 │ 4. Check title   │ Existing view? -> Merge components
 │                  │ New view? -> Save to PostgreSQL
@@ -1415,7 +1370,7 @@ User: "Build me a production dashboard"
 │  1. Fetch shared pod list (once)                       │
 │     └── Shared across crashloop, oom, image_pull       │
 │                                                        │
-│  2. Run all 22 scanners (asyncio.to_thread each)       │
+│  2. Run all 17 scanners (asyncio.to_thread each)       │
 │     └── Collect all findings                           │
 │                                                        │
 │  3. Deduplicate by finding_key                         │
@@ -1477,7 +1432,7 @@ Replaces keyword-only routing with 6-channel weighted fusion (5 active by defaul
 
 **Self-improving:** `selector_learning.py` recomputes channel weights from `skill_selection_log` outcomes. Weights persisted to DB via `load_learned_weights()` / `_persist_weights()`. Loaded on `SkillSelector.__init__()`.
 
-**Skill metadata:** All 7 skills enriched with `trigger_patterns` (regex), `tool_sequences` (named workflows), and `investigation_framework` (structured reasoning steps).
+**Skill metadata:** All 8 skills enriched with `trigger_patterns` (regex), `tool_sequences` (named workflows), and `investigation_framework` (structured reasoning steps).
 
 ### Phased Plan Execution (`plan_runtime.py`, `skill_plan.py`)
 
@@ -1538,7 +1493,7 @@ Generated after every plan execution (even if plan fails). Stored in `postmortem
 - Root cause from diagnostic evidence
 - Contributing factors, blast radius, actions taken
 - Prevention recommendations, metrics impact
-- UI: Postmortems view in the Inbox/Activity feed with expandable detail cards (the old "Incident Center" was replaced by the unified Ops Inbox -- see §4's Inbox row and `sre_agent/inbox.py`).
+- UI: Postmortems tab in Incident Center with expandable detail cards.
 
 **Change Risk Scoring (`change_risk.py`):**
 Pre-deploy risk analysis on every `audit_deployment` scanner finding:
@@ -1586,8 +1541,8 @@ All ORCA data surfaced in the UI:
 
 | Surface              | Location                               | Data Source                               |
 | -------------------- | -------------------------------------- | ----------------------------------------- |
-| Investigation Phases | Inbox item detail drawer (inline)      | `investigation_progress` WebSocket events |
-| Postmortems          | Inbox Activity feed                    | `GET /postmortems`                        |
+| Investigation Phases | Incident Center > Active (inline)      | `investigation_progress` WebSocket events |
+| Postmortems          | Incident Center > Postmortems tab      | `GET /postmortems`                        |
 | Impact Analysis      | `/topology` route                      | `GET /topology` (dependency graph)        |
 | Plans                | Toolbox > Plans tab                    | `GET /plan-templates`                     |
 | SLOs                 | Toolbox > SLOs tab                     | `GET /slo`                                |
@@ -1682,7 +1637,7 @@ interactions. MCP servers offer a standardized alternative. The strategy:
 │   • ArgoCD MCP → replace gitops_tools HTTP calls    │
 ├─────────────────────────────────────────────────────┤
 │ Layer 1: MCP Server (expose)                        │
-│   Expose Pulse Agent's 102 native tools AS an MCP server │
+│   Expose Pulse Agent's 86 native tools AS an MCP server │
 │   so other Claude-based tools can use them           │
 └─────────────────────────────────────────────────────┘
 ```
@@ -1714,7 +1669,7 @@ Key decisions made during development and the reasoning behind them.
 
 ### ADR-1: Custom Tools vs MCP
 
-**Decision:** Build custom `@beta_tool` functions instead of using MCP servers (grown from an initial ~86 to 102 native tools as of this writing).
+**Decision:** Build 86 custom `@beta_tool` functions instead of using MCP servers.
 
 **Why:** Our tools return `(text, component_spec)` tuples for rich UI rendering — interactive charts, tables, metric cards with live sparklines. MCP tools return text only. Our tools also embed domain logic (health scoring, chart type detection, PromQL title generation), feed the intelligence loop (tool_usage recording, chain hints), and integrate with the write confirmation gate. MCP was not mature for Kubernetes when we started.
 
@@ -1790,7 +1745,7 @@ Key decisions made during development and the reasoning behind them.
 
 **Trade-off:** Follow-up messages can misroute (e.g., "update the chart" going to SRE). Mitigated by sticky mode — once in view_designer, stay there unless the user clearly asks about pods crashing or RBAC.
 
-### ADR-9: 83 Hardcoded PromQL Recipes vs Dynamic Discovery Only
+### ADR-9: 73 Hardcoded PromQL Recipes vs Dynamic Discovery Only
 
 **Decision:** Ship 73 production-tested PromQL recipes in code (`promql_recipes.py`) instead of relying solely on runtime metric discovery.
 
@@ -1876,10 +1831,10 @@ Key decisions made during development and the reasoning behind them.
 | `sre_agent/monitor/`               | Autonomous scanning, auto-fix, investigations (11-module package)   |
 | `sre_agent/view_designer.py`       | View designer agent mode                                            |
 | `sre_agent/config.py`              | Pydantic v2 Settings (`PulseAgentSettings`)                         |
-| `sre_agent/k8s_tools/`             | 42 K8s tools (12-file package: 10 submodules + validators + `__init__`) |
+| `sre_agent/k8s_tools/`             | 41 K8s tools (11-module package)                                    |
 | `sre_agent/security_tools.py`      | 9 security tools                                                    |
 | `sre_agent/view_tools.py`          | View/dashboard CRUD tools                                           |
-| `sre_agent/fleet_tools.py`         | 7 multi-cluster tools                                               |
+| `sre_agent/fleet_tools.py`         | 5 multi-cluster tools                                               |
 | `sre_agent/gitops_tools.py`        | 6 ArgoCD tools                                                      |
 | `sre_agent/predict_tools.py`       | 3 predictive analytics tools                                        |
 | `sre_agent/timeline_tools.py`      | Incident correlation tool                                           |
@@ -1888,20 +1843,17 @@ Key decisions made during development and the reasoning behind them.
 | `sre_agent/tool_registry.py`       | Central tool registry                                               |
 | `sre_agent/k8s_client.py`          | Lazy K8s client with `safe()` wrapper                               |
 | `sre_agent/db.py`                  | Database abstraction, connection pooling                            |
-| `sre_agent/db_schema.py`           | PostgreSQL table definitions (28 tables, migration v022)            |
-| `sre_agent/inbox.py`               | Ops Inbox: CRUD, lifecycle, priority scoring, dedup (13 REST endpoints in `api/inbox_rest.py`) |
-| `sre_agent/self_tools.py`          | 12 self-description, skill management, and K8s introspection tools |
-| `sre_agent/event_bus.py`           | `EventBus`/`AgentEventHandler` -- replaces 7 raw callback params in the async agent loop |
+| `sre_agent/db_schema.py`           | PostgreSQL table definitions (21 tables)                            |
 | `sre_agent/db_migrations.py`       | Forward-only schema migrations                                      |
 | `sre_agent/errors.py`              | ToolError classification (7 categories)                             |
 | `sre_agent/error_tracker.py`       | Thread-safe ring buffer for error aggregation                       |
 | `sre_agent/runbooks.py`            | 10 built-in SRE runbooks                                            |
-| `sre_agent/promql_recipes.py`      | 83 PromQL recipes across 17 categories                              |
+| `sre_agent/promql_recipes.py`      | 73 PromQL recipes across 16 categories                              |
 | `sre_agent/prometheus.py`          | Shared Prometheus client                                            |
 | `sre_agent/layout_engine.py`       | Semantic auto-layout for dashboards                                 |
 | `sre_agent/quality_engine.py`      | Unified dashboard validation + quality scoring                      |
-| ~~`sre_agent/view_validator.py`~~  | Deleted -- fully merged into `quality_engine.py`, no wrapper remains |
-| ~~`sre_agent/view_critic.py`~~     | Deleted -- fully merged into `quality_engine.py`, no wrapper remains |
+| `sre_agent/view_validator.py`      | Backward-compatible wrapper around quality_engine                   |
+| `sre_agent/view_critic.py`         | Backward-compatible wrapper around quality_engine                   |
 | `sre_agent/intelligence.py`        | Analytics feedback loop                                             |
 | `sre_agent/tool_usage.py`          | Tool invocation audit log                                           |
 | `sre_agent/tool_predictor.py`      | Adaptive tool selection (TF-IDF + LLM fallback + co-occurrence)     |
@@ -1920,4 +1872,4 @@ Key decisions made during development and the reasoning behind them.
 
 ---
 
-*138 tools (102 native + 36 MCP) -- 7 skills -- 22 scanners -- 10 runbooks -- 83 PromQL recipes -- 192 eval scenarios -- 2,414 tests -- 28 DB tables (migration v022) -- Protocol v2*
+*154 tools (118 native + 36 MCP) -- 23 scanners -- 10 runbooks -- 83 PromQL recipes -- 192 eval scenarios -- 2,432 tests -- Protocol v2*
