@@ -30,6 +30,9 @@ class MCPConnection:
     transport: str  # stdio or sse
     toolsets: list[str]
     tool_renderers: dict[str, dict] = field(default_factory=dict)
+    # Tool names that mutate cluster state — require confirmation like native write tools.
+    # Declared explicitly in mcp.yaml since Pulse has no way to introspect MCP tool semantics.
+    write_tools: list[str] = field(default_factory=list)
     connected: bool = False
     tools: list[str] = field(default_factory=list)
     tool_schemas: dict[str, dict] = field(default_factory=dict)  # name → {description, inputSchema}
@@ -99,6 +102,7 @@ def connect_mcp_server(name: str, config: dict) -> MCPConnection:
     transport = server.get("transport", "stdio")
     toolsets = config.get("toolsets", [])
     tool_renderers = config.get("tool_renderers", {})
+    write_tools = [str(t) for t in config.get("write_tools", []) if isinstance(t, str)]
     display_name = config.get("name", f"OpenShift MCP ({name})")
 
     conn = MCPConnection(
@@ -107,6 +111,7 @@ def connect_mcp_server(name: str, config: dict) -> MCPConnection:
         transport=transport,
         toolsets=toolsets,
         tool_renderers=tool_renderers,
+        write_tools=write_tools,
     )
 
     if not url:
@@ -406,7 +411,7 @@ def register_mcp_tools(conn: MCPConnection) -> int:
         description = schema_def.get("description", f"MCP tool from {conn.name}")
         input_schema = schema_def.get("inputSchema", {"type": "object", "properties": {}, "required": []})
         tool = MCPTool(tool_name, fn, description, input_schema=input_schema)
-        register_tool(tool)
+        register_tool(tool, is_write=tool_name in conn.write_tools)
         count += 1
 
     logger.info("Registered %d MCP tools from '%s'", count, conn.name)
@@ -459,6 +464,18 @@ def list_mcp_connections() -> list[dict]:
         }
         for c in _connections.values()
     ]
+
+
+def get_skill_mcp_tool_names(skill_name: str) -> list[str]:
+    """Return tool names from the MCP server connected for a given skill (if any).
+
+    Used by skill_loader.build_config_from_skill() to include MCP tools in a
+    category-scoped skill's tool_map -- otherwise MCP tools registered via
+    connect_skill_mcp() are invisible to any skill that declares explicit
+    categories (TOOL_CATEGORIES has no knowledge of MCP tool names).
+    """
+    conn = _connections.get(skill_name)
+    return list(conn.tools) if conn and conn.connected else []
 
 
 def list_mcp_tools() -> list[dict]:

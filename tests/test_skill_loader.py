@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from sre_agent.skill_loader import (
     Skill,
     _parse_skill_md,
@@ -336,3 +338,148 @@ class TestSkillToDict:
         assert isinstance(d["keywords"], list)
         assert isinstance(d["prompt_length"], int)
         assert d["prompt_length"] > 0
+
+
+class TestBuildConfigSafety:
+    """Regression tests: skills with write_tools=false must never receive a
+    write-capable tool (native or MCP), regardless of how tool_map is assembled.
+
+    See build_config_from_skill() for the invariant this protects.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _ensure_registry_populated(self):
+        # Native tools register themselves as a side effect of import. Import
+        # explicitly so this test is deterministic regardless of collection order.
+        import sre_agent.agent
+        import sre_agent.security_agent
+        import sre_agent.view_designer  # noqa: F401
+
+    def test_view_designer_has_no_write_tools(self):
+        from sre_agent.skill_loader import build_config_from_skill
+        from sre_agent.tool_registry import WRITE_TOOL_NAMES
+
+        skill = get_skill("view_designer")
+        assert skill is not None
+        assert skill.write_tools is False
+        conf = build_config_from_skill(skill)
+        leaked = set(conf["tool_map"]) & WRITE_TOOL_NAMES
+        assert not leaked, f"view_designer leaked write tools: {leaked}"
+        assert conf["write_tools"] == set()
+
+    def test_security_has_no_write_tools(self):
+        from sre_agent.skill_loader import build_config_from_skill
+        from sre_agent.tool_registry import WRITE_TOOL_NAMES
+
+        skill = get_skill("security")
+        assert skill is not None
+        assert skill.write_tools is False
+        conf = build_config_from_skill(skill)
+        leaked = set(conf["tool_map"]) & WRITE_TOOL_NAMES
+        assert not leaked, f"security leaked write tools: {leaked}"
+
+    def test_sre_write_tools_are_all_confirmation_gated(self):
+        """sre has write_tools=true — every write tool it can see must require confirmation."""
+        from sre_agent.skill_loader import build_config_from_skill
+        from sre_agent.tool_registry import WRITE_TOOL_NAMES
+
+        skill = get_skill("sre")
+        assert skill is not None
+        assert skill.write_tools is True
+        conf = build_config_from_skill(skill)
+        write_tools_in_map = set(conf["tool_map"]) & WRITE_TOOL_NAMES
+        assert write_tools_in_map, "sanity check: sre should expose at least one write tool"
+        assert write_tools_in_map.issubset(conf["write_tools"])
+
+    def test_all_read_only_skills_never_expose_write_tools(self):
+        """No skill with write_tools=false should ever surface a write-capable tool.
+
+        Covers every currently-loaded skill, not just view_designer/security,
+        so a future skill package with categories=[] and write_tools=false
+        can't silently reintroduce this leak.
+        """
+        from sre_agent.skill_loader import build_config_from_skill
+        from sre_agent.tool_registry import WRITE_TOOL_NAMES
+
+        for skill in list_skills():
+            if skill.write_tools:
+                continue
+            conf = build_config_from_skill(skill)
+            leaked = set(conf["tool_map"]) & WRITE_TOOL_NAMES
+            assert not leaked, f"Skill '{skill.name}' (write_tools=false) leaked write tools: {leaked}"
+            assert conf["write_tools"] == set()
+
+    def test_mcp_write_tool_is_gated_for_write_capable_skill(self, monkeypatch):
+        """MCP tools marked in mcp.yaml's write_tools list must require confirmation
+        for a skill that declares write_tools=true."""
+        from sre_agent.mcp_client import MCPConnection, MCPTool, _connections
+        from sre_agent.skill_loader import build_config_from_skill
+        from sre_agent.tool_registry import TOOL_REGISTRY, WRITE_TOOL_NAMES, register_tool
+
+        register_tool(MCPTool("test_mcp_write_gated", lambda **kw: ("ok", None), "test"), is_write=True)
+        monkeypatch.setitem(
+            _connections,
+            "sre",
+            MCPConnection(
+                name="test-mcp",
+                url="http://x",
+                transport="sse",
+                toolsets=[],
+                connected=True,
+                tools=["test_mcp_write_gated"],
+                write_tools=["test_mcp_write_gated"],
+            ),
+        )
+        try:
+            skill = get_skill("sre")
+            conf = build_config_from_skill(skill)
+            assert "test_mcp_write_gated" in conf["tool_map"]
+            assert "test_mcp_write_gated" in conf["write_tools"]
+        finally:
+            TOOL_REGISTRY.pop("test_mcp_write_gated", None)
+            WRITE_TOOL_NAMES.discard("test_mcp_write_gated")
+
+    def test_no_builtin_skill_is_degraded(self):
+        """requires_tools in every shipped skill.md must reference tools that
+        actually exist in the registry -- a degraded skill silently loses its
+        health-check signal in the UI/API even if it still routes and runs.
+
+        Regression: capacity-planner/skill.md previously declared list_nodes
+        and get_resource_quotas, which were consolidated into list_resources
+        during the k8s_tools generic-tool refactor, leaving the skill
+        permanently marked degraded.
+        """
+        from sre_agent.skill_loader import load_skills
+
+        skills = load_skills()
+        degraded = {name: s.degraded_reason for name, s in skills.items() if s.degraded}
+        assert not degraded, f"Built-in skills are degraded (stale requires_tools?): {degraded}"
+
+    def test_mcp_write_tool_excluded_from_read_only_skill(self, monkeypatch):
+        """Even if a read-only skill connects an MCP server that exposes a write
+        tool, that tool must never reach the skill's tool_map."""
+        from sre_agent.mcp_client import MCPConnection, MCPTool, _connections
+        from sre_agent.skill_loader import build_config_from_skill
+        from sre_agent.tool_registry import TOOL_REGISTRY, WRITE_TOOL_NAMES, register_tool
+
+        register_tool(MCPTool("test_mcp_write_blocked", lambda **kw: ("ok", None), "test"), is_write=True)
+        monkeypatch.setitem(
+            _connections,
+            "view_designer",
+            MCPConnection(
+                name="test-mcp",
+                url="http://x",
+                transport="sse",
+                toolsets=[],
+                connected=True,
+                tools=["test_mcp_write_blocked"],
+                write_tools=["test_mcp_write_blocked"],
+            ),
+        )
+        try:
+            skill = get_skill("view_designer")
+            conf = build_config_from_skill(skill)
+            assert "test_mcp_write_blocked" not in conf["tool_map"]
+        finally:
+            TOOL_REGISTRY.pop("test_mcp_write_blocked", None)
+            WRITE_TOOL_NAMES.discard("test_mcp_write_blocked")

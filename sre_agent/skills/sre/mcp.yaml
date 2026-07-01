@@ -19,6 +19,18 @@ toolsets:
   # - tekton        # enable if cluster has Tekton
   # - kubevirt      # enable if cluster has KubeVirt
 
+# Tool names that mutate cluster state. Pulse cannot introspect MCP tool
+# semantics, so any tool that writes MUST be listed here explicitly to get
+# the same confirmation gate as native write tools (e.g. scale_deployment).
+# Defense in depth: the MCP server pod is also started with --read-only
+# (see chart/templates/mcp-server.yaml), but that is an external dependency's
+# behavior, not something Pulse can verify at runtime -- list write tools here
+# too so the confirmation gate holds even if that flag is ever removed or a
+# non-Pulse-managed MCP server (PULSE_MCP_URL override) doesn't honor it.
+write_tools:
+  - helm_install
+  - helm_uninstall
+
 # Map MCP tool output to Pulse UI components
 tool_renderers:
   helm_list:

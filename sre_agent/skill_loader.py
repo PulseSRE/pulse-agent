@@ -385,6 +385,11 @@ def build_config_from_skill(skill: Skill) -> dict:
     Returns dict with: system_prompt, tool_defs, tool_map, write_tools.
     Tools are selected from the full tool registry based on the skill's categories.
     Multiple skills share the same tools and MCP connections.
+
+    Safety invariant: a skill with write_tools=false NEVER receives a tool that is
+    in WRITE_TOOL_NAMES (native or MCP), regardless of how tool_map was assembled.
+    This is enforced unconditionally below -- do not rely solely on category/MCP
+    selection logic to keep write tools out of read-only skills.
     """
     from .harness import ALWAYS_INCLUDE, TOOL_CATEGORIES
     from .tool_registry import TOOL_REGISTRY, WRITE_TOOL_NAMES
@@ -403,8 +408,7 @@ def build_config_from_skill(skill: Skill) -> dict:
 
     if not skill.categories:
         # No categories = all tools (like view_designer)
-        tool_map = all_tools
-        tool_defs = [t.to_dict() for t in tool_map.values()]
+        tool_map = dict(all_tools)
     else:
         # Collect tools from the skill's categories + ALWAYS_INCLUDE
         tool_names = set(ALWAYS_INCLUDE)
@@ -412,9 +416,23 @@ def build_config_from_skill(skill: Skill) -> dict:
             cat = TOOL_CATEGORIES.get(cat_name, {})
             tool_names.update(cat.get("tools", []))
 
-        tool_map = {n: t for n, t in all_tools.items() if n in tool_names}
-        tool_defs = [t.to_dict() for t in tool_map.values()]
+        # MCP tools aren't listed in TOOL_CATEGORIES, so category-scoped skills
+        # (e.g. 'sre') would otherwise never see tools from their own mcp.yaml.
+        try:
+            from .mcp_client import get_skill_mcp_tool_names
 
+            tool_names.update(get_skill_mcp_tool_names(skill.name))
+        except Exception:
+            logger.debug("MCP tool lookup failed for skill '%s'", skill.name, exc_info=True)
+
+        tool_map = {n: t for n, t in all_tools.items() if n in tool_names}
+
+    # Hard safety gate: read-only skills never see write-capable tools (native or MCP),
+    # no matter how tool_map was assembled above.
+    if not skill.write_tools:
+        tool_map = {n: t for n, t in tool_map.items() if n not in WRITE_TOOL_NAMES}
+
+    tool_defs = [t.to_dict() for t in tool_map.values()]
     write_tools = set(WRITE_TOOL_NAMES) if skill.write_tools else set()
 
     return {
