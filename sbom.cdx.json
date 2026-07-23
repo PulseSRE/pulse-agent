@@ -1,0 +1,32 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:agentit-pulse-agent",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-07-23T19:48:39Z",
+    "component": {
+      "type": "application",
+      "name": "pulse-agent",
+      "version": "0.0.0"
+    },
+    "tools": [
+      {
+        "vendor": "AgentIT",
+        "name": "sbom-artifact"
+      },
+      {
+        "vendor": "AgentIT",
+        "name": "manifest-inventory"
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "anthropic",
+      "version": "0.52.0",
+      "purl": "pkg:pypi/anthropic@0.52.0"
+    }
+  ]
+}
