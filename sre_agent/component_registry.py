@@ -315,7 +315,7 @@ register_component(
         example={
             "kind": "status_list",
             "title": "Alerts",
-            "items": [{"label": "CPUThrottling", "status": "warning", "detail": "pod/api"}],
+            "items": [{"name": "CPUThrottling", "status": "warning", "detail": "pod/api"}],
         },
         prompt_hint="status_list — Status items with health indicators. Returned by get_firing_alerts().",
     )
@@ -328,7 +328,7 @@ register_component(
         category="status",
         required_fields=["badges"],
         optional_fields=["title", "description"],
-        example={"kind": "badge_list", "title": "Labels", "badges": [{"label": "app=nginx", "variant": "info"}]},
+        example={"kind": "badge_list", "title": "Labels", "badges": [{"text": "app=nginx", "variant": "info"}]},
         prompt_hint="badge_list — Colored badges for labels, tags, categories.",
     )
 )

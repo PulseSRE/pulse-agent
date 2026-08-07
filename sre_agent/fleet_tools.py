@@ -564,7 +564,8 @@ def fleet_query_metrics(
         values = r.get("values", [])
         if values:
             text_lines.append(f"  {label}: {values[-1][1]}")
-        series.append({"label": label, "color": CHART_COLORS[i % len(CHART_COLORS)], "values": values})
+        points = [[int(float(ts)) * 1000, float(v)] for ts, v in values]
+        series.append({"label": label, "color": CHART_COLORS[i % len(CHART_COLORS)], "data": points})
 
     if warning:
         text_lines.insert(0, f"⚠ {warning}")
@@ -634,7 +635,8 @@ def fleet_compare_metrics(query: str, time_range: str = "1h", title: str = ""):
         values = r.get("values", [])
         latest = values[-1][1] if values else "N/A"
         text_lines.append(f"  {cluster_name}: {latest}")
-        series.append({"label": cluster_name, "color": CHART_COLORS[i % len(CHART_COLORS)], "values": values})
+        points = [[int(float(ts)) * 1000, float(v)] for ts, v in values]
+        series.append({"label": cluster_name, "color": CHART_COLORS[i % len(CHART_COLORS)], "data": points})
 
     component = {
         "kind": "chart",

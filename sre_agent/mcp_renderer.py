@@ -86,13 +86,13 @@ def _apply_renderer(tool_name: str, output: str, config: dict) -> dict | None:
             elif isinstance(item, dict):
                 items.append(
                     {
-                        "label": str(item.get("name", item.get("label", ""))),
-                        "status": str(item.get("status", item.get("state", "info"))),
+                        "name": str(item.get("name", item.get("label", ""))),
+                        "status": str(item.get("status", item.get("state", "unknown"))),
                         "detail": str(item.get("detail", item.get("description", item.get("message", "")))),
                     }
                 )
             else:
-                items.append({"label": str(item), "status": "info"})
+                items.append({"name": str(item), "status": "unknown"})
         return {"kind": "status_list", "title": _humanize(tool_name), "items": items}
 
     elif kind == "metric_card" and isinstance(parsed, dict):
@@ -184,7 +184,7 @@ def _auto_detect(tool_name: str, output: str) -> dict:
         for line in lines:
             clean = re.sub(r"^[\d\.\-\*\•]\s*", "", line.strip())
             if clean:
-                items.append({"label": clean, "status": "info"})
+                items.append({"name": clean, "status": "unknown"})
         if items:
             return {"kind": "status_list", "title": title, "items": items}
 
@@ -199,7 +199,7 @@ def _auto_detect(tool_name: str, output: str) -> dict:
         if re.search(r"\b(error|fail|fatal)\b", line, re.IGNORECASE):
             level = "error"
         elif re.search(r"\b(warn|warning)\b", line, re.IGNORECASE):
-            level = "warning"
+            level = "warn"
         elif re.search(r"\b(debug)\b", line, re.IGNORECASE):
             level = "debug"
         log_lines.append({"message": line, "level": level})

@@ -250,7 +250,7 @@ def list_runbooks():
     for name, keywords in sorted(_RUNBOOK_KEYWORDS.items()):
         desc = descriptions.get(name, f"Triggers on: {', '.join(keywords[:3])}")
         lines.append(f"- **{name}** — {desc}")
-        items.append({"name": name, "status": "info", "detail": desc})
+        items.append({"name": name, "status": "healthy", "detail": desc})
 
     text = "\n".join(lines)
     component = {

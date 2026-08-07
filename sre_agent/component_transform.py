@@ -241,7 +241,8 @@ def _status_list_to_table(spec: dict, options: dict) -> dict:
         {"id": "detail", "header": "Detail"},
     ]
     rows = [
-        {"label": it.get("label", ""), "status": it.get("status", ""), "detail": it.get("detail", "")} for it in items
+        {"label": it.get("name", it.get("label", "")), "status": it.get("status", ""), "detail": it.get("detail", "")}
+        for it in items
     ]
     return {"columns": columns, "rows": rows}
 
