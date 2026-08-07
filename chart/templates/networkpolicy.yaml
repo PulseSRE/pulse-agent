@@ -13,8 +13,17 @@ spec:
     - Egress
     - Ingress
   ingress:
-    # Allow WebSocket/HTTP traffic from Pulse frontend on port 8080
-    - ports:
+    # Allow WebSocket/HTTP traffic from the Pulse frontend on port 8080 only.
+    # Without this pod selector, the rule has no `from:` and Kubernetes
+    # NetworkPolicy semantics treat that as "allow from any pod in any
+    # namespace" — i.e. no restriction at all, letting anything on the
+    # cluster network reach the agent directly and bypass the OAuth
+    # proxy/nginx trust boundary that sets X-Forwarded-User/-Access-Token.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.uiPodSelector | nindent 14 }}
+      ports:
         - protocol: TCP
           port: 8080
   egress:

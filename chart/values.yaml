@@ -45,6 +45,13 @@ rbac:
 # Enable on self-managed clusters where you control the CNI.
 networkPolicy:
   disabled: true
+  # Label selector for the Pulse UI pod, the only intended source of
+  # ingress traffic on port 8080 (WebSocket/HTTP). Must match the UI
+  # chart's pod labels — defaults to pulse-ui's `app: openshiftpulse`.
+  # Restricted to the same namespace (UI and agent are always deployed
+  # together per the umbrella chart).
+  uiPodSelector:
+    app: openshiftpulse
 
 # Self-improving memory system
 memory:

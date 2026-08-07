@@ -124,7 +124,7 @@ Investigation prompts wrap cluster data in delimiters:
 - All other egress blocked
 
 ### Ingress
-- Port 8080 only (WebSocket/HTTP)
+- Port 8080 (WebSocket/HTTP), restricted to pods matching `networkPolicy.uiPodSelector` (defaults to the Pulse UI's `app: openshiftpulse` label, same namespace) — not open to arbitrary pods on the cluster network
 - All other ingress blocked
 
 ### PostgreSQL NetworkPolicy
