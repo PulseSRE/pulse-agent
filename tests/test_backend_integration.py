@@ -237,20 +237,20 @@ class TestMCPStartupIntegration:
 class TestSkillRestRouterRegistered:
     """Verify skill REST endpoints are registered in the app."""
 
-    def test_skills_endpoint_exists(self):
+    @staticmethod
+    def _all_paths():
         from sre_agent.api.app import app
 
-        paths = [r.path for r in app.routes]
-        assert "/skills" in paths or any("/skills" in p for p in paths)
+        return list(app.openapi().get("paths", {}).keys())
+
+    def test_skills_endpoint_exists(self):
+        paths = self._all_paths()
+        assert any("/skills" in p for p in paths)
 
     def test_components_endpoint_exists(self):
-        from sre_agent.api.app import app
-
-        paths = [r.path for r in app.routes]
-        assert "/components" in paths or any("/components" in p for p in paths)
+        paths = self._all_paths()
+        assert any("/components" in p for p in paths)
 
     def test_admin_skills_reload_exists(self):
-        from sre_agent.api.app import app
-
-        paths = [r.path for r in app.routes]
-        assert any("reload" in str(p) for p in paths)
+        paths = self._all_paths()
+        assert any("reload" in p for p in paths)

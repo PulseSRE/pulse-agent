@@ -190,6 +190,14 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "auto_fixable": False,
         "scan_every": 1,  # Trend scanners run separately, not via unified path
     },
+    "trend_degraded": {
+        "displayName": "Trend Monitoring Degraded",
+        "description": "Reports when Prometheus trend queries failed during a scan cycle",
+        "category": "predictive",
+        "checks": [],
+        "auto_fixable": False,
+        "scan_every": 1,
+    },
 }
 
 # ── Types ──────────────────────────────────────────────────────────────────
