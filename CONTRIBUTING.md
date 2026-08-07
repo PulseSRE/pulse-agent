@@ -26,7 +26,7 @@
 ### Python
 - Use `@beta_tool` decorator for K8s tools, register in `tool_registry`
 - Use `safe()` wrapper for all K8s API calls
-- Use `get_database()` for database access (supports SQLite + PostgreSQL)
+- Use `get_database()` for database access (PostgreSQL only — no SQLite fallback)
 - Config via Pydantic Settings (`get_settings()`)
 
 ### TypeScript

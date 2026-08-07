@@ -52,7 +52,7 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `DELETE` | `/views/:id/claim` | token + owner | Release a claim |
 | `GET` | `/fix-history/summary` | token | Aggregated fix stats: totals, success/rollback rates, by-category with auto_fixed/confirmation_required, trend (query: `days` 1-90) |
 | `GET` | `/monitor/coverage` | token | Scanner coverage: active/total scanners, coverage %, category breakdown, per-scanner finding stats (query: `days` 1-90) |
-| `GET` | `/monitor/history` | token | Paginated scan run history (query: `limit`, `offset`) |
+| `GET` | `/monitor/scanners` | token | Full scanner registry with metadata, checks, and enabled state |
 | `GET` | `/analytics/confidence` | token | Confidence calibration: Brier score, accuracy %, rating (good/fair/poor), prediction buckets (query: `days` 1-365) |
 | `GET` | `/analytics/accuracy` | token | Agent accuracy: quality score trend, anti-patterns, learning stats, operator override rate (query: `days` 1-365) |
 | `GET` | `/analytics/cost` | token | Token cost per incident with trending, by-mode breakdown, 30-day forecast (query: `days` 1-365) |
@@ -77,6 +77,87 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/metrics/fix-success-rate` | token | Auto-fix outcome success rate (query: `period` 1-365 days) |
 | `GET` | `/metrics/response-latency` | token | Agent response p50/p95/p99 latency from tool_usage (query: `period` 1-365 days) |
 | `GET` | `/metrics/eval-trend` | token | Eval score trend with sparkline (query: `suite`, `releases` 1-50) |
+| `GET` | `/kpi` | token | 9 operational KPIs aligned with ORCA targets |
+| `GET` | `/analytics/plans` | token | Plan template usage, phase success rate, and duration analytics |
+| `GET` | `/activity` | token | Recent agent activity feed (used by the Admin Overview tab) |
+| `POST` | `/analytics/events` | token | Fire-and-forget UI session event batch recorder |
+| `GET` | `/analytics/sessions` | token | Page-view/session/feature-usage analytics |
+| `GET` | `/eval/score` | token | Tool-selection accuracy scoring against static + learned eval prompts |
+| `GET` | `/usage/summary` | token | Tool usage split by agent mode vs. pipeline/scanner mode |
+| `GET` | `/interactions` | token | Query the `user_interactions` audit log |
+| `GET` | `/query` | token | Direct PromQL -> ComponentSpec proxy for live widget refresh (no LLM call) |
+| `GET` | `/log-counts` | token | Per-pod log pattern match counts for live-table enrichment |
+| `GET` | `/topology/blast-radius` | token | Blast-radius analysis for a resource (query: `kind`, `name`, `namespace`) |
+| `GET` | `/incidents/{finding_id}/impact` | token | Business/user impact estimate for a finding |
+| `GET` | `/incidents/{finding_id}/learning` | token | What the agent learned from a resolved finding |
+| `POST` | `/monitor/simulate` | token | Preview a proposed action's impact/risk/duration without executing it |
+
+#### Chat History (`chat_rest.py`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/chat/sessions` | token | List chat sessions for the current user |
+| `GET` | `/chat/sessions/{session_id}/messages` | token | Get all messages in a session |
+| `POST` | `/chat/sessions` | token | Create a new chat session |
+| `PUT` | `/chat/sessions/{session_id}` | token | Update session metadata (e.g. title) |
+| `DELETE` | `/chat/sessions/{session_id}` | token | Delete a chat session |
+
+#### Ops Inbox (`inbox_rest.py`)
+
+Unified worklist for findings, alerts, and predictions -- replaces the old multi-tab Incident Center in the UI.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/inbox` | token | List inbox items (filters: status, priority, category, assignee) |
+| `GET` | `/inbox/stats` | token | Aggregate inbox counts by status/priority |
+| `GET` | `/inbox/{item_id}` | token | Get a single inbox item |
+| `POST` | `/inbox` | token | Create a new inbox item |
+| `PATCH` | `/inbox/{item_id}` | token | Update an inbox item |
+| `POST` | `/inbox/{item_id}/claim` | token | Claim an item |
+| `DELETE` | `/inbox/{item_id}/claim` | token | Release a claim |
+| `POST` | `/inbox/{item_id}/acknowledge` | token | Acknowledge an item |
+| `POST` | `/inbox/{item_id}/snooze` | token | Snooze an item |
+| `POST` | `/inbox/{item_id}/dismiss` | token | Dismiss an item |
+| `POST` | `/inbox/{item_id}/investigate` | token | Trigger investigation for an item |
+| `POST` | `/inbox/{item_id}/resolve` | token | Mark an item resolved |
+| `POST` | `/inbox/{item_id}/escalate` | token | Escalate an item |
+| `POST` | `/inbox/{item_id}/restore` | token | Restore a dismissed/resolved item |
+| `POST` | `/inbox/{item_id}/step` | token | Append an investigation step |
+| `GET` | `/inbox/{item_id}/investigation` | token | Get the investigation timeline for an item |
+| `POST` | `/inbox/{item_id}/pin` | token | Pin an item |
+
+#### Skills, Prompts, and MCP Admin (`skill_rest.py`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/skills` | token | List all skills with routing rules and metadata |
+| `GET` | `/skills/{name}` | token | Get skill detail (prompt, tools, routing, versions) |
+| `GET` | `/skills/usage` | token | Aggregated skill usage stats |
+| `GET` | `/skills/usage/handoffs` | token | Skill-to-skill handoff analytics |
+| `GET` | `/skills/usage/{name}` | token | Per-skill usage stats |
+| `GET` | `/skills/usage/{name}/trend` | token | Per-skill usage trend with sparkline |
+| `POST` | `/admin/skills/reload` | token | Hot-reload skill packages from disk |
+| `POST` | `/admin/skills/test` | token | Test routing -- returns which skill matches a given query |
+| `PUT` | `/admin/skills/{name}` | token | Edit skill (prompt, tools, routing rules) |
+| `DELETE` | `/admin/skills/{name}` | token | Delete a skill |
+| `POST` | `/admin/skills/{name}/clone` | token | Clone a skill with a new name |
+| `GET` | `/admin/skills/{name}/versions` | token | Version history for a skill |
+| `GET` | `/admin/skills/{name}/diff` | token | Diff between two skill versions |
+| `GET` | `/prompt/stats` | token | Prompt token cost breakdown |
+| `GET` | `/prompt/versions/{skill}` | token | Prompt version history for a skill |
+| `GET` | `/prompt/log` | token | Prompt audit log (hash, sections, tokens) |
+| `GET` | `/admin/mcp` | token | List MCP server connections and status |
+| `POST` | `/admin/mcp/toolsets` | token | Toggle MCP toolsets on/off |
+| `POST` | `/admin/mcp` | token | Register a new MCP server connection |
+| `DELETE` | `/admin/mcp/{name}` | token | Remove an MCP server connection |
+| `POST` | `/admin/mcp/test` | token | Test an MCP server connection |
+| `GET` | `/components` | token | Component registry -- list all 25 component kinds with schemas |
+
+#### Debug (`debug_rest.py`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/debug/memory` | token | RSS/GC/cache/session diagnostics |
 
 **Authentication:** Token-authenticated endpoints accept `Authorization: Bearer <token>` header or `?token=<token>` query parameter. The token is `PULSE_AGENT_WS_TOKEN`. Unauthenticated requests return 401.
 
@@ -85,8 +166,8 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 ```json
 {
   "protocol": "2",
-  "agent": "2.3.0",
-  "tools": 122,
+  "agent": "2.7.1",
+  "tools": 138,
   "skills": 7,
   "features": ["component_specs", "ws_token_auth", "rate_limiting", "monitor", "fix_history", "predictions"]
 }
@@ -380,6 +461,24 @@ All WebSocket endpoints require `PULSE_AGENT_WS_TOKEN` via the `token` query par
 }
 ```
 
+#### `feedback` — Thumbs up/down on the last response
+
+```json
+{
+  "type": "feedback",
+  "resolved": true,
+  "messageId": "msg-abc123"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | `"feedback"` | yes | |
+| `resolved` | `boolean` | yes | Whether the response resolved the user's issue |
+| `messageId` | `string` | no | ID of the message being rated |
+
+Triggers memory learning -- the server responds with `feedback_ack`.
+
 ### Server-to-Client Events
 
 #### `text_delta` — Streaming text chunk
@@ -474,6 +573,44 @@ See [Component Specs](#component-specs) for all `spec.kind` values.
 }
 ```
 
+#### `feedback_ack` — Response to a `feedback` message
+
+```json
+{
+  "type": "feedback_ack",
+  "resolved": true,
+  "score": 0.92,
+  "runbookExtracted": false
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `resolved` | `boolean` | Echoes the client's `resolved` value |
+| `score` | `number` | Memory score assigned to the interaction |
+| `runbookExtracted` | `boolean` | Whether a new learned runbook was extracted from this interaction |
+
+#### `session_expired` — The user's OAuth token expired mid-turn
+
+```json
+{
+  "type": "session_expired"
+}
+```
+
+Sent when a tool call fails with a 401 (`error_category == "unauthorized"`), signaling the user needs to re-authenticate.
+
+#### `view_updated` — An existing view was modified mid-turn
+
+```json
+{
+  "type": "view_updated",
+  "viewId": "cv-abc123"
+}
+```
+
+Sent when the agent merges new widgets into an already-saved view (as opposed to creating a new one via `view_spec`). The UI should refetch the view.
+
 ---
 
 ## Monitor Protocol (`/ws/monitor`)
@@ -540,6 +677,17 @@ Triggers an immediate cluster scan. If a scan is already in progress, returns an
 | `page` | `integer` | no | Page number (default: `1`) |
 | `filters` | `object` | no | Optional filters (`status`, `category`, `since`, `search`) |
 
+#### `set_disabled_scanners` — Dynamically disable specific scanners
+
+```json
+{
+  "type": "set_disabled_scanners",
+  "scannerIds": ["daemonsets", "audit_events"]
+}
+```
+
+Server acknowledges with an `ack` event.
+
 ### Server-to-Client Events
 
 #### `finding` — Cluster issue detected
@@ -550,15 +698,18 @@ Triggers an immediate cluster scan. If a scan is already in progress, returns an
   "id": "f-abc123",
   "severity": "warning",
   "category": "crash_loop",
-  "resource": {"kind": "Pod", "name": "api-server-xyz", "namespace": "production"},
+  "title": "Pod crash-looping",
+  "resources": [{"kind": "Pod", "name": "api-server-xyz", "namespace": "production"}],
   "summary": "Pod crash-looping: CrashLoopBackOff (5 restarts in 10m)",
-  "details": "...",
   "confidence": 0.95,
+  "autoFixable": true,
+  "runbookId": "crashloop",
+  "findingType": "current",
   "timestamp": 1711540800
 }
 ```
 
-The optional `confidence` field (0.0–1.0) indicates how confident the scanner is that this is a real issue. The optional `noiseScore` field (0.0–1.0) indicates how likely this finding is transient noise (based on historical self-resolution patterns). Findings with `noiseScore >= 0.5` are dimmed in the UI.
+**Note:** `resources` is a plural array (not a single `resource` object) since a finding can span multiple resources. There is no `details` field. The optional `confidence` field (0.0–1.0) indicates how confident the scanner is that this is a real issue. The optional `noiseScore` field (0.0–1.0) indicates how likely this finding is transient noise (based on historical self-resolution patterns) -- findings with `noiseScore >= 0.5` are dimmed in the UI. `autoFixable`, `runbookId`, and `findingType` (`"current"` | predictive variants) are also present on the real payload.
 
 #### `prediction` — Predicted future issue
 
@@ -567,32 +718,41 @@ The optional `confidence` field (0.0–1.0) indicates how confident the scanner 
   "type": "prediction",
   "id": "p-abc123",
   "category": "resource_pressure",
-  "resource": {"kind": "Node", "name": "worker-03"},
-  "summary": "Node memory predicted to exceed 90% within 2 hours",
+  "title": "Node memory pressure predicted",
+  "resources": [{"kind": "Node", "name": "worker-03"}],
+  "detail": "Node memory predicted to exceed 90% within 2 hours",
   "confidence": 0.87,
-  "horizon": "2h",
+  "eta": "2h",
+  "recommendedAction": "Consider adding a worker node or reducing requests",
   "timestamp": 1711540800
 }
 ```
+
+**Note:** the real field names are `resources` (plural array), `detail` (not `summary`), and `eta` (not `horizon`). `title` and `recommendedAction` are also present on the real payload but were previously undocumented.
 
 #### `action_report` — Result of an autonomous or approved action
 
 ```json
 {
   "type": "action_report",
-  "actionId": "a-abc123",
+  "id": "a-abc123",
   "findingId": "f-abc123",
-  "action": "restart_pod",
+  "tool": "restart_deployment",
+  "input": {"namespace": "production", "name": "api-server"},
   "status": "applied",
-  "summary": "Restarted pod api-server-xyz",
-  "before": {},
-  "after": {},
+  "beforeState": "replicas=3, ready=1",
+  "afterState": "replicas=3, ready=3",
+  "reasoning": "Pod was crash-looping; restart cleared the bad in-memory state",
+  "durationMs": 842,
   "timestamp": 1711540800
 }
 ```
 
+**Note:** the ID field is `id`, not `actionId`; the tool name field is `tool`, not `action`; there is no `summary` field; `beforeState`/`afterState` are **strings** (human-readable snapshots), not objects. `input` (the tool's input dict), `error` (on failure), `reasoning`, and `durationMs` are also present on the real payload but were previously undocumented.
+
 `action_report` may include optional fields:
 - `confidence`: `number` (0.0–1.0) — agent's confidence that this action will resolve the issue
+- `error`: `string` — present when `status` is a failure
 - `verificationStatus`: `"verified"` | `"still_failing"`
 - `verificationEvidence`: `string`
 - `verificationTimestamp`: `number`
@@ -616,7 +776,14 @@ The optional `confidence` field (0.0–1.0) indicates how confident the scanner 
 }
 ```
 
-Optional fields: `evidence` (list of facts supporting the diagnosis), `alternativesConsidered` (hypotheses checked and ruled out).
+Optional fields (per design): `evidence` (list of facts supporting the diagnosis), `alternativesConsidered` (hypotheses checked and ruled out).
+
+> **Known gap:** as of this writing, `investigations.py` computes `evidence`
+> and `alternatives_considered` internally, but `investigation_runner.py`'s
+> outbound payload construction does not copy them onto the broadcast
+> `investigation_report` event -- they are silently dropped before reaching
+> the UI. Either wire them through or remove them from this doc; tracked
+> here so it isn't lost.
 
 #### `verification_report` — Next-scan validation after a fix action
 
@@ -790,6 +957,15 @@ Emitted after each scan cycle completes. Includes per-scanner timing, findings c
   "total": 0,
   "page": 1,
   "pageSize": 20
+}
+```
+
+#### `ack` — Acknowledgment of `set_disabled_scanners`
+
+```json
+{
+  "type": "ack",
+  "message": "Disabled 2 scanners"
 }
 ```
 
@@ -1011,7 +1187,8 @@ The UI sends a `GET /version` request before connecting. If the agent's `protoco
 
 | UI Version | Agent Version | Protocol | Status |
 |------------|--------------|----------|--------|
-| v6.2.0 | v2.3.0 | 2 | Current |
+| v2.7.1 | v2.7.1 | 2 | Current |
+| v6.2.0 | v2.3.0 | 2 | Compatible (pre versioning reset) |
 | v5.16.2+ | v2.2.0 | 2 | Compatible |
 | v5.16.2+ | v2.1.0 | 2 | Compatible |
 | v5.16.2+ | v2.0.0 | 2 | Compatible |
@@ -1026,3 +1203,5 @@ The UI sends a `GET /version` request before connecting. If the agent's `protoco
 | v5.3.0+ | v1.0.0 | 1 | Compatible |
 
 > Both repos should tag releases together when protocol changes occur. Minor UI/Agent releases within the same protocol version are always compatible.
+>
+> **Versioning reset:** the UI's version numbering was reset from the `v6.x` line to a fresh `v2.x` line (coinciding with the org move to PulseSRE / rename to `pulse-ui`). Both repos now share the same version number for each release (e.g. `v2.7.1` / `v2.7.1`).

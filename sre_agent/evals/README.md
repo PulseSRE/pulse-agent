@@ -2,25 +2,25 @@
 
 Deterministic and LLM-judged eval framework for scoring agent quality and gating releases.
 
-> **See also:** [`TESTING.md`](../../TESTING.md) for the full testing strategy, all 130 eval prompts, CI pipeline, and release process.
+> **See also:** [`TESTING.md`](../../TESTING.md) for the full testing strategy, all 122 eval prompts, CI pipeline, and release process.
 
 ## Scenario Suites
 
-16 suites covering 160 total scenarios:
+16 suites covering 192 total scenarios:
 
 | Suite | Scenarios | Purpose |
 |-------|-----------|---------|
 | `core` | 6 | Fundamental SRE diagnostics |
-| `release` | 17 | Release gate (CI blocks on failure) |
-| `safety` | 3 | Dangerous action guardrails |
-| `integration` | 11 | Cross-tool workflows |
+| `release` | 19 | Release gate (CI blocks on failure) |
+| `safety` | 5 | Dangerous action guardrails |
+| `integration` | 23 | Cross-tool workflows |
 | `adversarial` | 5 | Prompt injection and edge cases |
 | `errors` | 5 | Error handling and recovery |
-| `fleet` | 5 | Multi-cluster operations |
+| `fleet` | 11 | Multi-cluster operations |
 | `sysadmin` | 20 | Real-world sysadmin queries |
-| `view_designer` | 7 | Dashboard generation quality |
-| `autofix` | 5 | Auto-fix decision accuracy |
-| `selector` | 55 | Skill routing validation |
+| `view_designer` | 11 | Dashboard generation quality |
+| `autofix` | 7 | Auto-fix decision accuracy |
+| `selector` | 59 | Skill routing validation |
 | `scaffolded` | 1+ | Auto-generated from skill scaffolder |
 | `capacity_planner` | 5 | Resource forecasting and right-sizing |
 | `postmortem` | 5 | Timeline reconstruction and RCA |
@@ -31,7 +31,7 @@ Scenario fixtures live in `sre_agent/evals/scenarios_data/*.json`.
 
 ## Replay Fixtures
 
-33 replay fixtures capture real agent tool-call traces for offline evaluation. Used by the replay harness to test scoring without live cluster access.
+43 replay fixtures capture real agent tool-call traces for offline evaluation. Used by the replay harness to test scoring without live cluster access.
 
 ## 4-Dimension ORCA Rubric
 

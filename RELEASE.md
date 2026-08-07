@@ -19,11 +19,11 @@ git push && git push --tags
 ## Release Phases
 
 ### Phase 1: Verify
-- Backend: `pytest` (1712+ tests), `mypy` (0 errors), `ruff` (clean)
-- Frontend: `vitest` (1937+ tests), `tsc` (clean)
+- Backend: `pytest` (2414+ tests), `mypy` (0 errors), `ruff` (clean)
+- Frontend: `vitest` (2045+ tests), `tsc` (clean)
 
 ### Phase 2: Eval Gates
-- **Selector routing** — 55/55 scenarios, 100% required
+- **Selector routing** — 59/59 scenarios, 100% required
 - **Release gate** — LLM-judged, min 75% score, no hard blockers
 - **View designer gate** — LLM-judged, min 75% score
 - **Baseline comparison** — no regressions allowed

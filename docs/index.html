@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Pulse Agent // AI SRE for OpenShift</title>
-  <meta name="description" content="AI-powered SRE and Security agent for OpenShift/Kubernetes. Claude-powered diagnostics, 154 tools, 7 skills, ORCA multi-signal routing, 83 PromQL recipes, autonomous monitoring, phased plan execution. v2.7.0.">
+  <meta name="description" content="AI-powered SRE and Security agent for OpenShift/Kubernetes. Claude-powered diagnostics, 138 tools, 7 skills, ORCA multi-signal routing, 83 PromQL recipes, autonomous monitoring, phased plan execution. v2.7.1.">
   <meta property="og:title" content="Pulse Agent">
-  <meta property="og:description" content="AI SRE agent for OpenShift — 154 tools, 7 skills, ORCA architecture, 23 scanners, 83 PromQL recipes, phased plan execution. v2.7.0">
+  <meta property="og:description" content="AI SRE agent for OpenShift — 138 tools, 7 skills, ORCA architecture, 22 scanners, 83 PromQL recipes, phased plan execution. v2.7.1">
   <link rel="icon" href="logo.svg" type="image/svg+xml">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
   <style>
@@ -101,7 +101,7 @@
   <section class="hero">
     <img src="logo.svg" alt="Pulse Agent" style="width: 80px; height: 80px; filter: drop-shadow(0 0 20px rgba(0,255,136,0.5)); animation: pulse-glow 3s ease-in-out infinite;">
     <h1>PULSE AGENT</h1>
-    <div class="version">v2.7.0 // 154 TOOLS // 49 MODULES // PROTOCOL v2 // ORCA INTELLIGENCE</div>
+    <div class="version">v2.7.1 // 138 TOOLS // 54 MODULES // PROTOCOL v2 // ORCA INTELLIGENCE</div>
     <p class="tagline">AI-powered SRE and Security agent for OpenShift. <em>Claude</em> diagnoses, triages, and remediates — 24/7.</p>
     <div class="hero-buttons">
       <a href="https://github.com/PulseSRE/pulse-agent" class="btn btn-primary">[ SOURCE ]</a>
@@ -113,13 +113,13 @@
   <div class="neon-divider"></div>
 
   <div class="stats-bar">
-    <div class="stat"><div class="stat-value">154</div><div class="stat-label">Tools</div></div>
+    <div class="stat"><div class="stat-value">138</div><div class="stat-label">Tools</div></div>
     <div class="stat"><div class="stat-value cyan">49</div><div class="stat-label">Modules</div></div>
-    <div class="stat"><div class="stat-value magenta">2,372</div><div class="stat-label">Tests</div></div>
+    <div class="stat"><div class="stat-value magenta">2,414</div><div class="stat-label">Tests</div></div>
     <div class="stat"><div class="stat-value" style="color: var(--violet); text-shadow: 0 0 15px rgba(139,92,246,0.4);">7</div><div class="stat-label">Skills</div></div>
     <div class="stat"><div class="stat-value">83</div><div class="stat-label">PromQL Recipes</div></div>
     <div class="stat"><div class="stat-value yellow">192</div><div class="stat-label">Eval Scenarios</div></div>
-    <div class="stat"><div class="stat-value" style="color: var(--green)">99.6%</div><div class="stat-label">Release Gate</div></div>
+    <div class="stat"><div class="stat-value" style="color: var(--green)">97.5%</div><div class="stat-label">Release Gate</div></div>
   </div>
 
   <div class="neon-divider"></div>
@@ -138,7 +138,7 @@
       </div>
       <div class="feature-card">
         <h3>Autonomous Monitor <span class="badge badge-auto">AUTO</span></h3>
-        <p>23 scanners running every 60 seconds. 11 reactive (crashloops, pending pods, failed deployments, node pressure, cert expiry, firing alerts, OOM kills, image pull errors, degraded operators, DaemonSet gaps, HPA saturation), SLO burn rate, security posture, 5 audit scanners, 5 predictive trend scanners.</p>
+        <p>22 scanners running every 60 seconds. 13 reactive (crashloops, pending pods, failed deployments, image pull errors, DaemonSet gaps, OOM kills, HPA saturation, node pressure, degraded operators, cert expiry, security posture, firing alerts, SLO burn rate), 5 audit scanners, 4 predictive trend scanners.</p>
       </div>
       <div class="feature-card">
         <h3>Auto-Fix Engine <span class="badge badge-auto">AUTO</span></h3>
@@ -166,7 +166,7 @@
       </div>
       <div class="feature-card">
         <h3>Generative Dashboards <span class="badge badge-ai">AI</span></h3>
-        <p>83 PromQL recipes across 16 categories. Semantic auto-layout engine. discover_metrics → verify_query → build. Data-first, never empty charts.</p>
+        <p>83 PromQL recipes across 17 categories. Semantic auto-layout engine. discover_metrics → verify_query → build. Data-first, never empty charts.</p>
       </div>
       <div class="feature-card">
         <h3>Intelligence Loop <span class="badge badge-ai">AI</span></h3>
@@ -182,7 +182,7 @@
       </div>
       <div class="feature-card">
         <h3>Fleet Management</h3>
-        <p>Multi-cluster operations across your fleet. 5 fleet tools for cross-cluster visibility, comparison, and coordinated actions.</p>
+        <p>Multi-cluster operations across your fleet. 7 fleet tools for cross-cluster visibility, comparison, and coordinated actions.</p>
       </div>
       <div class="feature-card">
         <h3>GitOps / ArgoCD</h3>
@@ -194,7 +194,7 @@
       </div>
       <div class="feature-card">
         <h3>Eval Framework & Scores</h3>
-        <p>16 eval suites, 192 scenarios. Release gate: <strong>99.6%</strong>. Safety, adversarial, autofix, capacity, postmortem, SLO management suites. Selector: 59 scenarios. Ablation testing, regression tracking, baseline comparison.</p>
+        <p>16 eval suites, 192 scenarios. Release gate: <strong>97.5%</strong>. Safety, adversarial, autofix, capacity, postmortem, SLO management suites. Selector: 59 scenarios. Ablation testing, regression tracking, baseline comparison.</p>
       </div>
       <div class="feature-card">
         <h3>Modular Architecture</h3>

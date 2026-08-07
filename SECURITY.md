@@ -108,17 +108,13 @@ Investigation prompts wrap cluster data in delimiters:
 
 ## Database Security
 
-### PostgreSQL (Production)
-- Uses RHEL 9 PostgreSQL image
+### PostgreSQL (Required)
+- PostgreSQL is required for all data-backed features (memory, monitor, views, tool analytics, SLOs, evals, inbox). There is no SQLite fallback — `get_database()` raises at startup if `PULSE_AGENT_DATABASE_URL` is unset.
+- Uses RHEL 9 PostgreSQL image in the Helm-deployed StatefulSet
 - NetworkPolicy restricts database access to agent pods only
-- Database password is auto-generated as a Kubernetes Secret on Helm install
+- Database password is auto-generated as a Kubernetes Secret on Helm install, preserved across upgrades via `lookup()`
 - Connection via `PULSE_AGENT_DATABASE_URL` environment variable
-
-### SQLite (Development/Testing)
-- Fallback when no PostgreSQL URL is configured
-- Default path: `/tmp/pulse_agent/pulse.db`
-- `@db_safe` decorator on all memory operations prevents crashes on database errors
-- Not recommended for production (no HA, no cross-pod sharing)
+- `@db_safe` decorator on fire-and-forget analytics writes (tool usage, etc.) prevents transient DB errors from crashing the agent
 
 ## Network Security
 

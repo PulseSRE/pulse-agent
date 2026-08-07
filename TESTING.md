@@ -27,11 +27,11 @@ Testing philosophy: deterministic tests run on every commit at zero cost. LLM-ju
                     +---------------------+
                   +-------------------------+
                   |    Replay Fixtures      |   <- dry-run on every CI run
-                  |  28 recorded traces     |      Deterministic scoring, no API key.
+                  |  43 recorded traces     |      Deterministic scoring, no API key.
                   +-------------------------+
                 +-----------------------+-----+
                 |  Deterministic Evals          |   <- every PR and push
-                |  16 suites, 127 scenarios       |      Tool selection, safety, guardrails.
+                |  16 suites, 192 scenarios       |      Tool selection, safety, guardrails.
                 +-------------------------------+
               +-----------------------------------+
               |       Skill-Bundled Evals          |   <- every PR and push
@@ -57,7 +57,7 @@ python3 -m pytest tests/ -x                           # stop on first failure
 make test                                             # shorthand (pytest -q)
 make verify                                           # lint + type-check + test
 make test-all                                         # verify + deterministic evals (release, core, safety, prompt audit)
-make test-everything                                  # verify + ALL 11 eval suites (includes LLM judge — needs API key)
+make test-everything                                  # verify + ALL 16 eval suites (includes LLM judge — needs API key)
 make evals                                            # deterministic evals only
 make evals-full                                       # all evals including LLM-judged suites
 make chaos-test                                       # chaos engineering — 5 failure scenarios against live cluster
@@ -122,14 +122,14 @@ python -m sre_agent.evals.weekly_digest_cli --current-days 7 --baseline-days 7 \
 
 ### Coverage
 
-pytest tests across 40+ test files in `tests/`. Major coverage areas:
+pytest tests across 121 test files in `tests/`. Major coverage areas:
 
 | Area | Test files | What they cover |
 |------|-----------|-----------------|
-| K8s tools | `test_k8s_tools.py` | All 41 `@beta_tool` functions, input validation, `safe()` error handling |
+| K8s tools | `test_k8s_tools.py` | All 42 `@beta_tool` functions, input validation, `safe()` error handling |
 | Security tools | `test_security_tools.py` | 9 security scanning tools |
 | API endpoints | `test_api_http.py`, `test_api_websocket.py`, `test_api_tools.py` | REST + WebSocket endpoints, auth, protocol v2 |
-| Monitor/scanners | `test_monitor.py`, `test_scanners.py`, `test_audit_scanner.py` | 17 scanners, auto-fix, noise learning |
+| Monitor/scanners | `test_monitor.py`, `test_scanners.py`, `test_audit_scanner.py` | 22 scanners, auto-fix, noise learning |
 | Agent loop | `test_agent.py` | Streaming loop, circuit breaker, confirmation gate |
 | Harness | `test_harness.py` | Dynamic tool selection, prompt caching |
 | Orchestrator | `test_orchestrator.py` | Intent classification, typo correction |
@@ -224,29 +224,29 @@ sre_agent/evals/
   outcomes_cli.py      # Outcomes CLI
   weekly_digest.py     # Weekly summary generation
   weekly_digest_cli.py # Weekly digest CLI
-  scenarios_data/      # 16 JSON suite files (127 scenarios total)
-  fixtures/            # 29 recorded tool-call trace files
+  scenarios_data/      # 16 JSON suite files (192 scenarios total)
+  fixtures/            # 43 recorded tool-call trace files
   baselines/           # Saved baseline results (core.json, release.json, view_designer.json)
   policies/            # Regression policy YAML
 ```
 
 ### Scenario Suites
 
-12 suites, 107 total scenarios:
+16 suites, 192 total scenarios:
 
 | Suite | Scenarios | Purpose | Gating? |
 |-------|-----------|---------|---------|
 | `core` | 6 | Fundamental SRE diagnostics | No |
-| `release` | 16 | Release gate -- CI blocks on failure | **Yes** |
-| `view_designer` | 7 | Dashboard generation quality | **Yes** |
-| `safety` | 3 | Dangerous action guardrails | No (informational) |
-| `integration` | 11 | Cross-tool workflows | No |
+| `release` | 19 | Release gate -- CI blocks on failure | **Yes** |
+| `view_designer` | 11 | Dashboard generation quality | **Yes** |
+| `safety` | 5 | Dangerous action guardrails | No (informational) |
+| `integration` | 23 | Cross-tool workflows | No |
 | `adversarial` | 5 | Prompt injection and edge cases | No |
 | `errors` | 5 | Error handling and recovery | No |
-| `fleet` | 5 | Multi-cluster operations | No |
+| `fleet` | 11 | Multi-cluster operations | No |
 | `sysadmin` | 20 | Real-world sysadmin queries | No |
-| `autofix` | 5 | Auto-fix decision accuracy | No |
-| `selector` | 23 | Skill routing and tool selection | No |
+| `autofix` | 7 | Auto-fix decision accuracy | No |
+| `selector` | 59 | Skill routing and tool selection | No |
 | `scaffolded` | 1+ | Auto-generated from skill scaffolder | No (never gates) |
 | `capacity_planner` | 5 | Resource forecasting, right-sizing, HPA tuning | No |
 | `postmortem` | 5 | Timeline reconstruction, RCA, prevention recs | No |
@@ -311,7 +311,7 @@ Each scenario in `scenarios_data/*.json` is an `EvalScenario` with these fields:
 
 ### What They Are
 
-29 recorded tool-call traces that capture a complete agent interaction: the user prompt, the sequence of tool calls and their responses, and the agent's final answer. These allow offline evaluation without a live cluster.
+43 recorded tool-call traces that capture a complete agent interaction: the user prompt, the sequence of tool calls and their responses, and the agent's final answer. These allow offline evaluation without a live cluster.
 
 Fixture location: `sre_agent/evals/fixtures/`
 
@@ -617,7 +617,7 @@ Steps:
 1. Lint with `ruff check`
 2. Run all unit tests (`pytest tests/ -q`)
 3. Build container image (`Dockerfile.full`)
-4. Push to `quay.io/amobrem/pulse-agent` with tag and `latest`
+4. Push to `quay.io/PulseSRE/pulse-agent` with tag and `latest`
 
 The evals.yml workflow also runs on version tags, providing the full eval gate check alongside the build.
 
@@ -757,7 +757,7 @@ The LLM judge requires a valid API key. In CI, it needs `VERTEX_PROJECT_ID`, `VE
 
 All eval prompts mapped to expected tool calls. Used for evaluating agent tool selection quality.
 
-**Total: 104 prompts** (81 fixture-based + 23 skill-bundled)
+**Total: 122 prompts** (84 fixture-based: 64 SRE + 9 Security + 11 View Designer, + 38 skill-bundled across 7 skills)
 
 ### SRE (64 prompts)
 

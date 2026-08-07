@@ -5,13 +5,13 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/PulseSRE/pulse-agent/releases/tag/v2.7.0"><img src="https://img.shields.io/badge/release-v2.7.0-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-154_(118+36_MCP)-10b981?style=for-the-badge" alt="Tools">
+  <a href="https://github.com/PulseSRE/pulse-agent/releases/tag/v2.7.1"><img src="https://img.shields.io/badge/release-v2.7.1-2563eb?style=for-the-badge" alt="Version"></a>
+  <img src="https://img.shields.io/badge/tools-138_(102+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
-  <img src="https://img.shields.io/badge/scanners-23-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-2372-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/scanners-22-10b981?style=for-the-badge" alt="Scanners">
+  <img src="https://img.shields.io/badge/tests-2414-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/eval_suites-16_(192_scenarios)-10b981?style=for-the-badge" alt="Eval Suites">
-  <img src="https://img.shields.io/badge/release_gate-99.6%25-10b981?style=for-the-badge" alt="Release Gate">
+  <img src="https://img.shields.io/badge/release_gate-97.5%25-10b981?style=for-the-badge" alt="Release Gate">
   <img src="https://img.shields.io/badge/PromQL%20recipes-83-10b981?style=for-the-badge" alt="PromQL Recipes">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
@@ -101,7 +101,7 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 - **Incident Triage** -- Correlate events, pod status, logs, and Prometheus metrics to identify root causes
 - **Resource Management** -- Analyze quotas, capacity, utilization, and HPA status across nodes
 - **Runbook Execution** -- 10 built-in runbooks. Scale deployments, restart pods, cordon/drain nodes, apply YAML (with confirmation gates)
-- **PromQL** -- 73 production-tested recipes across 16 categories, metric discovery, query verification against live clusters
+- **PromQL** -- 83 production-tested recipes across 17 categories, metric discovery, query verification against live clusters
 - **Right-Sizing** -- `get_resource_recommendations` compares actual CPU/memory usage to requests/limits via Prometheus
 
 ### Security Scanner
@@ -113,14 +113,14 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 - **Secret Hygiene** -- Find old unrotated secrets, env-exposed secrets, unused secrets
 
 ### Autonomous Monitor
-- **24 Scanners** -- 13 reactive (crashlooping pods, pending pods, failed deployments, node pressure, certificate expiry, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation, SLO burn rate, security posture) + 5 audit + 4 predictive trend (memory/disk pressure forecast, HPA exhaustion, error rate acceleration) + 2 proactive
+- **22 Scanners** -- 5 availability (crashlooping pods, pending pods, failed deployments, image pull errors, DaemonSet gaps) + 2 resources (OOM-killed pods, HPA saturation) + 2 infrastructure (node pressure, degraded operators) + 2 security (certificate expiry, security posture) + 2 monitoring (firing alerts, SLO burn rate) + 5 audit (auth, config, deployment, events, RBAC) + 4 predictive trend (memory/disk pressure, error rate, HPA exhaustion)
 - **Auto-Fix** -- Trust level 3 auto-fixes safe categories (crashloop pod deletion, deployment restarts). Trust level 4 fixes everything automatically with rollback snapshots
 - **Confidence Scores** -- Every finding, investigation, and action includes a 0-100% confidence score
 - **Noise Learning** -- Tracks transient findings and assigns noise scores to suppress flaky alerts
 - **Simulation Preview** -- Predict impact, risk, and duration before executing a fix
 
 ### MCP Integration
-- **36 MCP Tools** from the OpenShift MCP server (sidecar pod) across 11 toolsets: core, config, helm, observability, openshift, ossm, netedge, tekton, kiali, kubevirt, kcp
+- **36 MCP Tools** from the OpenShift MCP server (sidecar pod) across 11 toolsets: core, config, helm, observability, openshift, ossm, netedge, tekton, kiali, kubevirt, kcp. Combined with 102 native tools for **138 tools total**.
 - **Auto-Discovery** -- MCP tools registered alongside native tools at startup
 - **Toggle from UI** -- Enable/disable individual toolsets from the Toolbox page
 
@@ -130,6 +130,11 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 - **Cost Forecast** -- 30-day projected spend based on last 7 days of daily token totals
 - **Cost Budget** -- Optional daily dollar-amount cap (`PULSE_AGENT_COST_BUDGET_USD`) pauses investigations when exceeded
 - **ServiceMonitor** -- Helm template for Prometheus Operator scraping (`metrics.serviceMonitor.enabled`)
+
+### Unified Ops Inbox
+- **Single Worklist** -- `inbox.py` unifies findings, alerts, and predictions into one CRUD lifecycle (claim, acknowledge, snooze, dismiss, investigate, resolve, escalate, restore, pin) with dedup and priority
+- **Investigation Steps** -- Each inbox item tracks its own investigation timeline via `POST /inbox/{id}/step`
+- **REST API** -- `inbox_rest.py` exposes the full lifecycle at `/inbox/*`; the UI's Incident Center consumes this directly
 
 ### Self-Improving Agent
 - **Incident Memory** -- Every interaction stored with query, tool sequence, resolution, and outcome
@@ -214,7 +219,7 @@ podman run -d --name pulse-pg \
 export PULSE_AGENT_DATABASE_URL=postgresql://pulse:pulse@localhost:5433/pulse_test
 ```
 
-Schema migrations (currently at v016) are applied automatically on startup.
+Schema migrations (currently at v022) are applied automatically on startup.
 
 ## Deploy to OpenShift
 
@@ -275,17 +280,14 @@ The chart requires either `vertexAI.projectId` or `anthropicApiKey.existingSecre
 
 The [OpenShift Pulse](https://github.com/PulseSRE/pulse-ui) frontend is a React/TypeScript application that connects to the agent via WebSocket. Key surfaces:
 
-### Incident Center
-6 tabs for full incident lifecycle management:
+### Unified Inbox
+A single worklist page (`/inbox`) replaces the old multi-tab Incident Center. Findings, alerts, and predictions from the monitor flow into one list with full lifecycle actions (claim, acknowledge, snooze, dismiss, investigate, resolve, escalate, restore, pin):
 
-| Tab | What it shows |
-|-----|---------------|
-| **Active** | Live findings from the monitor with severity, confidence, and auto-fix controls |
-| **Timeline** | Chronological event stream across all scanners |
-| **Review Queue** | Proposed actions awaiting human approval (trust level 2) |
-| **Postmortems** | Auto-generated postmortem reports from resolved incidents |
-| **History** | All past findings and actions with rollback support |
-| **Alerts** | Prometheus firing alerts with investigation links |
+| Surface | What it shows |
+|---------|---------------|
+| **Inbox tab** | Grouped worklist with presets (Needs Attention, Agent Cleared, My Items, Archived, All), filters, and a task detail drawer showing the full investigation timeline |
+| **Activity tab** | Chronological feed across Events, Alerts, Agent actions, Rollouts, and Config changes |
+| **Task Detail Drawer** | Per-item lifecycle history, confidence score, rollback support, and step-by-step investigation log |
 
 ### Impact Analysis (`/topology`)
 Live dependency graph visualization showing resource relationships, blast radius overlays, and change risk scores.
@@ -295,7 +297,7 @@ Consolidated management page with 8 tabs:
 
 | Tab | Purpose |
 |-----|---------|
-| **Catalog** | All 122 tools organized by agent and category |
+| **Catalog** | All 138 tools organized by agent and category |
 | **Skills** | 7 loaded skills with status, keywords, and handoff configuration |
 | **Plans** | Plan templates and active plan executions |
 | **SLOs** | SLO registry, error budgets, and burn rate status |
@@ -321,21 +323,26 @@ All tests run without a live cluster or API key (fully mocked). See [TESTING.md]
 
 ### Eval Framework
 
-11 eval suites with 98 scenarios for release gating and regression detection:
+16 eval suites with 192 scenarios for release gating and regression detection:
 
 | Suite | Scenarios | Purpose |
 |-------|:---------:|---------|
-| `release` | 12 | Primary CI gate (must pass) |
-| `selector` | 23 | Skill routing accuracy |
+| `release` | 19 | Primary CI gate (must pass) |
+| `selector` | 59 | Skill routing accuracy (ORCA channel scoring) |
 | `sysadmin` | 20 | Real-world sysadmin queries |
-| `view_designer` | 7 | Dashboard generation quality |
+| `integration` | 23 | Reliability and failure modes |
+| `view_designer` | 11 | Dashboard generation quality |
+| `fleet` | 11 | Multi-cluster operations |
 | `core` | 6 | Mixed baseline coverage |
-| `integration` | 7 | Reliability and failure modes |
+| `autofix` | 7 | Auto-fix decision accuracy |
 | `adversarial` | 5 | Prompt injection and edge cases |
 | `errors` | 5 | Error handling and recovery |
-| `fleet` | 5 | Multi-cluster operations |
-| `autofix` | 5 | Auto-fix decision accuracy |
-| `safety` | 3 | Safety and compliance checks |
+| `capacity_planner` | 5 | Capacity forecasting accuracy |
+| `plan_builder` | 5 | Phased plan construction |
+| `postmortem` | 5 | Auto-postmortem quality |
+| `slo_management` | 5 | SLO/error-budget skill accuracy |
+| `safety` | 5 | Safety and compliance checks |
+| `scaffolded` | 1 | Auto-scaffolded skill validation |
 
 ```bash
 python -m sre_agent.evals.cli --suite release --fail-on-gate   # CI gate
@@ -343,7 +350,7 @@ python -m sre_agent.evals.cli --suite core --save-baseline     # Save baseline
 python -m sre_agent.evals.cli --suite core --compare-baseline  # Regression check
 ```
 
-Current release gate average: **98.1%**.
+Current release gate average: **97.5%** (19/19 scenarios passing).
 
 ## Architecture
 
@@ -369,9 +376,9 @@ sre_agent/
   change_risk.py       Pre-deploy risk scoring
 
   # Tools
-  k8s_tools/           41 K8s tools across 11 submodules
+  k8s_tools/           42 K8s tools across 10 submodules
   security_tools.py    9 security scanning tools
-  fleet_tools.py       5 multi-cluster tools
+  fleet_tools.py       7 multi-cluster tools
   gitops_tools.py      6 ArgoCD tools
   predict_tools.py     3 predictive analytics tools
   timeline_tools.py    Incident correlation
@@ -388,10 +395,14 @@ sre_agent/
   tool_predictor.py    TF-IDF + LLM fallback + co-occurrence tool selection
   tool_chains.py       Bigram tool chain discovery
   tool_usage.py        Audit log (PostgreSQL)
-  promql_recipes.py    73 PromQL recipes
+  promql_recipes.py    83 PromQL recipes
+
+  # Ops Inbox
+  inbox.py             Unified worklist: CRUD, lifecycle, priority, dedup
+  repositories/         Data-access layer (inbox, views, etc.)
 
   # Infrastructure
-  db.py                PostgreSQL abstraction + migrations (v016)
+  db.py                PostgreSQL abstraction + migrations (v022)
   memory/              Self-improving agent (incidents, runbooks, patterns)
   mcp_client.py        MCP server connections (SSE transport)
   orchestrator.py      Typo correction (~130 K8s misspellings)
@@ -405,14 +416,14 @@ chart/                 Helm chart (deployment, RBAC, PostgreSQL StatefulSet, Net
 | Endpoint | Description |
 |----------|-------------|
 | `WS /ws/agent` | Auto-routing orchestrated agent (ORCA classifies each message) |
-| `WS /ws/monitor` | Autonomous monitor (18 scanners, auto-fix, predictions) |
+| `WS /ws/monitor` | Autonomous monitor (22 scanners, auto-fix, predictions) |
 
 All WebSocket endpoints require `?token=...` query parameter (constant-time comparison). Protocol v2.
 
 ---
 
 <p align="center">
-  <strong>122 tools (86 native + 36 MCP)</strong> &bull; <strong>7 skills</strong> &bull; <strong>18 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>11 eval suites (98 scenarios)</strong> &bull; <strong>1,689 tests</strong> &bull; <strong>Migration v016</strong> &bull; <strong>Protocol v2</strong>
+  <strong>138 tools (102 native + 36 MCP)</strong> &bull; <strong>7 skills</strong> &bull; <strong>22 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>83 PromQL recipes</strong> &bull; <strong>25 component types</strong> &bull; <strong>16 eval suites (192 scenarios)</strong> &bull; <strong>2,414 tests</strong> &bull; <strong>Migration v022</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

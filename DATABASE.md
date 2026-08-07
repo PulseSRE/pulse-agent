@@ -99,7 +99,26 @@ Migrations apply automatically on first connection. No manual schema setup neede
 |-------|---------|-------------|
 | `metrics` | Agent performance metrics | metric_name, value, time_window |
 
-**Total: 24 tables, 30+ indexes.**
+### Plans (1 table)
+
+| Table | Purpose | Key Columns |
+|-------|---------|-------------|
+| `plan_executions` | Phased investigation plan runs | template_id, phase, status, progress_events (JSONB) |
+
+### Ops Inbox (1 table)
+
+| Table | Purpose | Key Columns |
+|-------|---------|-------------|
+| `inbox_items` | Unified worklist item | finding_id, status, priority, assignee, dedup_key |
+
+### User Analytics (2 tables)
+
+| Table | Purpose | Key Columns |
+|-------|---------|-------------|
+| `user_events` | Raw UI/user event stream | event_type, user_id, payload (JSONB) |
+| `user_interactions` | Aggregated interaction outcomes | interaction_type, outcome, user_id |
+
+**Total: 28 tables, 30+ indexes.**
 
 Full DDL: `sre_agent/db_schema.py`
 
@@ -113,7 +132,7 @@ Full DDL: `sre_agent/db_schema.py`
 4. Migrations are forward-only — no rollback support
 5. Failures roll back the individual migration and raise an exception
 
-### Current Migrations (v001 – v016)
+### Current Migrations (v001 – v022)
 
 | Version | Name | What it does |
 |---------|------|-------------|
@@ -133,6 +152,12 @@ Full DDL: `sre_agent/db_schema.py`
 | 14 | skill_selection_log | Adds ORCA selector logging |
 | 15 | postmortems | Adds `postmortems` table |
 | 16 | slo_definitions | Adds `slo_definitions` table |
+| 17 | plan_executions | Adds `plan_executions` table (phased plan runtime) |
+| 18 | user_events | Adds `user_events` table (raw UI event stream) |
+| 19 | agent_views | Adds agent-lifecycle columns to `views` (view_type, status, trigger_source) |
+| 20 | action_outcomes | Adds outcome-tracking columns to `actions` |
+| 21 | inbox_items | Adds `inbox_items` table (unified Ops Inbox) |
+| 22 | user_interactions | Adds `user_interactions` table (aggregated interaction outcomes) |
 
 ### Adding a New Migration
 
