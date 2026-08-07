@@ -100,6 +100,13 @@ async def rest_create_view(
     if len(_json.dumps(layout)) > 1_000_000:
         return JSONResponse(status_code=400, content={"error": "layout payload too large (max 1MB)"})
 
+    from ..quality_engine import normalize_layout, validate_layout_kinds
+
+    normalize_layout(layout)
+    kind_errors = validate_layout_kinds(layout)
+    if kind_errors:
+        return JSONResponse(status_code=400, content={"error": "; ".join(kind_errors)})
+
     result = db.save_view(owner, view_id, title, description, layout, positions, icon)
     if result is None:
         return JSONResponse(status_code=500, content={"error": "Failed to save view"})
@@ -124,6 +131,14 @@ async def rest_update_view(
     for key in ("title", "description", "icon", "layout", "positions"):
         if key in body:
             updates[key] = body[key]
+
+    if "layout" in updates and isinstance(updates["layout"], list):
+        from ..quality_engine import normalize_layout, validate_layout_kinds
+
+        normalize_layout(updates["layout"])
+        kind_errors = validate_layout_kinds(updates["layout"])
+        if kind_errors:
+            return JSONResponse(status_code=400, content={"error": "; ".join(kind_errors)})
 
     # Create version snapshot only when explicitly requested (save=true in body)
     if body.get("save"):

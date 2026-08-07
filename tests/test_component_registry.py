@@ -11,6 +11,7 @@ from sre_agent.component_registry import (
     get_valid_kinds,
     register_component,
 )
+from sre_agent.quality_engine import normalize_component_spec, normalize_layout, validate_layout_kinds
 
 
 class TestRegistry:
@@ -146,6 +147,154 @@ class TestPromptHints:
     def test_empty_kinds(self):
         hints = get_prompt_hints(kinds=["nonexistent_xyz"])
         assert hints == ""
+
+
+class TestNormalization:
+    def test_status_list_label_to_name(self):
+        spec = {"kind": "status_list", "items": [{"label": "Alert", "status": "warning"}]}
+        normalize_component_spec(spec)
+        assert spec["items"][0]["name"] == "Alert"
+        assert "label" not in spec["items"][0]
+
+    def test_status_list_preserves_name(self):
+        spec = {"kind": "status_list", "items": [{"name": "Alert", "status": "warning"}]}
+        normalize_component_spec(spec)
+        assert spec["items"][0]["name"] == "Alert"
+
+    def test_status_list_info_to_unknown(self):
+        spec = {"kind": "status_list", "items": [{"name": "x", "status": "info"}]}
+        normalize_component_spec(spec)
+        assert spec["items"][0]["status"] == "unknown"
+
+    def test_badge_list_label_to_text(self):
+        spec = {"kind": "badge_list", "badges": [{"label": "v1", "variant": "info"}]}
+        normalize_component_spec(spec)
+        assert spec["badges"][0]["text"] == "v1"
+        assert "label" not in spec["badges"][0]
+
+    def test_log_viewer_warning_to_warn(self):
+        spec = {"kind": "log_viewer", "lines": [{"message": "oops", "level": "warning"}]}
+        normalize_component_spec(spec)
+        assert spec["lines"][0]["level"] == "warn"
+
+    def test_chart_values_to_data(self):
+        spec = {"kind": "chart", "series": [{"label": "cpu", "values": [[1, 2]]}]}
+        normalize_component_spec(spec)
+        assert spec["series"][0]["data"] == [[1, 2]]
+        assert "values" not in spec["series"][0]
+
+    def test_yaml_viewer_yaml_to_content(self):
+        spec = {"kind": "yaml_viewer", "yaml": "key: val"}
+        normalize_component_spec(spec)
+        assert spec["content"] == "key: val"
+        assert "yaml" not in spec
+
+    def test_stat_card_label_to_title(self):
+        spec = {"kind": "stat_card", "label": "Errors", "value": "3"}
+        normalize_component_spec(spec)
+        assert spec["title"] == "Errors"
+
+    def test_info_card_grid_title_to_label(self):
+        spec = {"kind": "info_card_grid", "cards": [{"title": "Nodes", "text": "5"}]}
+        normalize_component_spec(spec)
+        assert spec["cards"][0]["label"] == "Nodes"
+        assert spec["cards"][0]["value"] == "5"
+
+    def test_props_flattened(self):
+        spec = {"kind": "metric_card", "title": "CPU", "props": {"value": "72%", "status": "warning"}}
+        normalize_component_spec(spec)
+        assert spec["value"] == "72%"
+        assert spec["status"] == "warning"
+        assert "props" not in spec
+
+    def test_blast_radius_info_to_healthy(self):
+        spec = {"kind": "blast_radius", "items": [{"kind_abbrev": "Svc", "name": "api", "status": "info"}]}
+        normalize_component_spec(spec)
+        assert spec["items"][0]["status"] == "healthy"
+
+    def test_normalize_layout_recurses_into_grid(self):
+        layout = [{"kind": "grid", "items": [{"kind": "status_list", "items": [{"label": "A", "status": "info"}]}]}]
+        normalize_layout(layout)
+        assert layout[0]["items"][0]["items"][0]["name"] == "A"
+        assert layout[0]["items"][0]["items"][0]["status"] == "unknown"
+
+
+class TestValidateLayoutKinds:
+    def test_valid_kinds(self):
+        layout = [{"kind": "metric_card"}, {"kind": "chart"}]
+        assert validate_layout_kinds(layout) == []
+
+    def test_invalid_kind(self):
+        layout = [{"kind": "metric_card"}, {"kind": "bogus_widget"}]
+        errors = validate_layout_kinds(layout)
+        assert len(errors) == 1
+        assert "bogus_widget" in errors[0]
+
+    def test_missing_kind(self):
+        layout = [{"title": "oops"}]
+        errors = validate_layout_kinds(layout)
+        assert len(errors) == 1
+        assert "missing" in errors[0].lower()
+
+
+class TestFrontendContract:
+    """Verify the backend registry matches what the frontend expects."""
+
+    _FRONTEND_KNOWN_KINDS: frozenset[str] = frozenset(
+        {
+            "data_table",
+            "info_card_grid",
+            "badge_list",
+            "status_list",
+            "key_value",
+            "chart",
+            "tabs",
+            "grid",
+            "section",
+            "relationship_tree",
+            "log_viewer",
+            "yaml_viewer",
+            "metric_card",
+            "node_map",
+            "bar_list",
+            "progress_list",
+            "stat_card",
+            "timeline",
+            "resource_counts",
+            "topology",
+            "action_button",
+            "confidence_badge",
+            "resolution_tracker",
+            "blast_radius",
+            "status_pipeline",
+        }
+    )
+
+    def test_backend_covers_frontend_kinds(self):
+        backend_kinds = get_valid_kinds()
+        missing = self._FRONTEND_KNOWN_KINDS - backend_kinds
+        assert not missing, f"Frontend expects kinds not in backend registry: {missing}"
+
+    def test_frontend_covers_backend_kinds(self):
+        backend_kinds = get_valid_kinds()
+        extra = backend_kinds - self._FRONTEND_KNOWN_KINDS
+        assert not extra, f"Backend has kinds not in frontend getKnownKinds(): {extra}"
+
+    def test_all_examples_use_correct_field_names(self):
+        """Verify registry examples use the canonical field names (not aliases)."""
+        for name, comp in COMPONENT_REGISTRY.items():
+            ex = comp.example
+            if name == "status_list":
+                for item in ex.get("items", []):
+                    assert "name" in item, "status_list example uses 'label' instead of 'name'"
+                    assert "label" not in item
+            elif name == "badge_list":
+                for badge in ex.get("badges", []):
+                    assert "text" in badge, "badge_list example uses 'label' instead of 'text'"
+                    assert "label" not in badge
+            elif name == "chart":
+                for s in ex.get("series", []):
+                    assert "values" not in s, "chart example uses 'values' instead of 'data'"
 
 
 class TestRegisterComponent:

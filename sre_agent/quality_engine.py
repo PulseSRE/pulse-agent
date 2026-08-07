@@ -87,6 +87,114 @@ def is_generic_title(title: str, kind: str) -> bool:
     return lower == kind_as_title
 
 
+def normalize_component_spec(spec: dict) -> dict:
+    """Normalize field name aliases in a component spec.
+
+    Fixes known mismatches between what tools produce and what the frontend
+    expects, so specs are consistent before validation or persistence.
+    """
+    kind = spec.get("kind", "")
+
+    if kind == "status_list":
+        items = spec.get("items")
+        if isinstance(items, list):
+            for item in items:
+                if "label" in item and "name" not in item:
+                    item["name"] = item.pop("label")
+                status = item.get("status")
+                if status == "info":
+                    item["status"] = "unknown"
+
+    elif kind == "badge_list":
+        badges = spec.get("badges")
+        if isinstance(badges, list):
+            for badge in badges:
+                if "label" in badge and "text" not in badge:
+                    badge["text"] = badge.pop("label")
+
+    elif kind == "log_viewer":
+        lines = spec.get("lines")
+        if isinstance(lines, list):
+            for line in lines:
+                if line.get("level") == "warning":
+                    line["level"] = "warn"
+
+    elif kind == "blast_radius":
+        items = spec.get("items")
+        if isinstance(items, list):
+            for item in items:
+                status = item.get("status")
+                if status == "info":
+                    item["status"] = "healthy"
+
+    elif kind == "chart":
+        series = spec.get("series")
+        if isinstance(series, list):
+            for s in series:
+                if "values" in s and "data" not in s:
+                    s["data"] = s.pop("values")
+
+    elif kind == "yaml_viewer":
+        if "yaml" in spec and "content" not in spec:
+            spec["content"] = spec.pop("yaml")
+
+    elif kind == "stat_card":
+        if "label" in spec and "title" not in spec:
+            spec["title"] = spec.pop("label")
+
+    elif kind == "info_card_grid":
+        cards = spec.get("cards")
+        if isinstance(cards, list):
+            for card in cards:
+                if "title" in card and "label" not in card:
+                    card["label"] = card.pop("title")
+                if "text" in card and "value" not in card:
+                    card["value"] = card.pop("text")
+
+    # Flatten props wrapper: {kind, props: {data}} → {kind, ...data}
+    if "props" in spec and isinstance(spec["props"], dict):
+        props = spec.pop("props")
+        for k, v in props.items():
+            if k not in spec:
+                spec[k] = v
+
+    return spec
+
+
+def normalize_layout(layout: list[dict]) -> list[dict]:
+    """Normalize all component specs in a layout list."""
+    for spec in layout:
+        normalize_component_spec(spec)
+        if spec.get("kind") == "grid":
+            for item in spec.get("items", []):
+                normalize_component_spec(item)
+        elif spec.get("kind") == "tabs":
+            for tab in spec.get("tabs", []):
+                for comp in tab.get("components", []):
+                    normalize_component_spec(comp)
+        elif spec.get("kind") == "section":
+            for comp in spec.get("components", []):
+                normalize_component_spec(comp)
+    return layout
+
+
+def validate_layout_kinds(layout: list[dict]) -> list[str]:
+    """Validate that all components in a layout have valid kinds.
+
+    Returns a list of error strings (empty if all valid).
+    Lighter than evaluate_components — suitable for REST save paths.
+    """
+    valid = _get_valid_kinds()
+    errors: list[str] = []
+    for i, spec in enumerate(layout):
+        kind = spec.get("kind")
+        if not kind:
+            errors.append(f"Widget {i}: missing 'kind' field")
+        elif kind not in valid:
+            errors.append(f"Widget {i}: invalid kind '{kind}'")
+    return errors
+
+
 def evaluate_components(
     components: list[dict],
     positions: dict | None = None,
@@ -106,6 +214,11 @@ def evaluate_components(
         result.valid = False
         result.errors.append("Dashboard must have at least 1 component.")
         return result
+
+    # ------------------------------------------------------------------
+    # Phase 0: Normalize field aliases
+    # ------------------------------------------------------------------
+    normalize_layout(components)
 
     # ------------------------------------------------------------------
     # Phase 1: Deduplication (from validator)
