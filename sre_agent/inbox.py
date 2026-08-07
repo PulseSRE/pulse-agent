@@ -184,7 +184,14 @@ def list_inbox_items(
     elif status == "agent_cleared":
         exclude_clause = "status NOT IN ('archived')"
     elif status == "__needs_attention__":
-        exclude_clause = "status NOT IN ('archived', 'agent_cleared', 'resolved', 'new', 'agent_reviewing', 'agent_review_failed') AND (severity IS NULL OR severity != 'info')"
+        # Only fully-closed states are excluded here. Freshly bridged monitor
+        # findings start in 'new' and pass through 'agent_reviewing'/
+        # 'agent_review_failed' while the async triage pipeline runs — those
+        # are still open issues the UI renders (spinner/badges in InboxItem),
+        # so hiding them made active critical findings invisible by default.
+        exclude_clause = (
+            "status NOT IN ('archived', 'agent_cleared', 'resolved') AND (severity IS NULL OR severity != 'info')"
+        )
         status = None
     else:
         exclude_clause = "status NOT IN ('archived', 'agent_cleared')"
@@ -265,9 +272,7 @@ def _compute_stats(items: list[dict[str, Any]]) -> dict[str, int]:
     return stats
 
 
-_NEEDS_ATTENTION_EXCLUDE = frozenset(
-    {"archived", "agent_cleared", "resolved", "new", "agent_reviewing", "agent_review_failed"}
-)
+_NEEDS_ATTENTION_EXCLUDE = frozenset({"archived", "agent_cleared", "resolved"})
 
 
 def get_inbox_stats() -> dict[str, int]:
@@ -322,7 +327,11 @@ async def async_list_inbox_items(
     elif status == "agent_cleared":
         exclude_clause = "status NOT IN ('archived')"
     elif status == "__needs_attention__":
-        exclude_clause = "status NOT IN ('archived', 'agent_cleared', 'resolved', 'new', 'agent_reviewing', 'agent_review_failed') AND (severity IS NULL OR severity != 'info')"
+        # See list_inbox_items() for why 'new'/'agent_reviewing'/
+        # 'agent_review_failed' must stay visible in Needs Attention.
+        exclude_clause = (
+            "status NOT IN ('archived', 'agent_cleared', 'resolved') AND (severity IS NULL OR severity != 'info')"
+        )
         status = None
     else:
         exclude_clause = "status NOT IN ('archived', 'agent_cleared')"

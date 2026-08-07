@@ -99,6 +99,95 @@ class TestInboxCRUD:
         assert "total" in stats
 
 
+class TestNeedsAttentionFilter:
+    """Regression tests: newly-bridged monitor findings (status='new') and
+    items still in the async agent triage pipeline ('agent_reviewing',
+    'agent_review_failed') must appear in the default '__needs_attention__'
+    view. Otherwise the Inbox shows zero items right after a scan even though
+    the cluster posture banner reports active critical findings, because
+    bridge_finding_to_inbox() creates items in 'new' status and the LLM
+    triage/investigate pipeline that advances them to 'triaged' runs
+    asynchronously (and can be slow, rate-limited, or fail outright).
+    """
+
+    def test_new_critical_finding_appears_in_needs_attention(self):
+        from sre_agent.inbox import bridge_finding_to_inbox, list_inbox_items
+
+        finding = {
+            "id": "f-crit-1",
+            "category": "crashloop",
+            "namespace": "production",
+            "title": "Pod acm-mcp-server restarting",
+            "summary": "acm-mcp-server pod restarting (3x)",
+            "severity": "critical",
+            "confidence": 0.9,
+            "resources": [{"kind": "Pod", "name": "acm-mcp-server-abc123", "namespace": "production"}],
+        }
+        item_id = bridge_finding_to_inbox(finding)
+
+        result = list_inbox_items(status="__needs_attention__")
+        ids = [i["id"] for i in result["items"]]
+        assert item_id in ids
+        assert result["total"] >= 1
+
+    def test_agent_reviewing_item_stays_in_needs_attention(self):
+        from sre_agent.inbox import create_inbox_item, list_inbox_items, update_item_status
+
+        item_id = create_inbox_item(_make_item(title="Reviewing item"))
+        assert update_item_status(item_id, "agent_reviewing")
+
+        result = list_inbox_items(status="__needs_attention__")
+        ids = [i["id"] for i in result["items"]]
+        assert item_id in ids
+
+    def test_agent_review_failed_item_stays_in_needs_attention(self):
+        """A failed AI triage must surface to a human, not vanish silently."""
+        from sre_agent.inbox import create_inbox_item, list_inbox_items, update_item_status
+
+        item_id = create_inbox_item(_make_item(title="Failed triage"))
+        assert update_item_status(item_id, "agent_review_failed")
+
+        result = list_inbox_items(status="__needs_attention__")
+        ids = [i["id"] for i in result["items"]]
+        assert item_id in ids
+
+    def test_agent_cleared_and_resolved_excluded_from_needs_attention(self):
+        from sre_agent.inbox import create_inbox_item, list_inbox_items, update_item_status
+
+        cleared_id = create_inbox_item(_make_item(title="Cleared item"))
+        update_item_status(cleared_id, "agent_cleared")
+
+        resolved_id = create_inbox_item(_make_item(title="Resolved item"))
+        update_item_status(resolved_id, "triaged")
+        update_item_status(resolved_id, "claimed")
+        update_item_status(resolved_id, "in_progress")
+        update_item_status(resolved_id, "resolved")
+
+        result = list_inbox_items(status="__needs_attention__")
+        ids = [i["id"] for i in result["items"]]
+        assert cleared_id not in ids
+        assert resolved_id not in ids
+
+    def test_stats_needs_attention_includes_new_items(self):
+        from sre_agent.inbox import bridge_finding_to_inbox, get_inbox_stats
+
+        finding = {
+            "id": "f-crit-2",
+            "category": "oom",
+            "namespace": "production",
+            "title": "Pod OOMKilled",
+            "summary": "payment-api OOMKilled",
+            "severity": "critical",
+            "confidence": 0.85,
+            "resources": [{"kind": "Pod", "name": "payment-api-xyz", "namespace": "production"}],
+        }
+        bridge_finding_to_inbox(finding)
+
+        stats = get_inbox_stats()
+        assert stats.get("new", 0) >= 1
+        assert stats["needs_attention"] >= stats["new"]
+
+
 class TestLifecycle:
     def test_simplified_lifecycle(self):
         """All item types share the same lifecycle: new → triaged → claimed → in_progress → resolved."""
