@@ -842,6 +842,8 @@ The UI shows a "Save Dashboard" prompt. Saved views are accessible at `/custom/:
 
 Emitted when the agent's `create_dashboard` call produces components with validation issues (missing structure, generic titles, etc.). The view IS saved (after dedup) so the agent can critique and fix it. Duplicates are silently removed.
 
+**Normalization**: Before validation, all component specs are normalized via `normalize_layout()` — field aliases are fixed automatically (e.g. `label`→`name` for status_list items, `values`→`data` for chart series, `props` wrappers are flattened). This runs on both WS and REST save paths.
+
 ```json
 {
   "type": "view_validation_warning",

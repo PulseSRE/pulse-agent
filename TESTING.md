@@ -135,6 +135,7 @@ pytest tests across 121 test files in `tests/`. Major coverage areas:
 | Orchestrator | `test_orchestrator.py` | Intent classification, typo correction |
 | Evals framework | `test_eval_*.py`, `test_evals_*.py` | Eval runner, compare, replay, judge, history, ablation |
 | Views/dashboards | `test_views.py`, `test_view_validator.py`, `test_view_critic.py`, `test_quality_engine.py` | Dashboard CRUD, validation, quality scoring |
+| Component contract | `test_component_registry.py` | Registry integrity, normalization, frontend contract (25 kinds sync) |
 | Layout | `test_layout_engine.py`, `test_component_transform.py`, `test_widget_mutations.py` | Semantic layout, component specs, widget ops |
 | Memory | `test_memory_tools.py`, `test_patterns.py`, `test_retrieval.py` | Pattern detection, learned runbooks |
 | Config | `test_config.py` | Pydantic settings, env var handling |
