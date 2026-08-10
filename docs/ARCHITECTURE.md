@@ -1,8 +1,8 @@
 # Pulse Agent Architecture
 
-Comprehensive architecture reference for Pulse Agent v2.7.1, Protocol v2.
+Comprehensive architecture reference for Pulse Agent v2.8.0, Protocol v2.
 
-**Last updated:** 2026-06-26
+**Last updated:** 2026-08-07
 
 ---
 
@@ -78,7 +78,7 @@ React/TypeScript frontend (OpenShift Pulse) providing the user interface.
 | ---------------- | -------------------------------------------------------- |
 | Tools            | 154 (118 native + 36 MCP) across 54 modules + MCP servers |
 | Scanners         | 23 (11 reactive + 5 audit + 1 SLO burn + 1 security posture + 5 predictive trend) |
-| Tests            | 2,432                                                    |
+| Tests            | 2,455                                                    |
 | PromQL Recipes   | 83 across 16 categories                                  |
 | Eval Prompts     | 192                                                      |
 | Protocol Version | 2                                                        |
@@ -218,6 +218,17 @@ inline in the chat or assembled into dashboards:
 | `yaml_viewer`       | Formatted YAML/JSON with copy button          | Various                      |
 | `metric_card`       | Single metric with live sparkline             | `cluster_metrics`            |
 | `node_map`          | Visual cluster node topology                  | `visualize_nodes`            |
+| `stat_card`         | Single metric with label and sparkline        | `cluster_metrics`            |
+| `resource_counts`   | Namespace resource summary                    | `namespace_summary`          |
+| `bar_list`          | Horizontal bars with labels                   | Various                      |
+| `progress_list`     | Utilization bars with max value               | Various                      |
+| `timeline`          | Chronological event timeline                  | `get_events`                 |
+| `topology`          | Resource dependency graph                     | `get_topology_graph`         |
+| `action_button`     | Actionable button for remediation             | Various                      |
+| `confidence_badge`  | Confidence score display                      | Various                      |
+| `resolution_tracker`| Fix verification status                       | Various                      |
+| `blast_radius`      | Impact analysis visualization                 | Various                      |
+| `status_pipeline`   | Multi-stage status display                    | Various                      |
 
 
 Data tables support 14 smart column renderers: `resource_name`, `namespace`,
@@ -299,7 +310,7 @@ User: "Why are pods crashing in staging?"     -> sre (hard switch)
 
 ## 4. Tool System
 
-### 122 Tools Across 36 Modules
+### 154 Tools Across 54 Modules
 
 
 | Module   | File                          | Tools | Description                                                             |
@@ -432,7 +443,7 @@ The system prompt is built in 4 tiers, each with different caching behavior:
 
 The harness achieves a 71% reduction in prompt size through:
 
-1. **Selective tool schema injection** -- Instead of sending all 122 tool
+1. **Selective tool schema injection** -- Instead of sending all 154 tool
    schemas, the harness selects 15-50 relevant tools based on the user query
    and agent mode. Each mode maps to a set of tool categories.
 2. **Selective component schema injection** -- Only component schemas that the
@@ -543,9 +554,9 @@ semantic auto-layout engine. It assigns widget sizes and positions based on:
 - **Adaptive grid**: Adjusts columns and row heights based on component count
   and types
 
-### 73 PromQL Recipes
+### 83 PromQL Recipes
 
-`sre_agent/promql_recipes.py` provides 73 production-tested PromQL queries
+`sre_agent/promql_recipes.py` provides 83 production-tested PromQL queries
 curated from 7 OpenShift/Kubernetes repositories:
 
 - Sources: openshift/console, cluster-monitoring-operator, kube-state-metrics,
@@ -569,7 +580,7 @@ cluster scanning via the `/ws/monitor` WebSocket endpoint. It pushes findings,
 predictions, investigation reports, and action reports to connected UI clients
 in real time.
 
-### 17 Scanners
+### 23 Scanners
 
 
 | Scanner                     | Category           | Severity       | Auto-fixable |
@@ -591,6 +602,11 @@ in real time.
 | Deployment rollouts (audit) | `audit_deployment` | INFO           | No           |
 | Warning events (audit)      | `audit_events`     | WARNING        | No           |
 | Auth anomalies (audit)      | `audit_auth`       | WARNING        | No           |
+| SLO burn rate               | `slo_burn`         | WARNING        | No           |
+| Memory pressure forecast    | `trend_memory`     | WARNING        | No (predictive) |
+| Disk pressure forecast      | `trend_disk`       | WARNING        | No (predictive) |
+| HPA exhaustion trend        | `trend_hpa`        | WARNING        | No (predictive) |
+| Error rate acceleration     | `trend_errors`     | WARNING        | No (predictive) |
 
 
 Pod-based scanners (crashloop, oom, image_pull) share a single pod list fetch
@@ -1018,7 +1034,7 @@ max 3 will operate at level 3. This prevents UI-side escalation.
 | Path          | Auth  | Description                                                           |
 | ------------- | ----- | --------------------------------------------------------------------- |
 | `/ws/agent`   | token | Auto-routing orchestrated agent (ORCA classifies intent per message)  |
-| `/ws/monitor` | token | Autonomous cluster monitoring (18 scanners, auto-fix, investigations) |
+| `/ws/monitor` | token | Autonomous cluster monitoring (23 scanners, auto-fix, investigations) |
 
 
 ### Chat Protocol (SRE, Security, Agent)
@@ -1223,7 +1239,7 @@ error if neither is set.
 │  │                │                                                 │    │
 │  │  /ws/monitor ──┤── MonitorSession                                │    │
 │  │                │     │                                           │    │
-│  │                │     ├── 17 Scanners ──── K8s API Server         │    │
+│  │                │     ├── 23 Scanners ──── K8s API Server         │    │
 │  │                │     ├── Investigations ─ Claude API              │    │
 │  │                │     ├── Auto-fix ─────── K8s API Server         │    │
 │  │                │     └── Fix History ──── PostgreSQL              │    │
@@ -1370,7 +1386,7 @@ User: "Build me a production dashboard"
 │  1. Fetch shared pod list (once)                       │
 │     └── Shared across crashloop, oom, image_pull       │
 │                                                        │
-│  2. Run all 17 scanners (asyncio.to_thread each)       │
+│  2. Run all 23 scanners (asyncio.to_thread each)       │
 │     └── Collect all findings                           │
 │                                                        │
 │  3. Deduplicate by finding_key                         │
@@ -1432,7 +1448,7 @@ Replaces keyword-only routing with 6-channel weighted fusion (5 active by defaul
 
 **Self-improving:** `selector_learning.py` recomputes channel weights from `skill_selection_log` outcomes. Weights persisted to DB via `load_learned_weights()` / `_persist_weights()`. Loaded on `SkillSelector.__init__()`.
 
-**Skill metadata:** All 8 skills enriched with `trigger_patterns` (regex), `tool_sequences` (named workflows), and `investigation_framework` (structured reasoning steps).
+**Skill metadata:** All 7 skills enriched with `trigger_patterns` (regex), `tool_sequences` (named workflows), and `investigation_framework` (structured reasoning steps).
 
 ### Phased Plan Execution (`plan_runtime.py`, `skill_plan.py`)
 

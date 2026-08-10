@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Pulse Agent // AI SRE for OpenShift</title>
-  <meta name="description" content="AI-powered SRE and Security agent for OpenShift/Kubernetes. Claude-powered diagnostics, 154 tools, 7 skills, ORCA multi-signal routing, 83 PromQL recipes, autonomous monitoring, phased plan execution. v2.7.0.">
+  <meta name="description" content="AI-powered SRE and Security agent for OpenShift/Kubernetes. Claude-powered diagnostics, 154 tools, 7 skills, ORCA multi-signal routing, 83 PromQL recipes, autonomous monitoring, phased plan execution. v2.8.0.">
   <meta property="og:title" content="Pulse Agent">
-  <meta property="og:description" content="AI SRE agent for OpenShift — 154 tools, 7 skills, ORCA architecture, 23 scanners, 83 PromQL recipes, phased plan execution. v2.7.0">
+  <meta property="og:description" content="AI SRE agent for OpenShift — 154 tools, 7 skills, ORCA architecture, 23 scanners, 83 PromQL recipes, phased plan execution. v2.8.0">
   <link rel="icon" href="logo.svg" type="image/svg+xml">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
   <style>
@@ -101,12 +101,12 @@
   <section class="hero">
     <img src="logo.svg" alt="Pulse Agent" style="width: 80px; height: 80px; filter: drop-shadow(0 0 20px rgba(0,255,136,0.5)); animation: pulse-glow 3s ease-in-out infinite;">
     <h1>PULSE AGENT</h1>
-    <div class="version">v2.7.1 // 154 TOOLS // 54 MODULES // PROTOCOL v2 // ORCA INTELLIGENCE</div>
+    <div class="version">v2.8.0 // 154 TOOLS // 25 COMPONENTS // PROTOCOL v2 // ORCA INTELLIGENCE</div>
     <p class="tagline">AI-powered SRE and Security agent for OpenShift. <em>Claude</em> diagnoses, triages, and remediates — 24/7.</p>
     <div class="hero-buttons">
-      <a href="https://github.com/alimobrem/pulse-agent" class="btn btn-primary">[ SOURCE ]</a>
-      <a href="https://github.com/alimobrem/pulse-agent/releases/latest" class="btn btn-secondary">RELEASES</a>
-      <a href="https://alimobrem.github.io/OpenshiftPulse/" class="btn btn-ghost">PULSE UI &#x2192;</a>
+      <a href="https://github.com/PulseSRE/pulse-agent" class="btn btn-primary">[ SOURCE ]</a>
+      <a href="https://github.com/PulseSRE/pulse-agent/releases/latest" class="btn btn-secondary">RELEASES</a>
+      <a href="https://PulseSRE.github.io/pulse-ui/" class="btn btn-ghost">PULSE UI &#x2192;</a>
     </div>
   </section>
 
@@ -114,8 +114,8 @@
 
   <div class="stats-bar">
     <div class="stat"><div class="stat-value">154</div><div class="stat-label">Tools</div></div>
-    <div class="stat"><div class="stat-value cyan">54</div><div class="stat-label">Modules</div></div>
-    <div class="stat"><div class="stat-value magenta">2,432</div><div class="stat-label">Tests</div></div>
+    <div class="stat"><div class="stat-value cyan">25</div><div class="stat-label">Components</div></div>
+    <div class="stat"><div class="stat-value magenta">2,455</div><div class="stat-label">Tests</div></div>
     <div class="stat"><div class="stat-value" style="color: var(--violet); text-shadow: 0 0 15px rgba(139,92,246,0.4);">7</div><div class="stat-label">Skills</div></div>
     <div class="stat"><div class="stat-value">83</div><div class="stat-label">PromQL Recipes</div></div>
     <div class="stat"><div class="stat-value yellow">192</div><div class="stat-label">Eval Scenarios</div></div>
@@ -197,8 +197,24 @@
         <p>16 eval suites, 192 scenarios. Release gate: <strong>99.6%</strong>. Safety, adversarial, autofix, capacity, postmortem, SLO management suites. Selector: 59 scenarios. Ablation testing, regression tracking, baseline comparison.</p>
       </div>
       <div class="feature-card">
+        <h3>Ops Inbox <span class="badge badge-auto">AUTO</span></h3>
+        <p>Unified SRE worklist. 13 proactive task generators (cert expiry, trend prediction, degraded operators, SLO burn, capacity, RBAC drift). Priority scoring, dedup, snooze, lifecycle transitions, WebSocket live updates.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Intelligence Bridge <span class="badge badge-ai">AI</span></h3>
+        <p>Automatic field alias normalization between backend and frontend. 25 component types with contract tests. Backend normalizes on save, frontend normalizes on render — zero mismatches.</p>
+      </div>
+      <div class="feature-card">
+        <h3>View Lifecycle</h3>
+        <p>3 view types (incident, plan, assessment). Multi-user claims with status state machines. Finding dedup, recurrence handling, assessment-to-incident escalation. ViewEventBus for real-time broadcast.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Predictive Analytics <span class="badge badge-ai">AI</span></h3>
+        <p>5 trend scanners using Prometheus predict_linear(): memory pressure forecast, disk pressure forecast, HPA exhaustion trend, error rate acceleration. Predict problems before they happen.</p>
+      </div>
+      <div class="feature-card">
         <h3>Modular Architecture</h3>
-        <p>49 modules across 3 packages. No file over 910 lines. Typo auto-correction for 130+ K8s terms. Centralized Pydantic config, zero raw os.environ.</p>
+        <p>54 modules across 3 packages. No file over 910 lines. Typo auto-correction for 130+ K8s terms. Centralized Pydantic config, zero raw os.environ.</p>
       </div>
     </div>
   </section>
@@ -259,7 +275,7 @@
     <p class="subtitle">From zero to scanning in 60 seconds.</p>
     <div class="code-block">
       <span class="comment"># install</span><br>
-      <span class="cmd">git clone</span> https://github.com/alimobrem/pulse-agent.git<br>
+      <span class="cmd">git clone</span> https://github.com/PulseSRE/pulse-agent.git<br>
       <span class="cmd">cd</span> pulse-agent && <span class="cmd">pip install</span> <span class="flag">-e .</span><br><br>
       <span class="comment"># configure (pick one)</span><br>
       <span class="flag">ANTHROPIC_VERTEX_PROJECT_ID</span>=your-project <span class="flag">CLOUD_ML_REGION</span>=us-east5 <span class="comment"># Vertex AI</span><br>
@@ -277,15 +293,15 @@
 
   <section class="cta-section">
     <h2>Your cluster deserves an AI copilot.</h2>
-    <p>Pair with <a href="https://alimobrem.github.io/OpenshiftPulse/">OpenShift Pulse</a> for the full experience, or run standalone as a CLI.</p>
+    <p>Pair with <a href="https://PulseSRE.github.io/pulse-ui/">Pulse UI</a> for the full experience, or run standalone as a CLI.</p>
     <div class="hero-buttons">
-      <a href="https://github.com/alimobrem/pulse-agent" class="btn btn-primary">[ DEPLOY AGENT ]</a>
-      <a href="https://alimobrem.github.io/OpenshiftPulse/" class="btn btn-secondary">PULSE UI</a>
+      <a href="https://github.com/PulseSRE/pulse-agent" class="btn btn-primary">[ DEPLOY AGENT ]</a>
+      <a href="https://PulseSRE.github.io/pulse-ui/" class="btn btn-secondary">PULSE UI</a>
     </div>
   </section>
 
   <footer>
-    PULSE AGENT // MIT LICENSE // <a href="https://github.com/alimobrem/pulse-agent">GITHUB</a> &middot; <a href="https://alimobrem.github.io/OpenshiftPulse/">PULSE UI</a> &middot; <a href="https://github.com/alimobrem/pulse-agent/blob/main/CHANGELOG.md">CHANGELOG</a>
+    PULSE AGENT // MIT LICENSE // <a href="https://github.com/PulseSRE/pulse-agent">GITHUB</a> &middot; <a href="https://PulseSRE.github.io/pulse-ui/">PULSE UI</a> &middot; <a href="https://github.com/PulseSRE/pulse-agent/blob/main/CHANGELOG.md">CHANGELOG</a>
   </footer>
 
 </body>
