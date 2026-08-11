@@ -16,7 +16,7 @@ from typing import Any
 
 from .decorators import beta_tool
 from .errors import ToolError
-from .k8s_client import age, get_apps_client, get_core_client, get_custom_client, safe_list
+from .k8s_client import age, get_apps_client, get_core_client, get_custom_client
 
 logger = logging.getLogger("pulse_agent.fleet")
 

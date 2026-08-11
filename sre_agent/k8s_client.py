@@ -30,6 +30,17 @@ _user_token_var: ContextVar[str | None] = ContextVar("_user_token", default=None
 _user_api_client_var: ContextVar[Any] = ContextVar("_user_api_client", default=None)
 _require_user_token_var: ContextVar[bool] = ContextVar("_require_user_token", default=False)
 
+_SYSTEM_NS_PREFIXES = ("openshift-", "kube-")
+
+
+def is_system_namespace(name: str, *, include_default: bool = True) -> bool:
+    """Return True if the namespace is a platform/system namespace."""
+    if name.startswith(_SYSTEM_NS_PREFIXES):
+        return True
+    if name == "openshift":
+        return True
+    return bool(include_default and name == "default")
+
 
 def get_current_user_token() -> str | None:
     """Return the current user's bearer token, or None if using SA."""

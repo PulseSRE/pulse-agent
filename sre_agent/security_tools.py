@@ -18,6 +18,7 @@ from .k8s_client import (
     get_custom_client,
     get_networking_client,
     get_rbac_client,
+    is_system_namespace,
     safe,
     safe_list,
 )
@@ -514,7 +515,7 @@ def get_security_summary() -> str:
 
         for pod in pods.items:
             ns = pod.metadata.namespace
-            if ns.startswith(("openshift-", "kube-")):
+            if is_system_namespace(ns, include_default=False):
                 continue
 
             # Default service account
@@ -645,11 +646,7 @@ def get_security_summary() -> str:
     netpols = safe(lambda: get_networking_client().list_network_policy_for_all_namespaces())
     if not isinstance(ns_list, ToolError) and not isinstance(netpols, ToolError):
         ns_with_policies = {np.metadata.namespace for np in netpols.items}
-        user_ns = [
-            ns.metadata.name
-            for ns in ns_list.items
-            if not ns.metadata.name.startswith(("openshift-", "kube-", "default"))
-        ]
+        user_ns = [ns.metadata.name for ns in ns_list.items if not is_system_namespace(ns.metadata.name)]
         missing = [n for n in user_ns if n not in ns_with_policies]
         stats["namespaces_without_network_policy"] = len(missing)
         if missing:
@@ -686,7 +683,7 @@ def get_security_summary() -> str:
         now = datetime.now(UTC)
         old_secrets = 0
         for s in secrets.items:
-            if s.metadata.namespace.startswith(("openshift-", "kube-")):
+            if is_system_namespace(s.metadata.namespace, include_default=False):
                 continue
             if s.type in ("kubernetes.io/service-account-token", "kubernetes.io/dockercfg"):
                 continue

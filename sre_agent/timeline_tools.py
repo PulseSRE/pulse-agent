@@ -19,7 +19,7 @@ logger = logging.getLogger("pulse_agent.timeline_tools")
 from kubernetes.client.rest import ApiException
 
 from .decorators import beta_tool
-from .k8s_client import get_apps_client, get_core_client, get_custom_client, safe, safe_list
+from .k8s_client import get_apps_client, get_core_client, get_custom_client, safe_list
 
 
 @beta_tool

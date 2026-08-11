@@ -216,7 +216,7 @@ def _get_rbac_drift() -> list[dict]:
 
 def _get_network_policy_gaps() -> list[dict]:
     try:
-        from .k8s_client import get_core_client, get_networking_client, safe
+        from .k8s_client import get_core_client, get_networking_client, is_system_namespace, safe
 
         namespaces = safe(lambda: get_core_client().list_namespace())
         if isinstance(namespaces, str):
@@ -232,7 +232,7 @@ def _get_network_policy_gaps() -> list[dict]:
         gaps = []
         for ns in namespaces.items:
             name = ns.metadata.name
-            if name.startswith("openshift-") or name.startswith("kube-"):
+            if is_system_namespace(name, include_default=False):
                 continue
             if name not in ns_with_policies:
                 gaps.append({"namespace": name})
@@ -266,7 +266,7 @@ def _get_route_cert_expiry() -> list[dict]:
 
 def _get_service_endpoint_gaps() -> list[dict]:
     try:
-        from .k8s_client import get_core_client, safe
+        from .k8s_client import get_core_client, is_system_namespace, safe
 
         endpoints = safe(lambda: get_core_client().list_endpoints_for_all_namespaces())
         if isinstance(endpoints, str):
@@ -274,7 +274,7 @@ def _get_service_endpoint_gaps() -> list[dict]:
         gaps = []
         for ep in endpoints.items:
             ns = ep.metadata.namespace
-            if ns.startswith("openshift-") or ns.startswith("kube-"):
+            if is_system_namespace(ns, include_default=False):
                 continue
             subsets = ep.subsets or []
             ready = sum(len(s.addresses or []) for s in subsets)

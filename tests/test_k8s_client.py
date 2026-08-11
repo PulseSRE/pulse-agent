@@ -34,3 +34,14 @@ def test_safe_list_with_kwargs():
     list_all.assert_called_once_with(field_selector="status=Running")
     list_ns.assert_not_called()
     assert result == ["filtered"]
+
+
+def test_is_system_namespace():
+    from sre_agent.k8s_client import is_system_namespace
+
+    assert is_system_namespace("openshift-monitoring")
+    assert is_system_namespace("kube-system")
+    assert is_system_namespace("openshift")
+    assert is_system_namespace("default")
+    assert not is_system_namespace("my-app")
+    assert not is_system_namespace("default", include_default=False)
