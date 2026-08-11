@@ -949,17 +949,6 @@ class MonitorRepository(BaseRepository):
             (cutoff,),
         )
 
-    # ── Tool latency (skill_loader.py) ────────────────────────────────────────
-
-    def fetch_tool_avg_latency(self, tool_name: str) -> dict | None:
-        """Average latency for a tool from usage history."""
-        return self.db.fetchone(
-            "SELECT AVG(duration_ms) as avg_ms FROM tool_usage "
-            "WHERE tool_name = %s AND status = 'success' "
-            "AND timestamp > NOW() - INTERVAL '7 days'",
-            (tool_name,),
-        )
-
 
 # ---------------------------------------------------------------------------
 # Module-level singleton

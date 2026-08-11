@@ -509,17 +509,6 @@ def _populate_risk_levels() -> None:
         logger.debug("Failed to populate tool risk levels", exc_info=True)
 
 
-def get_tool_avg_latency(tool_name: str) -> int:
-    """Get average latency for a tool from usage history (ms)."""
-    try:
-        from .repositories import get_monitor_repo
-
-        row = get_monitor_repo().fetch_tool_avg_latency(tool_name)
-        return int(row["avg_ms"]) if row and row["avg_ms"] else 0
-    except Exception:
-        return 0
-
-
 # Cache for deprioritized tools (refreshed every 10 minutes)
 _deprioritized_cache: tuple[set[str], float] | None = None
 _DEPRIORITIZE_TTL = 600  # 10 minutes

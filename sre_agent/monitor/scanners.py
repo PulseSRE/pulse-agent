@@ -794,21 +794,6 @@ def get_all_scanner_instances() -> list[FunctionScanner]:
     ]
 
 
-def build_registry_from_instances() -> dict[str, dict]:
-    """Build SCANNER_REGISTRY-format dict from scanner instances."""
-    return {
-        s.meta.name: {
-            "displayName": s.meta.display_name,
-            "description": s.meta.description,
-            "category": s.meta.category,
-            "checks": list(s.meta.checks),
-            "auto_fixable": s.meta.auto_fixable,
-            "scan_every": s.meta.scan_every,
-        }
-        for s in get_all_scanner_instances()
-    }
-
-
 def scan_slo_burn_rate() -> list[dict]:
     """Check registered SLOs for error budget depletion."""
     try:
