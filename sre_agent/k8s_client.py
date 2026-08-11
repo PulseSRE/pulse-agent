@@ -222,6 +222,13 @@ def safe(fn) -> Any:
         return classify_api_error(e)
 
 
+def safe_list(list_all_fn, list_namespaced_fn, namespace: str = "ALL", **kwargs):
+    """Dispatch to cluster-wide or namespaced K8s list, wrapped in safe()."""
+    if namespace.upper() == "ALL":
+        return safe(lambda: list_all_fn(**kwargs))
+    return safe(lambda: list_namespaced_fn(namespace, **kwargs))
+
+
 def age(ts: datetime | None) -> str:
     """Format a timestamp as a human-readable age string."""
     if ts is None:

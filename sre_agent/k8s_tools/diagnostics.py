@@ -15,6 +15,7 @@ from kubernetes.client.rest import ApiException
 from .. import k8s_client as _kc
 from ..decorators import beta_tool
 from ..errors import ToolError
+from ..k8s_client import safe_list
 from .validators import MAX_RESULTS, _validate_k8s_namespace
 
 # Shared pool for parallel pod log searching
@@ -58,10 +59,7 @@ def get_events(namespace: str = "default", resource_kind: str = "", resource_nam
         kwargs["field_selector"] = field_selector
 
     core = _kc.get_core_client()
-    if namespace.upper() == "ALL":
-        result = _kc.safe(lambda: core.list_event_for_all_namespaces(**kwargs))
-    else:
-        result = _kc.safe(lambda: core.list_namespaced_event(namespace, **kwargs))
+    result = safe_list(core.list_event_for_all_namespaces, core.list_namespaced_event, namespace, **kwargs)
     if isinstance(result, ToolError):
         return str(result)
 
@@ -140,10 +138,7 @@ def get_services(namespace: str = "default"):
         namespace: Kubernetes namespace. Use 'ALL' for all namespaces.
     """
     core = _kc.get_core_client()
-    if namespace.upper() == "ALL":
-        result = _kc.safe(lambda: core.list_service_for_all_namespaces())
-    else:
-        result = _kc.safe(lambda: core.list_namespaced_service(namespace))
+    result = safe_list(core.list_service_for_all_namespaces, core.list_namespaced_service, namespace)
     if isinstance(result, ToolError):
         return str(result)
 
@@ -167,10 +162,9 @@ def get_persistent_volume_claims(namespace: str = "default"):
         namespace: Kubernetes namespace. Use 'ALL' for all namespaces.
     """
     core = _kc.get_core_client()
-    if namespace.upper() == "ALL":
-        result = _kc.safe(lambda: core.list_persistent_volume_claim_for_all_namespaces())
-    else:
-        result = _kc.safe(lambda: core.list_namespaced_persistent_volume_claim(namespace))
+    result = safe_list(
+        core.list_persistent_volume_claim_for_all_namespaces, core.list_namespaced_persistent_volume_claim, namespace
+    )
     if isinstance(result, ToolError):
         return str(result)
 
@@ -375,10 +369,7 @@ def top_pods_by_restarts(namespace: str = "ALL", limit: int = 20):
         limit: Maximum number of pods to return (default 20).
     """
     core = _kc.get_core_client()
-    if namespace.upper() == "ALL":
-        result = _kc.safe(lambda: core.list_pod_for_all_namespaces())
-    else:
-        result = _kc.safe(lambda: core.list_namespaced_pod(namespace))
+    result = safe_list(core.list_pod_for_all_namespaces, core.list_namespaced_pod, namespace)
     if isinstance(result, ToolError):
         return str(result)
 
@@ -451,10 +442,7 @@ def get_recent_changes(namespace: str = "ALL", minutes: int = 60):
     lines = []
 
     # Recent events (Warning and Normal)
-    if namespace.upper() == "ALL":
-        events_result = _kc.safe(lambda: core.list_event_for_all_namespaces())
-    else:
-        events_result = _kc.safe(lambda: core.list_namespaced_event(namespace))
+    events_result = safe_list(core.list_event_for_all_namespaces, core.list_namespaced_event, namespace)
 
     if not isinstance(events_result, ToolError):
         recent_events = [
@@ -484,10 +472,7 @@ def get_recent_changes(namespace: str = "ALL", minutes: int = 60):
                 )
 
     # Recent deployments that changed
-    if namespace.upper() == "ALL":
-        deps_result = _kc.safe(lambda: apps.list_deployment_for_all_namespaces())
-    else:
-        deps_result = _kc.safe(lambda: apps.list_namespaced_deployment(namespace))
+    deps_result = safe_list(apps.list_deployment_for_all_namespaces, apps.list_namespaced_deployment, namespace)
 
     if not isinstance(deps_result, ToolError):
         recently_updated = []
@@ -526,21 +511,13 @@ def get_tls_certificates(namespace: str = "ALL"):
     from cryptography import x509
 
     core = _kc.get_core_client()
-    if namespace.upper() == "ALL":
-        result = _kc.safe(
-            lambda: core.list_secret_for_all_namespaces(
-                field_selector="type=kubernetes.io/tls",
-                limit=MAX_RESULTS,
-            )
-        )
-    else:
-        result = _kc.safe(
-            lambda: core.list_namespaced_secret(
-                namespace,
-                field_selector="type=kubernetes.io/tls",
-                limit=MAX_RESULTS,
-            )
-        )
+    result = safe_list(
+        core.list_secret_for_all_namespaces,
+        core.list_namespaced_secret,
+        namespace,
+        field_selector="type=kubernetes.io/tls",
+        limit=MAX_RESULTS,
+    )
     if isinstance(result, ToolError):
         return str(result)
 
@@ -729,10 +706,9 @@ def get_pod_disruption_budgets(namespace: str = "ALL"):
 
     _load_k8s()
 
-    if namespace.upper() == "ALL":
-        result = _kc.safe(lambda: policy.list_pod_disruption_budget_for_all_namespaces())
-    else:
-        result = _kc.safe(lambda: policy.list_namespaced_pod_disruption_budget(namespace))
+    result = safe_list(
+        policy.list_pod_disruption_budget_for_all_namespaces, policy.list_namespaced_pod_disruption_budget, namespace
+    )
     if isinstance(result, ToolError):
         return str(result)
 

@@ -19,7 +19,7 @@ logger = logging.getLogger("pulse_agent.timeline_tools")
 from kubernetes.client.rest import ApiException
 
 from .decorators import beta_tool
-from .k8s_client import get_apps_client, get_core_client, get_custom_client, safe
+from .k8s_client import get_apps_client, get_core_client, get_custom_client, safe, safe_list
 
 
 @beta_tool
@@ -51,10 +51,7 @@ def correlate_incident(
     kwargs = {}
     if resource_name:
         kwargs["field_selector"] = f"involvedObject.name={resource_name}"
-    if namespace.upper() == "ALL":
-        events_result = safe(lambda: core.list_event_for_all_namespaces(**kwargs))
-    else:
-        events_result = safe(lambda: core.list_namespaced_event(namespace, **kwargs))
+    events_result = safe_list(core.list_event_for_all_namespaces, core.list_namespaced_event, namespace, **kwargs)
 
     if not isinstance(events_result, str):
         for e in events_result.items:
@@ -77,10 +74,7 @@ def correlate_incident(
             )
 
     # 2. Deployment rollouts (probable cause)
-    if namespace.upper() == "ALL":
-        deploys = safe(lambda: apps.list_deployment_for_all_namespaces())
-    else:
-        deploys = safe(lambda: apps.list_namespaced_deployment(namespace))
+    deploys = safe_list(apps.list_deployment_for_all_namespaces, apps.list_namespaced_deployment, namespace)
 
     if not isinstance(deploys, str):
         for dep in deploys.items:
@@ -106,10 +100,7 @@ def correlate_incident(
                     )
 
     # 3. ReplicaSet creation (tracks image changes)
-    if namespace.upper() == "ALL":
-        rs_result = safe(lambda: apps.list_replica_set_for_all_namespaces())
-    else:
-        rs_result = safe(lambda: apps.list_namespaced_replica_set(namespace))
+    rs_result = safe_list(apps.list_replica_set_for_all_namespaces, apps.list_namespaced_replica_set, namespace)
 
     if not isinstance(rs_result, str):
         for rs in rs_result.items:

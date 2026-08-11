@@ -19,6 +19,7 @@ from .k8s_client import (
     get_networking_client,
     get_rbac_client,
     safe,
+    safe_list,
 )
 
 # ---------------------------------------------------------------------------
@@ -33,10 +34,8 @@ def scan_pod_security(namespace: str = "ALL") -> str:
     Args:
         namespace: Namespace to scan. Use 'ALL' for cluster-wide scan.
     """
-    if namespace.upper() == "ALL":
-        result = safe(lambda: get_core_client().list_pod_for_all_namespaces())
-    else:
-        result = safe(lambda: get_core_client().list_namespaced_pod(namespace))
+    core = get_core_client()
+    result = safe_list(core.list_pod_for_all_namespaces, core.list_namespaced_pod, namespace)
     if isinstance(result, ToolError):
         return str(result)
 
@@ -100,10 +99,8 @@ def scan_images(namespace: str = "ALL") -> str:
     Args:
         namespace: Namespace to scan. Use 'ALL' for cluster-wide scan.
     """
-    if namespace.upper() == "ALL":
-        result = safe(lambda: get_core_client().list_pod_for_all_namespaces())
-    else:
-        result = safe(lambda: get_core_client().list_namespaced_pod(namespace))
+    core = get_core_client()
+    result = safe_list(core.list_pod_for_all_namespaces, core.list_namespaced_pod, namespace)
     if isinstance(result, ToolError):
         return str(result)
 
@@ -221,10 +218,8 @@ def list_service_account_secrets(namespace: str = "default") -> str:
     Args:
         namespace: Namespace to inspect. Use 'ALL' for all namespaces.
     """
-    if namespace.upper() == "ALL":
-        result = safe(lambda: get_core_client().list_service_account_for_all_namespaces())
-    else:
-        result = safe(lambda: get_core_client().list_namespaced_service_account(namespace))
+    core = get_core_client()
+    result = safe_list(core.list_service_account_for_all_namespaces, core.list_namespaced_service_account, namespace)
     if isinstance(result, ToolError):
         return str(result)
 
@@ -256,10 +251,10 @@ def scan_network_policies(namespace: str = "ALL") -> str:
 
     skip_prefixes = ("openshift-", "kube-", "default")
 
-    if namespace.upper() == "ALL":
-        netpols = safe(lambda: get_networking_client().list_network_policy_for_all_namespaces())
-    else:
-        netpols = safe(lambda: get_networking_client().list_namespaced_network_policy(namespace))
+    networking = get_networking_client()
+    netpols = safe_list(
+        networking.list_network_policy_for_all_namespaces, networking.list_namespaced_network_policy, namespace
+    )
     if isinstance(netpols, ToolError):
         return str(netpols)
 
@@ -357,10 +352,8 @@ def scan_scc_usage(namespace: str = "ALL") -> str:
     Args:
         namespace: Namespace to scan. Use 'ALL' for cluster-wide.
     """
-    if namespace.upper() == "ALL":
-        result = safe(lambda: get_core_client().list_pod_for_all_namespaces())
-    else:
-        result = safe(lambda: get_core_client().list_namespaced_pod(namespace))
+    core = get_core_client()
+    result = safe_list(core.list_pod_for_all_namespaces, core.list_namespaced_pod, namespace)
     if isinstance(result, ToolError):
         return str(result)
 
@@ -400,12 +393,9 @@ def scan_secrets(namespace: str = "ALL") -> str:
     Args:
         namespace: Namespace to scan. Use 'ALL' for cluster-wide.
     """
-    if namespace.upper() == "ALL":
-        secrets = safe(lambda: get_core_client().list_secret_for_all_namespaces())
-        pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
-    else:
-        secrets = safe(lambda: get_core_client().list_namespaced_secret(namespace))
-        pods = safe(lambda: get_core_client().list_namespaced_pod(namespace))
+    core = get_core_client()
+    secrets = safe_list(core.list_secret_for_all_namespaces, core.list_namespaced_secret, namespace)
+    pods = safe_list(core.list_pod_for_all_namespaces, core.list_namespaced_pod, namespace)
     if isinstance(secrets, ToolError):
         return str(secrets)
     if isinstance(pods, ToolError):

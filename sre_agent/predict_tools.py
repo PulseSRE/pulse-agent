@@ -10,7 +10,7 @@ import logging
 
 from .decorators import beta_tool
 from .errors import ToolError
-from .k8s_client import get_autoscaling_client, get_core_client, safe
+from .k8s_client import get_autoscaling_client, get_core_client, safe, safe_list
 from .prometheus import get_prometheus_client
 from .units import parse_cpu_millicores, parse_memory_bytes
 
@@ -147,10 +147,11 @@ def analyze_hpa_thrashing(namespace: str = "ALL") -> str:
         namespace: Namespace to check. Use 'ALL' for cluster-wide.
     """
     auto = get_autoscaling_client()
-    if namespace.upper() == "ALL":
-        result = safe(lambda: auto.list_horizontal_pod_autoscaler_for_all_namespaces())
-    else:
-        result = safe(lambda: auto.list_namespaced_horizontal_pod_autoscaler(namespace))
+    result = safe_list(
+        auto.list_horizontal_pod_autoscaler_for_all_namespaces,
+        auto.list_namespaced_horizontal_pod_autoscaler,
+        namespace,
+    )
     if isinstance(result, ToolError):
         return str(result)
 
