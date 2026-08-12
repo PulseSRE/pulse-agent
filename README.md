@@ -5,11 +5,11 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v2.7.1"><img src="https://img.shields.io/badge/release-v2.7.1-2563eb?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v2.8.0"><img src="https://img.shields.io/badge/release-v2.8.0-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-154_(118+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
   <img src="https://img.shields.io/badge/scanners-23-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-2432-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-2459-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/eval_suites-16_(192_scenarios)-10b981?style=for-the-badge" alt="Eval Suites">
   <img src="https://img.shields.io/badge/release_gate-99.6%25-10b981?style=for-the-badge" alt="Release Gate">
   <img src="https://img.shields.io/badge/PromQL%20recipes-83-10b981?style=for-the-badge" alt="PromQL Recipes">
@@ -101,7 +101,7 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 - **Incident Triage** -- Correlate events, pod status, logs, and Prometheus metrics to identify root causes
 - **Resource Management** -- Analyze quotas, capacity, utilization, and HPA status across nodes
 - **Runbook Execution** -- 10 built-in runbooks. Scale deployments, restart pods, cordon/drain nodes, apply YAML (with confirmation gates)
-- **PromQL** -- 73 production-tested recipes across 16 categories, metric discovery, query verification against live clusters
+- **PromQL** -- 83 production-tested recipes across 16 categories, metric discovery, query verification against live clusters
 - **Right-Sizing** -- `get_resource_recommendations` compares actual CPU/memory usage to requests/limits via Prometheus
 
 ### Security Scanner
@@ -295,7 +295,7 @@ Consolidated management page with 8 tabs:
 
 | Tab | Purpose |
 |-----|---------|
-| **Catalog** | All 122 tools organized by agent and category |
+| **Catalog** | All 154 tools organized by agent and category |
 | **Skills** | 7 loaded skills with status, keywords, and handoff configuration |
 | **Plans** | Plan templates and active plan executions |
 | **SLOs** | SLO registry, error budgets, and burn rate status |
@@ -321,29 +321,34 @@ All tests run without a live cluster or API key (fully mocked). See [TESTING.md]
 
 ### Eval Framework
 
-11 eval suites with 98 scenarios for release gating and regression detection:
+16 eval suites with 192 scenarios for release gating and regression detection:
 
 | Suite | Scenarios | Purpose |
 |-------|:---------:|---------|
-| `release` | 12 | Primary CI gate (must pass) |
-| `selector` | 23 | Skill routing accuracy |
+| `release` | 19 | Primary CI gate (must pass) |
+| `selector` | 59 | Skill routing accuracy |
 | `sysadmin` | 20 | Real-world sysadmin queries |
-| `view_designer` | 7 | Dashboard generation quality |
+| `integration` | 23 | Reliability and failure modes |
+| `view_designer` | 11 | Dashboard generation quality |
+| `fleet` | 11 | Multi-cluster operations |
 | `core` | 6 | Mixed baseline coverage |
-| `integration` | 7 | Reliability and failure modes |
+| `capacity_planner` | 5 | Capacity analysis accuracy |
+| `plan_builder` | 5 | Investigation plan quality |
+| `postmortem` | 5 | Auto-postmortem generation |
+| `slo_management` | 5 | SLO burn rate and alerting |
 | `adversarial` | 5 | Prompt injection and edge cases |
 | `errors` | 5 | Error handling and recovery |
-| `fleet` | 5 | Multi-cluster operations |
-| `autofix` | 5 | Auto-fix decision accuracy |
-| `safety` | 3 | Safety and compliance checks |
+| `autofix` | 7 | Auto-fix decision accuracy |
+| `safety` | 5 | Safety and compliance checks |
+| `scaffolded` | 1 | Auto-generated skill scenarios |
 
 ```bash
-python -m sre_agent.evals.cli --suite release --fail-on-gate   # CI gate
-python -m sre_agent.evals.cli --suite core --save-baseline     # Save baseline
-python -m sre_agent.evals.cli --suite core --compare-baseline  # Regression check
+python3 -m sre_agent.evals.cli --suite release --fail-on-gate   # CI gate
+python3 -m sre_agent.evals.cli --suite core --save-baseline     # Save baseline
+python3 -m sre_agent.evals.cli --suite core --compare-baseline  # Regression check
 ```
 
-Current release gate average: **98.1%**.
+Current release gate average: **99.6%**.
 
 ## Architecture
 
@@ -388,10 +393,10 @@ sre_agent/
   tool_predictor.py    TF-IDF + LLM fallback + co-occurrence tool selection
   tool_chains.py       Bigram tool chain discovery
   tool_usage.py        Audit log (PostgreSQL)
-  promql_recipes.py    73 PromQL recipes
+  promql_recipes.py    83 PromQL recipes
 
   # Infrastructure
-  db.py                PostgreSQL abstraction + migrations (v016)
+  db.py                PostgreSQL abstraction + migrations (v022)
   memory/              Self-improving agent (incidents, runbooks, patterns)
   mcp_client.py        MCP server connections (SSE transport)
   orchestrator.py      Typo correction (~130 K8s misspellings)
@@ -405,14 +410,14 @@ chart/                 Helm chart (deployment, RBAC, PostgreSQL StatefulSet, Net
 | Endpoint | Description |
 |----------|-------------|
 | `WS /ws/agent` | Auto-routing orchestrated agent (ORCA classifies each message) |
-| `WS /ws/monitor` | Autonomous monitor (18 scanners, auto-fix, predictions) |
+| `WS /ws/monitor` | Autonomous monitor (23 scanners, auto-fix, predictions) |
 
 All WebSocket endpoints require `?token=...` query parameter (constant-time comparison). Protocol v2.
 
 ---
 
 <p align="center">
-  <strong>122 tools (86 native + 36 MCP)</strong> &bull; <strong>7 skills</strong> &bull; <strong>18 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>73 PromQL recipes</strong> &bull; <strong>11 eval suites (98 scenarios)</strong> &bull; <strong>1,689 tests</strong> &bull; <strong>Migration v016</strong> &bull; <strong>Protocol v2</strong>
+  <strong>154 tools (118 native + 36 MCP)</strong> &bull; <strong>7 skills</strong> &bull; <strong>23 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>83 PromQL recipes</strong> &bull; <strong>16 eval suites (192 scenarios)</strong> &bull; <strong>2,459 tests</strong> &bull; <strong>Migration v022</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">
