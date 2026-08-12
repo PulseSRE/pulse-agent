@@ -18,6 +18,11 @@ on:
 jobs:
   evals:
     runs-on: ubuntu-latest
+    # Safety net: without this, GitHub Actions falls back to its 360-minute
+    # (6h) default, so a hang (e.g. a DB lock wait) silently occupies a
+    # runner for hours instead of failing fast. 45m covers unit tests, lint,
+    # deterministic eval gates, and the live LLM judge run (daily cron/tags).
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16
@@ -55,6 +60,9 @@ jobs:
         run: ruff format --check sre_agent/ tests/
 
       - name: Run unit tests
+        # Normally completes in ~1-2 minutes; bounded well above that so a
+        # hang (e.g. a DB lock wait) fails fast instead of stalling the job.
+        timeout-minutes: 15
         run: python -m pytest tests/ -q
 
       - name: Verify version sync

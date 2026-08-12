@@ -37,7 +37,12 @@ class Database:
         _s = get_settings()
         minconn = _s.database.pool_min
         maxconn = _s.database.pool_max
-        self._pool = psycopg2.pool.ThreadedConnectionPool(minconn, maxconn, dsn=url)
+        # Bound lock waits and runaway statements so a stuck/held lock (e.g. an
+        # uncommitted transaction on another pooled connection) fails fast with
+        # a catchable error instead of blocking the caller indefinitely.
+        self._pool = psycopg2.pool.ThreadedConnectionPool(
+            minconn, maxconn, dsn=url, options="-c lock_timeout=10000 -c statement_timeout=30000"
+        )
         self._local = threading.local()
 
     # ------------------------------------------------------------------
