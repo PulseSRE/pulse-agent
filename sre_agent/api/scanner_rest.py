@@ -25,6 +25,9 @@ _SCANNER_CATEGORIES = {
     "alerts": ["alerts"],
     "deployment_audit": ["audit_deployment", "audit_events"],
     "operator_health": ["operators"],
+    "slo_burn": ["slo_burn"],
+    "security_posture": ["security"],
+    "predictive_trends": ["trend_memory", "trend_disk", "trend_hpa", "trend_errors", "trend_degraded"],
 }
 
 

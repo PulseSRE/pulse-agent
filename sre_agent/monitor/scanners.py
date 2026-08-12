@@ -492,6 +492,13 @@ def _get_all_scanners() -> list[tuple[str, Callable[..., Any]]]:
         scan_recent_deployments,
         scan_warning_events,
     )
+    from .trend_scanners import (
+        get_trend_degraded_finding,
+        scan_disk_pressure_forecast,
+        scan_error_rate_acceleration,
+        scan_hpa_exhaustion_trend,
+        scan_memory_pressure_forecast,
+    )
 
     return ALL_SCANNERS + [
         ("audit_config", scan_config_changes),
@@ -501,6 +508,11 @@ def _get_all_scanners() -> list[tuple[str, Callable[..., Any]]]:
         ("audit_auth", scan_auth_events),
         ("slo_burn", scan_slo_burn_rate),
         ("security", scan_security_posture),
+        ("trend_memory", scan_memory_pressure_forecast),
+        ("trend_disk", scan_disk_pressure_forecast),
+        ("trend_hpa", scan_hpa_exhaustion_trend),
+        ("trend_errors", scan_error_rate_acceleration),
+        ("trend_degraded", get_trend_degraded_finding),
     ]
 
 
