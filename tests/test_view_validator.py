@@ -107,14 +107,17 @@ class TestDeduplication:
         result = validate_components(d)
         assert result.deduped_count == 1
 
-    def test_same_kind_title_different_query_kept(self):
-        """Same (kind, title) but different query should NOT be deduped."""
+    def test_same_kind_title_different_query_deduped(self):
+        """Same (kind, title) with different query IS deduped — last occurrence wins."""
         d = copy.deepcopy(GOLDEN_DASHBOARD)
         dup = copy.deepcopy(d[1])
         dup["query"] = "different_query"
         d.append(dup)
         result = validate_components(d)
-        assert result.deduped_count == 0
+        # The last occurrence (dup with different_query) wins; the earlier one is removed
+        assert result.deduped_count == 1
+        charts = [c for c in result.components if c["kind"] == "chart" and c["title"] == "CPU by Namespace"]
+        assert charts[0]["query"] == "different_query"
 
     def test_dedup_preserves_order(self):
         d = copy.deepcopy(GOLDEN_DASHBOARD)

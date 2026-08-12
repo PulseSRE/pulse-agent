@@ -133,10 +133,24 @@ def normalize_component_spec(spec: dict) -> dict:
             for s in series:
                 if "values" in s and "data" not in s:
                     s["data"] = s.pop("values")
+                if "label" in s and "name" not in s:
+                    s["name"] = s.pop("label")
 
     elif kind == "yaml_viewer":
         if "yaml" in spec and "content" not in spec:
             spec["content"] = spec.pop("yaml")
+
+    elif kind == "metric_card":
+        val = spec.get("value")
+        if isinstance(val, float) and val == int(val):
+            spec["value"] = str(int(val))
+        elif isinstance(val, str):
+            try:
+                f = float(val)
+                if f == int(f) and "." in val:
+                    spec["value"] = str(int(f))
+            except (ValueError, OverflowError):
+                pass
 
     elif kind == "stat_card":
         if "label" in spec and "title" not in spec:
@@ -423,26 +437,45 @@ def evaluate_components(
 
 
 def _deduplicate(components: list[dict]) -> list[dict]:
-    """Remove components with identical query, or identical (kind, title, query) triple."""
+    """Remove duplicate components.
+
+    Dedup criteria applied in order:
+    1. Identical non-empty query string — keeps the first occurrence (earlier
+       component wins; later one with same PromQL is redundant).
+    2. Identical (kind, title) pair — keeps the LAST occurrence so that the
+       most-recent agent pass (build phase) wins over earlier investigation-phase
+       components, preventing double-layout when the agent runs two passes.
+
+    Query is intentionally excluded from the (kind, title) key so that two
+    containers of the same type (e.g. two "tabs" blocks) are collapsed even
+    when their internal PromQL differs between passes.
+    """
+    # Pre-scan: record the last index of each (kind, title) pair so we can
+    # keep only that occurrence while preserving original list order.
+    last_kt: dict[tuple[str, str], int] = {}
+    for i, comp in enumerate(components):
+        k = comp.get("kind", "")
+        t = (comp.get("title") or "").lower()
+        if k and t:
+            last_kt[(k, t)] = i
+
     seen_queries: set[str] = set()
-    seen_kind_title_query: set[tuple[str, str, str]] = set()
     out: list[dict] = []
 
-    for comp in components:
+    for i, comp in enumerate(components):
         query = comp.get("query", "")
         kind = comp.get("kind", "")
         title = (comp.get("title") or "").lower()
 
+        # Drop if a later component has the same query (keep first query match)
         if query and query in seen_queries:
             continue
-        key = (kind, title, query)
-        if kind and title and key in seen_kind_title_query:
+        # Drop if a later occurrence of the same (kind, title) exists (keep last)
+        if kind and title and last_kt.get((kind, title)) != i:
             continue
 
         if query:
             seen_queries.add(query)
-        if kind and title:
-            seen_kind_title_query.add(key)
         out.append(comp)
 
     return out

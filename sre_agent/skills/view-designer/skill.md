@@ -184,12 +184,24 @@ Every dashboard should be **shaped by its topic**, not a fixed template. Never d
 - `status_list` for PromQL boolean results — these have no meaningful labels
 - Separate `metric_card` per node/pod — use a single `data_table` or `chart` with `by (node)` grouping
 - Giant `section` with 5+ metric cards stacked vertically — use `grid` with `columns: 4` instead
+- `data_table` with >20 rows when title includes "Top" or "Top N" — limit to 20 with `topk()` or list slicing
 
 ## Quality Rules
 
 - 3-8 widgets, specific descriptive titles, no duplicate queries or titles
 - Topic-relevant widgets only -- don't pad with generic metrics
 - PromQL: all matchers in one `{}` block: `{namespace="prod",phase="Running"}`
+
+**Chart series naming:** Always set `name` (not `label`) on each series object. The frontend uses `name` to render legends — `label` is silently ignored.
+  Example: `series: [{name: "prometheus-k8s-0", data: [...], color: "blue"}]`
+
+**Table row limits:** When building a "top N consumers" table, limit rows to 20 maximum. Use `topk(20, ...)` in PromQL or slice the result list to 20 items before including in the component. Never include 200 rows in a `data_table` titled "Top by CPU" or similar.
+
+**No empty tabs:** Never create a `tabs` widget with empty tab content. If a tab has 0 components, omit that tab entirely. Only include tabs you can populate with real data.
+
+**Integer counts:** For count-type `metric_card` values (pods, nodes, namespaces, replicas), format as integer. Use `"6"` not `"6.0"`, `"513"` not `"513.0"`. Apply `int()` or `round()` before setting the value field.
+
+**Always save:** After gathering data with tools, ALWAYS call `create_dashboard`. Do not stop with a text response describing the planned layout — call the tool. A text description is not a dashboard.
 
 ## ACM Thanos Compatibility
 
