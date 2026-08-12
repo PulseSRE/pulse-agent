@@ -20,7 +20,6 @@ from kubernetes.client.rest import ApiException
 
 from .decorators import beta_tool
 from .k8s_client import get_apps_client, get_core_client, get_custom_client, safe_list
-from .monitor.confidence import _strip_pod_hash
 
 
 @beta_tool
@@ -284,7 +283,9 @@ def correlate_incident(
         if not name:
             return resource
         if kind == "Pod":
-            name = _strip_pod_hash(name)
+            # Strip -<rs-hash>-<pod-hash> only when both segments match hash patterns
+            name = re.sub(r"-[a-z0-9]{8,10}-[a-z0-9]{4,5}$", "", name)
+            name = re.sub(r"-[a-f0-9]{8,}$", "", name)
         elif kind == "ReplicaSet":
             # Strip -<hash> suffix
             name = re.sub(r"-[a-z0-9]{8,10}$", "", name)
