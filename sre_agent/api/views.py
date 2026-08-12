@@ -102,7 +102,7 @@ async def rest_create_view(
 
     from ..quality_engine import normalize_layout, validate_layout_kinds
 
-    normalize_layout(layout)
+    layout = normalize_layout(layout)
     kind_errors = validate_layout_kinds(layout)
     if kind_errors:
         return JSONResponse(status_code=400, content={"error": "; ".join(kind_errors)})
@@ -135,7 +135,7 @@ async def rest_update_view(
     if "layout" in updates and isinstance(updates["layout"], list):
         from ..quality_engine import normalize_layout, validate_layout_kinds
 
-        normalize_layout(updates["layout"])
+        updates["layout"] = normalize_layout(updates["layout"])
         kind_errors = validate_layout_kinds(updates["layout"])
         if kind_errors:
             return JSONResponse(status_code=400, content={"error": "; ".join(kind_errors)})

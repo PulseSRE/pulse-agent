@@ -246,7 +246,7 @@ def evaluate_components(
     # ------------------------------------------------------------------
     # Phase 0: Normalize field aliases
     # ------------------------------------------------------------------
-    normalize_layout(components)
+    components = normalize_layout(components)
 
     # ------------------------------------------------------------------
     # Phase 1: Deduplication (from validator)
