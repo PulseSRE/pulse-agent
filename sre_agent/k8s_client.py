@@ -32,6 +32,14 @@ _require_user_token_var: ContextVar[bool] = ContextVar("_require_user_token", de
 
 _SYSTEM_NS_PREFIXES = ("openshift-", "kube-")
 
+SYSTEM_SECRET_TYPES: frozenset[str] = frozenset(
+    {
+        "kubernetes.io/service-account-token",
+        "kubernetes.io/dockercfg",
+        "kubernetes.io/dockerconfigjson",
+    }
+)
+
 
 def is_system_namespace(name: str, *, include_default: bool = True) -> bool:
     """Return True if the namespace is a platform/system namespace."""

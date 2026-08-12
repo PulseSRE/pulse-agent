@@ -25,6 +25,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+from .db import _PARAM_RE
+
 logger = logging.getLogger("pulse_agent.async_db")
 
 try:
@@ -33,9 +35,6 @@ try:
     ASYNC_DB_ERRORS: tuple[type[Exception], ...] = (asyncpg.PostgresError, OSError)
 except ImportError:
     ASYNC_DB_ERRORS = (OSError,)
-
-
-_PLACEHOLDER_RE = re.compile(r"(?<![@?])\?(?![?|&])")
 
 
 def _translate_placeholders(query: str) -> str:
@@ -52,7 +51,7 @@ def _translate_placeholders(query: str) -> str:
         counter += 1
         return f"${counter}"
 
-    return _PLACEHOLDER_RE.sub(_replace, query)
+    return _PARAM_RE.sub(_replace, query)
 
 
 class AsyncDatabase:

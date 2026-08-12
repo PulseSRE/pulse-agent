@@ -14,6 +14,7 @@ from kubernetes.client.rest import ApiException
 from .decorators import beta_tool
 from .errors import ToolError
 from .k8s_client import (
+    SYSTEM_SECRET_TYPES,
     get_core_client,
     get_custom_client,
     get_networking_client,
@@ -432,11 +433,7 @@ def scan_secrets(namespace: str = "ALL") -> str:
     now = datetime.now(UTC)
     old_secrets = []
     for s in secrets.items:
-        if s.type in (
-            "kubernetes.io/service-account-token",
-            "kubernetes.io/dockercfg",
-            "kubernetes.io/dockerconfigjson",
-        ):
+        if s.type in SYSTEM_SECRET_TYPES:
             continue
         ts = s.metadata.creation_timestamp
         if ts.tzinfo is None:
@@ -454,11 +451,7 @@ def scan_secrets(namespace: str = "ALL") -> str:
     # Count unreferenced secrets (excluding system types)
     all_secret_keys = set()
     for s in secrets.items:
-        if s.type in (
-            "kubernetes.io/service-account-token",
-            "kubernetes.io/dockercfg",
-            "kubernetes.io/dockerconfigjson",
-        ):
+        if s.type in SYSTEM_SECRET_TYPES:
             continue
         all_secret_keys.add(f"{s.metadata.namespace}/{s.metadata.name}")
     unreferenced = all_secret_keys - referenced_secrets
