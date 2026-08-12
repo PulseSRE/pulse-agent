@@ -182,37 +182,34 @@ def _migrate_018_user_events(db: Database) -> None:
 
 
 def _migrate_019_agent_views(db: Database) -> None:
-    """Add agent view columns: type, status, visibility, trigger, finding, cluster, claim."""
-    for col, typ, default in [
-        ("view_type", "TEXT", "'custom'"),
-        ("status", "TEXT", "'active'"),
-        ("trigger_source", "TEXT", "'user'"),
-        ("finding_id", "TEXT", None),
-        ("cluster_id", "TEXT", "''"),
-        ("claimed_by", "TEXT", None),
-        ("claimed_at", "TEXT", None),
-        ("visibility", "TEXT", "'private'"),
-    ]:
-        try:
-            default_clause = f" DEFAULT {default}" if default else ""
-            not_null = " NOT NULL" if default else ""
-            db.execute(f"ALTER TABLE views ADD COLUMN {col} {typ}{not_null}{default_clause}")
-        except Exception:
-            logger.debug("Column %s may already exist on views table", col, exc_info=True)
-    db.commit()
+    """Add agent view columns: type, status, visibility, trigger, finding, cluster, claim.
+
+    Uses ``ADD COLUMN IF NOT EXISTS`` (idempotent at the SQL level) rather than
+    per-statement try/except: the previous per-column try/except swallowed
+    DuplicateColumn errors, but since none of these statements committed until
+    after the whole loop, a failure on any later column rolled back the
+    earlier, still-uncommitted successful columns in the same transaction --
+    silently dropping them on a partial re-run (e.g. after an interrupted
+    migration).
+    """
+    db.executescript("""
+        ALTER TABLE views ADD COLUMN IF NOT EXISTS view_type TEXT NOT NULL DEFAULT 'custom';
+        ALTER TABLE views ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+        ALTER TABLE views ADD COLUMN IF NOT EXISTS trigger_source TEXT NOT NULL DEFAULT 'user';
+        ALTER TABLE views ADD COLUMN IF NOT EXISTS finding_id TEXT;
+        ALTER TABLE views ADD COLUMN IF NOT EXISTS cluster_id TEXT NOT NULL DEFAULT '';
+        ALTER TABLE views ADD COLUMN IF NOT EXISTS claimed_by TEXT;
+        ALTER TABLE views ADD COLUMN IF NOT EXISTS claimed_at TEXT;
+        ALTER TABLE views ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private';
+    """)
 
 
 def _migrate_020_action_outcomes(db: Database) -> None:
     """Add outcome tracking to actions table for fix success rate metrics."""
-    try:
-        db.execute("ALTER TABLE actions ADD COLUMN IF NOT EXISTS outcome TEXT NOT NULL DEFAULT 'unknown'")
-    except Exception:
-        logger.debug("actions.outcome column may already exist", exc_info=True)
-    try:
-        db.execute("CREATE INDEX IF NOT EXISTS idx_actions_finding_id ON actions (finding_id)")
-    except Exception:
-        logger.debug("idx_actions_finding_id index may already exist", exc_info=True)
-    db.commit()
+    db.executescript("""
+        ALTER TABLE actions ADD COLUMN IF NOT EXISTS outcome TEXT NOT NULL DEFAULT 'unknown';
+        CREATE INDEX IF NOT EXISTS idx_actions_finding_id ON actions (finding_id);
+    """)
 
 
 def _migrate_021_inbox_items(db: Database) -> None:
