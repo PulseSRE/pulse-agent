@@ -12,6 +12,41 @@ from unittest.mock import AsyncMock, MagicMock, patch
 SCAN_CYCLE_THRESHOLD_S = 60.0
 
 
+def _mock_async_core():
+    """Mock async CoreV1Api used by cluster_monitor's shared-resource prefetch.
+
+    Without this, ``_run_scan_locked()`` calls the real ``async_k8s`` client,
+    which loads the machine's actual kubeconfig and attempts a live network
+    call to whatever cluster is the current context — hanging indefinitely
+    if that cluster is unreachable (e.g. VPN down) instead of failing fast.
+    """
+    core = MagicMock()
+    core.list_pod_for_all_namespaces = AsyncMock(return_value=MagicMock(items=[]))
+    return core
+
+
+def _mock_async_apps():
+    """Mock async AppsV1Api used by the deployment/daemonset async scanners."""
+    apps = MagicMock()
+    apps.list_deployment_for_all_namespaces = AsyncMock(return_value=MagicMock(items=[]))
+    apps.list_daemon_set_for_all_namespaces = AsyncMock(return_value=MagicMock(items=[]))
+    return apps
+
+
+def _mock_async_custom():
+    """Mock async CustomObjectsApi used by the degraded-operator scanner."""
+    custom = MagicMock()
+    custom.list_cluster_custom_object = AsyncMock(return_value={"items": []})
+    return custom
+
+
+def _mock_async_autoscaling():
+    """Mock async AutoscalingV1Api used by the HPA-saturation scanner."""
+    autoscaling = MagicMock()
+    autoscaling.list_horizontal_pod_autoscaler_for_all_namespaces = AsyncMock(return_value=MagicMock(items=[]))
+    return autoscaling
+
+
 def _mock_core():
     core = MagicMock()
     core.list_pod_for_all_namespaces.return_value = MagicMock(items=[])
@@ -64,6 +99,12 @@ class TestScanCycleLatency:
             patch("sre_agent.k8s_client.get_apps_client", return_value=_mock_apps()),
             patch("sre_agent.k8s_client.get_custom_client", return_value=_mock_custom()),
             patch("sre_agent.k8s_client.get_version_client", return_value=MagicMock()),
+            patch("sre_agent.async_k8s.get_async_core_client", AsyncMock(return_value=_mock_async_core())),
+            patch("sre_agent.async_k8s.get_async_apps_client", AsyncMock(return_value=_mock_async_apps())),
+            patch("sre_agent.async_k8s.get_async_custom_client", AsyncMock(return_value=_mock_async_custom())),
+            patch(
+                "sre_agent.async_k8s.get_async_autoscaling_client", AsyncMock(return_value=_mock_async_autoscaling())
+            ),
         ):
             monitor = _make_monitor()
 
@@ -91,6 +132,12 @@ class TestScanCycleLatency:
             patch("sre_agent.k8s_client.get_apps_client", return_value=_mock_apps()),
             patch("sre_agent.k8s_client.get_custom_client", return_value=_mock_custom()),
             patch("sre_agent.k8s_client.get_version_client", return_value=MagicMock()),
+            patch("sre_agent.async_k8s.get_async_core_client", AsyncMock(return_value=_mock_async_core())),
+            patch("sre_agent.async_k8s.get_async_apps_client", AsyncMock(return_value=_mock_async_apps())),
+            patch("sre_agent.async_k8s.get_async_custom_client", AsyncMock(return_value=_mock_async_custom())),
+            patch(
+                "sre_agent.async_k8s.get_async_autoscaling_client", AsyncMock(return_value=_mock_async_autoscaling())
+            ),
         ):
             monitor = _make_monitor()
             loop = asyncio.new_event_loop()

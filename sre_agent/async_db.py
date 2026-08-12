@@ -64,6 +64,7 @@ class AsyncDatabase:
     def __init__(self) -> None:
         self._pool: Any = None
         self._url: str = ""
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def connect(self, url: str | None = None, min_size: int = 2, max_size: int = 20) -> None:
         """Create the connection pool.  Safe to call multiple times."""
@@ -79,11 +80,34 @@ class AsyncDatabase:
         self._url = url
         import asyncpg
 
-        self._pool = await asyncpg.create_pool(url, min_size=min_size, max_size=max_size)
+        # Bound lock waits and runaway statements so a stuck/held lock (e.g. an
+        # uncommitted transaction on another pooled connection) fails fast with
+        # a catchable error instead of blocking the caller indefinitely — mirrors
+        # the equivalent guard on the sync pool in db.py.
+        self._pool = await asyncpg.create_pool(
+            url,
+            min_size=min_size,
+            max_size=max_size,
+            server_settings={"lock_timeout": "10000", "statement_timeout": "30000"},
+        )
+        self._loop = asyncio.get_running_loop()
 
     async def _ensure_pool(self) -> Any:
+        if self._pool is not None:
+            try:
+                current_loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+            except RuntimeError:
+                current_loop = None
+            if current_loop is not None and self._loop is not None and current_loop is not self._loop:
+                # Pool was created on a different (likely already-closed) event
+                # loop — e.g. a singleton reused across tests/processes that each
+                # spin up their own loop. Closing it here would itself run on the
+                # wrong loop, so just drop the stale reference; the old loop owns
+                # its own cleanup. A fresh pool is created below for this loop.
+                logger.warning("AsyncDatabase pool bound to a stale event loop; recreating")
+                self._pool = None
         if self._pool is None:
-            await self.connect()
+            await self.connect(url=self._url or None)
         return self._pool
 
     async def fetchone(self, query: str, *args: Any) -> dict[str, Any] | None:
@@ -145,8 +169,20 @@ class AsyncDatabase:
     async def close(self) -> None:
         """Close the connection pool."""
         if self._pool is not None:
-            await self._pool.close()
+            try:
+                current_loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+            except RuntimeError:
+                current_loop = None
+            if self._loop is not None and current_loop is not None and current_loop is not self._loop:
+                # Pool belongs to a different (likely already-closed) event loop —
+                # closing it here would run against the wrong loop and raise, same
+                # as in _ensure_pool(). Drop the reference without attempting a
+                # graceful close; the original loop owns its own cleanup.
+                logger.warning("AsyncDatabase.close() called on a pool bound to a stale event loop; discarding")
+            else:
+                await self._pool.close()
             self._pool = None
+            self._loop = None
 
     async def health_check(self) -> bool:
         """Check if the pool can serve a connection."""
