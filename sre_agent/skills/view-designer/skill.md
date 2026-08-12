@@ -57,6 +57,8 @@ trigger_patterns:
   - "build.*dashboard|create.*dashboard|make.*dashboard"
   - "build.*view|create.*view|make.*view"
   - "show.*as.*chart|add.*widget|layout"
+  - "(show|give)\\s+me\\s+(a|the)\\s+(dashboard|view)"
+  - "(i\\s+want|can\\s+you\\s+make|make\\s+me)\\s+a\\s+(dashboard|view)"
 tool_sequences:
   new_dashboard: [plan_dashboard, namespace_summary, cluster_metrics, create_dashboard]
   edit_dashboard: [get_view_details, update_view_widgets]
@@ -202,6 +204,8 @@ Every dashboard should be **shaped by its topic**, not a fixed template. Never d
 **Integer counts:** For count-type `metric_card` values (pods, nodes, namespaces, replicas), format as integer. Use `"6"` not `"6.0"`, `"513"` not `"513.0"`. Apply `int()` or `round()` before setting the value field.
 
 **Always save:** After gathering data with tools, ALWAYS call `create_dashboard`. Do not stop with a text response describing the planned layout — call the tool. A text description is not a dashboard.
+
+**View type:** Always call `create_dashboard(view_type="custom")` for any user-requested dashboard, regardless of topic (security, capacity, incidents, etc.). The `incident`, `plan`, and `assessment` types are reserved for monitor-triggered views — they start in `analyzing` status which does not advance automatically and leaves the dashboard stuck and invisible to the user.
 
 ## ACM Thanos Compatibility
 

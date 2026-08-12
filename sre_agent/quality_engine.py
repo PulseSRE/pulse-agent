@@ -101,6 +101,10 @@ def normalize_component_spec(spec: dict) -> dict:
             for item in items:
                 if "label" in item and "name" not in item:
                     item["name"] = item.pop("label")
+                elif "text" in item and "name" not in item:
+                    item["name"] = item["text"]  # copy, keep text for description
+                elif "title" in item and "name" not in item:
+                    item["name"] = item.pop("title")
                 status = item.get("status")
                 if status == "info":
                     item["status"] = "unknown"
@@ -176,20 +180,30 @@ def normalize_component_spec(spec: dict) -> dict:
 
 
 def normalize_layout(layout: list[dict]) -> list[dict]:
-    """Normalize all component specs in a layout list."""
+    """Normalize all component specs in a layout list.
+
+    Empty tabs are stripped structurally: tab children with no components are
+    removed; if a tabs widget has no populated tabs remaining it is dropped.
+    """
+    result = []
     for spec in layout:
         normalize_component_spec(spec)
-        if spec.get("kind") == "grid":
+        kind = spec.get("kind")
+        if kind == "grid":
             for item in spec.get("items", []):
                 normalize_component_spec(item)
-        elif spec.get("kind") == "tabs":
+        elif kind == "tabs":
             for tab in spec.get("tabs", []):
                 for comp in tab.get("components", []):
                     normalize_component_spec(comp)
-        elif spec.get("kind") == "section":
+            spec["tabs"] = [t for t in spec.get("tabs", []) if t.get("components")]
+            if not spec["tabs"]:
+                continue  # drop widget if no populated tabs remain
+        elif kind == "section":
             for comp in spec.get("components", []):
                 normalize_component_spec(comp)
-    return layout
+        result.append(spec)
+    return result
 
 
 def validate_layout_kinds(layout: list[dict]) -> list[str]:

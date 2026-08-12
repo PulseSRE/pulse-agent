@@ -67,7 +67,7 @@ def create_dashboard(
     Args:
         title: Name for the dashboard (e.g. "SRE Overview", "Incident — payment-api").
         description: Brief description of what the dashboard shows.
-        view_type: Type of view: custom, incident, plan, or assessment.
+        view_type: Use 'custom' for all user-requested dashboards (starts as active and is immediately visible). Only use 'incident', 'plan', or 'assessment' for monitor-triggered views — these start in 'analyzing' status which does not advance automatically.
         trigger_source: Who created it: user, monitor, or agent.
         finding_id: Monitor finding ID that triggered this view (for dedup).
         visibility: private (default for custom) or team (default for incident/plan/assessment).

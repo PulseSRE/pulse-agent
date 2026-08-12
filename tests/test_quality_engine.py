@@ -250,3 +250,67 @@ class TestResultShape:
         assert hasattr(r, "suggestions")
         assert hasattr(r, "deduped_count")
         assert hasattr(r, "components")
+
+
+# ---------------------------------------------------------------------------
+# normalize_layout — empty tabs stripping
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeLayout:
+    def test_empty_tabs_widget_dropped(self):
+        """A tabs widget where all tabs have 0 components is removed entirely."""
+        from sre_agent.quality_engine import normalize_layout
+
+        layout = [
+            {"kind": "metric_card", "title": "Nodes Ready", "value": "6"},
+            {
+                "kind": "tabs",
+                "tabs": [
+                    {"label": "Recommendations", "components": []},
+                    {"label": "Impact", "components": []},
+                ],
+            },
+        ]
+        result = normalize_layout(layout)
+        kinds = [w["kind"] for w in result]
+        assert "tabs" not in kinds, f"Empty tabs widget should be dropped, got: {kinds}"
+        assert "metric_card" in kinds
+
+    def test_mixed_tabs_strips_empty_keeps_populated(self):
+        """A tabs widget with one populated and one empty tab keeps only the populated tab."""
+        from sre_agent.quality_engine import normalize_layout
+
+        layout = [
+            {
+                "kind": "tabs",
+                "tabs": [
+                    {"label": "Trend", "components": [{"kind": "chart", "title": "CPU"}]},
+                    {"label": "Recommendations", "components": []},
+                ],
+            },
+        ]
+        result = normalize_layout(layout)
+        assert len(result) == 1
+        remaining_tabs = result[0]["tabs"]
+        assert len(remaining_tabs) == 1
+        assert remaining_tabs[0]["label"] == "Trend"
+
+    def test_status_list_text_to_name(self):
+        """status_list items with 'text' field (no 'name') get name populated."""
+        from sre_agent.quality_engine import normalize_component_spec
+
+        spec = {
+            "kind": "status_list",
+            "title": "RBAC Findings",
+            "items": [
+                {"text": "ClusterRole: admin bound to user foo", "status": "warning"},
+                {"title": "Exposed NodePort: my-svc", "status": "error"},
+                {"name": "Already has name", "status": "ok"},
+            ],
+        }
+        normalize_component_spec(spec)
+        items = spec["items"]
+        assert items[0]["name"] == "ClusterRole: admin bound to user foo"
+        assert items[1]["name"] == "Exposed NodePort: my-svc"
+        assert items[2]["name"] == "Already has name"  # untouched
