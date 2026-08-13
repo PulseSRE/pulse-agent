@@ -26,6 +26,7 @@ def get_firing_alerts():
     """Get all currently firing alerts from Alertmanager. Returns alert name, severity, namespace, summary, and duration."""
 
     core = _kc.get_core_client()
+    via_prometheus = False
     # Try to use the service proxy
     try:
         result = core.connect_get_namespaced_service_proxy_with_path(
@@ -52,6 +53,7 @@ def get_firing_alerts():
                 }
                 for a in alerts_raw
             ]
+            via_prometheus = True
         except Exception:
             return "Cannot reach Alertmanager. It may not be installed or accessible."
 
@@ -83,7 +85,8 @@ def get_firing_alerts():
             }
         )
 
-    text = f"Firing alerts ({len(firing)}):\n\n" + "\n\n".join(lines)
+    source_note = " (sourced from Prometheus — Alertmanager service proxy unavailable)" if via_prometheus else ""
+    text = f"Firing alerts ({len(firing)}){source_note}:\n\n" + "\n\n".join(lines)
     component = (
         {
             "kind": "status_list",
