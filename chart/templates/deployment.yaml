@@ -117,10 +117,6 @@ spec:
               value: {{ .Values.acm.thanosUrl | quote }}
             {{- end }}
             {{- end }}
-            {{- if .Values.alertmanagerUrl }}
-            - name: ALERTMANAGER_URL
-              value: {{ .Values.alertmanagerUrl | quote }}
-            {{- end }}
             - name: PULSE_AGENT_WS_TOKEN
               valueFrom:
                 secretKeyRef:
