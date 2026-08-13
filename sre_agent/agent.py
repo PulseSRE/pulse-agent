@@ -310,6 +310,49 @@ async def borrow_async_client(client=None):
                 logger.debug("Failed to close borrowed async client", exc_info=True)
 
 
+def _strip_orphaned_tool_results(messages: list[dict]) -> list[dict]:
+    """Remove user tool_result blocks whose tool_use_id has no matching tool_use.
+
+    Context compression can strip an assistant turn that contains tool_use blocks
+    while keeping the following user turn that contains the paired tool_result
+    blocks.  Sending that history to the API produces a 400 invalid_request_error
+    with 'unexpected tool_use_id found in tool_result blocks'.  This helper scans
+    the messages list and drops any tool_result whose ID is not backed by a
+    tool_use in the preceding assistant turns.
+    """
+    # Collect all tool_use IDs from assistant turns
+    known_ids: set[str] = set()
+    for msg in messages:
+        if msg.get("role") == "assistant":
+            content = msg.get("content", [])
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        known_ids.add(block["id"])
+
+    cleaned: list[dict] = []
+    for msg in messages:
+        if msg.get("role") != "user":
+            cleaned.append(msg)
+            continue
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            cleaned.append(msg)
+            continue
+        # Keep only tool_result blocks whose ID is known, plus all non-tool_result blocks
+        filtered = [
+            block
+            for block in content
+            if not (isinstance(block, dict) and block.get("type") == "tool_result")
+            or block.get("tool_use_id") in known_ids
+        ]
+        if filtered:
+            cleaned.append({**msg, "content": filtered})
+        # If all blocks were orphaned tool_results, drop the entire message
+
+    return cleaned
+
+
 def _sanitize_content(content) -> list[dict]:
     """Convert response content blocks to plain dicts safe for round-tripping.
 
@@ -647,6 +690,19 @@ async def run_agent_streaming(
                     )
                     await event_bus.on_text(f"\n*Rate limited, retrying in {delay}s...*\n")
                     await asyncio.sleep(min(delay, 30))
+                    continue
+                # Orphaned tool_result: context compression stripped a tool_use turn but
+                # kept the paired tool_result, making the history invalid.  Strip all
+                # tool_result user turns whose IDs have no matching tool_use in the
+                # preceding assistant turns, then retry once without sleeping.
+                if (
+                    hasattr(e, "status_code")
+                    and e.status_code == 400
+                    and "tool_use_id" in str(e)
+                    and attempt < max_retries
+                ):
+                    logger.warning("Orphaned tool_result in history — stripping and retrying")
+                    messages[:] = _strip_orphaned_tool_results(messages)
                     continue
                 _circuit_breaker.record_failure()
                 if _circuit_breaker.is_open:
