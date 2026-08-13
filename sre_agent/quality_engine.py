@@ -140,6 +140,13 @@ def normalize_component_spec(spec: dict) -> dict:
                 if "label" in s and "name" not in s:
                     s["name"] = s.pop("label")
 
+    elif kind == "data_table":
+        rows = spec.get("rows")
+        title = (spec.get("title") or "").lower()
+        # Cap "Top N" tables at 20 rows — 200-row dumps are not useful for top-consumers views
+        if isinstance(rows, list) and len(rows) > 20 and ("top" in title or "consumer" in title):
+            spec["rows"] = rows[:20]
+
     elif kind == "yaml_viewer":
         if "yaml" in spec and "content" not in spec:
             spec["content"] = spec.pop("yaml")

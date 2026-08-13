@@ -36,14 +36,24 @@ def get_firing_alerts():
         )
         data = json.loads(result.data)
     except Exception:
-        # Fallback: try via custom API
-        try:
-            result = _kc.get_custom_client().get_cluster_custom_object(
-                "monitoring.coreos.com", "v1", "alertmanagers", "main"
-            )
-            return "Alertmanager found but cannot query alerts via this method. Configure ALERTMANAGER_URL."
-        except Exception:
-            return "Cannot reach Alertmanager. It may not be installed or accessible."
+        # Fallback: hit ALERTMANAGER_URL directly with the user's OCP bearer token
+        import os
+        import urllib.request
+
+        alertmanager_url = os.environ.get("ALERTMANAGER_URL", "")
+        if alertmanager_url:
+            try:
+                user_token = _kc.get_current_user_token()
+                req = urllib.request.Request(
+                    f"{alertmanager_url.rstrip('/')}/api/v2/alerts",
+                    headers={"Authorization": f"Bearer {user_token}"} if user_token else {},
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read())
+            except Exception:
+                return "Cannot reach Alertmanager via service proxy or configured URL."
+        else:
+            return "Cannot reach Alertmanager. It may not be installed or accessible. Set ALERTMANAGER_URL to enable."
 
     if not isinstance(data, list):
         return "Unexpected response format from Alertmanager."

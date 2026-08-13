@@ -129,6 +129,10 @@ acm:
   # Override ACM Thanos endpoint (auto-detected from open-cluster-management-observability namespace if empty)
   thanosUrl: ""
 
+# Alertmanager integration — direct URL for firing alert queries
+# Example (OCP): https://alertmanager-main-openshift-monitoring.apps.<cluster-domain>
+alertmanagerUrl: ""
+
 nodeSelector: {}
 tolerations: []
 affinity: {}
