@@ -938,6 +938,7 @@ def list_deprecated_apis():
 
 from .tool_registry import register_tool as _register
 
+# Read-only self-description tools.
 for _tool in [
     describe_agent,
     describe_tools,
@@ -947,9 +948,29 @@ for _tool in [
     explain_resource,
     list_api_resources,
     list_deprecated_apis,
+]:
+    _register(_tool)
+
+# Skill mutation is a WRITE operation and must reach the confirmation gate.
+#
+# Skills are the system prompt — prompt_builder assembles it from skill.md —
+# and edits hot-reload immediately. These four were previously registered with
+# the default is_write=False, which put them in the agent loop's `read_blocks`
+# branch: executed in parallel, with on_confirm never called. The agent could
+# therefore rewrite its own instructions, permanently and for every later
+# session, without anyone approving it — while deleting a single pod correctly
+# required confirmation.
+#
+# That matters most on the path this cannot otherwise defend against: untrusted
+# cluster text (a pod annotation, a log line) reaching the model through a
+# diagnostic tool and asking it to call edit_skill. _validate_skill_safety's
+# substring blocklist is a speed bump, not a control — it matches seven literal
+# English phrases. Requiring confirmation puts a human in front of the change
+# regardless of how the request was phrased or what language it was in.
+for _tool in [
     create_skill,
     edit_skill,
     delete_skill,
     create_skill_from_template,
 ]:
-    _register(_tool)
+    _register(_tool, is_write=True)
