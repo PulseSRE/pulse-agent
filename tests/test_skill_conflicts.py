@@ -9,24 +9,9 @@ Covers:
 
 from __future__ import annotations
 
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-# The multi-turn WebSocket tests below drive the real agent loop, which builds a
-# real Anthropic (or AnthropicVertex) client. Without a backend configured the
-# SDK raises "Could not resolve authentication method" inside the streaming
-# context manager, the session never emits a `done` event, and the test's
-# receive_json() loop blocks forever on the TestClient portal thread -- which is
-# what wedged CI on every run from 2026-06-26 onward. They also assert nothing
-# useful in that state: with no events delivered, the "no hallucinations" lists
-# are trivially empty and the assertions pass vacuously.
-_HAS_AI_BACKEND = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_VERTEX_PROJECT_ID"))
-_REQUIRES_AI_BACKEND = pytest.mark.skipif(
-    not _HAS_AI_BACKEND,
-    reason="needs a live model: set ANTHROPIC_API_KEY or ANTHROPIC_VERTEX_PROJECT_ID",
-)
 
 
 def _setup():
@@ -156,14 +141,13 @@ class TestMetadataIntegrity:
                     assert secondary is None, f"Exclusive skill '{skill.name}' got secondary={secondary.name}"
 
 
-@_REQUIRES_AI_BACKEND
 class TestMultiTurnStickyMode:
     """Simulate multi-turn WebSocket sessions to verify sticky mode.
 
-    These exercise the real agent loop against a live model — they are
-    integration tests, not unit tests, and are skipped unless a backend is
-    configured. See _REQUIRES_AI_BACKEND above for why running them without
-    one hangs rather than fails.
+    These drive the real agent loop. The conftest stub supplies the model
+    response, so what is actually under test here is the routing that runs
+    either way -- the hard pre-route pattern match and sticky-mode carry-over
+    between turns -- rather than anything the model decides.
     """
 
     @pytest.fixture

@@ -26,7 +26,7 @@ from sre_agent.monitor import (
     scan_oom_killed_pods,
     scan_pending_pods,
 )
-from tests.conftest import _TEST_DB_URL
+from tests.conftest import _TEST_DB_URL, restore_full_schema
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -56,6 +56,11 @@ def _use_temp_db(monkeypatch):
         except Exception:
             pass
     db.commit()
+    # The DROP above removes tables owned by other modules (investigations,
+    # actions) that the _ensure_tables() calls below do not recreate, and
+    # run_migrations() will not restore them once schema_migrations records a
+    # version. Rebuild the whole schema so later test files still find them.
+    restore_full_schema(db)
     _mon.findings._tables_ensured = False
     ContextBusRepository._tables_ensured = False
     _mon._ensure_tables()

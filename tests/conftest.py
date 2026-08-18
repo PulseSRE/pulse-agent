@@ -101,6 +101,35 @@ class _StubAsyncClient:
         return None
 
 
+def restore_full_schema(db) -> None:
+    """Recreate every table after a test fixture has dropped some of them.
+
+    Several fixtures drop the tables their module owns (actions,
+    investigations, findings, ...) to get a clean slate, then call a
+    module-local _ensure_tables() that only recreates its own subset. The rest
+    stay dropped for the remainder of the session, and run_migrations() will
+    not bring them back: it skips every migration at or below the version
+    already recorded in schema_migrations, including the 001 baseline that
+    creates them.
+
+    Alphabetical collection order meant test_monitor.py and test_scanners.py
+    ran early and left `investigations` and `actions` missing for everything
+    after them -- 42 of the failures that surfaced once the suite could
+    complete at all.
+
+    Clearing the ledger and re-running the chain restores the full schema at
+    its current shape (baseline plus every later ALTER), rather than just the
+    baseline's older column set. Every migration is guarded with IF NOT EXISTS
+    or try/except, and 012 (investigations.timestamp -> BIGINT) is a no-op
+    when already applied, so replaying them over surviving tables is safe.
+    """
+    from sre_agent.db_migrations import run_migrations
+
+    db.execute("DELETE FROM schema_migrations")
+    db.commit()
+    run_migrations(db)
+
+
 def _has_live_ai_backend() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID"))
 
@@ -120,8 +149,17 @@ def _stub_async_anthropic_client(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _set_test_db_url(monkeypatch):
-    """Ensure all tests use the test PostgreSQL database."""
+    """Ensure all tests use the test PostgreSQL database and a usable TLS context."""
     monkeypatch.setenv("PULSE_AGENT_DATABASE_URL", _TEST_DB_URL)
+    # PrometheusClient._build_ssl_context() raises PrometheusConfigError when it
+    # finds no in-cluster CA bundle, which is every environment that is not a
+    # pod. That happens before any HTTP call, so tests which mock
+    # urllib.request.urlopen never reached their mock and saw FAIL_UNREACHABLE
+    # instead of the parsed response they assert on. Nothing here is testing TLS
+    # (the one test that does, test_prometheus_client.py, mocks settings
+    # directly and is unaffected) -- this just gets the mocked transport back in
+    # play. Set before _reset_settings() so the cached Settings pick it up.
+    monkeypatch.setenv("PULSE_AGENT_PROMETHEUS_INSECURE", "true")
     from sre_agent.config import _reset_settings
 
     _reset_settings()

@@ -28,7 +28,7 @@ from sre_agent.monitor import (
 )
 from sre_agent.monitor.cluster_monitor import ClusterMonitor, reset_cluster_monitor
 from sre_agent.repositories.monitor_repo import MonitorRepository
-from tests.conftest import _TEST_DB_URL
+from tests.conftest import _TEST_DB_URL, restore_full_schema
 
 
 @pytest.fixture(autouse=True)
@@ -61,6 +61,11 @@ def _use_temp_db(monkeypatch, tmp_path):
         except Exception:
             pass
     db.commit()
+    # The DROP above removes tables owned by other modules (investigations,
+    # actions) that the _ensure_tables() calls below do not recreate, and
+    # run_migrations() will not restore them once schema_migrations records a
+    # version. Rebuild the whole schema so later test files still find them.
+    restore_full_schema(db)
     _mon.findings._tables_ensured = False
     MonitorRepository._tables_ensured = False
     ContextBusRepository._tables_ensured = False
@@ -386,8 +391,10 @@ class TestSecurityFollowup:
         }
 
         with (
-            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation", return_value=mock_inv_result),
-            patch("sre_agent.monitor.cluster_monitor._run_security_followup", return_value=mock_sec_result) as mock_sec,
+            patch("sre_agent.monitor.investigation_runner._run_proactive_investigation", return_value=mock_inv_result),
+            patch(
+                "sre_agent.monitor.investigation_runner._run_security_followup", return_value=mock_sec_result
+            ) as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
@@ -439,8 +446,8 @@ class TestSecurityFollowup:
         }
 
         with (
-            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation", return_value=mock_inv_result),
-            patch("sre_agent.monitor.cluster_monitor._run_security_followup") as mock_sec,
+            patch("sre_agent.monitor.investigation_runner._run_proactive_investigation", return_value=mock_inv_result),
+            patch("sre_agent.monitor.investigation_runner._run_security_followup") as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
@@ -500,8 +507,10 @@ class TestSecurityFollowup:
         }
 
         with (
-            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation", return_value=mock_inv_result),
-            patch("sre_agent.monitor.cluster_monitor._run_security_followup", return_value=mock_sec_result) as mock_sec,
+            patch("sre_agent.monitor.investigation_runner._run_proactive_investigation", return_value=mock_inv_result),
+            patch(
+                "sre_agent.monitor.investigation_runner._run_security_followup", return_value=mock_sec_result
+            ) as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
@@ -557,7 +566,7 @@ class TestMonitorAutoLearn:
         }
 
         with (
-            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation", return_value=mock_inv_result),
+            patch("sre_agent.monitor.investigation_runner._run_proactive_investigation", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
@@ -616,7 +625,7 @@ class TestMonitorAutoLearn:
         }
 
         with (
-            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation", return_value=mock_inv_result),
+            patch("sre_agent.monitor.investigation_runner._run_proactive_investigation", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch("sre_agent.plan_templates.match_template", return_value=None),
         ):
@@ -670,7 +679,7 @@ class TestMonitorAutoLearn:
         }
 
         with (
-            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation", return_value=mock_inv_result),
+            patch("sre_agent.monitor.investigation_runner._run_proactive_investigation", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
@@ -1305,7 +1314,7 @@ class TestEvalScaffoldingIntegration:
         eval_mock = MagicMock()
         fake_bus = MagicMock()
         with (
-            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation", return_value=mock_inv_result),
+            patch("sre_agent.monitor.investigation_runner._run_proactive_investigation", return_value=mock_inv_result),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.context_bus.get_context_bus", return_value=fake_bus),
