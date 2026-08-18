@@ -50,14 +50,18 @@ def _get_current_user(
 ) -> str:
     """Extract username from OAuth proxy headers.
 
-    Priority: PULSE_AGENT_DEV_USER > X-Forwarded-User > TokenReview > JWT decode > token hash.
+    Priority: X-Forwarded-User > TokenReview > PULSE_AGENT_DEV_USER > token hash.
     The OAuth proxy sets X-Forwarded-User with the authenticated username -- this is
     the most reliable source since OpenShift tokens are opaque (sha256~...), not JWTs.
-    """
-    dev_user = get_settings().agent.dev_user
-    if dev_user:
-        return dev_user
 
+    PULSE_AGENT_DEV_USER is deliberately NOT first. It exists for local development,
+    where no OAuth proxy is in front of the agent and no identity headers arrive at
+    all -- so a fallback is all it ever needs to be. Checking it first meant that
+    setting it in a deployment that *does* sit behind the proxy (a stray env var, a
+    copied manifest) silently collapsed every caller's identity to that one name,
+    overriding real authenticated users with no error and no log line. As a fallback
+    it still works for local dev, but can no longer mask a real identity.
+    """
     # Best source: OAuth proxy sets X-Forwarded-User directly
     if x_forwarded_user and isinstance(x_forwarded_user, str) and x_forwarded_user.strip():
         username = x_forwarded_user.strip()
@@ -77,6 +81,12 @@ def _get_current_user(
     token = x_forwarded_access_token or ""
 
     if not token:
+        # No proxy identity of any kind: this is the local-development shape that
+        # PULSE_AGENT_DEV_USER exists for. In a real deployment the proxy always
+        # supplies one of the two headers, so this branch is not reachable there.
+        dev_user = get_settings().agent.dev_user
+        if dev_user:
+            return dev_user
         raise HTTPException(
             status_code=401,
             detail="User identity required. X-Forwarded-Access-Token or X-Forwarded-User header is missing.",

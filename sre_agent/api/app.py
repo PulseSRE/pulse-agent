@@ -74,8 +74,15 @@ async def lifespan(app: FastAPI):
 
     if not get_settings().server.ws_token:
         logger.critical(
-            "PULSE_AGENT_WS_TOKEN is not set. WebSocket endpoint is UNAUTHENTICATED. "
-            "Set this variable or connections will be rejected."
+            "PULSE_AGENT_WS_TOKEN is not set. All WebSocket and REST requests will be rejected "
+            "(4001 / 503) until it is set."
+        )
+    if get_settings().agent.dev_user:
+        logger.warning(
+            "PULSE_AGENT_DEV_USER is set to '%s'. This is a local-development fallback used only "
+            "when no OAuth proxy identity headers are present; it must not be set in a deployment "
+            "behind oauth-proxy.",
+            get_settings().agent.dev_user,
         )
     try:
         from ..k8s_client import get_core_client
