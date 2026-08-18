@@ -119,7 +119,7 @@ class TestProcessHandoffs:
         )
 
         with patch(
-            "sre_agent.monitor.cluster_monitor._run_security_followup",
+            "sre_agent.monitor.handoff_processor._run_security_followup",
             return_value={"security_issues": [], "risk_level": "low"},
         ) as mock_sec:
             loop = asyncio.new_event_loop()
@@ -151,7 +151,7 @@ class TestProcessHandoffs:
         )
 
         with patch(
-            "sre_agent.monitor.cluster_monitor._run_proactive_investigation",
+            "sre_agent.monitor.handoff_processor._run_proactive_investigation",
             return_value={"summary": "ok", "confidence": 0.5},
         ) as mock_sre:
             loop = asyncio.new_event_loop()
@@ -178,7 +178,7 @@ class TestProcessHandoffs:
             )
         )
 
-        with patch("sre_agent.monitor.cluster_monitor._run_security_followup", return_value={}):
+        with patch("sre_agent.monitor.handoff_processor._run_security_followup", return_value={}):
             loop = asyncio.new_event_loop()
             try:
                 loop.run_until_complete(monitor.process_handoffs())
@@ -218,8 +218,8 @@ class TestProcessHandoffs:
 
         # Should not call either investigation function
         with (
-            patch("sre_agent.monitor.cluster_monitor._run_security_followup") as mock_sec,
-            patch("sre_agent.monitor.cluster_monitor._run_proactive_investigation") as mock_sre,
+            patch("sre_agent.monitor.handoff_processor._run_security_followup") as mock_sec,
+            patch("sre_agent.monitor.handoff_processor._run_proactive_investigation") as mock_sre,
         ):
             loop = asyncio.new_event_loop()
             try:
