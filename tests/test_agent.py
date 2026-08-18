@@ -287,12 +287,39 @@ class TestWriteToolSet:
             "create_argo_application",
             "exec_command",
             "test_connectivity",
+            # Skill mutation edits the system prompt itself — see
+            # test_skill_mutation_tools_require_confirmation below.
+            "create_skill",
+            "edit_skill",
+            "delete_skill",
+            "create_skill_from_template",
         }
         assert expected == WRITE_TOOLS
 
     def test_read_tools_not_in_write_set(self):
         read_tools = {"list_pods", "list_nodes", "get_events", "describe_pod", "list_namespaces"}
         assert WRITE_TOOLS & read_tools == set()
+
+    def test_skill_mutation_tools_require_confirmation(self):
+        """Editing a skill edits the system prompt, so it must reach the confirm gate.
+
+        Regression: these four were registered with the default is_write=False,
+        which put them in run_agent_streaming's `read_blocks` branch — executed
+        in parallel, with on_confirm never called. The agent could rewrite its
+        own instructions, permanently and for every later session, while
+        deleting one pod still required approval.
+
+        This matters most on the path nothing else defends: untrusted cluster
+        text reaching the model through a diagnostic tool and asking it to call
+        edit_skill. _validate_skill_safety matches seven literal English
+        phrases, so it is a speed bump rather than a control; the confirmation
+        gate is what actually puts a human in front of the change.
+        """
+        for name in ("create_skill", "edit_skill", "delete_skill", "create_skill_from_template"):
+            assert name in WRITE_TOOLS, (
+                f"{name} mutates the system prompt and must be registered with "
+                "is_write=True, or the confirmation gate is bypassed"
+            )
 
 
 @patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
