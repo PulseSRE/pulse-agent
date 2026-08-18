@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -31,18 +31,30 @@ def client(app):
 
 
 class TestListViewsFilters:
+    """GET /views must pass its query filters straight through to the repository.
+
+    These patch ViewRepository.async_list_views, not sre_agent.db.list_views:
+    the endpoint moved to the repository layer, so the old target was never
+    called and the assertions could not fail for the right reason.
+    """
+
+    # Patching the method on the class (rather than autospec'ing it) means the
+    # Mock is not a descriptor, so `self` is not passed and the assertions below
+    # match the endpoint's call signature exactly.
+    _TARGET = "sre_agent.repositories.view_repo.ViewRepository.async_list_views"
+
     def test_filter_by_view_type(self, client):
-        with patch("sre_agent.db.list_views", return_value=[]) as mock:
+        with patch(self._TARGET, new_callable=AsyncMock, return_value=[]) as mock:
             client.get("/views?view_type=incident")
             mock.assert_called_once_with("testuser", view_type="incident", visibility=None, exclude_status=None)
 
     def test_filter_by_visibility(self, client):
-        with patch("sre_agent.db.list_views", return_value=[]) as mock:
+        with patch(self._TARGET, new_callable=AsyncMock, return_value=[]) as mock:
             client.get("/views?visibility=team")
             mock.assert_called_once_with("testuser", view_type=None, visibility="team", exclude_status=None)
 
     def test_filter_exclude_status(self, client):
-        with patch("sre_agent.db.list_views", return_value=[]) as mock:
+        with patch(self._TARGET, new_callable=AsyncMock, return_value=[]) as mock:
             client.get("/views?view_type=plan&exclude_status=completed")
             mock.assert_called_once_with("testuser", view_type="plan", visibility=None, exclude_status="completed")
 

@@ -80,9 +80,9 @@ class TestInvestigationResponsePassthrough:
         finally:
             patch.stopall()
 
-        assert "viewPlan" in result
-        assert len(result["viewPlan"]) == 1
-        assert result["viewPlan"][0]["kind"] == "chart"
+        assert "view_plan" in result
+        assert len(result["view_plan"]) == 1
+        assert result["view_plan"][0]["kind"] == "chart"
 
     @pytest.mark.asyncio
     async def test_missing_view_plan_returns_empty_list(self):
@@ -101,4 +101,4 @@ class TestInvestigationResponsePassthrough:
         finally:
             patch.stopall()
 
-        assert result["viewPlan"] == []
+        assert result["view_plan"] == []

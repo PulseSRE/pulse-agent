@@ -238,7 +238,13 @@ class TestMCPRendererEdgeCases:
         config = {"kind": "status_list", "parser": "json"}
         _, spec = render_mcp_output("alerts", output, renderer_config=config)
         assert spec["kind"] == "status_list"
-        assert spec["items"][0]["label"] == "alert1"
+        # status_list items are {name, status, detail} -- see the component
+        # registry's status_list contract. These assertions read "label"
+        # before bd7ede5 standardised the field names across tools, and were
+        # never updated because CI was not running the suite.
+        assert spec["items"][0]["name"] == "alert1"
+        assert spec["items"][0]["status"] == "firing"
+        assert spec["items"][0]["detail"] == "CPU high"
 
     def test_skill_renderer_metric_card(self):
         from sre_agent.mcp_renderer import render_mcp_output
@@ -256,7 +262,9 @@ class TestMCPRendererEdgeCases:
         config = {"kind": "status_list", "parser": "json"}
         _, spec = render_mcp_output("items", output, renderer_config=config)
         assert spec["kind"] == "status_list"
-        assert spec["items"][0]["label"] == "item1"
+        # Non-dict entries fall back to {name: str(item), status: "unknown"}.
+        assert spec["items"][0]["name"] == "item1"
+        assert spec["items"][0]["status"] == "unknown"
 
 
 # ---------------------------------------------------------------------------
