@@ -18,7 +18,7 @@ from ..config import get_settings
 from ..k8s_client import get_core_client
 from ..repositories.monitor_repo import get_monitor_repo
 from .actions import mark_finding_actions_resolved, save_action
-from .autofix import _autofix_paused
+from .autofix import is_autofix_paused
 from .confidence import _estimate_auto_fix_confidence, _estimate_finding_confidence, _finding_key
 from .findings import _make_action_report, _ts
 from .registry import SEVERITY_CRITICAL
@@ -214,7 +214,12 @@ class ClusterMonitor:
 
     async def auto_fix(self, findings: list[dict]) -> None:
         """Attempt to auto-fix findings when trust level permits."""
-        if _autofix_paused:
+        # Call the accessor rather than reading a module-level flag imported by
+        # value. `from .autofix import _autofix_paused` binds the *value* False
+        # into this module at import time; set_autofix_paused() rebinds the name
+        # inside autofix.py only, so the pause never reached this check while
+        # /health (which calls is_autofix_paused()) reported it as active.
+        if is_autofix_paused():
             logger.info("Auto-fix paused — skipping")
             return
 
