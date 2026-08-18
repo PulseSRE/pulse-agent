@@ -431,3 +431,53 @@ class TestSLORegistration:
         )
         assert r.status_code == 422
         assert "target" in r.json()["detail"]
+
+
+class TestSkillAdminAuthorization:
+    """Skill mutation rewrites the system prompt, so it needs more than the shared token.
+
+    Regression: PUT/DELETE /admin/skills/{name} were guarded by verify_token —
+    the same shared WS token as GET /skills — so possession of a service
+    credential was enough to rewrite the agent's instructions, with no user
+    attached to the change. Separately, DELETE refused built-in skills but PUT
+    did not, so `sre` could not be deleted but could be overwritten wholesale.
+    """
+
+    def test_put_refuses_to_overwrite_a_builtin_skill(self, api_client, api_headers, monkeypatch):
+        monkeypatch.setenv("PULSE_AGENT_DEV_USER", "someone")
+        from sre_agent.config import _reset_settings
+
+        _reset_settings()
+        r = api_client.put(
+            "/admin/skills/sre",
+            headers=api_headers,
+            json={"content": "---\nname: sre\n---\nrewritten"},
+        )
+        assert r.status_code == 403, "built-in skills must not be overwritable"
+
+    def test_non_admin_rejected_when_allowlist_is_configured(self, api_client, api_headers, monkeypatch):
+        monkeypatch.setenv("PULSE_AGENT_ADMIN_USERS", "alice,bob")
+        monkeypatch.setenv("PULSE_AGENT_DEV_USER", "mallory")
+        from sre_agent.config import _reset_settings
+
+        _reset_settings()
+        r = api_client.put(
+            "/admin/skills/anything",
+            headers=api_headers,
+            json={"content": "---\nname: x\n---\nbody"},
+        )
+        assert r.status_code == 403, "a user outside PULSE_AGENT_ADMIN_USERS must be refused"
+
+    def test_admin_allowed_when_on_the_allowlist(self, api_client, api_headers, monkeypatch):
+        monkeypatch.setenv("PULSE_AGENT_ADMIN_USERS", "alice,bob")
+        monkeypatch.setenv("PULSE_AGENT_DEV_USER", "alice")
+        from sre_agent.config import _reset_settings
+
+        _reset_settings()
+        r = api_client.put(
+            "/admin/skills/does-not-exist",
+            headers=api_headers,
+            json={"content": "---\nname: x\n---\nbody"},
+        )
+        # Past the admin gate: 404 for the missing skill, not 403.
+        assert r.status_code == 404, f"allowlisted admin should pass authz, got {r.status_code}"

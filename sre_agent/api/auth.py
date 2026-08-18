@@ -147,6 +147,45 @@ def get_owner(
     return _get_current_user(x_forwarded_access_token, x_forwarded_user)
 
 
+def require_admin(
+    authorization: str | None = Header(None),
+    token: str | None = Query(None),
+    x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
+    x_forwarded_user: str | None = Header(None, alias="X-Forwarded-User"),
+) -> str:
+    """FastAPI dependency for endpoints that mutate the agent's own behaviour.
+
+    Stricter than verify_token in two ways.
+
+    First, it requires a real authenticated user rather than only the shared
+    WS token. The shared token authorises the UI as a whole; it says nothing
+    about who is driving it, so on its own it cannot attribute a skill edit to
+    anyone. Skill mutation rewrites the system prompt, which is the most
+    powerful thing this API exposes, so it should never be reachable by
+    possession of a service credential alone.
+
+    Second, when server.admin_users is set it restricts the change to that
+    list. Left empty it permits any authenticated user, which is the
+    pre-existing behaviour — defaulting to deny would lock existing
+    deployments out of their own skill editor on upgrade.
+    """
+    _verify_rest_token(authorization, token)
+    user = _get_current_user(x_forwarded_access_token, x_forwarded_user)
+
+    configured = get_settings().server.admin_users
+    allowed = {u.strip() for u in configured.split(",") if u.strip()}
+    if allowed and user not in allowed:
+        logger.warning("Rejected skill mutation by non-admin user '%s'", user)
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    if not allowed:
+        logger.warning(
+            "Skill mutation by '%s' — PULSE_AGENT_ADMIN_USERS is unset, so any "
+            "authenticated user may rewrite the system prompt. Set it in production.",
+            user,
+        )
+    return user
+
+
 def extract_user_token(headers) -> str | None:
     """Extract user OAuth token from request/websocket headers. Returns None if absent or disabled."""
     from ..config import get_settings
