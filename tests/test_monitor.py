@@ -1329,3 +1329,58 @@ class TestEvalScaffoldingIntegration:
         assert call_kwargs["skill_name"] is not None
         assert call_kwargs["finding"] is finding
         assert call_kwargs["investigation_result"] is mock_inv_result
+
+
+class TestAutofixPause:
+    """The auto-fix pause must actually reach ClusterMonitor.auto_fix.
+
+    Regression: cluster_monitor did ``from .autofix import _autofix_paused``,
+    which binds the *value* False into this module at import time.
+    set_autofix_paused() rebinds the name inside autofix.py only, so the pause
+    never reached the monitor loop — it kept deleting pods and patching
+    workloads while /health (which calls is_autofix_paused()) reported the
+    pause as active. An emergency stop that reports success while doing
+    nothing is worse than having none, so both halves are asserted here.
+    """
+
+    def test_pause_stops_auto_fix(self):
+        from sre_agent.monitor import cluster_monitor as cm
+        from sre_agent.monitor.autofix import set_autofix_paused
+
+        # Construct before patching: ClusterMonitor.__init__ reads settings too.
+        monitor = ClusterMonitor()
+
+        set_autofix_paused(True)
+        try:
+            with patch.object(cm, "get_settings") as mock_settings:
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(monitor.auto_fix([{"autoFixable": True, "category": "crashloop"}]))
+                finally:
+                    loop.close()
+            # The pause check precedes every settings read in auto_fix, so an
+            # untouched get_settings proves we returned at the pause gate.
+            mock_settings.assert_not_called()
+        finally:
+            set_autofix_paused(False)
+
+    def test_pause_state_is_shared_with_the_health_endpoint(self):
+        """is_autofix_paused() and the monitor loop must agree on one source of truth."""
+        from sre_agent.monitor.autofix import is_autofix_paused, set_autofix_paused
+
+        set_autofix_paused(True)
+        try:
+            assert is_autofix_paused() is True
+        finally:
+            set_autofix_paused(False)
+        assert is_autofix_paused() is False
+
+    def test_pause_is_not_imported_by_value(self):
+        """Guard the specific mistake: a by-value import cannot see later rebinds."""
+        from sre_agent.monitor import cluster_monitor as cm
+
+        assert not hasattr(cm, "_autofix_paused"), (
+            "cluster_monitor must not import _autofix_paused by value — "
+            "set_autofix_paused() rebinds it in autofix.py and the change "
+            "would never be visible here. Call is_autofix_paused() instead."
+        )
