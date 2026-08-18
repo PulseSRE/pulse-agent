@@ -11,17 +11,55 @@ from ..k8s_client import get_apps_client, get_core_client
 logger = logging.getLogger("pulse_agent.monitor")
 
 # ── Auto-fix kill switch ───────────────────────────────────────────────────
+#
+# Backed by the operational_flags table rather than a module global. A global
+# had two failure modes that both silently re-armed autonomous remediation:
+# it reset to "not paused" on every pod restart (an OOMKill or reschedule
+# during an incident would quietly resume deleting pods), and it was
+# process-local, so pausing one replica left the others acting.
+#
+# Read on every auto_fix() call — once per scan cycle, so the query cost is
+# irrelevant next to what it guards.
 
-_autofix_paused = False
+_AUTOFIX_PAUSED_KEY = "autofix_paused"
 
 
-def set_autofix_paused(paused: bool) -> None:
-    global _autofix_paused
-    _autofix_paused = paused
+def set_autofix_paused(paused: bool, updated_by: str = "") -> None:
+    """Persist the auto-fix pause flag. Raises if it cannot be stored.
+
+    Deliberately not best-effort: an operator who hits pause and gets a success
+    response must not be left with remediation still running.
+    """
+    from ..db import get_database
+
+    get_database().execute(
+        "INSERT INTO operational_flags (key, value, updated_at, updated_by) "
+        "VALUES (%s, %s, NOW(), %s) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "
+        "updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by",
+        (_AUTOFIX_PAUSED_KEY, paused, updated_by or None),
+    )
+    get_database().commit()
+    logger.info("Auto-fix %s (persisted)", "paused" if paused else "resumed")
 
 
 def is_autofix_paused() -> bool:
-    return _autofix_paused
+    """Return the persisted pause state, defaulting to PAUSED on any read error.
+
+    Fails closed on purpose. If the flag cannot be read we cannot know whether
+    an operator has halted remediation, and continuing to delete pods and patch
+    workloads on that assumption is the more damaging of the two mistakes.
+    """
+    from ..db import get_database
+
+    try:
+        row = get_database().fetchone("SELECT value FROM operational_flags WHERE key = %s", (_AUTOFIX_PAUSED_KEY,))
+    except Exception:
+        logger.exception("Could not read the auto-fix pause flag — treating auto-fix as PAUSED")
+        return True
+    if row is None:
+        return False
+    return bool(row["value"])
 
 
 # ── Auto-fix functions ────────────────────────────────────────────────────

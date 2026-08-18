@@ -214,11 +214,11 @@ class ClusterMonitor:
 
     async def auto_fix(self, findings: list[dict]) -> None:
         """Attempt to auto-fix findings when trust level permits."""
-        # Call the accessor rather than reading a module-level flag imported by
-        # value. `from .autofix import _autofix_paused` binds the *value* False
-        # into this module at import time; set_autofix_paused() rebinds the name
-        # inside autofix.py only, so the pause never reached this check while
-        # /health (which calls is_autofix_paused()) reported it as active.
+        # Always call the accessor. It reads the persisted operational_flags row,
+        # so the pause is visible across replicas and survives a restart; and
+        # reading it through a function rather than a module-level name avoids
+        # re-introducing the by-value import bug that made this check see a
+        # permanently-False copy while /health reported the pause as active.
         if is_autofix_paused():
             logger.info("Auto-fix paused — skipping")
             return
