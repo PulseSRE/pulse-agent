@@ -1124,7 +1124,12 @@ def _phase_b_investigate() -> int:
                 metadata["skill_used"] = "sre"
                 metadata["tools_offered"] = tools_offered[:20]
 
-                raw_view_plan = result.get("viewPlan", [])
+                # "view_plan", not "viewPlan": _run_proactive_investigation reads
+                # the model's camelCase viewPlan but normalises it to snake_case
+                # on the way out (e2c1ae9), like every other key read above.
+                # This read was missed in that rename, so the inbox path silently
+                # dropped every investigation view plan.
+                raw_view_plan = result.get("view_plan", [])
                 if isinstance(raw_view_plan, list) and raw_view_plan:
                     from .view_executor import validate_view_plan
 

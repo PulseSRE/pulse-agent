@@ -218,10 +218,6 @@ def _get_agent_version() -> str:
 app = FastAPI(title="Pulse Agent API", version=_get_agent_version(), lifespan=lifespan)
 app.add_middleware(CorrelationMiddleware)
 
-from prometheus_client import make_asgi_app as _make_metrics_app
-
-app.mount("/metrics", _make_metrics_app())
-
 from ..observability import BUILD_INFO
 
 BUILD_INFO.info({"version": _get_agent_version()})
@@ -244,6 +240,18 @@ app.include_router(topology_router)
 app.include_router(metrics_router)
 app.include_router(inbox_router)
 app.include_router(debug_router)
+
+# Prometheus scrape endpoint. Mounted AFTER the routers on purpose: a Starlette
+# Mount matches on path prefix, so mounting "/metrics" first swallowed every
+# /metrics/* REST route registered later -- /metrics/fix-success-rate,
+# /metrics/response-latency and /metrics/eval-trend all reached the scrape app
+# instead, returning exposition text with a 200 and skipping FastAPI's query
+# validation entirely. Registering the routers first lets those exact paths win
+# while "/metrics" itself still falls through to the mount, so the
+# ServiceMonitor scrape target is unchanged.
+from prometheus_client import make_asgi_app as _make_metrics_app
+
+app.mount("/metrics", _make_metrics_app())
 
 # Register WebSocket endpoints
 # /ws/agent — ORCA-routed chat (routes to any of 7 skills)
