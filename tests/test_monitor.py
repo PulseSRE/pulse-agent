@@ -1384,6 +1384,41 @@ class TestAutofixPause:
             set_autofix_paused(False)
         assert is_autofix_paused() is False
 
+    def test_pause_survives_a_process_restart(self):
+        """The flag lives in the DB, so a fresh process must still see it.
+
+        Regression: it was a module global that reset to "not paused" on every
+        restart, so an OOMKill or reschedule during an incident silently
+        re-armed autonomous remediation.
+        """
+        import importlib
+
+        from sre_agent.monitor.autofix import set_autofix_paused
+
+        set_autofix_paused(True)
+        try:
+            # Re-importing gives the module a fresh namespace, which is as close
+            # to a restart as an in-process test gets. A global would be back to
+            # its False initialiser here.
+            import sre_agent.monitor.autofix as autofix_module
+
+            reloaded = importlib.reload(autofix_module)
+            assert reloaded.is_autofix_paused() is True
+        finally:
+            set_autofix_paused(False)
+
+    def test_pause_fails_closed_when_the_flag_cannot_be_read(self):
+        """An unreadable flag must read as PAUSED, not as free to remediate.
+
+        is_autofix_paused() imports get_database inside the function, so the
+        module attribute is resolved at call time and patching it there is what
+        the accessor actually sees.
+        """
+        from sre_agent.monitor.autofix import is_autofix_paused
+
+        with patch("sre_agent.db.get_database", side_effect=RuntimeError("db down")):
+            assert is_autofix_paused() is True
+
     def test_pause_is_not_imported_by_value(self):
         """Guard the specific mistake: a by-value import cannot see later rebinds."""
         from sre_agent.monitor import cluster_monitor as cm

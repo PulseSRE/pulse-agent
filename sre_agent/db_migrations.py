@@ -226,6 +226,13 @@ def _migrate_022_user_interactions(db: Database) -> None:
     db.executescript(USER_INTERACTIONS_SCHEMA)
 
 
+def _migrate_023_operational_flags(db: Database) -> None:
+    """Create operational_flags table so the auto-fix kill switch survives restarts."""
+    from .db_schema import OPERATIONAL_FLAGS_SCHEMA
+
+    db.executescript(OPERATIONAL_FLAGS_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -249,4 +256,5 @@ MIGRATIONS = [
     (20, "action_outcomes", _migrate_020_action_outcomes),
     (21, "inbox_items", _migrate_021_inbox_items),
     (22, "user_interactions", _migrate_022_user_interactions),
+    (23, "operational_flags", _migrate_023_operational_flags),
 ]
