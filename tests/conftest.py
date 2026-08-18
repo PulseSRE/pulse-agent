@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +15,107 @@ _TEST_DB_URL = os.environ.get(
     "PULSE_AGENT_TEST_DATABASE_URL",
     "postgresql://pulse:pulse@localhost:5433/pulse_test",
 )
+
+
+# ---------------------------------------------------------------------------
+# Anthropic client stub
+# ---------------------------------------------------------------------------
+#
+# The WebSocket tests drive the real agent loop, and the ws_client fixtures
+# patch the Kubernetes clients but never the Anthropic one. With no backend
+# configured the SDK raises "Could not resolve authentication method" while
+# building request headers, the session never completes normally, and the
+# test's receive loop blocks -- which wedged CI on every run from 2026-06-26
+# onward until a per-test timeout made it visible.
+#
+# The patch targets anthropic.AsyncAnthropic itself, NOT
+# sre_agent.agent.create_async_client. Patching the factory does not work:
+# sre_agent/api/agent_ws.py does `from ..agent import create_async_client` at
+# module level, so it holds its own binding and never sees a patch applied to
+# sre_agent.agent -- the same by-value import problem that made the auto-fix
+# kill switch inert. create_async_client() looks up `anthropic.AsyncAnthropic`
+# as a module attribute at call time, so patching there reaches every caller
+# regardless of how it imported the factory, and regardless of import order.
+#
+# Only the *async* client is stubbed: that is what the agent loop and the
+# WebSocket endpoints use. The sync one (borrow_client, used by
+# skill_router/tool_predictor/inbox for best-effort classification) fails fast
+# with the same TypeError rather than hanging, and those call sites already
+# swallow it, so leaving it alone avoids changing behaviour tests rely on.
+#
+# Skipped entirely when a real backend is configured, so the live-judge and
+# replay eval runs still exercise the real client.
+
+
+class _StubUsage:
+    input_tokens = 0
+    output_tokens = 0
+    cache_read_input_tokens = 0
+    cache_creation_input_tokens = 0
+
+
+class _StubFinalMessage:
+    """Minimal stand-in for the object returned by stream.get_final_message()."""
+
+    # end_turn makes run_agent_streaming break out of the tool loop immediately,
+    # so `content` is never inspected on this path.
+    stop_reason = "end_turn"
+    content: ClassVar[list] = []
+    usage = _StubUsage()
+
+
+class _StubStream:
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def __aiter__(self):
+        async def _events():
+            yield SimpleNamespace(
+                type="content_block_delta",
+                delta=SimpleNamespace(type="text_delta", text=self._text),
+            )
+
+        return _events()
+
+    async def get_final_message(self):
+        return _StubFinalMessage()
+
+
+class _StubAsyncClient:
+    """Async Anthropic client stub: one text delta, then a clean end_turn."""
+
+    STUB_TEXT = "[stubbed model response]"
+
+    def __init__(self, *args, **kwargs) -> None:
+        # Accepts and ignores constructor args so it can stand in for both
+        # AsyncAnthropic() and AsyncAnthropicVertex(region=..., project_id=...).
+        self.messages = SimpleNamespace(stream=lambda **kw: _StubStream(self.STUB_TEXT))
+
+    async def close(self) -> None:
+        return None
+
+
+def _has_live_ai_backend() -> bool:
+    return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID"))
+
+
+@pytest.fixture(autouse=True)
+def _stub_async_anthropic_client(monkeypatch):
+    """Prevent any test from constructing a real async Anthropic client."""
+    if _has_live_ai_backend():
+        yield
+        return
+    import anthropic
+
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", _StubAsyncClient)
+    monkeypatch.setattr(anthropic, "AsyncAnthropicVertex", _StubAsyncClient, raising=False)
+    yield
 
 
 @pytest.fixture(autouse=True)
