@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8.0", "pytest-asyncio>=0.23.0", "ruff>=0.4.0", "mypy>=1.0", "types-PyYAML>=6.0"]
+test = ["pytest>=8.0", "pytest-asyncio>=0.23.0", "pytest-timeout>=2.3.0", "ruff>=0.4.0", "mypy>=1.0", "types-PyYAML>=6.0"]
 
 [project.scripts]
 sre-agent = "sre_agent.main:main"
@@ -42,6 +42,21 @@ include = ["sre_agent*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# A hung test used to be invisible: the suite normally finishes in ~1-2 minutes,
+# but when it stopped finishing, `pytest -q` had flushed no output by the time
+# CI's 15-minute step cap killed the job, so nothing identified the culprit.
+# Fail the individual test instead, and name it.
+#
+# timeout_method = "thread" rather than the default "signal": signal-based
+# timeouts cannot interrupt a thread blocked in C code (a blocking socket read
+# inside psycopg2, say), which is the most likely shape of a hang here. The
+# thread method also dumps every thread's stack on expiry, which is the part
+# that actually tells you where it stopped.
+timeout = 120
+timeout_method = "thread"
+# Dump all thread stacks if the whole session wedges somewhere pytest-timeout
+# cannot see (collection, fixture teardown, interpreter shutdown).
+faulthandler_timeout = 300
 
 [tool.ruff]
 target-version = "py311"
