@@ -342,7 +342,8 @@ class TestCloneView:
 
 
 class TestGetCurrentUser:
-    def test_dev_user_override(self, monkeypatch):
+    def test_dev_user_used_when_no_proxy_identity(self, monkeypatch):
+        """Local-development shape: no OAuth proxy, so no identity headers arrive."""
         from sre_agent.api import _get_current_user
         from sre_agent.config import _reset_settings
 
@@ -350,6 +351,22 @@ class TestGetCurrentUser:
         _reset_settings()
         user = _get_current_user()
         assert user == "testdev"
+
+    def test_dev_user_does_not_override_a_real_proxy_identity(self, monkeypatch):
+        """PULSE_AGENT_DEV_USER must never mask an authenticated user.
+
+        Regression: dev_user was checked first, so setting it in a deployment
+        that sits behind oauth-proxy silently collapsed every caller's identity
+        to that one name -- overriding real authenticated users with no error
+        and no log line. It is a fallback for the no-proxy case only.
+        """
+        from sre_agent.api import _get_current_user
+        from sre_agent.config import _reset_settings
+
+        monkeypatch.setenv("PULSE_AGENT_DEV_USER", "testdev")
+        _reset_settings()
+        user = _get_current_user(x_forwarded_user="alice@example.com")
+        assert user == "alice@example.com", "the proxy-supplied identity must win over PULSE_AGENT_DEV_USER"
 
     def test_no_token_raises_401(self):
         from fastapi import HTTPException
