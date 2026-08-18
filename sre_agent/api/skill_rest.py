@@ -11,7 +11,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from .auth import verify_token
+from .auth import require_admin, verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -106,7 +106,7 @@ async def get_skill(name: str, _auth=Depends(verify_token)):
 
 
 @router.post("/admin/skills/reload")
-async def reload_skills(_auth=Depends(verify_token)):
+async def reload_skills(admin: str = Depends(require_admin)):
     """Hot reload all skills from disk."""
     from ..skill_loader import reload_skills as _reload
 
@@ -136,8 +136,11 @@ async def test_skill_routing(
     }
 
 
+_BUILTIN_SKILLS = {"sre", "security", "view_designer"}
+
+
 @router.put("/admin/skills/{name}")
-async def update_skill(name: str, body: dict, _auth=Depends(verify_token)):
+async def update_skill(name: str, body: dict, admin: str = Depends(require_admin)):
     """Save updated skill.md content. Archives the old version and hot-reloads."""
     from ..skill_loader import get_skill as _get
     from ..skill_loader import reload_skills as _reload
@@ -145,6 +148,12 @@ async def update_skill(name: str, body: dict, _auth=Depends(verify_token)):
     skill = _get(name)
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+
+    # DELETE has always refused built-ins; PUT did not, so the built-in sre
+    # skill could not be deleted but could be overwritten wholesale — which is
+    # strictly more useful to an attacker than deleting it. Same rule for both.
+    if name in _BUILTIN_SKILLS:
+        raise HTTPException(status_code=403, detail=f"Cannot overwrite built-in skill '{name}'")
 
     content = body.get("content", "")
     if not content or "---" not in content:
@@ -161,6 +170,7 @@ async def update_skill(name: str, body: dict, _auth=Depends(verify_token)):
     _archive_version(skill.path, skill.version)
 
     # Write new content
+    logger.warning("Skill '%s' overwritten by '%s' (%d bytes)", name, admin, len(content))
     skill_file.write_text(content, encoding="utf-8")
 
     # Hot-reload all skills
@@ -176,11 +186,8 @@ async def update_skill(name: str, body: dict, _auth=Depends(verify_token)):
     }
 
 
-_BUILTIN_SKILLS = {"sre", "security", "view_designer"}
-
-
 @router.delete("/admin/skills/{name}")
-async def delete_skill_endpoint(name: str, _auth=Depends(verify_token)):
+async def delete_skill_endpoint(name: str, admin: str = Depends(require_admin)):
     """Delete a user-created skill. Built-in skills cannot be deleted."""
     from ..skill_loader import get_skill as _get
     from ..skill_loader import reload_skills as _reload
@@ -201,7 +208,7 @@ async def delete_skill_endpoint(name: str, _auth=Depends(verify_token)):
 
 
 @router.post("/admin/skills/{name}/clone")
-async def clone_skill(name: str, body: dict, _auth=Depends(verify_token)):
+async def clone_skill(name: str, body: dict, admin: str = Depends(require_admin)):
     """Clone an existing skill as a template for a new one."""
     from ..skill_loader import _SKILLS_DIR
     from ..skill_loader import get_skill as _get

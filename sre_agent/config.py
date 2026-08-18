@@ -81,6 +81,12 @@ class ServerConfig(BaseModel):
     trusted_registries: str = (
         "registry.redhat.io,registry.access.redhat.com,quay.io,image-registry.openshift-image-registry.svc"
     )
+    # Comma-separated usernames permitted to mutate skills. Skills are the
+    # system prompt, so this is the most powerful thing the API exposes.
+    # Empty means "any authenticated user", which is the pre-existing
+    # behaviour — narrowing it by default would lock existing deployments out
+    # of their own skill editor on upgrade. Set it in production.
+    admin_users: str = ""
 
 
 class PrometheusConfig(BaseModel):
@@ -164,6 +170,7 @@ class PulseAgentSettings(BaseSettings):
     max_conversation_messages: int = 50
     max_agent_sessions: int = 20
     max_monitor_clients: int = 50
+    admin_users: str = ""
     user_skills_dir: str = "/tmp/pulse_agent/skills"
     log_format: str = "json"
     log_level: str = "INFO"
@@ -237,6 +244,7 @@ class PulseAgentSettings(BaseSettings):
             log_format=self.log_format,
             log_level=self.log_level,
             trusted_registries=self.trusted_registries,
+            admin_users=self.admin_users,
         )
         self.prometheus = PrometheusConfig(
             thanos_url=self.thanos_url,
