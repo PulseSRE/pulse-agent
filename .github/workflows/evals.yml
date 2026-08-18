@@ -277,3 +277,54 @@ jobs:
         with:
           name: pulse-agent-eval-artifacts
           path: artifacts/
+
+  # ── Scheduled-failure notifier ──────────────────────────────────────────
+  #
+  # The nightly cron ran red from 2026-06-26 to 2026-08-18 — every run for
+  # roughly seven weeks — and nobody was told. It was found by a manual review,
+  # not by the board. A scheduled workflow that fails silently is worse than no
+  # scheduled workflow: it produces the reassurance of coverage with none of it.
+  #
+  # Deliberately limited to `schedule`. Push and pull_request failures are
+  # already visible to whoever pushed; it is the unattended run that needs a
+  # voice. Uses the built-in GITHUB_TOKEN, so it needs no secrets to be
+  # configured before it starts working.
+  notify-on-scheduled-failure:
+    needs: [evals]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TITLE="Nightly eval run is failing"
+
+          # One issue per outage, not one per night: comment on the existing
+          # thread if it is already open, so seven weeks of failures is seven
+          # comments rather than seven issues nobody reads.
+          EXISTING=$(gh issue list --repo "$REPO" --state open \
+            --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')
+
+          BODY=$(printf '%s\n' \
+            "The scheduled \`Eval Framework\` run failed." \
+            "" \
+            "Run: $RUN_URL" \
+            "Commit: \`${GITHUB_SHA:0:7}\`" \
+            "" \
+            "This is the unattended nightly run, so no one is watching it by default." \
+            "Closing this issue is fine once the run is green again — it will reopen a" \
+            "new one if it breaks later.")
+
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --repo "$REPO" --body "$BODY"
+            echo "Commented on existing issue #$EXISTING"
+          else
+            gh issue create --repo "$REPO" --title "$TITLE" --body "$BODY"
+            echo "Opened a new failure issue"
+          fi
