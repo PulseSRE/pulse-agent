@@ -29,6 +29,18 @@ logger = logging.getLogger("pulse_agent.monitor")
 _BURST_WINDOW_SECONDS = 1800  # 30 minutes
 _BURST_MIN_PODS = 5  # below this, individual findings are still the clearer form
 
+# restart_count is cumulative for the life of the pod and never decreases. A
+# workload that crossed the threshold once therefore stays flagged forever, long
+# after it recovered — measured on a live cluster, 46 of 75 flagged containers
+# had not restarted in over six hours. They were healthy; the counter simply
+# remembered. Worse, the inbox item could never clear: resolve_finding_inbox_item
+# fires when a scan stops reporting a finding, and the scan never stopped.
+#
+# A container that has not restarted for this long has stabilised, whatever its
+# lifetime count says. Pods whose last-restart time is unknown are still
+# reported: absence of evidence is not evidence of recovery.
+_STABILISED_AFTER_SECONDS = 6 * 3600
+
 
 def _last_restart_epoch(cs: Any) -> int | None:
     """Epoch seconds of the container's most recent termination, if known."""
@@ -56,6 +68,7 @@ def scan_crashlooping_pods(pods=None) -> list[dict]:
         if isinstance(pods, ToolError):
             return findings
 
+        now_epoch = int(datetime.now(UTC).timestamp())
         candidates: list[dict[str, Any]] = []
         for pod in pods.items:
             ns = pod.metadata.namespace
@@ -65,6 +78,11 @@ def scan_crashlooping_pods(pods=None) -> list[dict]:
                 continue
             for cs in pod.status.container_statuses or []:
                 if cs.restart_count >= crashloop_threshold:
+                    last_restart = _last_restart_epoch(cs)
+                    if last_restart is not None and (now_epoch - last_restart) > _STABILISED_AFTER_SECONDS:
+                        # Recovered. Reporting it again would also keep the
+                        # existing inbox item alive forever.
+                        continue
                     waiting = cs.state.waiting
                     candidates.append(
                         {
@@ -73,7 +91,7 @@ def scan_crashlooping_pods(pods=None) -> list[dict]:
                             "container": cs.name,
                             "restarts": cs.restart_count,
                             "reason": waiting.reason if waiting else "Unknown",
-                            "last_restart": _last_restart_epoch(cs),
+                            "last_restart": last_restart,
                         }
                     )
 

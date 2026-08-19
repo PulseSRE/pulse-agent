@@ -1315,3 +1315,58 @@ class TestCrashloopBurstCorrelation:
         first = self._scan(pods)[0]["title"]
         second = self._scan(pods)[0]["title"]
         assert first == second, "the same burst must produce the same title on every scan"
+
+
+class TestStabilisedPodsStopAlerting:
+    """restart_count never decreases, so recovery must be judged on time.
+
+    Measured on a live cluster: 46 of 75 flagged containers had not restarted in
+    over six hours. They were healthy — the counter simply remembered. And the
+    inbox item could never clear, because resolve_finding_inbox_item only fires
+    when a scan stops reporting the finding, and the scan never stopped.
+    """
+
+    @staticmethod
+    def _pod(name, restarts, finished_at):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            metadata=SimpleNamespace(namespace="app", name=name),
+            status=SimpleNamespace(
+                container_statuses=[
+                    SimpleNamespace(
+                        name="c",
+                        restart_count=restarts,
+                        state=SimpleNamespace(waiting=None),
+                        last_state=SimpleNamespace(terminated=SimpleNamespace(finished_at=finished_at)),
+                    )
+                ]
+            ),
+        )
+
+    def _scan(self, pods):
+        from types import SimpleNamespace
+
+        from sre_agent.monitor.scanners import scan_crashlooping_pods
+
+        return scan_crashlooping_pods(SimpleNamespace(items=pods))
+
+    def test_recovered_pod_is_not_reported_despite_a_high_lifetime_count(self):
+        from datetime import UTC, datetime, timedelta
+
+        long_ago = datetime.now(UTC) - timedelta(hours=12)
+        # 126 restarts, but none for 12 hours — this is the limitador case.
+        findings = self._scan([self._pod("limitador-operator-abc-123", 126, long_ago)])
+        assert findings == [], "a pod that stopped restarting must stop being reported so its item can resolve"
+
+    def test_recently_restarting_pod_is_still_reported(self):
+        from datetime import UTC, datetime, timedelta
+
+        recent = datetime.now(UTC) - timedelta(minutes=20)
+        findings = self._scan([self._pod("flapping-abc-123", 5, recent)])
+        assert len(findings) == 1, "a pod still restarting is a live problem"
+
+    def test_unknown_restart_time_is_still_reported(self):
+        """Absence of evidence is not evidence of recovery."""
+        findings = self._scan([self._pod("mystery-abc-123", 9, None)])
+        assert len(findings) == 1, "an unknown last-restart time must not be treated as recovered"
