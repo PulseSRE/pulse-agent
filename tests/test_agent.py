@@ -675,3 +675,27 @@ class TestCircuitBreakerThreadSafety:
         # but other threads may have called record_failure after.
         # The important thing is no exception was raised (no race crash).
         assert cb.state in (CircuitBreaker.CLOSED, CircuitBreaker.OPEN)
+
+
+class TestToolRegistrationRequiresAnExplicitDecision:
+    """register_tool must not let is_write be omitted.
+
+    When it defaulted to False, four tools that rewrite the agent's own system
+    prompt were registered as reads — not by a bad decision, but by no decision.
+    Making the parameter required means a tool cannot be added without someone
+    answering "does this need a human to approve it?".
+    """
+
+    def test_is_write_is_required_and_keyword_only(self):
+        import inspect
+
+        from sre_agent.tool_registry import register_tool
+
+        sig = inspect.signature(register_tool)
+        param = sig.parameters["is_write"]
+        assert param.default is inspect.Parameter.empty, (
+            "is_write must have no default — a default is how the skill-mutation tools silently became read tools"
+        )
+        assert param.kind is inspect.Parameter.KEYWORD_ONLY, (
+            "is_write must be keyword-only so call sites read register_tool(x, is_write=True)"
+        )

@@ -59,6 +59,13 @@ jobs:
       - name: Format check
         run: ruff format --check sre_agent/ tests/
 
+      - name: Discipline guardrails (no silent skips, no by-value global imports)
+        # Two bug classes this repo has already shipped, now mechanically
+        # blocked: a test that skips instead of failing, and `from mod import
+        # FLAG` where mod rebinds FLAG under `global` (the shape that left the
+        # auto-fix kill switch inert for four months).
+        run: python3 scripts/check_discipline.py
+
       - name: Run unit tests
         # Normally completes in ~1-2 minutes; bounded well above that so a
         # hang (e.g. a DB lock wait) fails fast instead of stalling the job.

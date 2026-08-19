@@ -59,8 +59,9 @@ class TestActionEndpoint:
             (n for n in TOOL_REGISTRY if n not in {"drain_node", "exec_command"}),
             None,
         )
-        if tool_name is None:
-            pytest.skip("No tools registered")
+        # Empty registry is a genuine failure — every tool module registers at
+        # import. Skipping here would report success while testing nothing.
+        assert tool_name is not None, "TOOL_REGISTRY is empty — tool registration is broken"
 
         with patch("sre_agent.db.get_view", return_value=None):
             resp = client.post(
@@ -88,8 +89,9 @@ class TestActionEndpoint:
             (n for n in TOOL_REGISTRY if n not in {"drain_node", "exec_command"}),
             None,
         )
-        if tool_name is None:
-            pytest.skip("No tools registered")
+        # Empty registry is a genuine failure — every tool module registers at
+        # import. Skipping here would report success while testing nothing.
+        assert tool_name is not None, "TOOL_REGISTRY is empty — tool registration is broken"
 
         with patch("sre_agent.db.get_view", return_value={"id": "cv-test", "owner": "testuser", "layout": []}):
             resp = client.post(
@@ -105,8 +107,9 @@ class TestActionEndpoint:
             (n for n in TOOL_REGISTRY if n not in {"drain_node", "exec_command"}),
             None,
         )
-        if tool_name is None:
-            pytest.skip("No tools registered")
+        # Empty registry is a genuine failure — every tool module registers at
+        # import. Skipping here would report success while testing nothing.
+        assert tool_name is not None, "TOOL_REGISTRY is empty — tool registration is broken"
 
         with patch("sre_agent.db.get_view", return_value={"id": "cv-test", "owner": "testuser", "layout": []}):
             resp = client.post(
@@ -123,8 +126,9 @@ class TestActionEndpoint:
             (n for n in TOOL_REGISTRY if n not in {"drain_node", "exec_command"}),
             None,
         )
-        if tool_name is None:
-            pytest.skip("No tools registered")
+        # Empty registry is a genuine failure — every tool module registers at
+        # import. Skipping here would report success while testing nothing.
+        assert tool_name is not None, "TOOL_REGISTRY is empty — tool registration is broken"
 
         resp = client.post(
             "/views/cv-test/actions",

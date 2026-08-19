@@ -321,8 +321,8 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
     )
 
 
-register_tool(update_view_widgets)
-register_tool(remove_widget_from_view)
-register_tool(undo_view_change)
-register_tool(get_view_versions)
-register_tool(optimize_view)
+register_tool(update_view_widgets, is_write=False)
+register_tool(remove_widget_from_view, is_write=False)
+register_tool(undo_view_change, is_write=False)
+register_tool(get_view_versions, is_write=False)
+register_tool(optimize_view, is_write=False)
