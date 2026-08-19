@@ -183,6 +183,21 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "auto_fixable": False,
         "scan_every": 5,
     },
+    "control_plane": {
+        "displayName": "Control Plane Stalls",
+        "description": "Finds etcd and API server degradation underneath workloads that merely look flaky",
+        "category": "liveness",
+        "checks": [
+            "etcd leader changes > 2/h",
+            "etcd failed proposals > 10/h",
+            "etcd peer round-trip p99 > 250ms",
+            "etcd disk commit p99 > 500ms",
+            "API server p99 request latency > 5s",
+            "cluster-scoped LIST rate > 2/s per resource",
+        ],
+        "auto_fixable": False,
+        "scan_every": 5,
+    },
     "trend_memory": {
         "displayName": "Memory Pressure Forecast",
         "description": "Predicts node memory exhaustion using 7-day trends",

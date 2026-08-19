@@ -77,7 +77,7 @@ from .scanners import (
     scan_pending_pods,
 )
 from .session import MonitorClient, MonitorSession
-from .stuck_scanners import scan_hot_reconcile_loops, scan_stuck_deletions
+from .stuck_scanners import scan_control_plane_stalls, scan_hot_reconcile_loops, scan_stuck_deletions
 from .webhook import _send_webhook
 
 # The `findings` submodule is imported above (via _ensure_tables, etc.)
@@ -127,6 +127,7 @@ __all__ = [
     "reset_cluster_monitor",
     "save_action",
     "save_investigation",
+    "scan_control_plane_stalls",
     "scan_crashlooping_pods",
     "scan_daemonset_gaps",
     "scan_degraded_operators",

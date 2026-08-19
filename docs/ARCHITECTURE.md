@@ -1034,7 +1034,7 @@ max 3 will operate at level 3. This prevents UI-side escalation.
 | Path          | Auth  | Description                                                           |
 | ------------- | ----- | --------------------------------------------------------------------- |
 | `/ws/agent`   | token | Auto-routing orchestrated agent (ORCA classifies intent per message)  |
-| `/ws/monitor` | token | Autonomous cluster monitoring (25 scanners, auto-fix, investigations) |
+| `/ws/monitor` | token | Autonomous cluster monitoring (26 scanners, auto-fix, investigations) |
 
 
 ### Chat Protocol (SRE, Security, Agent)
@@ -1386,7 +1386,7 @@ User: "Build me a production dashboard"
 │  1. Fetch shared pod list (once)                       │
 │     └── Shared across crashloop, oom, image_pull       │
 │                                                        │
-│  2. Run all 25 scanners (asyncio.to_thread each)       │
+│  2. Run all 26 scanners (asyncio.to_thread each)       │
 │     └── Collect all findings                           │
 │                                                        │
 │  3. Deduplicate by finding_key                         │
@@ -1888,4 +1888,4 @@ Key decisions made during development and the reasoning behind them.
 
 ---
 
-*156 tools (120 native + 36 MCP) -- 25 scanners -- 12 runbooks -- 83 PromQL recipes -- 192 eval scenarios -- 2,432 tests -- Protocol v2*
+*156 tools (120 native + 36 MCP) -- 26 scanners -- 13 runbooks -- 83 PromQL recipes -- 192 eval scenarios -- 2,432 tests -- Protocol v2*

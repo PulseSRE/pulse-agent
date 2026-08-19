@@ -356,3 +356,162 @@ def test_registry_entries_exist_for_both():
     for name in ("stuck", "hot_loop"):
         assert SCANNER_REGISTRY[name]["category"] == "liveness"
         assert SCANNER_REGISTRY[name]["checks"]
+
+
+# ── Control-plane stalls ──────────────────────────────────────────────────
+# Thresholds are asserted against both a measured healthy value and a measured
+# incident value from the same cluster. A threshold that sits on the wrong side
+# of either is the whole failure mode for this scanner.
+
+from sre_agent.monitor.stuck_scanners import (
+    _scan_apiserver_latency,
+    _scan_etcd_consensus,
+    _scan_etcd_latency,
+    _scan_read_amplification,
+    scan_control_plane_stalls,
+)
+
+
+def test_etcd_leader_churn_is_critical():
+    with patch(f"{MODULE}._query", return_value=[_promql_result({}, 12.0)]):
+        findings = _scan_etcd_consensus()
+    assert findings[0]["severity"] == SEVERITY_CRITICAL
+    assert "12 times" in findings[0]["title"]
+
+
+def test_failed_proposals_name_the_member():
+    def _fake(query):
+        return [_promql_result({"instance": "10.0.64.50:9979"}, 951.0)] if "proposals_failed" in query else []
+
+    with patch(f"{MODULE}._query", side_effect=_fake):
+        finding = _scan_etcd_consensus()[0]
+    assert "10.0.64.50:9979" in finding["title"]
+    assert finding["resources"] == [{"kind": "Etcd", "name": "10.0.64.50:9979"}]
+
+
+def test_peer_latency_is_reported_in_milliseconds():
+    """Seconds are the metric's unit; milliseconds are the unit operators think in."""
+
+    def _fake(query):
+        return [_promql_result({"instance": "10.0.64.50:9979"}, 3.2768)] if "peer_round_trip" in query else []
+
+    with patch(f"{MODULE}._query", side_effect=_fake):
+        finding = _scan_etcd_latency()[0]
+    assert "3276ms" in finding["title"]
+    assert finding["severity"] == SEVERITY_CRITICAL
+
+
+def test_disk_commit_latency_points_at_iops_not_a_dead_disk():
+    def _fake(query):
+        return [_promql_result({"instance": "10.0.64.50:9979"}, 2.048)] if "backend_commit" in query else []
+
+    with patch(f"{MODULE}._query", side_effect=_fake):
+        finding = _scan_etcd_latency()[0]
+    assert "throttling" in finding["summary"]
+
+
+def test_apiserver_latency_at_the_timeout_ceiling_is_critical():
+    with patch(f"{MODULE}._query", return_value=[_promql_result({}, 60.0)]):
+        finding = _scan_apiserver_latency()[0]
+    assert finding["severity"] == SEVERITY_CRITICAL
+    assert "60s" in finding["title"]
+
+
+def test_apiserver_latency_query_excludes_long_lived_verbs():
+    """WATCH and CONNECT are slow by design and would sit above any threshold."""
+    seen = []
+    with patch(f"{MODULE}._query", side_effect=lambda q: seen.append(q) or []):
+        _scan_apiserver_latency()
+    assert "WATCH" in seen[0]
+    assert "CONNECT" in seen[0]
+
+
+def test_read_amplification_counts_the_hourly_cost():
+    """'2.4/s' does not land; '8,510 full collection reads an hour' does."""
+    results = [
+        _promql_result({"resource": "mutatingwebhookconfigurations", "group": "admissionregistration.k8s.io"}, 2.364)
+    ]
+    with patch(f"{MODULE}._query", return_value=results):
+        finding = _scan_read_amplification()[0]
+    assert "8,510" in finding["summary"]
+    assert "mutatingwebhookconfigurations.admissionregistration.k8s.io" in finding["title"]
+
+
+def test_read_amplification_only_looks_at_cluster_scope():
+    """A namespaced LIST is bounded by the namespace; a cluster-scoped one is not."""
+    seen = []
+    with patch(f"{MODULE}._query", side_effect=lambda q: seen.append(q) or []):
+        _scan_read_amplification()
+    assert 'scope="cluster"' in seen[0]
+    assert 'verb="LIST"' in seen[0]
+
+
+@pytest.mark.parametrize(
+    "healthy_value,query_marker,scan",
+    [
+        (0.0, "leader_changes", _scan_etcd_consensus),
+        (0.012, "peer_round_trip", _scan_etcd_latency),
+        (0.045, "backend_commit", _scan_etcd_latency),
+        (0.07, "apiserver_request_duration", _scan_apiserver_latency),
+        (1.0, 'verb="LIST"', _scan_read_amplification),
+    ],
+)
+def test_measured_healthy_values_stay_below_every_threshold(healthy_value, query_marker, scan):
+    """Each value here was measured on a healthy cluster. None may produce a finding.
+
+    Filtering happens in PromQL, so this asserts on the threshold in the query
+    text rather than on the scanner's output.
+    """
+    seen = []
+    with patch(f"{MODULE}._query", side_effect=lambda q: seen.append(q) or []):
+        scan()
+    query = next(q for q in seen if query_marker in q)
+    threshold = float(query.rsplit(">", 1)[1].strip())
+    assert healthy_value < threshold, f"{query_marker}: healthy {healthy_value} would fire at {threshold}"
+
+
+@pytest.mark.parametrize(
+    "incident_value,query_marker,scan",
+    [
+        (12.0, "leader_changes", _scan_etcd_consensus),
+        (3.2768, "peer_round_trip", _scan_etcd_latency),
+        (2.048, "backend_commit", _scan_etcd_latency),
+        (60.0, "apiserver_request_duration", _scan_apiserver_latency),
+        (2.36, 'verb="LIST"', _scan_read_amplification),
+    ],
+)
+def test_measured_incident_values_are_above_every_threshold(incident_value, query_marker, scan):
+    """Each value here was measured during a real control-plane outage."""
+    seen = []
+    with patch(f"{MODULE}._query", side_effect=lambda q: seen.append(q) or []):
+        scan()
+    query = next(q for q in seen if query_marker in q)
+    threshold = float(query.rsplit(">", 1)[1].strip())
+    assert incident_value > threshold, f"{query_marker}: incident {incident_value} would be missed at {threshold}"
+
+
+def test_all_four_control_plane_checks_run():
+    calls = []
+    with patch(f"{MODULE}._query", side_effect=lambda q: calls.append(q) or []):
+        scan_control_plane_stalls()
+    assert len(calls) == 6
+
+
+def test_one_failing_check_does_not_lose_the_others():
+    def _fake(query):
+        if "leader_changes" in query:
+            raise RuntimeError("prometheus refused")
+        if "apiserver_request_duration" in query:
+            return [_promql_result({}, 60.0)]
+        return []
+
+    with patch(f"{MODULE}._query", side_effect=_fake):
+        findings = scan_control_plane_stalls()
+    assert len(findings) == 1
+    assert "API server" in findings[0]["title"]
+
+
+def test_control_plane_findings_are_never_auto_fixable():
+    """Nothing here has a safe automatic remedy — etcd is not a thing to restart blind."""
+    with patch(f"{MODULE}._query", return_value=[_promql_result({}, 60.0)]):
+        assert all(not f["autoFixable"] for f in _scan_apiserver_latency())

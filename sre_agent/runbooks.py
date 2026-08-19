@@ -136,6 +136,28 @@ RUNBOOK_CHUNKS: dict[str, str] = {
         "5. Impact: API server capacity and etcd write volume, which degrades every\n"
         "   other client on the cluster long before the looping controller itself fails"
     ),
+    "control_plane_stall": (
+        "### Control Plane Stall (etcd / API server)\n"
+        "1. Read the ordering before the symptoms. A burst of restarts across unrelated\n"
+        "   namespaces is almost never a workload problem — check whether API server\n"
+        "   latency rose first, and whether etcd moved before that\n"
+        "2. etcd, in order: leader changes (healthy is zero), failed proposals, peer\n"
+        "   round-trip p99 (tens of ms across zones), disk backend commit p99 (tens of ms)\n"
+        "3. Note that WAL fsync alone is not enough to clear etcd. fsync can look\n"
+        "   perfect while backend commit and peer latency are both an order of magnitude\n"
+        "   out — check all four\n"
+        "4. Common causes:\n"
+        "   - Cloud volume IOPS throttling, a burst balance running out — slow commits,\n"
+        "     then heartbeat timeouts, then elections\n"
+        "   - Network degradation between control-plane zones — high peer RTT with\n"
+        "     healthy disks\n"
+        "   - Undersized control-plane nodes for the object count and watch load\n"
+        "5. What it looks like downstream, so it is not misread: lease PUTs returning\n"
+        "   500/504, controllers losing leadership, liveness probes timing out, and the\n"
+        "   kubelet SIGKILLing containers — exit 137 with reason Error, which is NOT the\n"
+        "   same as OOMKilled and does not mean anything ran out of memory\n"
+        '6. Do not restart etcd members to "clear" this. Fix the disk or the network'
+    ),
     "quota": (
         "### Quota / LimitRange Issues\n"
         "1. `get_resource_quotas` — check quota usage vs limits\n"
@@ -166,6 +188,16 @@ _RUNBOOK_KEYWORDS: dict[str, list[str]] = {
         "won't delete",
     ],
     "hot_loop": ["hot loop", "reconcile", "workqueue", "retries", "api server load", "hammering"],
+    "control_plane_stall": [
+        "etcd",
+        "control plane",
+        "apiserver",
+        "api server",
+        "latency",
+        "leader election",
+        "slow",
+        "timeout",
+    ],
 }
 
 
