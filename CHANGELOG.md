@@ -2,6 +2,11 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [Unreleased]
+
+### Fixes
+- Migration 025 repairs inbox items orphaned by the v2.9.0 correlation-key change. Adding the namespace to the key meant every pre-existing open item stopped matching any finding: each froze at the values it held that day while a second, live item was created beside it. On the cluster this was found on, 38 of 62 open items were orphans, last updated more than two hours earlier, with 16 workloads showing both copies. The migration resolves orphans that duplicate a live item and re-keys the rest in place; cluster-scoped keys and resolved history are deliberately left alone
+
 ## [2.9.0] - 2026-08-19
 
 ### Signal quality

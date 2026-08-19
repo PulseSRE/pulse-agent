@@ -240,6 +240,88 @@ def _migrate_024_inbox_mutes(db: Database) -> None:
     db.executescript(INBOX_MUTES_SCHEMA)
 
 
+# Open statuses, spelled the same way the inbox module does.
+_OPEN_STATUSES = "('new', 'triaged', 'claimed', 'in_progress', 'agent_reviewing')"
+
+# 'crashloop::Pod/x' -> 'crashloop:kuadrant-system:Pod/x'. Anchored on the first
+# ':' rather than split_part(), because the fallback key form is
+# f"{category}:{namespace}:{title}" and a title may contain colons of its own.
+_REKEY_EXPR = "regexp_replace(i.correlation_key, '^([^:]*)::', '\\1:' || n.ns || ':')"
+
+_NS_FROM_RESOURCES = """
+    LEFT JOIN LATERAL (
+        SELECT NULLIF(i.resources::jsonb -> 0 ->> 'namespace', '') AS ns
+    ) n ON TRUE
+"""
+
+
+def _migrate_025_rekey_inbox_correlation_keys(db: Database) -> None:
+    """Re-key inbox items left orphaned when correlation keys gained a namespace.
+
+    v2.9.0 changed the key from ``category::Kind/name`` to
+    ``category:namespace:Kind/name`` so that same-named workloads in different
+    namespaces stopped colliding. Existing rows kept the old key. Every
+    subsequent scan computed the new form, failed to match, and opened a second
+    item — leaving the original frozen at the values it held the moment the
+    format changed, unable to be updated, resolved or muted, because no finding
+    will ever produce its key again.
+
+    On the cluster this was found on: 38 open items stuck at whatever they said
+    two hours before, alongside 24 live ones, with 16 workloads showing both.
+
+    Two passes. Where an open namespaced item already covers the condition, the
+    orphan is a duplicate and is resolved. Otherwise the key is rewritten in
+    place and the item becomes live again — the next scan refreshes its title
+    and resources like any other.
+
+    Resolved rows are deliberately left alone. They are history, nothing reads
+    them by key except the 24h reopen lookup, and re-keying them there would
+    resurrect old items rather than clean anything up.
+
+    Items with no recoverable namespace are also left alone: ``category::X`` is
+    exactly what the current code produces for a cluster-scoped finding, so
+    those keys were never wrong.
+    """
+    db.execute(
+        f"""
+        UPDATE inbox_items o
+        SET status = 'resolved',
+            resolved_at = EXTRACT(EPOCH FROM NOW())::bigint,
+            updated_at = EXTRACT(EPOCH FROM NOW())::bigint
+        FROM (
+            SELECT i.id, {_REKEY_EXPR} AS new_key
+            FROM inbox_items i {_NS_FROM_RESOURCES}
+            WHERE i.correlation_key LIKE '%::%'
+              AND i.status IN {_OPEN_STATUSES}
+              AND n.ns IS NOT NULL
+        ) c
+        WHERE o.id = c.id
+          AND EXISTS (
+              SELECT 1 FROM inbox_items live
+              WHERE live.id <> o.id
+                AND live.correlation_key = c.new_key
+                AND live.status IN {_OPEN_STATUSES}
+          )
+        """
+    )
+    db.execute(
+        f"""
+        UPDATE inbox_items o
+        SET correlation_key = c.new_key,
+            namespace = COALESCE(NULLIF(o.namespace, ''), c.ns)
+        FROM (
+            SELECT i.id, n.ns, {_REKEY_EXPR} AS new_key
+            FROM inbox_items i {_NS_FROM_RESOURCES}
+            WHERE i.correlation_key LIKE '%::%'
+              AND i.status IN {_OPEN_STATUSES}
+              AND n.ns IS NOT NULL
+        ) c
+        WHERE o.id = c.id
+          AND o.status IN {_OPEN_STATUSES}
+        """
+    )
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -265,4 +347,5 @@ MIGRATIONS = [
     (22, "user_interactions", _migrate_022_user_interactions),
     (23, "operational_flags", _migrate_023_operational_flags),
     (24, "inbox_mutes", _migrate_024_inbox_mutes),
+    (25, "rekey_inbox_correlation_keys", _migrate_025_rekey_inbox_correlation_keys),
 ]
