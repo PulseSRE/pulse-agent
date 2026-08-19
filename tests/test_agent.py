@@ -287,6 +287,8 @@ class TestWriteToolSet:
             "create_argo_application",
             "exec_command",
             "test_connectivity",
+            # Forcing a finalizer off skips the cleanup it was protecting.
+            "remove_finalizer",
             # Skill mutation edits the system prompt itself — see
             # test_skill_mutation_tools_require_confirmation below.
             "create_skill",

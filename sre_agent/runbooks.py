@@ -98,6 +98,44 @@ RUNBOOK_CHUNKS: dict[str, str] = {
         "4. `get_pod_logs` for the operator pod — look for error messages\n"
         "5. Common: cert expiry, etcd issues, API server connectivity"
     ),
+    "stuck_deletion": (
+        "### Stuck Deletion (finalizer never clears)\n"
+        "1. `diagnose_stuck_deletion(kind, name, namespace)` — lists the finalizers still\n"
+        "   present, the owner references, and for a namespace the API server's own\n"
+        "   NamespaceContentRemaining message naming what is still inside\n"
+        "2. Identify the controller behind the finalizer from its prefix\n"
+        "   (`kuadrant.io/...` → the Kuadrant operator) and check that it is running\n"
+        "3. `get_pod_logs` for that controller — a finalizer that never clears almost\n"
+        "   always has a repeating error explaining why\n"
+        "4. Common causes:\n"
+        "   - The owning operator was uninstalled while its resources still existed,\n"
+        "     so nothing is left to clear the finalizer\n"
+        "   - The controller lacks RBAC on the object it is trying to clean up\n"
+        "   - An external dependency (cloud API, DNS provider) is unreachable\n"
+        "   - `kubernetes.io/pvc-protection` — a pod still mounts the claim; this one\n"
+        "     clears itself once the consumer stops, and must not be forced\n"
+        "5. Preferred fix: reinstall or repair the controller so it completes its own\n"
+        "   cleanup. `remove_finalizer` skips that cleanup and leaks whatever the\n"
+        "   finalizer was protecting (load balancers, volumes, DNS records) — it is a\n"
+        "   last resort and requires confirmation"
+    ),
+    "hot_loop": (
+        "### Controller Hot Loop (high API traffic, no progress)\n"
+        "1. Identify the controller — the finding names the work queue, the resource\n"
+        "   kind being written, or the pod making the failing calls\n"
+        "2. `get_pod_logs` for the controller — look for the same reconcile error\n"
+        "   repeating rather than a one-off failure\n"
+        "3. Check whether anything is mid-deletion: a hot loop and a stuck finalizer\n"
+        "   are usually the same incident seen from two sides. Run the stuck-deletion\n"
+        "   runbook if so\n"
+        "4. Common causes:\n"
+        "   - A finalizer the controller cannot complete, retried forever\n"
+        "   - Two controllers fighting over the same field, each undoing the other\n"
+        "   - A reconcile that writes status on every pass, so its own write wakes it\n"
+        "   - An RBAC denial or missing CRD, retried with backoff that never gives up\n"
+        "5. Impact: API server capacity and etcd write volume, which degrades every\n"
+        "   other client on the cluster long before the looping controller itself fails"
+    ),
     "quota": (
         "### Quota / LimitRange Issues\n"
         "1. `get_resource_quotas` — check quota usage vs limits\n"
@@ -118,6 +156,16 @@ _RUNBOOK_KEYWORDS: dict[str, list[str]] = {
     "deployment_stuck": ["deployment", "progressing", "rollout", "stuck", "not progressing"],
     "operator_degraded": ["operator", "degraded", "clusteroperator"],
     "quota": ["quota", "limit", "limitrange", "resourcequota", "exceeded"],
+    "stuck_deletion": [
+        "stuck",
+        "terminating",
+        "finalizer",
+        "deletion",
+        "deleting",
+        "namespace stuck",
+        "won't delete",
+    ],
+    "hot_loop": ["hot loop", "reconcile", "workqueue", "retries", "api server load", "hammering"],
 }
 
 

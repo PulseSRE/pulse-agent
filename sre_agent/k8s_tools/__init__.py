@@ -38,6 +38,7 @@ __all__ = [
     "describe_pod",
     "describe_resource",
     "describe_service",
+    "diagnose_stuck_deletion",
     "discover_metrics",
     "drain_node",
     "exec_command",
@@ -75,6 +76,7 @@ __all__ = [
     "list_routes",
     "list_statefulsets",
     "record_audit_entry",
+    "remove_finalizer",
     "restart_deployment",
     "rollback_deployment",
     "scale_deployment",
@@ -127,6 +129,9 @@ from .diagnostics import (
     search_logs,
     top_pods_by_restarts,
 )
+
+# --- Finalizer / stuck-deletion tools ---
+from .finalizers import diagnose_stuck_deletion, remove_finalizer
 
 # --- Generic tools ---
 from .generic import (
@@ -212,6 +217,7 @@ WRITE_TOOLS = {
     "drain_node",
     "exec_command",
     "test_connectivity",
+    "remove_finalizer",
 }
 
 ALL_TOOLS: list[Any] = [
@@ -252,6 +258,7 @@ ALL_TOOLS: list[Any] = [
     get_tls_certificates,
     search_logs,  # search across pods by label
     get_resource_recommendations,  # right-sizing analysis
+    diagnose_stuck_deletion,  # why a deletion never completed
     # Write operations
     scale_deployment,
     restart_deployment,
@@ -263,6 +270,7 @@ ALL_TOOLS: list[Any] = [
     apply_yaml,
     create_network_policy,
     exec_command,  # run commands in pods
+    remove_finalizer,  # forces a stuck deletion; confirmation-gated
     test_connectivity,  # network connectivity tests
     # Audit
     record_audit_entry,
