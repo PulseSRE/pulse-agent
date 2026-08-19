@@ -215,3 +215,48 @@ class TestInboxActions:
         resp = client.get("/inbox/stats", headers=auth_headers)
         assert resp.status_code == 200
         assert "total" in resp.json()
+
+
+class TestInboxInvestigationPersistence:
+    """The inbox investigation path must give the report an id before saving it.
+
+    Regression seen in production logs: 9 occurrences of
+    "Failed to save investigation: null value in column \\"id\\" of relation
+    \\"investigations\\" violates not-null constraint".
+
+    _run_proactive_investigation returns no "id" key, so inbox.py computed a
+    fallback into a local variable, used it for metadata["investigation_id"],
+    and passed the *unmodified* dict to save_investigation — which persists
+    report.get("id") into a TEXT NOT NULL column. Every inbox-triggered
+    investigation was discarded at the last step, after the model call had
+    already been paid for. The monitor path was unaffected because
+    investigation_runner builds its own report dict with an id.
+    """
+
+    def test_proactive_investigation_result_has_no_id_of_its_own(self):
+        """Pin the assumption the fix rests on."""
+        import inspect
+
+        from sre_agent.monitor import investigations
+
+        src = inspect.getsource(investigations._run_proactive_investigation)
+        # The returned dict carries no "id" key — hence the fallback in inbox.py.
+        assert '"id":' not in src.split("return {")[-1], (
+            "_run_proactive_investigation now returns an id; inbox.py's fallback "
+            "may no longer be needed — re-check the save path"
+        )
+
+    def test_inbox_writes_the_id_back_into_the_report(self):
+        """The computed id must land in the dict that gets persisted."""
+        import inspect
+
+        from sre_agent import inbox
+
+        src = inspect.getsource(inbox)
+        idx = src.find("investigation_id = result.get(")
+        assert idx != -1, "investigation id fallback not found"
+        window = src[idx : idx + 400]
+        assert 'result["id"] = investigation_id' in window, (
+            "the fallback id must be written back into `result` before "
+            "save_investigation persists it, or investigations.id is NULL"
+        )
