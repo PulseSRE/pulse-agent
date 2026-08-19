@@ -1439,4 +1439,4 @@ def create_inbox_task(
     return f"Created inbox task: {title} (id: {item_id}, due: {urgency})"
 
 
-register_tool(create_inbox_task)
+register_tool(create_inbox_task, is_write=False)

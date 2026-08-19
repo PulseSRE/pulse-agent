@@ -534,7 +534,7 @@ def register_mcp_tools(conn: MCPConnection) -> int:
         description = schema_def.get("description", f"MCP tool from {conn.name}")
         input_schema = schema_def.get("inputSchema", {"type": "object", "properties": {}, "required": []})
         tool = MCPTool(tool_name, fn, description, input_schema=input_schema)
-        register_tool(tool)
+        register_tool(tool, is_write=False)
         count += 1
 
     # Register MCP prompts as tools (prompts are callable workflows)
@@ -554,7 +554,7 @@ def register_mcp_tools(conn: MCPConnection) -> int:
         description = schema_def.get("description", f"MCP prompt from {conn.name}")
         input_schema = schema_def.get("inputSchema", {"type": "object", "properties": {}, "required": []})
         tool = MCPTool(prompt_name, fn, description, input_schema=input_schema)
-        register_tool(tool)
+        register_tool(tool, is_write=False)
         conn.tools.append(prompt_name)
         count += 1
 

@@ -19,8 +19,20 @@ WRITE_TOOL_NAMES: set[str] = set()
 TOOL_CATEGORIES: dict[str, set[str]] = {}
 
 
-def register_tool(tool: Any, is_write: bool = False, category: str = "general") -> Any:
-    """Register a tool in the central registry."""
+def register_tool(tool: Any, *, is_write: bool, category: str = "general") -> Any:
+    """Register a tool in the central registry.
+
+    is_write is keyword-only and has NO default, deliberately. It decides which
+    branch of the agent loop a tool takes: write tools go through the
+    confirmation gate, read tools execute in parallel unattended. When it
+    defaulted to False, four tools that rewrite the agent's own system prompt
+    (create_skill, edit_skill, delete_skill, create_skill_from_template) were
+    registered as reads — not by a bad decision, but by no decision at all.
+
+    Requiring it means a tool cannot be added without someone answering "does
+    this need a human to approve it?". Getting the answer wrong is a bug;
+    never being asked is a class of bug.
+    """
     TOOL_REGISTRY[tool.name] = tool
     if is_write:
         WRITE_TOOL_NAMES.add(tool.name)

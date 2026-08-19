@@ -153,4 +153,4 @@ def create_live_table(
     return (text, component)
 
 
-register_tool(create_live_table)
+register_tool(create_live_table, is_write=False)
