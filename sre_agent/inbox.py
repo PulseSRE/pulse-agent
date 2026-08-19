@@ -102,6 +102,18 @@ SEVERITY_WEIGHTS = {"critical": 4, "warning": 2, "info": 1}
 AGE_BONUS_CAP = 2.0
 AGE_BONUS_PER_HOUR = 0.1
 
+# Something that just started matters more than something that has been true for
+# a month. Without this, age_bonus alone means a week-old warning (3.12) outranks
+# a warning raised ten minutes ago (1.92), so permanent conditions — "1
+# cluster-admin binding to review", true on every cluster ever built — drift to
+# the top and stay there while fresh problems appear underneath them.
+#
+# Added rather than replacing age_bonus: the aging escalation exists so nothing
+# rots unnoticed, which is a real concern. Novelty decays to zero over the
+# window, at which point ranking behaves exactly as it does today.
+NOVELTY_BONUS = 1.5
+NOVELTY_WINDOW_HOURS = 24.0
+
 
 def _gen_id() -> str:
     return f"inb-{uuid.uuid4().hex[:12]}"
@@ -129,6 +141,9 @@ def compute_priority_score(
     age_hours = (time.time() - created_at) / 3600
     age_bonus = min(age_hours * AGE_BONUS_PER_HOUR, AGE_BONUS_CAP)
 
+    # Decays linearly to zero across NOVELTY_WINDOW_HOURS.
+    novelty_bonus = NOVELTY_BONUS * max(0.0, 1.0 - age_hours / NOVELTY_WINDOW_HOURS)
+
     due_bonus = 0.0
     if due_date is not None:
         hours_until = (due_date - time.time()) / 3600
@@ -137,7 +152,7 @@ def compute_priority_score(
         elif hours_until <= 72:
             due_bonus = 1.0
 
-    return base + age_bonus + due_bonus
+    return base + age_bonus + novelty_bonus + due_bonus
 
 
 def create_inbox_item(item: dict[str, Any]) -> str:
@@ -722,9 +737,35 @@ def unsnooze_expired() -> int:
     return count
 
 
+def mute_correlation_key(correlation_key: str, muted_by: str, reason: str, hours: float | None = None) -> None:
+    """Silence a condition the operator has judged uninteresting.
+
+    Without this there is no way to say "yes, I know, stop telling me". A
+    monitoring tool that cannot be told to be quiet gets ignored wholesale,
+    which costs far more signal than the muted item ever did.
+    """
+    now = int(time.time())
+    until = int(now + hours * 3600) if hours else None
+    get_inbox_repo().set_mute(correlation_key, until, muted_by, reason, now)
+    _inbox_logger.info(
+        "Muted %s by %s%s (%s)", correlation_key, muted_by, f" for {hours}h" if hours else " indefinitely", reason
+    )
+
+
+def unmute_correlation_key(correlation_key: str) -> None:
+    get_inbox_repo().clear_mute(correlation_key)
+    _inbox_logger.info("Unmuted %s", correlation_key)
+
+
 def upsert_inbox_item(item: dict[str, Any]) -> str:
     repo = get_inbox_repo()
     corr_key = item.get("correlation_key")
+    # Drop muted conditions here rather than filtering on read: an item that is
+    # never created cannot resurface, be counted in needs-attention, or trigger
+    # an investigation that costs a model call to produce something nobody
+    # asked for.
+    if corr_key and get_inbox_repo().is_muted(corr_key, int(time.time())):
+        return ""
     item_type = item["item_type"]
 
     existing = None

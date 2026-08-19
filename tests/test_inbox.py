@@ -933,3 +933,82 @@ class TestInboxStalenessAndCorrelation:
             {**base, "resources": [{"kind": "Pod", "name": "discovery-operator-564dcd46cb-kplj2", "namespace": "mce"}]}
         )
         assert first == second, "a new pod for the same workload must reuse the existing item"
+
+
+class TestNoveltyRanking:
+    """Something that just started must outrank something true for a month."""
+
+    def test_fresh_item_outranks_a_stale_one_of_equal_severity(self):
+        import time
+
+        from sre_agent.inbox import compute_priority_score
+
+        now = int(time.time())
+        fresh = compute_priority_score("warning", 0.95, 0.0, now - 600, None)
+        week_old = compute_priority_score("warning", 0.8, 0.3, now - 7 * 86400, None)
+        assert fresh > week_old, (
+            "age_bonus alone ranked a week-old warning above a fresh one, which is how "
+            "permanent conditions drift to the top of the inbox and stay there"
+        )
+
+    def test_novelty_decays_so_ranking_settles(self):
+        """After the window the bonus is gone and ordering is unchanged from before."""
+        import time
+
+        from sre_agent.inbox import NOVELTY_WINDOW_HOURS, compute_priority_score
+
+        now = int(time.time())
+        past_window = now - int((NOVELTY_WINDOW_HOURS + 1) * 3600)
+        with_novelty = compute_priority_score("warning", 0.9, 0.0, past_window, None)
+        baseline = 2 * 0.9 + min(((NOVELTY_WINDOW_HOURS + 1) * 0.1), 2.0)
+        assert abs(with_novelty - baseline) < 0.01, "novelty must decay to zero, not linger"
+
+    def test_severity_still_dominates(self):
+        """Novelty must not let a fresh info item outrank a fresh critical."""
+        import time
+
+        from sre_agent.inbox import compute_priority_score
+
+        now = int(time.time())
+        fresh_info = compute_priority_score("info", 1.0, 0.0, now, None)
+        fresh_critical = compute_priority_score("critical", 0.9, 0.0, now, None)
+        assert fresh_critical > fresh_info
+
+
+class TestInboxMute:
+    """An operator must be able to say 'I know, stop telling me'."""
+
+    def test_muted_condition_is_never_created(self, monkeypatch):
+        from sre_agent import inbox
+
+        class _Repo:
+            def is_muted(self, key, now):
+                return key == "crashloop:ns:Pod/known-flapper"
+
+        monkeypatch.setattr(inbox, "get_inbox_repo", lambda: _Repo())
+        created = inbox.upsert_inbox_item(
+            {"item_type": "task", "title": "x", "correlation_key": "crashloop:ns:Pod/known-flapper"}
+        )
+        assert created == "", "a muted condition must not produce an item at all"
+
+    def test_unmuted_condition_is_unaffected(self, monkeypatch):
+        """The mute check must not swallow everything else."""
+        from sre_agent import inbox
+
+        seen = {}
+
+        class _Repo:
+            def is_muted(self, key, now):
+                return False
+
+            def find_active_by_correlation(self, key, item_type):
+                seen["looked_up"] = True
+                return None
+
+        monkeypatch.setattr(inbox, "get_inbox_repo", lambda: _Repo())
+        monkeypatch.setattr(inbox, "create_inbox_item", lambda item: "inb-created")
+        result = inbox.upsert_inbox_item(
+            {"item_type": "task", "title": "x", "correlation_key": "crashloop:ns:Pod/real"}
+        )
+        assert result == "inb-created"
+        assert seen.get("looked_up"), "an unmuted key must still go through normal correlation"

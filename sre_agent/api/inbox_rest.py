@@ -71,6 +71,16 @@ async def rest_inbox_stats():
     return await async_get_inbox_stats()
 
 
+# Declared before /inbox/{item_id}: FastAPI matches in definition order, so a
+# literal path registered after the parameterised one is unreachable — item_id
+# would simply capture "mutes". /inbox/stats above is placed the same way.
+@router.get("/inbox/mutes")
+async def list_muted_conditions(_auth=Depends(verify_token)):
+    from ..repositories.inbox_repo import get_inbox_repo
+
+    return {"mutes": [dict(r) for r in get_inbox_repo().list_mutes()]}
+
+
 @router.get("/inbox/{item_id}")
 async def rest_get_inbox_item(item_id: str):
     item = get_inbox_item(item_id)
@@ -248,3 +258,35 @@ async def rest_pin_item(item_id: str, owner: str = Depends(get_owner)):
     if not ok:
         raise HTTPException(status_code=404, detail="Item not found")
     return {"ok": True}
+
+
+@router.post("/inbox/mute")
+async def mute_condition(body: dict, owner: str = Depends(get_owner)):
+    """Silence a correlation key so its items stop being raised.
+
+    Takes a correlation_key rather than an item id on purpose: muting one item
+    would be pointless, because the next scan simply raises another for the same
+    condition. The key is what recurs.
+    """
+    from ..inbox import mute_correlation_key
+
+    key = (body.get("correlation_key") or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="correlation_key is required")
+    reason = (body.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(
+            status_code=400, detail="reason is required — a mute with no reason becomes permanent by accident"
+        )
+
+    hours = body.get("hours")
+    mute_correlation_key(key, muted_by=owner, reason=reason, hours=float(hours) if hours else None)
+    return {"correlation_key": key, "muted": True, "hours": hours, "muted_by": owner}
+
+
+@router.delete("/inbox/mute/{correlation_key:path}")
+async def unmute_condition(correlation_key: str, _owner: str = Depends(get_owner)):
+    from ..inbox import unmute_correlation_key
+
+    unmute_correlation_key(correlation_key)
+    return {"correlation_key": correlation_key, "muted": False}

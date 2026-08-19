@@ -110,6 +110,7 @@ Unified worklist for findings, alerts, and predictions -- replaces the old multi
 |--------|------|------|-------------|
 | `GET` | `/inbox` | token | List inbox items (filters: status, priority, category, assignee) |
 | `GET` | `/inbox/stats` | token | Aggregate inbox counts by status/priority |
+| `GET` | `/inbox/mutes` | token | List active mutes (declared before `/inbox/{item_id}` so it is reachable) |
 | `GET` | `/inbox/{item_id}` | token | Get a single inbox item |
 | `POST` | `/inbox` | token | Create a new inbox item |
 | `PATCH` | `/inbox/{item_id}` | token | Update an inbox item |
@@ -119,6 +120,8 @@ Unified worklist for findings, alerts, and predictions -- replaces the old multi
 | `POST` | `/inbox/{item_id}/snooze` | token | Snooze an item |
 | `POST` | `/inbox/{item_id}/dismiss` | token | Dismiss an item |
 | `POST` | `/inbox/{item_id}/investigate` | token | Trigger investigation for an item |
+| `POST` | `/inbox/mute` | user | Mute a `correlation_key` (body: `correlation_key`, `reason`, optional `hours`) |
+| `DELETE` | `/inbox/mute/{correlation_key}` | user | Clear a mute |
 | `POST` | `/inbox/{item_id}/resolve` | token | Mark an item resolved |
 | `POST` | `/inbox/{item_id}/escalate` | token | Escalate an item |
 | `POST` | `/inbox/{item_id}/restore` | token | Restore a dismissed/resolved item |

@@ -563,3 +563,13 @@ CREATE TABLE IF NOT EXISTS operational_flags (
     updated_by TEXT
 );
 """
+
+INBOX_MUTES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS inbox_mutes (
+    correlation_key TEXT PRIMARY KEY,
+    muted_until     BIGINT,
+    muted_by        TEXT NOT NULL,
+    reason          TEXT NOT NULL,
+    created_at      BIGINT NOT NULL
+);
+"""
