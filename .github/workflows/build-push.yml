@@ -21,6 +21,26 @@ env:
 jobs:
   build-push:
     runs-on: ubuntu-latest
+    # The pre-build test gate runs the full suite, and a large part of that
+    # suite needs PostgreSQL — the same service evals.yml declares. Without it
+    # every DB-backed test errors with "connection refused" on port 5433 and no
+    # release can be cut, which is what happened on the v2.9.0 tag.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pulse
+          POSTGRES_PASSWORD: pulse
+          POSTGRES_DB: pulse_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PULSE_AGENT_DATABASE_URL: postgresql://pulse:pulse@localhost:5433/pulse_test
     steps:
       - name: Checkout
         uses: actions/checkout@v4
