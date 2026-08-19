@@ -27,7 +27,7 @@ class TestRegisterTool:
 
     def test_register_read_tool(self):
         tool = SimpleNamespace(name="test_read_tool")
-        result = register_tool(tool)
+        result = register_tool(tool, is_write=False)
         assert result is tool
         assert "test_read_tool" in TOOL_REGISTRY
         assert "test_read_tool" not in WRITE_TOOL_NAMES
@@ -41,8 +41,8 @@ class TestRegisterTool:
     def test_register_overwrites_existing(self):
         tool1 = SimpleNamespace(name="dup_tool", version=1)
         tool2 = SimpleNamespace(name="dup_tool", version=2)
-        register_tool(tool1)
-        register_tool(tool2)
+        register_tool(tool1, is_write=False)
+        register_tool(tool2, is_write=False)
         assert TOOL_REGISTRY["dup_tool"].version == 2
 
 
