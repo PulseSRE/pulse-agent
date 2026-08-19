@@ -1278,9 +1278,11 @@ class TestCrashloopBurstCorrelation:
         return scan_crashlooping_pods(SimpleNamespace(items=pods))
 
     def test_simultaneous_restarts_collapse_into_one_finding(self):
-        from datetime import UTC, datetime
+        from datetime import UTC, datetime, timedelta
 
-        when = datetime(2026, 8, 19, 4, 12, tzinfo=UTC)
+        # Relative to now: an absolute date drifts past the stabilised window and
+        # the pods stop being reported at all.
+        when = datetime.now(UTC) - timedelta(minutes=20)
         pods = [self._pod("app", f"pod-{i}", [self._cs("c", 5, when)]) for i in range(8)]
         findings = self._scan(pods)
 
@@ -1291,9 +1293,10 @@ class TestCrashloopBurstCorrelation:
     def test_unrelated_restarts_stay_individual(self):
         from datetime import UTC, datetime, timedelta
 
-        base = datetime(2026, 8, 19, 4, 0, tzinfo=UTC)
-        # Hours apart — genuinely separate incidents.
-        pods = [self._pod("app", f"pod-{i}", [self._cs("c", 5, base + timedelta(hours=3 * i))]) for i in range(4)]
+        # Spread across the recent window so each lands in its own bucket while
+        # all four stay inside the stabilised cutoff.
+        base = datetime.now(UTC) - timedelta(hours=4)
+        pods = [self._pod("app", f"pod-{i}", [self._cs("c", 5, base + timedelta(hours=i))]) for i in range(4)]
         findings = self._scan(pods)
 
         assert len(findings) == 4, "restarts hours apart are separate problems and must not be merged"
@@ -1308,9 +1311,9 @@ class TestCrashloopBurstCorrelation:
 
     def test_burst_correlation_key_is_stable_across_scans(self):
         """Bucketing on absolute time, not age, so a rescan is the same burst."""
-        from datetime import UTC, datetime
+        from datetime import UTC, datetime, timedelta
 
-        when = datetime(2026, 8, 19, 4, 12, tzinfo=UTC)
+        when = datetime.now(UTC) - timedelta(minutes=20)
         pods = [self._pod("app", f"pod-{i}", [self._cs("c", 5, when)]) for i in range(6)]
         first = self._scan(pods)[0]["title"]
         second = self._scan(pods)[0]["title"]
