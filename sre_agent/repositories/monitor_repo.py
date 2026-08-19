@@ -941,11 +941,21 @@ class MonitorRepository(BaseRepository):
     # ── Inbox generators (inbox_generators.py) ────────────────────────────────
 
     def fetch_stale_inbox_items(self, cutoff: int) -> list[dict]:
-        """Fetch stale inbox items for the stale findings generator."""
+        """Fetch stale inbox items for the stale findings generator.
+
+        Excludes generator-produced items. _make_assessment sets
+        item_type='task', which this query selects, so the
+        "N findings open >72h without action" digest became stale itself after
+        72h and then counted — and listed — itself on every later cycle. The
+        correlation key keeps it to a single row rather than growing without
+        bound, but the count was inflated by one and the summary read
+        absurdly. Generator items carry metadata.generator; nothing else does.
+        """
         return self.db.fetchall(
             """SELECT id, title, created_at FROM inbox_items
             WHERE item_type = 'task' AND status IN ('new', 'triaged')
-            AND created_at < ?""",
+            AND created_at < ?
+            AND (metadata IS NULL OR metadata NOT LIKE '%"generator"%')""",
             (cutoff,),
         )
 

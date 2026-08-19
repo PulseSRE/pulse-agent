@@ -751,7 +751,20 @@ def upsert_inbox_item(item: dict[str, Any]) -> str:
         due_date=item.get("due_date", existing.get("due_date")),
     )
 
-    repo.update_resources_and_priority(existing["id"], merged_resources, priority, now)
+    # Pass the freshly generated wording through. Without this the item keeps
+    # its original title forever: the prune path re-points `resources` at
+    # whichever pod is currently unhealthy, but the title still names the pod
+    # that was unhealthy when the item was first raised. Operators then see a
+    # pod name that no longer exists and reasonably conclude the whole item is
+    # stale, when the underlying condition is live.
+    repo.update_resources_and_priority(
+        existing["id"],
+        merged_resources,
+        priority,
+        now,
+        title=item.get("title"),
+        summary=item.get("summary"),
+    )
     return existing["id"]
 
 
@@ -875,8 +888,14 @@ def _deserialize_row(row: Any) -> dict[str, Any]:
 def _finding_corr_key(finding: dict[str, Any]) -> str:
     """Build a correlation key scoped to category + namespace + primary resource."""
     category = finding.get("category", "unknown")
-    namespace = finding.get("namespace", "")
     resources = finding.get("resources", [])
+    # _make_finding never sets a top-level "namespace" — scanners put it inside
+    # resources[0] — so this was always "" and every key came out as
+    # "crashloop::Pod/name". Two workloads sharing a name in different
+    # namespaces therefore collided onto one inbox item, which on a cluster
+    # full of operators means names like "controller-manager" are guaranteed
+    # to clash. Fall back to the primary resource's namespace.
+    namespace = finding.get("namespace") or (resources[0].get("namespace", "") if resources else "")
     if resources:
         r = resources[0]
         name = r.get("name", "")

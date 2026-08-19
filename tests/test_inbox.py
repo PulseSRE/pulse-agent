@@ -888,3 +888,48 @@ class TestCorrelationKeyDeterministic:
             namespace=None,
         )
         assert item["correlation_key"] == "privileged_workloads:cluster"
+
+
+class TestInboxStalenessAndCorrelation:
+    """Regressions found by inspecting a live cluster's inbox, not from tests."""
+
+    def test_correlation_key_includes_the_namespace(self):
+        """Two same-named workloads in different namespaces must not collide.
+
+        _make_finding never sets a top-level "namespace" — scanners put it in
+        resources[0] — so _finding_corr_key produced "crashloop::Pod/name" for
+        everything. On the live cluster every key had an empty namespace
+        segment, meaning e.g. a "controller-manager" in two operator
+        namespaces would share one inbox item.
+        """
+        from sre_agent.inbox import _finding_corr_key
+
+        a = _finding_corr_key(
+            {
+                "category": "crashloop",
+                "resources": [{"kind": "Pod", "name": "controller-manager-abc12-x9f2j", "namespace": "ns-a"}],
+            }
+        )
+        b = _finding_corr_key(
+            {
+                "category": "crashloop",
+                "resources": [{"kind": "Pod", "name": "controller-manager-abc12-q4t7z", "namespace": "ns-b"}],
+            }
+        )
+        assert a != b, "same workload name in different namespaces must not share a correlation key"
+        assert "ns-a" in a and "ns-b" in b
+        # Pod hash still stripped, so the key survives pod rotation.
+        assert a.endswith("Pod/controller-manager")
+
+    def test_correlation_key_survives_pod_rotation(self):
+        """The key must be stable when the ReplicaSet spins a new pod."""
+        from sre_agent.inbox import _finding_corr_key
+
+        base = {"category": "crashloop"}
+        first = _finding_corr_key(
+            {**base, "resources": [{"kind": "Pod", "name": "discovery-operator-564dcd46cb-qrlql", "namespace": "mce"}]}
+        )
+        second = _finding_corr_key(
+            {**base, "resources": [{"kind": "Pod", "name": "discovery-operator-564dcd46cb-kplj2", "namespace": "mce"}]}
+        )
+        assert first == second, "a new pod for the same workload must reuse the existing item"

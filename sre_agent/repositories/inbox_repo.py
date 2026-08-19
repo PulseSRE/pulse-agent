@@ -263,11 +263,28 @@ class InboxRepository(BaseRepository):
         resources: list[dict[str, Any]],
         priority: float,
         now: int,
+        title: str | None = None,
+        summary: str | None = None,
     ) -> None:
-        self.db.execute(
-            "UPDATE inbox_items SET resources = ?, priority_score = ?, updated_at = ? WHERE id = ?",
-            (json.dumps(resources), priority, now, item_id),
-        )
+        """Refresh a correlated item.
+
+        title/summary are optional so existing callers keep their behaviour, but
+        the generator path should pass them. They were previously never updated,
+        so an item's wording was frozen at creation while its resources were
+        pruned and re-pointed underneath it — leaving titles naming pods that
+        had been deleted days earlier, and restart counts stuck at their
+        first-seen value. The item was still valid; only its label was stale.
+        """
+        fields = ["resources = ?", "priority_score = ?", "updated_at = ?"]
+        values: list[Any] = [json.dumps(resources), priority, now]
+        if title:
+            fields.append("title = ?")
+            values.append(title)
+        if summary:
+            fields.append("summary = ?")
+            values.append(summary)
+        values.append(item_id)
+        self.db.execute(f"UPDATE inbox_items SET {', '.join(fields)} WHERE id = ?", tuple(values))
         self.db.commit()
 
     # -- Escalation ----------------------------------------------------------
