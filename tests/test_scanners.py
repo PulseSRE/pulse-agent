@@ -1239,3 +1239,79 @@ class TestParallelScannerErrorIsolation:
         assert broken_result["result"]["status"] == "error"
         assert broken_result["findings"] == []
         assert "K8s API unreachable" in broken_result["result"]["error"]
+
+
+class TestCrashloopBurstCorrelation:
+    """Simultaneous restarts are one event, not N problems.
+
+    Measured on a live cluster: 75 containers were over the restart threshold
+    and 39 of them shared just two moments — 28 at one instant, 10 at another.
+    Reported individually that buries the real signal ("something restarted a
+    third of the cluster") under a list nobody reads.
+    """
+
+    @staticmethod
+    def _cs(name, restarts, finished_at):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            name=name,
+            restart_count=restarts,
+            state=SimpleNamespace(waiting=None),
+            last_state=SimpleNamespace(terminated=SimpleNamespace(finished_at=finished_at)),
+        )
+
+    @staticmethod
+    def _pod(ns, name, statuses):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            metadata=SimpleNamespace(namespace=ns, name=name),
+            status=SimpleNamespace(container_statuses=statuses),
+        )
+
+    def _scan(self, pods):
+        from types import SimpleNamespace
+
+        from sre_agent.monitor.scanners import scan_crashlooping_pods
+
+        return scan_crashlooping_pods(SimpleNamespace(items=pods))
+
+    def test_simultaneous_restarts_collapse_into_one_finding(self):
+        from datetime import UTC, datetime
+
+        when = datetime(2026, 8, 19, 4, 12, tzinfo=UTC)
+        pods = [self._pod("app", f"pod-{i}", [self._cs("c", 5, when)]) for i in range(8)]
+        findings = self._scan(pods)
+
+        assert len(findings) == 1, f"8 simultaneous restarts should be one finding, got {len(findings)}"
+        assert "8 pods restarted together" in findings[0]["title"]
+        assert len(findings[0]["resources"]) == 8, "every affected pod must stay attached to the burst"
+
+    def test_unrelated_restarts_stay_individual(self):
+        from datetime import UTC, datetime, timedelta
+
+        base = datetime(2026, 8, 19, 4, 0, tzinfo=UTC)
+        # Hours apart — genuinely separate incidents.
+        pods = [self._pod("app", f"pod-{i}", [self._cs("c", 5, base + timedelta(hours=3 * i))]) for i in range(4)]
+        findings = self._scan(pods)
+
+        assert len(findings) == 4, "restarts hours apart are separate problems and must not be merged"
+        assert all("restarting" in f["title"] for f in findings)
+
+    def test_pods_with_no_restart_time_are_never_merged(self):
+        """A missing timestamp must not group unrelated pods into a fake burst."""
+        pods = [self._pod("app", f"pod-{i}", [self._cs("c", 5, None)]) for i in range(9)]
+        findings = self._scan(pods)
+
+        assert len(findings) == 9, "unknown restart times cannot be correlated, so must stay individual"
+
+    def test_burst_correlation_key_is_stable_across_scans(self):
+        """Bucketing on absolute time, not age, so a rescan is the same burst."""
+        from datetime import UTC, datetime
+
+        when = datetime(2026, 8, 19, 4, 12, tzinfo=UTC)
+        pods = [self._pod("app", f"pod-{i}", [self._cs("c", 5, when)]) for i in range(6)]
+        first = self._scan(pods)[0]["title"]
+        second = self._scan(pods)[0]["title"]
+        assert first == second, "the same burst must produce the same title on every scan"

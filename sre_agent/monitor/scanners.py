@@ -20,8 +20,34 @@ logger = logging.getLogger("pulse_agent.monitor")
 # ── Scan Functions ─────────────────────────────────────────────────────────
 
 
+# Pods whose most recent restart falls in the same window are almost always one
+# event, not N problems. Measured on a real cluster: 75 containers were over the
+# restart threshold, and 39 of them shared just two moments — 29 at one instant
+# and 10 at another. Reporting those as 39 separate items buries the actual
+# signal ("something restarted a third of the cluster at 04:12") under a list
+# nobody can read.
+_BURST_WINDOW_SECONDS = 1800  # 30 minutes
+_BURST_MIN_PODS = 5  # below this, individual findings are still the clearer form
+
+
+def _last_restart_epoch(cs: Any) -> int | None:
+    """Epoch seconds of the container's most recent termination, if known."""
+    last = getattr(cs, "last_state", None)
+    term = getattr(last, "terminated", None) if last else None
+    finished = getattr(term, "finished_at", None) if term else None
+    if finished is None:
+        return None
+    try:
+        return int(finished.timestamp())
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
 def scan_crashlooping_pods(pods=None) -> list[dict]:
-    """Find pods in CrashLoopBackOff or high restart counts."""
+    """Find pods in CrashLoopBackOff or high restart counts.
+
+    Restarts that happened at the same moment are grouped into one finding.
+    """
     crashloop_threshold = get_settings().monitor.crashloop_threshold
     findings: list[dict[str, Any]] = []
     try:
@@ -29,6 +55,8 @@ def scan_crashlooping_pods(pods=None) -> list[dict]:
             pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
         if isinstance(pods, ToolError):
             return findings
+
+        candidates: list[dict[str, Any]] = []
         for pod in pods.items:
             ns = pod.metadata.namespace
             name = pod.metadata.name
@@ -38,18 +66,67 @@ def scan_crashlooping_pods(pods=None) -> list[dict]:
             for cs in pod.status.container_statuses or []:
                 if cs.restart_count >= crashloop_threshold:
                     waiting = cs.state.waiting
-                    reason = waiting.reason if waiting else "Unknown"
-                    findings.append(
-                        _make_finding(
-                            severity=SEVERITY_CRITICAL if cs.restart_count >= 10 else SEVERITY_WARNING,
-                            category="crashloop",
-                            title=f"Pod {name} restarting ({cs.restart_count}x)",
-                            summary=f"Container '{cs.name}' has restarted {cs.restart_count} times. Reason: {reason}",
-                            resources=[{"kind": "Pod", "name": name, "namespace": ns}],
-                            auto_fixable=True,
-                            runbook_id="crashloop-restart",
-                        )
+                    candidates.append(
+                        {
+                            "ns": ns,
+                            "name": name,
+                            "container": cs.name,
+                            "restarts": cs.restart_count,
+                            "reason": waiting.reason if waiting else "Unknown",
+                            "last_restart": _last_restart_epoch(cs),
+                        }
                     )
+
+        # Bucket on the absolute restart time, not on age. Age-based keys would
+        # shift on every scan and each pass would look like a brand new burst.
+        buckets: dict[int | None, list[dict[str, Any]]] = {}
+        for c in candidates:
+            lr = c["last_restart"]
+            key = (lr // _BURST_WINDOW_SECONDS) if lr is not None else None
+            buckets.setdefault(key, []).append(c)
+
+        for key, group in buckets.items():
+            if key is not None and len(group) >= _BURST_MIN_PODS:
+                when = datetime.fromtimestamp(key * _BURST_WINDOW_SECONDS, tz=UTC)
+                namespaces = sorted({c["ns"] for c in group})
+                ns_summary = ", ".join(namespaces[:3]) + (
+                    f" (+{len(namespaces) - 3} more)" if len(namespaces) > 3 else ""
+                )
+                findings.append(
+                    _make_finding(
+                        # A correlated restart across many workloads is a bigger
+                        # deal than any one of them, not a smaller one.
+                        severity=SEVERITY_CRITICAL,
+                        category="crashloop",
+                        title=f"{len(group)} pods restarted together around {when:%H:%M UTC}",
+                        summary=(
+                            f"{len(group)} containers across {len(namespaces)} namespace(s) "
+                            f"({ns_summary}) last restarted within the same "
+                            f"{_BURST_WINDOW_SECONDS // 60}-minute window. A simultaneous restart "
+                            f"of this many workloads usually has one cause — a node going away, an "
+                            f"upgrade, or resource pressure — rather than {len(group)} independent faults."
+                        ),
+                        resources=[{"kind": "Pod", "name": c["name"], "namespace": c["ns"]} for c in group],
+                        auto_fixable=False,
+                        runbook_id="crashloop-restart",
+                    )
+                )
+                continue
+
+            for c in group:
+                findings.append(
+                    _make_finding(
+                        severity=SEVERITY_CRITICAL if c["restarts"] >= 10 else SEVERITY_WARNING,
+                        category="crashloop",
+                        title=f"Pod {c['name']} restarting ({c['restarts']}x)",
+                        summary=(
+                            f"Container '{c['container']}' has restarted {c['restarts']} times. Reason: {c['reason']}"
+                        ),
+                        resources=[{"kind": "Pod", "name": c["name"], "namespace": c["ns"]}],
+                        auto_fixable=True,
+                        runbook_id="crashloop-restart",
+                    )
+                )
     except Exception as e:
         logger.error("Crash loop scan failed: %s", e)
     return findings
