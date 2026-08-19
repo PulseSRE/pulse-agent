@@ -39,3 +39,4 @@ tmp/
 *.png
 !docs/*.png
 !docs/**/*.png
+.venv-local/

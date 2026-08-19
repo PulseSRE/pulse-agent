@@ -212,6 +212,18 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "Pod deletion",
     ),
     (
+        "the agentit namespace has been stuck terminating for five days, why?",
+        ["diagnose_stuck_deletion"],
+        "sre",
+        "Stuck deletion diagnosis",
+    ),
+    (
+        "force the kuadrant.io/dnsrecord finalizer off dnsrecords.kuadrant.io",
+        ["remove_finalizer"],
+        "sre",
+        "Finalizer removal",
+    ),
+    (
         "rollback my-deployment to the previous version",
         ["rollback_deployment"],
         "sre",

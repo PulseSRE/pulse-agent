@@ -9,7 +9,8 @@ from __future__ import annotations
 from datetime import UTC
 
 from .decorators import beta_tool
-from .k8s_client import get_apis_client, get_core_client, safe
+from .errors import ToolError
+from .k8s_client import get_apis_client, get_core_client, get_raw_json, safe
 
 _openapi_cache: tuple[dict, float] | None = None
 _OPENAPI_CACHE_TTL = 3600  # 1 hour
@@ -674,13 +675,9 @@ def _get_openapi_definitions():
     if _openapi_cache and now - _openapi_cache[1] < _OPENAPI_CACHE_TTL:
         return _openapi_cache[0]
 
-    api_client = get_core_client().api_client
-    openapi = api_client.call_api(
-        "/openapi/v2", "GET", response_type="object", auth_settings=["BearerToken"], _preload_content=False
-    )
-    import json
-
-    schema_data = json.loads(openapi[0].read())
+    schema_data = get_raw_json("/openapi/v2", "explain_resource")
+    if isinstance(schema_data, ToolError):
+        raise RuntimeError(str(schema_data))
     definitions = schema_data.get("definitions", {})
     _openapi_cache = (definitions, now)
     return definitions
@@ -829,7 +826,6 @@ def list_api_resources(group: str = ""):
 
     # Specific group: list resources
     try:
-        api_client = get_core_client().api_client
         if group == "v1" or group == "core":
             core = get_core_client()
             resources = safe(lambda: core.get_api_resources())
@@ -851,12 +847,9 @@ def list_api_resources(group: str = ""):
 
             preferred = target_group.preferred_version.group_version
             path = f"/apis/{preferred}"
-            resp = api_client.call_api(
-                path, "GET", response_type="object", auth_settings=["BearerToken"], _preload_content=False
-            )
-            import json
-
-            data = json.loads(resp[0].read())
+            data = get_raw_json(path, "list_api_resources")
+            if isinstance(data, ToolError):
+                return str(data)
             resources_list = data.get("resources", [])
 
             lines = [f"**{group}** ({preferred}) — {len(resources_list)} resources:\n"]
