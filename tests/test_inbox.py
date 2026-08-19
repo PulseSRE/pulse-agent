@@ -1005,6 +1005,11 @@ class TestInboxMute:
                 seen["looked_up"] = True
                 return None
 
+            def find_recently_resolved(self, key, item_type, since):
+                # Real path checks this when no active item matches, so the
+                # double has to answer it too.
+                return None
+
         monkeypatch.setattr(inbox, "get_inbox_repo", lambda: _Repo())
         monkeypatch.setattr(inbox, "create_inbox_item", lambda item: "inb-created")
         result = inbox.upsert_inbox_item(
