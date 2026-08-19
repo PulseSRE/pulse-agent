@@ -16,9 +16,9 @@
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 
-AI-powered OpenShift/Kubernetes SRE and Security Agent built on Claude. Pulse Agent connects to your cluster via the Kubernetes API and uses Claude Opus for diagnostics, incident triage, security audits, and automated remediation -- all through natural language. It pairs with the [OpenShift Pulse](https://github.com/alimobrem/OpenshiftPulse) UI for rich incident management, or runs standalone as a CLI.
+AI-powered OpenShift/Kubernetes SRE and Security Agent built on Claude. Pulse Agent connects to your cluster via the Kubernetes API and uses Claude Opus for diagnostics, incident triage, security audits, and automated remediation -- all through natural language. It pairs with the [OpenShift Pulse](https://github.com/PulseSRE/pulse-ui) UI for rich incident management, or runs standalone as a CLI. Both are deployed together via the [pulse-operator](https://github.com/PulseSRE/pulse-operator) — see [Deploy to OpenShift](#deploy-to-openshift) below.
 
-**Docs:** [API Contract](API_CONTRACT.md) | [Architecture](docs/ARCHITECTURE.md) | [Database](DATABASE.md) | [Security](SECURITY.md) | [Design Principles](DESIGN_PRINCIPLES.md) | [Testing & Evals](TESTING.md) | [Skill Developer Guide](docs/SKILL_DEVELOPER_GUIDE.md) | [Contributing](CONTRIBUTING.md) | [Changelog](CHANGELOG.md)
+**Docs:** [Operator (install)](https://github.com/PulseSRE/pulse-operator) | [API Contract](API_CONTRACT.md) | [Architecture](docs/ARCHITECTURE.md) | [Database](DATABASE.md) | [Security](SECURITY.md) | [Design Principles](DESIGN_PRINCIPLES.md) | [Testing & Evals](TESTING.md) | [Skill Developer Guide](docs/SKILL_DEVELOPER_GUIDE.md) | [Contributing](CONTRIBUTING.md) | [Changelog](CHANGELOG.md)
 
 ## Agent Intelligence (ORCA)
 
