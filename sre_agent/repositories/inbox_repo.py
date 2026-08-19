@@ -443,6 +443,42 @@ class InboxRepository(BaseRepository):
             (now, now, item_id),
         )
 
+    # -- Mutes ---------------------------------------------------------------
+
+    def set_mute(self, correlation_key: str, muted_until: int | None, muted_by: str, reason: str, now: int) -> None:
+        """Silence a correlation key. muted_until=None means indefinitely."""
+        self.db.execute(
+            """INSERT INTO inbox_mutes (correlation_key, muted_until, muted_by, reason, created_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT (correlation_key) DO UPDATE SET
+                 muted_until = EXCLUDED.muted_until,
+                 muted_by = EXCLUDED.muted_by,
+                 reason = EXCLUDED.reason,
+                 created_at = EXCLUDED.created_at""",
+            (correlation_key, muted_until, muted_by, reason, now),
+        )
+        self.db.commit()
+
+    def clear_mute(self, correlation_key: str) -> None:
+        self.db.execute("DELETE FROM inbox_mutes WHERE correlation_key = ?", (correlation_key,))
+        self.db.commit()
+
+    def is_muted(self, correlation_key: str, now: int) -> bool:
+        """True while a mute is active. Expired mutes are treated as absent."""
+        if not correlation_key:
+            return False
+        row = self.db.fetchone(
+            "SELECT muted_until FROM inbox_mutes WHERE correlation_key = ?",
+            (correlation_key,),
+        )
+        if row is None:
+            return False
+        until = row["muted_until"]
+        return until is None or until > now
+
+    def list_mutes(self) -> list[Any]:
+        return self.db.fetchall("SELECT * FROM inbox_mutes ORDER BY created_at DESC")
+
     def fetch_open_items_with_resources(self) -> list[Any]:
         return self.db.fetchall(
             "SELECT id, resources FROM inbox_items WHERE status NOT IN ('resolved', 'archived')",

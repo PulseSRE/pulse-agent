@@ -233,6 +233,13 @@ def _migrate_023_operational_flags(db: Database) -> None:
     db.executescript(OPERATIONAL_FLAGS_SCHEMA)
 
 
+def _migrate_024_inbox_mutes(db: Database) -> None:
+    """Create inbox_mutes so operators can silence a known-noisy condition."""
+    from .db_schema import INBOX_MUTES_SCHEMA
+
+    db.executescript(INBOX_MUTES_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -257,4 +264,5 @@ MIGRATIONS = [
     (21, "inbox_items", _migrate_021_inbox_items),
     (22, "user_interactions", _migrate_022_user_interactions),
     (23, "operational_flags", _migrate_023_operational_flags),
+    (24, "inbox_mutes", _migrate_024_inbox_mutes),
 ]

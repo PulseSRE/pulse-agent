@@ -2,6 +2,49 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [2.9.0] - 2026-08-19
+
+### Signal quality
+- Simultaneous pod restarts are grouped into one finding instead of one per pod. Measured on a live cluster, 75 crashloop findings became 19: 39 of the 75 shared just two moments, so they were one event reported 39 times. Burst items carry every affected pod and are raised to critical — a correlated restart across namespaces matters more than any single pod in it
+- Inbox ranking now favours novelty. `age_bonus` alone meant a week-old warning outranked one raised ten minutes ago, so permanent conditions ("1 cluster-admin binding to review") drifted to the top and stayed. The new bonus decays to zero over 24h, after which ranking behaves as before
+- Conditions can be muted by `correlation_key` (`POST /inbox/mute`), with an optional expiry and a required reason. Muted conditions are dropped at creation rather than filtered on read, so they cannot resurface, be counted, or trigger an investigation
+
+### Fixes
+- Inbox items showed pod names that had been deleted days earlier: `resources` were re-pointed at the current pod on every scan while `title` and `summary` were frozen at creation
+- Correlation keys omitted the namespace (`crashloop::Pod/name`), so same-named workloads in different namespaces shared one item
+- Every inbox-triggered investigation was discarded on save — the report had no `id` and the column is `NOT NULL`, so the model was paid for work that was then thrown away
+- The stale-findings digest counted and listed itself once it was 72h old
+- `/metrics/*` REST routes were shadowed by the Prometheus scrape mount and had been unreachable
+- Investigation view plans were dropped by the inbox (`viewPlan` read where the producer emits `view_plan`)
+
+### Security
+- The agent could rewrite its own system prompt with no confirmation: the four skill-mutation tools were registered as reads, so they never reached the confirmation gate
+- `/admin/skills` mutation required only the shared token — now needs a real authenticated user, with an optional `PULSE_AGENT_ADMIN_USERS` allowlist. `PUT` can no longer overwrite built-in skills, which `DELETE` already refused
+- `PULSE_AGENT_DEV_USER` could mask a real authenticated identity; it is now a fallback for the no-proxy case only
+- The auto-fix kill switch never reached the monitor loop (a by-value import), and once fixed still reset to armed on every restart. It is now persisted and fails closed
+
+### CI
+- The test suite runs again. It had not passed since 2026-06-26 — every scheduled and push run failed for seven weeks. The cause was tests building a real Anthropic client with no API key, which hung until the job cap
+- Scheduled failures now open or update a GitHub issue, so an unattended run that breaks is not silent
+- Two bug classes are mechanically blocked: tests that skip instead of failing, and `from mod import FLAG` where the module rebinds `FLAG` (the shape behind the inert kill switch)
+- `register_tool`'s `is_write` is now required, so a tool cannot be added without deciding whether it needs confirmation
+
+## [2.8.0] - 2026-08-07
+
+Backfilled — this release shipped without a changelog entry.
+
+### Features
+- Intelligence bridge: component spec normalization and validation
+- Targeted async DB migration for tool usage, monitor repo and REST endpoints
+- `current_user` included in the `/inbox` list response
+
+### Fixes
+- Needs-attention exclusion narrowed to fully-closed statuses
+- Component spec field names standardized across tools
+- Source filter uses `created_by`; claim rejects terminal states
+- Async DB fallbacks narrowed to specific errors, preventing fire-and-forget task GC
+- Auto-detection uses the RHACM hub for multi-cluster rather than Submariner
+
 ## [2.7.1] - 2026-05-20
 
 ### Security
