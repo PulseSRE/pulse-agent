@@ -129,7 +129,7 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 - **Budget API** -- `GET /analytics/budget` returns real-time investigation budget (used/remaining) and optional cost budget status
 - **Cost Forecast** -- 30-day projected spend based on last 7 days of daily token totals
 - **Cost Budget** -- Optional daily dollar-amount cap (`PULSE_AGENT_COST_BUDGET_USD`) pauses investigations when exceeded
-- **ServiceMonitor** -- Helm template for Prometheus Operator scraping (`metrics.serviceMonitor.enabled`)
+- **ServiceMonitor** -- deployed automatically by the [pulse-operator](https://github.com/PulseSRE/pulse-operator) for Prometheus Operator scraping (`spec.monitoring.enabled`, default `true`)
 
 ### Self-Improving Agent
 - **Incident Memory** -- Every interaction stored with query, tool sequence, resolution, and outcome
@@ -218,51 +218,20 @@ Schema migrations (currently at v016) are applied automatically on startup.
 
 ## Deploy to OpenShift
 
-### Recommended: Unified Deploy
+**Install via the [pulse-operator](https://github.com/PulseSRE/pulse-operator)** — an OLM-managed Kubernetes Operator that deploys this agent alongside the [OpenShift Pulse](https://github.com/PulseSRE/pulse-ui) UI and PostgreSQL from a single `OpenShiftPulse` custom resource. See the operator's [README](https://github.com/PulseSRE/pulse-operator#install-via-olm) for the full CatalogSource → Subscription → CR walkthrough.
 
-The deploy script in the UI repo builds both images, pushes to your container registry, and runs Helm upgrade:
+Key CR fields relevant to this agent (set on the `OpenShiftPulse` resource, not via Helm values):
 
-```bash
-# Prerequisites
-oc login https://api.your-cluster:6443
-podman login quay.io  # or your registry
-
-# Clone both repos
-git clone https://github.com/alimobrem/pulse-agent.git
-git clone https://github.com/alimobrem/OpenshiftPulse.git
-
-# Deploy everything (UI + Agent)
-cd OpenshiftPulse
-./deploy/deploy.sh
-```
-
-What `deploy.sh` does:
-1. Builds the React/TypeScript UI with rspack
-2. Builds Agent and UI container images in parallel with Podman
-3. Pushes both images to Quay.io (or your configured registry)
-4. Runs `helm upgrade` with the umbrella chart (agent deploys first, UI reads the auto-generated WS token)
-
-Useful flags:
-```bash
-./deploy/deploy.sh --dry-run           # Preview without applying
-./deploy/deploy.sh --skip-build        # Redeploy with existing images
-./deploy/deploy.sh --set agent.mcp.enabled=true  # Deploy with MCP enabled
-```
-
-### Helm Values
-
-Key values to configure:
-
-| Value | Description | Default |
+| Field | Description | Default |
 |-------|-------------|---------|
-| `vertexAI.projectId` | GCP project (required if using Vertex AI) | -- |
-| `anthropicApiKey.existingSecret` | K8s Secret with Anthropic API key | -- |
-| `rbac.allowWriteOperations` | Enable scale, restart, cordon, delete, apply | `false` |
-| `rbac.allowSecretAccess` | Enable secret scanning | `false` |
-| `mcp.enabled` | Deploy OpenShift MCP server sidecar | `true` |
-| `memory.enabled` | Enable self-improving agent memory | `true` |
+| `spec.vertexAI.projectId` | GCP project (required if using Vertex AI) | -- |
+| `spec.anthropicApiKey.existingSecret` | K8s Secret with Anthropic API key | -- |
+| `spec.agent.allowWriteOperations` | Enable scale, restart, cordon, delete, apply | `false` |
+| `spec.agent.allowSecretAccess` | Enable secret scanning | `false` |
+| `spec.agent.mcp.enabled` | Deploy OpenShift MCP server sidecar | `false` |
+| `spec.agent.trustLevel` | Autonomy level: 0=observe, 1=suggest, 2=confirm, 3=batch, 4=autonomous | `2` |
 
-The chart requires either `vertexAI.projectId` or `anthropicApiKey.existingSecret`. Install will fail with a clear error if neither is set. The WebSocket auth token is auto-generated as a Kubernetes Secret on first install.
+`spec.vertexAI` and `spec.anthropicApiKey` are mutually exclusive — the CRD rejects a CR with both set via a validation rule. Neither is required at the CRD level, but the agent has no AI backend without one (the operator emits a `NoAIBackendConfigured` warning event if you omit both). The WebSocket auth token and PostgreSQL credentials are auto-generated once and reused across every reconcile — no manual token management, and no re-generation that would invalidate an existing connection.
 
 ### Container Security
 
