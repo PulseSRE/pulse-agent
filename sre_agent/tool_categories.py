@@ -188,6 +188,10 @@ TOOL_CATEGORIES = {
             "remind",
             "track",
             "inbox",
+            "stuck",
+            "terminating",
+            "finalizer",
+            "won't delete",
         ],
         "tools": [
             "cordon_node",
@@ -198,6 +202,8 @@ TOOL_CATEGORIES = {
             "list_operator_subscriptions",
             "exec_command",
             "create_inbox_task",
+            "diagnose_stuck_deletion",
+            "remove_finalizer",
         ],
     },
     "gitops": {

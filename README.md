@@ -8,7 +8,7 @@
   <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v2.9.0"><img src="https://img.shields.io/badge/release-v2.9.0-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-154_(118+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
-  <img src="https://img.shields.io/badge/scanners-23-10b981?style=for-the-badge" alt="Scanners">
+  <img src="https://img.shields.io/badge/scanners-25-10b981?style=for-the-badge" alt="Scanners">
   <img src="https://img.shields.io/badge/tests-2459-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/eval_suites-16_(192_scenarios)-10b981?style=for-the-badge" alt="Eval Suites">
   <img src="https://img.shields.io/badge/release_gate-99.6%25-10b981?style=for-the-badge" alt="Release Gate">
@@ -379,14 +379,14 @@ chart/                 Helm chart (deployment, RBAC, PostgreSQL StatefulSet, Net
 | Endpoint | Description |
 |----------|-------------|
 | `WS /ws/agent` | Auto-routing orchestrated agent (ORCA classifies each message) |
-| `WS /ws/monitor` | Autonomous monitor (23 scanners, auto-fix, predictions) |
+| `WS /ws/monitor` | Autonomous monitor (25 scanners, auto-fix, predictions) |
 
 All WebSocket endpoints require `?token=...` query parameter (constant-time comparison). Protocol v2.
 
 ---
 
 <p align="center">
-  <strong>154 tools (118 native + 36 MCP)</strong> &bull; <strong>7 skills</strong> &bull; <strong>23 scanners</strong> &bull; <strong>10 runbooks</strong> &bull; <strong>83 PromQL recipes</strong> &bull; <strong>16 eval suites (192 scenarios)</strong> &bull; <strong>2,459 tests</strong> &bull; <strong>Migration v022</strong> &bull; <strong>Protocol v2</strong>
+  <strong>156 tools (120 native + 36 MCP)</strong> &bull; <strong>7 skills</strong> &bull; <strong>25 scanners</strong> &bull; <strong>12 runbooks</strong> &bull; <strong>83 PromQL recipes</strong> &bull; <strong>16 eval suites (192 scenarios)</strong> &bull; <strong>2,459 tests</strong> &bull; <strong>Migration v022</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

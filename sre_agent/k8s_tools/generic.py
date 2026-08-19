@@ -9,7 +9,6 @@ from typing import Any
 
 logger = logging.getLogger("pulse_agent.k8s_tools")
 
-from kubernetes.client.rest import ApiException
 
 from .. import k8s_client as _kc
 from ..decorators import beta_tool
@@ -658,25 +657,9 @@ def describe_resource(namespace: str, name: str, kind: str, group: str = "", ver
     else:
         path = f"{api_base}/{plural}/{name}"
 
-    # Reuse the existing core client's ApiClient (singleton, already authed)
-    api = _kc.get_core_client().api_client
-
-    try:
-        resp = api.call_api(
-            path,
-            "GET",
-            auth_settings=["BearerToken"],
-            response_type="object",
-            _return_http_data_only=True,
-        )
-        # resp is a tuple (data, status, headers) or just data depending on version
-        obj = resp if isinstance(resp, dict) else resp[0] if isinstance(resp, tuple) else resp
-    except ApiException as e:
-        from ..errors import classify_api_error
-
-        return classify_api_error(e, "describe_resource")
-    except Exception as e:
-        return f"Error fetching {kind}/{name}: {type(e).__name__}: {e}"
+    obj = _kc.get_raw_json(path, "describe_resource")
+    if isinstance(obj, ToolError):
+        return str(obj)
 
     if not isinstance(obj, dict):
         return f"Unexpected response type: {type(obj).__name__}"

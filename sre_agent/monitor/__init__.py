@@ -77,6 +77,7 @@ from .scanners import (
     scan_pending_pods,
 )
 from .session import MonitorClient, MonitorSession
+from .stuck_scanners import scan_hot_reconcile_loops, scan_stuck_deletions
 from .webhook import _send_webhook
 
 # The `findings` submodule is imported above (via _ensure_tables, etc.)
@@ -132,11 +133,13 @@ __all__ = [
     "scan_expiring_certs",
     "scan_failed_deployments",
     "scan_firing_alerts",
+    "scan_hot_reconcile_loops",
     "scan_hpa_saturation",
     "scan_image_pull_errors",
     "scan_node_pressure",
     "scan_oom_killed_pods",
     "scan_pending_pods",
+    "scan_stuck_deletions",
     "set_autofix_paused",
     "simulate_action",
     "update_action_verification",

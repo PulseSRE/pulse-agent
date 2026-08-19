@@ -48,7 +48,7 @@ class MonitorConfig(BaseModel):
     noise_threshold: float = 0.7
     max_trust_level: int = 2
     investigation_categories: str = (
-        "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa"
+        "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa,stuck,hot_loop"
     )
     max_concurrent_investigations: int = 3
 
@@ -147,7 +147,7 @@ class PulseAgentSettings(BaseSettings):
     noise_threshold: float = 0.7
     max_trust_level: int = 2
     investigation_categories: str = (
-        "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa"
+        "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa,stuck,hot_loop"
     )
     max_concurrent_investigations: int = 3
 
