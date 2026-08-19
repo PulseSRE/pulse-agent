@@ -480,11 +480,13 @@ class TestMetricsTools:
 
 
 class TestDescribeResource:
-    def test_returns_resource_details(self, mock_k8s):
-        from unittest.mock import MagicMock
-
-        mock_api = MagicMock()
-        mock_api.call_api.return_value = {
+    # These stub get_raw_json rather than call_api. The previous stubs made
+    # call_api return a bare dict, which the real client never does — so they
+    # passed happily while every live call raised TypeError on a stale kwarg.
+    # The wire layer is covered by tests/test_raw_api_calls.py; these cover
+    # rendering.
+    def test_returns_resource_details(self, mock_k8s, monkeypatch):
+        obj = {
             "apiVersion": "v1",
             "kind": "ConfigMap",
             "metadata": {
@@ -497,9 +499,8 @@ class TestDescribeResource:
             },
             "data": {"key": "value"},
         }
-        # Mock events
+        monkeypatch.setattr("sre_agent.k8s_client.get_raw_json", lambda path, operation="": obj)
         mock_k8s["core"].list_namespaced_event.return_value = _list_result([])
-        mock_k8s["core"].api_client = mock_api
 
         result = describe_resource.call({"namespace": "default", "name": "my-config", "kind": "ConfigMap"})
         assert isinstance(result, tuple)
@@ -510,11 +511,8 @@ class TestDescribeResource:
         assert "key_value" in kinds
         assert "badge_list" in kinds
 
-    def test_cluster_scoped_resource(self, mock_k8s):
-        from unittest.mock import MagicMock
-
-        mock_api = MagicMock()
-        mock_api.call_api.return_value = {
+    def test_cluster_scoped_resource(self, mock_k8s, monkeypatch):
+        obj = {
             "apiVersion": "v1",
             "kind": "Node",
             "metadata": {
@@ -531,7 +529,7 @@ class TestDescribeResource:
             },
         }
 
-        mock_k8s["core"].api_client = mock_api
+        monkeypatch.setattr("sre_agent.k8s_client.get_raw_json", lambda path, operation="": obj)
         result = describe_resource.call({"namespace": "_", "name": "node-1", "kind": "Node"})
         assert isinstance(result, tuple)
         text, component = result
@@ -550,11 +548,8 @@ class TestDescribeResource:
         result = describe_resource.call({"namespace": "default", "name": "ghost", "kind": "ConfigMap"})
         assert "not found" in str(result).lower() or "404" in str(result)
 
-    def test_grouped_resource(self, mock_k8s):
-        from unittest.mock import MagicMock
-
-        mock_api = MagicMock()
-        mock_api.call_api.return_value = {
+    def test_grouped_resource(self, mock_k8s, monkeypatch):
+        obj = {
             "apiVersion": "apps/v1",
             "kind": "StatefulSet",
             "metadata": {
@@ -569,7 +564,8 @@ class TestDescribeResource:
         }
         mock_k8s["core"].list_namespaced_event.return_value = _list_result([])
 
-        mock_k8s["core"].api_client = mock_api
+        paths: list[str] = []
+        monkeypatch.setattr("sre_agent.k8s_client.get_raw_json", lambda path, operation="": paths.append(path) or obj)
         result = describe_resource.call(
             {"namespace": "default", "name": "my-sts", "kind": "StatefulSet", "group": "apps"}
         )
@@ -577,8 +573,7 @@ class TestDescribeResource:
         text, _ = result
         assert '"my-sts"' in text
         # Verify the API path used /apis/apps/v1
-        call_args = mock_api.call_api.call_args
-        assert "/apis/apps/v1/" in call_args[0][0]
+        assert "/apis/apps/v1/" in paths[0]
 
 
 class TestExecCommand:

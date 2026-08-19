@@ -233,6 +233,36 @@ def get_apis_client() -> client.ApisApi:
     return _clients["apis"]
 
 
+def get_raw_json(path: str, operation: str = "") -> Any:
+    """GET an arbitrary API server path and return the decoded JSON body.
+
+    Returns a ToolError on failure.
+
+    Deliberately takes the raw ``_preload_content=False`` route rather than the
+    client's typed deserialiser. The typed route wants ``response_types_map``
+    keyed by status code; three call sites passed the long-removed
+    ``response_type="object"`` instead, so every call raised TypeError. Each
+    site caught it and returned its own "Error fetching ..." string, which is
+    how kubectl-explain, API group discovery and the generic describe tool
+    could all be dead at once without a single log line saying so.
+    """
+    import json
+
+    api_client = get_core_client().api_client
+    try:
+        resp = api_client.call_api(
+            path,
+            "GET",
+            auth_settings=["BearerToken"],
+            _preload_content=False,
+        )
+    except ApiException as e:
+        return classify_api_error(e, operation or path)
+    raw = resp[0] if isinstance(resp, tuple) else resp
+    data = raw.data if hasattr(raw, "data") else raw.read()
+    return json.loads(data)
+
+
 def safe(fn) -> Any:
     """Wrap a k8s call so API errors return a structured error string."""
     try:
