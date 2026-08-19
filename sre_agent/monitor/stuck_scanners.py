@@ -435,3 +435,248 @@ def scan_hot_reconcile_loops() -> list[dict]:
         except Exception as e:
             logger.error("Hot-loop scan failed for %s: %s", label, e)
     return findings
+
+
+# ── Control-plane stalls ──────────────────────────────────────────────────
+# Added after an incident the two scanners above walked straight past. etcd
+# peer latency spiked, the API server's p99 went from 20ms to the 60s ceiling
+# for fifteen minutes, liveness probes timed out, and the kubelet SIGKILLed
+# 135 containers across all six nodes in thirteen minutes. Every workload-level
+# scanner saw the restarts; none could say why, because the cause was a layer
+# below anything they measure.
+#
+# Every threshold below is the midpoint of a measured healthy value and a
+# measured incident value on the same cluster, recorded in the comments.
+
+# Healthy: 0 in 6h. Incident: 12 in 6h. Any leader change stalls writes
+# cluster-wide, so a couple in an hour is already worth knowing about.
+_ETCD_LEADER_CHANGES_WARNING = 2.0
+
+# Healthy: 0. Incident: 1,667 in 6h across three members. A failed proposal is
+# a write etcd refused — it surfaces to clients as a 500 on a lease renewal,
+# which is how leader election and node heartbeats start failing.
+_ETCD_FAILED_PROPOSALS_WARNING = 10.0
+
+# Healthy: 12ms across AZs. Incident: 3,280ms. etcd's own heartbeat interval is
+# 100ms, so anything approaching that costs elections.
+_ETCD_PEER_RTT_WARNING = 0.25
+_ETCD_PEER_RTT_CRITICAL = 1.0
+
+# Healthy: 45ms. Incident: 2,048ms. This is the disk, and on cloud volumes it
+# is usually IOPS throttling rather than a failing device.
+_ETCD_COMMIT_WARNING = 0.5
+_ETCD_COMMIT_CRITICAL = 1.5
+
+# Healthy: 0.02 to 0.07s. Incident: pegged at 60s, the request timeout ceiling.
+_APISERVER_LATENCY_WARNING = 5.0
+_APISERVER_LATENCY_CRITICAL = 30.0
+
+# A cluster-scoped LIST returns every object of its kind, which is why it costs
+# so much more than the namespaced form. Healthy ceiling on the reference
+# cluster is 1.0/s (projects); the two admission-webhook configs sit at
+# 2.4 to 5.2/s around the clock, which is a controller re-listing instead of
+# watching. 2/s is above everything legitimate and below that pair.
+_CLUSTER_LIST_RATE_WARNING = 2.0
+
+
+def _scan_etcd_consensus() -> list[dict]:
+    """etcd losing or re-running leader elections, and writes it would not accept.
+
+    Checked before latency because a member that cannot hold leadership makes
+    every other control-plane number meaningless.
+    """
+    findings: list[dict[str, Any]] = []
+
+    for result in _query(f"sum(increase(etcd_server_leader_changes_seen_total[1h])) > {_ETCD_LEADER_CHANGES_WARNING}"):
+        rate = _rate(result)
+        if rate is None:
+            continue
+        findings.append(
+            _make_finding(
+                severity=SEVERITY_CRITICAL,
+                category="control_plane",
+                title=f"etcd changed leader {int(rate)} times in an hour",
+                summary=(
+                    f"A healthy etcd cluster elects a leader once and keeps it. {int(rate)} elections in "
+                    f"an hour means members are failing to reach each other or to commit in time; every "
+                    f"election stalls writes cluster-wide, which surfaces as API server timeouts and "
+                    f"controllers losing leadership. Check peer latency and disk commit times first."
+                ),
+                resources=[{"kind": "Etcd", "name": "cluster"}],
+                runbook_id="control-plane-stall",
+                confidence=0.9,
+            )
+        )
+
+    for result in _query(
+        f"sum by (instance) (increase(etcd_server_proposals_failed_total[1h])) > {_ETCD_FAILED_PROPOSALS_WARNING}"
+    ):
+        rate = _rate(result)
+        if rate is None:
+            continue
+        instance = result.get("metric", {}).get("instance", "unknown")
+        findings.append(
+            _make_finding(
+                severity=SEVERITY_CRITICAL,
+                category="control_plane",
+                title=f"etcd member {instance} refused {int(rate)} writes in an hour",
+                summary=(
+                    "Failed proposals are writes etcd would not accept, normally because leadership was "
+                    "in flux while they were in flight. Clients see them as HTTP 500 and 504, and the "
+                    "first casualties are lease renewals — leader election and node heartbeats."
+                ),
+                resources=[{"kind": "Etcd", "name": instance}],
+                runbook_id="control-plane-stall",
+                confidence=0.85,
+            )
+        )
+
+    return findings
+
+
+def _scan_etcd_latency() -> list[dict]:
+    """The two etcd latencies that cause elections: peer network and disk commit."""
+    findings: list[dict[str, Any]] = []
+
+    peer_query = (
+        "histogram_quantile(0.99, sum by (instance, le) "
+        f"(rate(etcd_network_peer_round_trip_time_seconds_bucket[15m]))) > {_ETCD_PEER_RTT_WARNING}"
+    )
+    for result in _query(peer_query):
+        seconds = _rate(result)
+        if seconds is None:
+            continue
+        instance = result.get("metric", {}).get("instance", "unknown")
+        findings.append(
+            _make_finding(
+                severity=SEVERITY_CRITICAL if seconds >= _ETCD_PEER_RTT_CRITICAL else SEVERITY_WARNING,
+                category="control_plane",
+                title=f"etcd peer latency {int(seconds * 1000)}ms from {instance}",
+                summary=(
+                    f"Round-trip time to this member's peers is {seconds * 1000:.0f}ms at p99. etcd's "
+                    f"heartbeat interval is 100ms, so at this latency members declare each other dead and "
+                    f"elect a new leader. Across availability zones, tens of milliseconds is normal and "
+                    f"hundreds is not — look at the network path, not at etcd."
+                ),
+                resources=[{"kind": "Etcd", "name": instance}],
+                runbook_id="control-plane-stall",
+                confidence=0.85,
+            )
+        )
+
+    commit_query = (
+        "histogram_quantile(0.99, sum by (instance, le) "
+        f"(rate(etcd_disk_backend_commit_duration_seconds_bucket[15m]))) > {_ETCD_COMMIT_WARNING}"
+    )
+    for result in _query(commit_query):
+        seconds = _rate(result)
+        if seconds is None:
+            continue
+        instance = result.get("metric", {}).get("instance", "unknown")
+        findings.append(
+            _make_finding(
+                severity=SEVERITY_CRITICAL if seconds >= _ETCD_COMMIT_CRITICAL else SEVERITY_WARNING,
+                category="control_plane",
+                title=f"etcd disk commit {int(seconds * 1000)}ms on {instance}",
+                summary=(
+                    f"Backend commit p99 is {seconds * 1000:.0f}ms, against tens of milliseconds on healthy "
+                    f"hardware. etcd cannot acknowledge a write until it commits, so this becomes API "
+                    f"server latency directly. On cloud volumes the usual cause is IOPS throttling — a "
+                    f"burst balance running out — rather than a failing disk."
+                ),
+                resources=[{"kind": "Etcd", "name": instance}],
+                runbook_id="control-plane-stall",
+                confidence=0.85,
+            )
+        )
+
+    return findings
+
+
+def _scan_apiserver_latency() -> list[dict]:
+    """The API server taking so long that probes and heartbeats give up.
+
+    WATCH and CONNECT are excluded because they are long-lived by design and
+    would sit above any threshold that means anything for the rest.
+    """
+    findings: list[dict[str, Any]] = []
+    query = (
+        "histogram_quantile(0.99, sum by (le) (rate(apiserver_request_duration_seconds_bucket"
+        f'{{verb!~"WATCH|WATCHLIST|CONNECT"}}[5m]))) > {_APISERVER_LATENCY_WARNING}'
+    )
+    for result in _query(query):
+        seconds = _rate(result)
+        if seconds is None:
+            continue
+        findings.append(
+            _make_finding(
+                severity=SEVERITY_CRITICAL if seconds >= _APISERVER_LATENCY_CRITICAL else SEVERITY_WARNING,
+                category="control_plane",
+                title=f"API server p99 latency {seconds:.0f}s",
+                summary=(
+                    f"Requests are taking {seconds:.0f}s at p99, against tens of milliseconds normally. "
+                    f"Liveness probes and lease renewals time out well before this, so the kubelet starts "
+                    f"killing containers and controllers start losing leadership — a burst of restarts "
+                    f"across unrelated namespaces is the symptom, not the cause. Check etcd first."
+                ),
+                resources=[{"kind": "APIServer", "name": "kube-apiserver"}],
+                runbook_id="control-plane-stall",
+                confidence=0.9,
+            )
+        )
+    return findings
+
+
+def _scan_read_amplification() -> list[dict]:
+    """Cluster-scoped LISTs at a rate no controller should need.
+
+    The write-amplification check misses this entirely, and reads are what
+    actually cost an API server: a cluster-scoped LIST returns every object of
+    its kind, decoded into memory, every time.
+    """
+    findings: list[dict[str, Any]] = []
+    query = (
+        'sum by (resource, group) (rate(apiserver_request_total{verb="LIST",scope="cluster"}[1h])) '
+        f"> {_CLUSTER_LIST_RATE_WARNING}"
+    )
+    for result in _query(query):
+        rate = _rate(result)
+        if rate is None:
+            continue
+        metric = result.get("metric", {})
+        resource = metric.get("resource", "unknown")
+        group = metric.get("group", "")
+        qualified = f"{resource}.{group}" if group else resource
+        findings.append(
+            _make_finding(
+                severity=SEVERITY_WARNING,
+                category="control_plane",
+                title=f"{qualified} listed cluster-wide {rate:.1f}/s",
+                summary=(
+                    f"Something is fetching every {qualified} in the cluster {rate:.1f} times a second — "
+                    f"{int(rate * 3600):,} full collection reads an hour. A controller that needs current "
+                    f"state should hold a watch, not re-list; re-listing this often is a bug in the "
+                    f"controller and a standing cost on API server memory and CPU."
+                ),
+                resources=[{"kind": "APIResource", "name": qualified}],
+                runbook_id="control-plane-stall",
+                confidence=0.75,
+            )
+        )
+    return findings
+
+
+def scan_control_plane_stalls() -> list[dict]:
+    """Find the control plane failing underneath workloads that look merely flaky."""
+    findings: list[dict[str, Any]] = []
+    for label, sub_scan in (
+        ("etcd consensus", _scan_etcd_consensus),
+        ("etcd latency", _scan_etcd_latency),
+        ("API server latency", _scan_apiserver_latency),
+        ("read amplification", _scan_read_amplification),
+    ):
+        try:
+            findings.extend(sub_scan())
+        except Exception as e:
+            logger.error("Control-plane scan failed for %s: %s", label, e)
+    return findings
