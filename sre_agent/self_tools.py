@@ -949,7 +949,7 @@ for _tool in [
     list_api_resources,
     list_deprecated_apis,
 ]:
-    _register(_tool)
+    _register(_tool, is_write=False)
 
 # Skill mutation is a WRITE operation and must reach the confirmation gate.
 #
