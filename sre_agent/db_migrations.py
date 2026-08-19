@@ -248,6 +248,10 @@ _OPEN_STATUSES = "('new', 'triaged', 'claimed', 'in_progress', 'agent_reviewing'
 # f"{category}:{namespace}:{title}" and a title may contain colons of its own.
 _REKEY_EXPR = "regexp_replace(i.correlation_key, '^([^:]*)::', '\\1:' || n.ns || ':')"
 
+# Old-format keys are matched with strpos(), not LIKE '%::%'. Database.execute()
+# always passes a params tuple, so psycopg2 treats every % in the statement as a
+# placeholder and the LIKE form dies with "tuple index out of range" before it
+# reaches the server.
 _NS_FROM_RESOURCES = """
     LEFT JOIN LATERAL (
         SELECT NULLIF(i.resources::jsonb -> 0 ->> 'namespace', '') AS ns
@@ -291,7 +295,7 @@ def _migrate_025_rekey_inbox_correlation_keys(db: Database) -> None:
         FROM (
             SELECT i.id, {_REKEY_EXPR} AS new_key
             FROM inbox_items i {_NS_FROM_RESOURCES}
-            WHERE i.correlation_key LIKE '%::%'
+            WHERE strpos(i.correlation_key, '::') > 0
               AND i.status IN {_OPEN_STATUSES}
               AND n.ns IS NOT NULL
         ) c
@@ -312,7 +316,7 @@ def _migrate_025_rekey_inbox_correlation_keys(db: Database) -> None:
         FROM (
             SELECT i.id, n.ns, {_REKEY_EXPR} AS new_key
             FROM inbox_items i {_NS_FROM_RESOURCES}
-            WHERE i.correlation_key LIKE '%::%'
+            WHERE strpos(i.correlation_key, '::') > 0
               AND i.status IN {_OPEN_STATUSES}
               AND n.ns IS NOT NULL
         ) c
