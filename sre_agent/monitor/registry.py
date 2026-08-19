@@ -158,6 +158,31 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "auto_fixable": False,
         "scan_every": 3,
     },
+    "stuck": {
+        "displayName": "Stuck Deletions",
+        "description": "Finds resources whose deletion was requested but never completed",
+        "category": "liveness",
+        "checks": [
+            "namespace terminating > 15 minutes",
+            "pod terminating past grace period",
+            "PVC terminating > 15 minutes",
+            "CRD deleting > 15 minutes",
+        ],
+        "auto_fixable": False,
+        "scan_every": 5,
+    },
+    "hot_loop": {
+        "displayName": "Hot Reconcile Loops",
+        "description": "Finds controllers burning API server capacity without making progress",
+        "category": "liveness",
+        "checks": [
+            "rate(workqueue_retries_total[1h]) > 20/s",
+            'rate(apiserver_request_total{verb=~"POST|PUT|PATCH|DELETE"}[1h]) > 5/s per resource',
+            'rate(rest_client_requests_total{code=~"4..|5.."}[1h]) > 5/s per pod',
+        ],
+        "auto_fixable": False,
+        "scan_every": 5,
+    },
     "trend_memory": {
         "displayName": "Memory Pressure Forecast",
         "description": "Predicts node memory exhaustion using 7-day trends",
