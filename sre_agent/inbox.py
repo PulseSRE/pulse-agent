@@ -528,7 +528,12 @@ def expire_untouched_items() -> int:
             continue
         if item.get("created_by") not in SYSTEM_CREATORS:
             continue
-        repo.update_status(item["id"], "archived", now, now)
+        repo.archive_with_reason(
+            item["id"],
+            f"No activity for {_UNTOUCHED_EXPIRY_HOURS}h",
+            item.get("metadata") or {},
+            now,
+        )
         _publish_event("inbox_item_updated", item["id"], {"status": "archived", "reason": "untouched"})
         expired += 1
     if expired:

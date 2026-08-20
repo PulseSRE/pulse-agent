@@ -54,7 +54,17 @@ def test_an_untouched_machine_raised_item_is_archived(repo):
     repo.fetch_untouched_open_items.return_value = [_row()]
     with patch("sre_agent.inbox._publish_event"):
         assert expire_untouched_items() == 1
-    assert repo.update_status.call_args.args[1] == "archived"
+    assert repo.archive_with_reason.called
+
+
+def test_the_reason_is_recorded_so_it_does_not_just_disappear(repo):
+    """Work vanishing from a queue with no explanation is its own trust problem."""
+    repo.fetch_untouched_open_items.return_value = [_row()]
+    with patch("sre_agent.inbox._publish_event"):
+        expire_untouched_items()
+    reason = repo.archive_with_reason.call_args.args[1]
+    assert "48h" in reason
+    assert "No activity" in reason
 
 
 def test_the_cutoff_is_48_hours(repo):
@@ -71,7 +81,7 @@ def test_an_item_somebody_claimed_is_never_expired(repo):
     repo.fetch_untouched_open_items.return_value = [_row(claimed_by="alice")]
     with patch("sre_agent.inbox._publish_event"):
         assert expire_untouched_items() == 0
-    assert not repo.update_status.called
+    assert not repo.archive_with_reason.called
 
 
 def test_a_pinned_item_is_never_expired(repo):
@@ -79,7 +89,7 @@ def test_a_pinned_item_is_never_expired(repo):
     repo.fetch_untouched_open_items.return_value = [_row(pinned_by='["alice"]')]
     with patch("sre_agent.inbox._publish_event"):
         assert expire_untouched_items() == 0
-    assert not repo.update_status.called
+    assert not repo.archive_with_reason.called
 
 
 def test_a_task_a_person_created_is_never_expired(repo):
@@ -87,14 +97,14 @@ def test_a_task_a_person_created_is_never_expired(repo):
     repo.fetch_untouched_open_items.return_value = [_row(created_by="alice")]
     with patch("sre_agent.inbox._publish_event"):
         assert expire_untouched_items() == 0
-    assert not repo.update_status.called
+    assert not repo.archive_with_reason.called
 
 
 def test_a_database_error_expires_nothing(repo):
     """Failing open: never archive work because a query broke."""
     repo.fetch_untouched_open_items.side_effect = RuntimeError("db down")
     assert expire_untouched_items() == 0
-    assert not repo.update_status.called
+    assert not repo.archive_with_reason.called
 
 
 def test_the_sweep_runs_on_the_scan_cycle_not_only_at_startup():
