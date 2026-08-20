@@ -25,7 +25,7 @@ import time
 import uuid
 from typing import Any
 
-from .layers import STANDALONE_CATEGORIES, can_explain, layer_of
+from .layers import can_explain, can_head_episode, layer_of
 
 logger = logging.getLogger("pulse_agent.monitor")
 
@@ -65,12 +65,7 @@ def open_or_touch(finding: dict[str, Any]) -> str | None:
     Returns the episode id, or None if this finding cannot head an episode.
     """
     category = finding.get("category", "")
-    if category in STANDALONE_CATEGORIES:
-        return None
-    # Only infrastructure and platform findings head episodes. A workload
-    # finding heading one would absorb signal-layer findings across the whole
-    # cluster on the strength of a single restarting pod.
-    if layer_of(category) > 1:
+    if not can_head_episode(category, finding.get("findingType", "current")):
         return None
 
     key = _cause_key(finding)

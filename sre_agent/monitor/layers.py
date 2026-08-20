@@ -46,7 +46,6 @@ CATEGORY_LAYER: dict[str, int] = {
     "stuck": L_PLATFORM,
     "hot_loop": L_PLATFORM,
     "daemonsets": L_PLATFORM,
-    "cert_expiry": L_PLATFORM,
     # ── workload ──────────────────────────────────────────────────────────
     "crashloop": L_WORKLOAD,
     "workloads": L_WORKLOAD,
@@ -58,6 +57,7 @@ CATEGORY_LAYER: dict[str, int] = {
     "alerts": L_SIGNAL,
     "slo_burn": L_SIGNAL,
     "security": L_SIGNAL,
+    "cert_expiry": L_SIGNAL,
     "errors": L_SIGNAL,
     "monitoring": L_SIGNAL,
     "audit_config": L_SIGNAL,
@@ -71,6 +71,38 @@ CATEGORY_LAYER: dict[str, int] = {
 # anyone's cause — an outage does not make a scanner broken, and a broken
 # scanner does not crash pods. Kept out of episodes entirely.
 STANDALONE_CATEGORIES = frozenset({"degraded"})
+
+# A finding that describes the future, or a standing posture, is never the
+# cause of something happening now. Found the hard way: running the full
+# scanner set against a live cluster produced seven episodes headed by
+# "Certificate expiring in 9d", between them absorbing 21 of 23 findings. A
+# certificate that expires next week did not crash a pod this morning.
+#
+# The test for heading an episode is not "is this important" but "is this
+# happening now, and can it propagate downward".
+NON_CAUSAL_CATEGORIES = frozenset(
+    {
+        "cert_expiry",  # expires in N days — has not happened yet
+        "memory_pressure",  # predict_linear forecast
+        "disk_pressure",  # predict_linear forecast
+        "security",  # standing posture, not an event
+        "monitoring",  # observations about the monitoring stack
+    }
+)
+
+
+def can_head_episode(category: str, finding_type: str = "current") -> bool:
+    """Whether a finding of this kind may be the cause an episode is built around.
+
+    Three ways to fail: it is about Pulse itself, it forecasts rather than
+    observes, or it sits too far up the stack to explain anything beneath it.
+    """
+    if category in STANDALONE_CATEGORIES or category in NON_CAUSAL_CATEGORIES:
+        return False
+    if finding_type != "current":
+        # Trend and prediction findings describe what has not happened yet.
+        return False
+    return layer_of(category) <= L_PLATFORM
 
 # An unknown category sits at workload level: it can be explained by
 # infrastructure, and it will not silently swallow anything beneath it.

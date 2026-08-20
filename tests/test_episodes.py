@@ -234,3 +234,53 @@ def test_the_symptom_index_survives_a_database_error(repo):
     """Ranking must degrade to 'no episodes' rather than take the scan down."""
     repo.open_symptom_index.side_effect = RuntimeError("db down")
     assert ep.symptom_keys_by_episode() == {}
+
+
+# ── over-attachment, found by running against a live cluster ──────────────
+# The unit tests above all passed while the engine did this: a full scan of a
+# real cluster produced seven episodes headed by "Certificate expiring in 9d",
+# between them absorbing 21 of 23 findings. Every guard was working; the layer
+# assignment was simply wrong. These fix the class.
+
+
+def test_a_certificate_expiring_next_week_cannot_head_an_episode(repo):
+    """It has not happened yet, so it has caused nothing."""
+    assert ep.open_or_touch(_finding("cert_expiry", "Certificate addon-webhook expiring in 9d")) is None
+
+
+def test_a_security_posture_finding_cannot_head_an_episode(repo):
+    """A standing posture is a property of the cluster, not an event in it."""
+    assert ep.open_or_touch(_finding("security", "88 privileged containers across 16 namespaces")) is None
+
+
+def test_a_forecast_cannot_head_an_episode_even_at_the_infrastructure_layer(repo):
+    """Node memory exhaustion predicted in 3 days did not crash anything today."""
+    forecast = _finding("memory_pressure", "Node ip-10-0-1-24 memory exhaustion predicted in 3 days")
+    forecast["findingType"] = "trend"
+    assert ep.open_or_touch(forecast) is None
+
+
+def test_a_current_infrastructure_finding_still_heads_one(repo):
+    """The fix must not silence the case the feature exists for."""
+    assert ep.open_or_touch(ETCD) is not None
+
+
+@pytest.mark.parametrize(
+    "category,finding_type,expected",
+    [
+        ("control_plane", "current", True),
+        ("nodes", "current", True),
+        ("stuck", "current", True),
+        ("hot_loop", "current", True),
+        ("cert_expiry", "current", False),
+        ("security", "current", False),
+        ("memory_pressure", "trend", False),
+        ("crashloop", "current", False),
+        ("alerts", "current", False),
+        ("degraded", "current", False),
+    ],
+)
+def test_the_full_can_head_matrix(category, finding_type, expected):
+    from sre_agent.monitor.layers import can_head_episode
+
+    assert can_head_episode(category, finding_type) is expected
