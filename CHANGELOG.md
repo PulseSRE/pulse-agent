@@ -4,6 +4,19 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### Episodes — one event with a cause, instead of N things that are wrong
+
+The product had `findings` and `inbox_items`. Both mean "this is wrong". Neither means "this happened". So when one cause produced fourteen wrong things, there were fourteen equal rows and no way to say they were one event.
+
+Measured on the cluster this was built against: at 20:35 during a control-plane outage the monitor produced fourteen findings inside a single second — nine `Deployment degraded` rated critical, three pod restarts, and one `etcdMemberCommunicationSlow` rated *warning*. The warning was the cause of the other thirteen and did not make the top thirteen by priority.
+
+- New `episodes` and `episode_symptoms` tables (migration 026). Named episodes because `incidents` was already taken by the agent's memory store and the UI's "Incident Center" is a findings list — the word was spoken for twice and meant neither thing
+- New causal layer model: infrastructure → platform → workload → signal. A finding may only be explained by one strictly beneath it, so a crashing pod can never absorb a failing API server, and two crashlooping pods are never evidence about each other (burst correlation already handles same-layer siblings)
+- Only infrastructure and platform findings may head an episode. A single restarting pod heading one would absorb signal-layer findings across the whole cluster
+- A symptom must have been first seen at or after the cause, with a 3-minute grace for detection lag. Something already broken an hour earlier was not caused by the thing that started now
+- Episodes are DB-backed, unlike the in-memory `_last_findings` they sit beside — which lost every open condition on restart, and with it the ability to ever resolve anything created before one
+- Recurrence is recorded: the same cause returning within 24h links to the prior episode. "Sixth time today, escalating" was the most actionable sentence available about that outage and a human found it by hand
+- `GET /episodes`, `GET /episodes/{id}`, `POST /episodes/{id}/detach`. Detachment is stored rather than deleted and never re-attached — an operator saying "this was not caused by that" is the only ground truth the system gets about its own correlation, and it arrives as a by-product of them doing their job
 ### Pulse now admits when it is broken
 
 The rule: **absence of findings must never be indistinguishable from absence of problems.**

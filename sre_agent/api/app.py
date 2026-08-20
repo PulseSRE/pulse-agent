@@ -28,6 +28,7 @@ from .analytics_rest import router as analytics_router
 from .auth import verify_token
 from .chat_rest import router as chat_router
 from .debug_rest import router as debug_router
+from .episode_rest import router as episode_router
 from .eval_rest import router as eval_router
 from .fix_rest import router as fix_router
 from .inbox_rest import router as inbox_router
@@ -239,6 +240,7 @@ app.include_router(recommendations_router)
 app.include_router(topology_router)
 app.include_router(metrics_router)
 app.include_router(inbox_router)
+app.include_router(episode_router)
 app.include_router(debug_router)
 
 # Prometheus scrape endpoint. Mounted AFTER the routers on purpose: a Starlette

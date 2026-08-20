@@ -57,6 +57,19 @@ def _resolve_finding_inbox(finding_id: str, finding: dict | None = None) -> None
         logger.debug("Failed to resolve inbox item for finding %s", finding_id, exc_info=True)
 
 
+def _close_episode_for(finding: dict) -> None:
+    """Close the episode this finding heads, if it heads one."""
+    try:
+        from ..inbox import _finding_corr_key
+        from .episodes import close_for_correlation
+
+        key = _finding_corr_key(finding)
+        if key:
+            close_for_correlation(key)
+    except Exception:
+        logger.debug("Could not close episode for finding", exc_info=True)
+
+
 class ClusterMonitor:
     """Singleton that owns the scan loop and investigation pipeline.
 
@@ -66,10 +79,33 @@ class ClusterMonitor:
 
     _MAX_FINDINGS = 500
 
+    def _correlate_episodes(self, findings: list[dict]) -> None:
+        """Open episodes for cause-capable findings and attach what they explain.
+
+        Called with every finding currently standing, so a cause found three
+        cycles ago can still absorb a symptom that only appeared this cycle.
+        """
+        from ..inbox import _finding_corr_key
+        from .episodes import attach_symptoms, open_or_touch
+
+        first_seen = {}
+        for f in findings:
+            key = _finding_corr_key(f)
+            if key:
+                first_seen[key] = self._first_seen.get(_finding_key(f), int(time.time()))
+
+        for f in findings:
+            episode_id = open_or_touch(f)
+            if episode_id:
+                attach_symptoms(episode_id, f.get("category", ""), findings, first_seen)
+
     def __init__(self) -> None:
         self.running = False
         self.scan_interval = get_settings().monitor.scan_interval
         self._subscribers: list[MonitorClient] = []
+        # When each condition was first observed. Episodes need it to tell a
+        # symptom from something that was already broken before the cause.
+        self._first_seen: dict[str, int] = {}
         self._subscribers_lock = asyncio.Lock()
 
         # Scan state — previously owned by MonitorSession
@@ -692,12 +728,21 @@ class ClusterMonitor:
 
                 new_findings.append(f)
                 self._last_findings[key] = f
+                self._first_seen.setdefault(key, int(time.time()))
 
         if len(self._last_findings) > self._MAX_FINDINGS:
             excess = len(self._last_findings) - self._MAX_FINDINGS
             oldest_keys = list(self._last_findings.keys())[:excess]
             for k in oldest_keys:
                 del self._last_findings[k]
+
+        # Episode correlation. Runs on every finding still standing this cycle,
+        # not just the new ones: a cause detected three cycles ago must still
+        # be able to absorb a symptom that only appeared now.
+        try:
+            await asyncio.to_thread(self._correlate_episodes, list(self._last_findings.values()))
+        except Exception:
+            logger.exception("Episode correlation failed")
 
         # Resolution events
         stale_keys = set(self._last_findings.keys()) - current_keys
@@ -718,6 +763,8 @@ class ClusterMonitor:
                     "timestamp": _ts(),
                 }
             )
+            self._first_seen.pop(key, None)
+            asyncio.get_running_loop().run_in_executor(None, _close_episode_for, resolved_finding)
             if finding_id:
                 asyncio.get_running_loop().run_in_executor(None, mark_finding_actions_resolved, finding_id)
                 asyncio.get_running_loop().run_in_executor(None, _resolve_finding_inbox, finding_id, resolved_finding)
