@@ -28,10 +28,21 @@ sed -i.bak "s/^version: .*/version: $VERSION/" "$REPO_ROOT/chart/Chart.yaml"
 sed -i.bak "s/^appVersion: .*/appVersion: \"$VERSION\"/" "$REPO_ROOT/chart/Chart.yaml"
 rm -f "$REPO_ROOT/chart/Chart.yaml.bak"
 
+# Update the README release badge. Missed on the 2.12.0 bump and caught only
+# by the CI docs-consistency check, which asserts the README mentions the
+# packaged version. Doing it here means the check has nothing left to catch.
+sed -i.bak -E "s|releases/tag/v[0-9]+\.[0-9]+\.[0-9]+|releases/tag/v$VERSION|; s|badge/release-v[0-9]+\.[0-9]+\.[0-9]+|badge/release-v$VERSION|" "$REPO_ROOT/README.md"
+rm -f "$REPO_ROOT/README.md.bak"
+
 # Verify
 PY_VER=$(grep '^version = ' "$REPO_ROOT/pyproject.toml" | sed 's/version = "\(.*\)"/\1/')
 CHART_VER=$(grep '^version: ' "$REPO_ROOT/chart/Chart.yaml" | awk '{print $2}')
 APP_VER=$(grep '^appVersion: ' "$REPO_ROOT/chart/Chart.yaml" | sed 's/appVersion: "\(.*\)"/\1/')
+
+if ! grep -q "release-v$VERSION" "$REPO_ROOT/README.md"; then
+    echo "Error: README release badge was not updated to $VERSION"
+    exit 1
+fi
 
 if [[ "$PY_VER" != "$VERSION" || "$CHART_VER" != "$VERSION" || "$APP_VER" != "$VERSION" ]]; then
     echo "Error: version sync failed!"
