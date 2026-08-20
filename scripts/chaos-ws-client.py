@@ -143,9 +143,7 @@ def main() -> None:
     signal.signal(signal.SIGINT, _shutdown)
 
     try:
-        loop.run_until_complete(
-            run(args.url, args.token, args.output, args.trust_level, categories)
-        )
+        loop.run_until_complete(run(args.url, args.token, args.output, args.trust_level, categories))
     except RuntimeError:
         pass  # loop.stop() from signal handler
 
