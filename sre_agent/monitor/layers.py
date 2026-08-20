@@ -130,4 +130,11 @@ def can_explain(cause_category: str, symptom_category: str) -> bool:
     """
     if cause_category in STANDALONE_CATEGORIES or symptom_category in STANDALONE_CATEGORIES:
         return False
+    # A forecast or a standing posture is nobody's symptom either. Seen on a
+    # live cluster: 117 "Security: Resource Limits" findings attached to an
+    # etcd write failure, because a posture finding sits at the signal layer
+    # and the layer test alone said yes. Having too many privileged containers
+    # is a property of the cluster, not something etcd did to it.
+    if symptom_category in NON_CAUSAL_CATEGORIES:
+        return False
     return layer_of(cause_category) < layer_of(symptom_category)

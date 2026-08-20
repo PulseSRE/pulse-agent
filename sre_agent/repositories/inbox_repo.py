@@ -131,7 +131,10 @@ class InboxRepository(BaseRepository):
             WHERE status IN ('new', 'triaged')
             AND updated_at < ?
             AND claimed_by IS NULL
-            AND pinned_by IS NULL""",
+            -- pinned_by is a JSON list and defaults to '[]', never NULL. An
+            -- IS NULL test here matched no row in the table, so expiry could
+            -- never fire; the empty-list case is the one that means unpinned.
+            AND coalesce(pinned_by, '[]') IN ('[]', '')""",
             (cutoff,),
         )
 

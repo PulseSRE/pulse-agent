@@ -116,3 +116,19 @@ def test_the_sweep_runs_on_the_scan_cycle_not_only_at_startup():
     source = inspect.getsource(run_generator_cycle)
     assert "sweep_stale_items()" in source
     assert "expire_untouched_items()" in source
+
+
+def test_the_query_matches_unpinned_rows_rather_than_null_ones():
+    """pinned_by is a JSON list defaulting to '[]', never NULL.
+
+    The first version filtered `pinned_by IS NULL`, which matched no row in
+    the table — 323 of 323 had '[]' — so expiry silently never fired. The
+    tests passed because they stubbed the repository and never ran the SQL.
+    """
+    import inspect
+
+    from sre_agent.repositories.inbox_repo import InboxRepository
+
+    sql = inspect.getsource(InboxRepository.fetch_untouched_open_items)
+    assert "pinned_by IS NULL" not in sql
+    assert "'[]'" in sql
