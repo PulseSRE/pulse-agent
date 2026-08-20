@@ -5,7 +5,7 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/alimobrem/pulse-agent/releases/tag/v2.9.0"><img src="https://img.shields.io/badge/release-v2.9.0-2563eb?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/PulseSRE/pulse-agent/releases/tag/v2.9.0"><img src="https://img.shields.io/badge/release-v2.9.0-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-154_(118+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
   <img src="https://img.shields.io/badge/scanners-26-10b981?style=for-the-badge" alt="Scanners">
@@ -16,7 +16,16 @@
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 
-AI-powered OpenShift/Kubernetes SRE and Security Agent built on Claude. Pulse Agent connects to your cluster via the Kubernetes API and uses Claude Opus for diagnostics, incident triage, security audits, and automated remediation -- all through natural language. It pairs with the [OpenShift Pulse](https://github.com/PulseSRE/pulse-ui) UI for rich incident management, or runs standalone as a CLI. Both are deployed together via the [pulse-operator](https://github.com/PulseSRE/pulse-operator) — see [Deploy to OpenShift](#deploy-to-openshift) below.
+AI-powered OpenShift SRE and Security Agent built on Claude. Pulse Agent connects to your cluster via the Kubernetes API and uses Claude Opus for diagnostics, incident triage, security audits, and automated remediation -- all through natural language. It pairs with the [OpenShift Pulse](https://github.com/PulseSRE/pulse-ui) UI for rich incident management, or runs standalone as a CLI. Both are deployed together via the [pulse-operator](https://github.com/PulseSRE/pulse-operator) — see [Deploy to OpenShift](#deploy-to-openshift) below.
+
+> **Runs on OpenShift, not vanilla Kubernetes.** The deployed product uses
+> `route.openshift.io` for ingress, `oauth.openshift.io` for single sign-on, and
+> `config.openshift.io` to discover the cluster's application domain. There is no
+> Ingress fallback and no capability detection, so on a cluster without those APIs
+> the install fails rather than degrades. OpenShift 4.12+ is required — see the
+> [operator's prerequisites](https://github.com/PulseSRE/pulse-operator#prerequisites).
+> The CLI below is a developer workflow and will talk to any cluster your
+> kubeconfig points at; only the deployed product is OpenShift-bound.
 
 **Docs:** [Operator (install)](https://github.com/PulseSRE/pulse-operator) | [API Contract](API_CONTRACT.md) | [Architecture](docs/ARCHITECTURE.md) | [Database](DATABASE.md) | [Security](SECURITY.md) | [Design Principles](DESIGN_PRINCIPLES.md) | [Testing & Evals](TESTING.md) | [Skill Developer Guide](docs/SKILL_DEVELOPER_GUIDE.md) | [Contributing](CONTRIBUTING.md) | [Changelog](CHANGELOG.md)
 
@@ -142,14 +151,14 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 ### Prerequisites
 
 - **Python 3.12+**
-- **Access to a Kubernetes or OpenShift cluster** (`oc login` or valid `~/.kube/config`)
+- **Access to a Kubernetes or OpenShift cluster** (`oc login` or valid `~/.kube/config`) — the CLI itself is not OpenShift-bound; the deployed product is
 - **Claude API access** via Anthropic API key or Google Vertex AI project
 - **PostgreSQL 14+** for data persistence (optional for basic CLI use, required for memory/monitor/views)
 
 ### Install
 
 ```bash
-git clone https://github.com/alimobrem/pulse-agent.git
+git clone https://github.com/PulseSRE/pulse-agent.git
 cd pulse-agent
 pip install -e .
 ```
@@ -214,9 +223,11 @@ podman run -d --name pulse-pg \
 export PULSE_AGENT_DATABASE_URL=postgresql://pulse:pulse@localhost:5433/pulse_test
 ```
 
-Schema migrations (currently at v016) are applied automatically on startup.
+Schema migrations are applied automatically on startup.
 
 ## Deploy to OpenShift
+
+The [pulse-operator README](https://github.com/PulseSRE/pulse-operator#install-via-olm) is the canonical install guide — it is the only place the steps are maintained, so anything here that contradicts it is wrong.
 
 **Install via the [pulse-operator](https://github.com/PulseSRE/pulse-operator)** — an OLM-managed Kubernetes Operator that deploys this agent alongside the [OpenShift Pulse](https://github.com/PulseSRE/pulse-ui) UI and PostgreSQL from a single `OpenShiftPulse` custom resource. See the operator's [README](https://github.com/PulseSRE/pulse-operator#install-via-olm) for the full CatalogSource → Subscription → CR walkthrough.
 
@@ -242,7 +253,7 @@ Key CR fields relevant to this agent (set on the `OpenShiftPulse` resource, not 
 
 ## UI (OpenShift Pulse)
 
-The [OpenShift Pulse](https://github.com/alimobrem/OpenshiftPulse) frontend is a React/TypeScript application that connects to the agent via WebSocket. Key surfaces:
+The [OpenShift Pulse](https://github.com/PulseSRE/pulse-ui) frontend is a React/TypeScript application that connects to the agent via WebSocket. Key surfaces:
 
 ### Incident Center
 6 tabs for full incident lifecycle management:
@@ -390,9 +401,9 @@ All WebSocket endpoints require `?token=...` query parameter (constant-time comp
 </p>
 
 <p align="center">
-  <a href="https://github.com/alimobrem/pulse-agent/releases">Releases</a> &bull;
-  <a href="https://github.com/alimobrem/OpenshiftPulse">Pulse UI</a> &bull;
-  <a href="https://github.com/alimobrem/pulse-agent/issues">Issues</a>
+  <a href="https://github.com/PulseSRE/pulse-agent/releases">Releases</a> &bull;
+  <a href="https://github.com/PulseSRE/pulse-ui">Pulse UI</a> &bull;
+  <a href="https://github.com/PulseSRE/pulse-agent/issues">Issues</a>
 </p>
 
 <p align="center">MIT License</p>
