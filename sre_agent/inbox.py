@@ -217,6 +217,35 @@ def _collapse_episode_symptoms(items: list[dict[str, Any]]) -> tuple[list[dict[s
     return kept, collapsed
 
 
+def _collapse_episode_symptoms_everywhere(
+    ungrouped: list[dict[str, Any]], groups: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    """Collapse symptoms out of the loose items *and* out of any groups.
+
+    Collapsing only the loose list meant the feature quietly stopped working
+    whenever "group by correlation" was on: an episode's symptoms that happened
+    to be grouped stayed in the queue while the rest disappeared, which is
+    worse than either behaviour on its own.
+
+    A group left with one item is no longer a group, so it is unwrapped back
+    into the loose list rather than rendered as a group of one.
+    """
+    kept, collapsed = _collapse_episode_symptoms(ungrouped)
+
+    remaining_groups: list[dict[str, Any]] = []
+    for group in groups:
+        group_kept, group_collapsed = _collapse_episode_symptoms(group.get("items") or [])
+        collapsed += group_collapsed
+        if not group_kept:
+            continue
+        if len(group_kept) == 1:
+            kept.extend(group_kept)
+            continue
+        remaining_groups.append({**group, "items": group_kept, "count": len(group_kept)})
+
+    return kept, remaining_groups, collapsed
+
+
 def list_inbox_items(
     item_type: str | None = None,
     status: str | None = None,
@@ -303,7 +332,7 @@ def list_inbox_items(
     else:
         ungrouped = items
 
-    ungrouped, collapsed = _collapse_episode_symptoms(ungrouped)
+    ungrouped, groups, collapsed = _collapse_episode_symptoms_everywhere(ungrouped, groups)
     all_for_stats = ungrouped + [i for g in groups for i in g["items"]]
     return {
         "items": ungrouped,
@@ -452,7 +481,7 @@ async def async_list_inbox_items(
     else:
         ungrouped = items
 
-    ungrouped, collapsed = _collapse_episode_symptoms(ungrouped)
+    ungrouped, groups, collapsed = _collapse_episode_symptoms_everywhere(ungrouped, groups)
     all_for_stats = ungrouped + [i for g in groups for i in g["items"]]
     return {
         "items": ungrouped,
