@@ -154,6 +154,19 @@ def close_for_correlation(correlation_key: str) -> bool:
     return True
 
 
+def dismiss(episode_id: str, actor: str) -> bool:
+    """Close an episode because an operator says it is over.
+
+    If the cause genuinely re-fires later it opens a *new* episode with
+    recurrence_of set, rather than staying dismissed. Silently suppressing a
+    live problem forever is how alerting systems lose the people using them.
+    """
+    if not _repo().dismiss(episode_id, actor, _now()):
+        return False
+    logger.info("Episode %s dismissed by %s", episode_id, actor)
+    return True
+
+
 def detach(episode_id: str, correlation_key: str, actor: str) -> bool:
     """Record that an operator says this symptom was not caused by this episode.
 

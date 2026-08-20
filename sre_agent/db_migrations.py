@@ -343,6 +343,18 @@ def _migrate_026_episodes(db: Database) -> None:
     db.executescript(EPISODES_SCHEMA)
 
 
+def _migrate_027_episode_dismissal(db: Database) -> None:
+    """Let an operator close an episode the scanner will not close itself.
+
+    Without this the only way an episode ended was its cause finding
+    resolving, so a card whose cause had genuinely stopped — but whose metric
+    window had not yet rolled over — could not be cleared by anyone. The
+    window bug is fixed separately; this is the escape hatch for the next time
+    something similar is true.
+    """
+    db.execute("ALTER TABLE episodes ADD COLUMN IF NOT EXISTS dismissed_by TEXT")
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -370,4 +382,5 @@ MIGRATIONS = [
     (24, "inbox_mutes", _migrate_024_inbox_mutes),
     (25, "rekey_inbox_correlation_keys", _migrate_025_rekey_inbox_correlation_keys),
     (26, "episodes", _migrate_026_episodes),
+    (27, "episode_dismissal", _migrate_027_episode_dismissal),
 ]

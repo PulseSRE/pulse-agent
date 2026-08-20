@@ -11,7 +11,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..monitor.episodes import changes_around, detach, list_open, recurrence_summary
+from ..monitor.episodes import changes_around, detach, dismiss, list_open, recurrence_summary
 from ..repositories.episode_repo import get_episode_repo
 from .auth import get_owner, verify_token
 
@@ -64,3 +64,15 @@ async def rest_detach_symptom(episode_id: str, body: dict, owner: str = Depends(
             detail=f"{correlation_key} is not attached to {episode_id}",
         )
     return {"status": "detached", "episodeId": episode_id, "correlationKey": correlation_key}
+
+
+@router.post("/episodes/{episode_id}/dismiss")
+async def rest_dismiss_episode(episode_id: str, owner: str = Depends(get_owner)):
+    """Close an episode an operator says is over.
+
+    The cause re-firing later opens a new episode rather than reviving this
+    one, so dismissing cannot hide a problem that comes back.
+    """
+    if not dismiss(episode_id, owner):
+        raise HTTPException(status_code=404, detail=f"No open episode {episode_id}")
+    return {"status": "dismissed", "episodeId": episode_id, "dismissedBy": owner}

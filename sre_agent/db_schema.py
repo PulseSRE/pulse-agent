@@ -578,7 +578,8 @@ CREATE TABLE IF NOT EXISTS episodes (
     symptom_count     INTEGER NOT NULL DEFAULT 0,
     namespaces        TEXT NOT NULL DEFAULT '[]',
     correlation_key   TEXT NOT NULL,
-    recurrence_of     TEXT
+    recurrence_of     TEXT,
+    dismissed_by      TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_episodes_status ON episodes (status);

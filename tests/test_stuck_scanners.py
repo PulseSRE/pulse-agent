@@ -239,6 +239,17 @@ def test_system_namespaces_are_not_skipped(k8s):
 # ── Hot reconcile loops ───────────────────────────────────────────────────
 
 
+def _sustained_threshold(query: str) -> float:
+    """The threshold on the sustained half of a two-window check.
+
+    Queries read "(long > T) and (short > T2)". Splitting on the last ">"
+    finds T2, which is the guard that clears the finding, not the one that
+    raises it.
+    """
+    sustained = query.split(" and ")[0]
+    return float(sustained.rsplit(">", 1)[1].strip().rstrip(")"))
+
+
 def _promql_result(metric: dict, value: float):
     return {"metric": metric, "value": [0, str(value)]}
 
@@ -267,6 +278,7 @@ def test_retry_threshold_is_expressed_in_the_query():
         _scan_controller_retries()
     assert "workqueue_retries_total[1h]" in seen[0]
     assert "> 20.0" in seen[0]
+    assert " and " in seen[0], "sustained check needs a current-signal guard"
 
 
 def test_write_amplification_query_excludes_structurally_noisy_resources():
@@ -466,7 +478,7 @@ def test_measured_healthy_values_stay_below_every_threshold(healthy_value, query
     with patch(f"{MODULE}._query", side_effect=lambda q: seen.append(q) or []):
         scan()
     query = next(q for q in seen if query_marker in q)
-    threshold = float(query.rsplit(">", 1)[1].strip())
+    threshold = _sustained_threshold(query)
     assert healthy_value < threshold, f"{query_marker}: healthy {healthy_value} would fire at {threshold}"
 
 
@@ -486,7 +498,7 @@ def test_measured_incident_values_are_above_every_threshold(incident_value, quer
     with patch(f"{MODULE}._query", side_effect=lambda q: seen.append(q) or []):
         scan()
     query = next(q for q in seen if query_marker in q)
-    threshold = float(query.rsplit(">", 1)[1].strip())
+    threshold = _sustained_threshold(query)
     assert incident_value > threshold, f"{query_marker}: incident {incident_value} would be missed at {threshold}"
 
 
