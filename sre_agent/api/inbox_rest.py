@@ -23,7 +23,7 @@ from ..inbox import (
     unclaim_item,
     update_item_status,
 )
-from .auth import get_owner, verify_token
+from .auth import get_owner, require_admin, verify_token
 
 router = APIRouter(tags=["inbox"], dependencies=[Depends(verify_token)])
 
@@ -79,6 +79,42 @@ async def list_muted_conditions(_auth=Depends(verify_token)):
     from ..repositories.inbox_repo import get_inbox_repo
 
     return {"mutes": [dict(r) for r in get_inbox_repo().list_mutes()]}
+
+
+# Declared before /inbox/{item_id} for the same reason as /inbox/mutes above.
+@router.post("/inbox/reset")
+async def rest_reset_inbox(actor: str = Depends(require_admin)):
+    """Re-baseline the inbox: archive what is open, then rescan from now.
+
+    Gated on a real authenticated user rather than the shared UI token. This
+    clears a queue several people may be working from, and "somebody with the
+    UI credential did it" is not an answer to who.
+
+    The rescan is awaited rather than left to the next cycle. A reset that
+    empties the inbox and hands back a blank page looks like data loss for
+    however long the scan interval is; coming back already refilled with what
+    is true now is the whole point of the button.
+    """
+    import asyncio
+
+    from ..inbox import reset_inbox
+
+    result = await asyncio.to_thread(reset_inbox, actor)
+
+    try:
+        from ..monitor import get_cluster_monitor
+
+        monitor = await get_cluster_monitor()
+        await monitor.run_scan()
+        result["rescanned"] = True
+    except Exception as e:
+        # The reset itself succeeded and is already durable. Say the rescan
+        # did not happen rather than failing the whole call and leaving the
+        # caller unsure which half took effect.
+        logger.error("Post-reset scan failed: %s", e)
+        result["rescanned"] = False
+        result["rescan_error"] = str(e)[:200]
+    return result
 
 
 @router.get("/inbox/{item_id}")

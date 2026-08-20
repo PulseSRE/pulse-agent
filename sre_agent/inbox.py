@@ -570,6 +570,118 @@ def expire_untouched_items() -> int:
     return expired
 
 
+def _current_restart_counts() -> list[dict]:
+    """Every container's restart count right now, for the reset snapshot.
+
+    Failure here is not fatal to the reset. Without a snapshot the inbox still
+    clears and the watermark still applies; restart findings simply report
+    lifetime counts, which is what they did before resets existed.
+    """
+    from .errors import ToolError
+    from .k8s_client import get_core_client, safe
+
+    pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
+    if isinstance(pods, ToolError):
+        _inbox_logger.warning("Reset could not snapshot restart counts: %s", pods)
+        return []
+    counts = []
+    for pod in pods.items:
+        for cs in pod.status.container_statuses or []:
+            counts.append(
+                {
+                    "namespace": pod.metadata.namespace,
+                    "pod": pod.metadata.name,
+                    "container": cs.name,
+                    "restart_count": cs.restart_count,
+                }
+            )
+    return counts
+
+
+def reset_inbox(actor: str) -> dict:
+    """Archive everything open, mark a new baseline, and let the next scan refill.
+
+    Nothing is deleted. Every item keeps its row and its history; they move to
+    ``archived`` with a reason naming who reset and when, so the record of what
+    the cluster looked like survives even though the queue no longer shows it.
+
+    Pinned and claimed items are archived along with everything else. That is
+    the instruction — a reset that leaves things behind is not a reset — but
+    the counts come back in the response so a caller can say out loud what it
+    is about to take, rather than quietly dropping somebody's marked work.
+
+    What returns after this is what is *true now*: current-state findings
+    reappear on the next scan if they still hold, and counting findings start
+    from zero. That is the whole point. An inbox that says a pod restarted 122
+    times, when 118 of those were yesterday, is reporting history as though it
+    were news.
+    """
+    from .monitor import baseline
+    from .monitor.episodes import dismiss as dismiss_episode
+    from .monitor.episodes import list_open as list_open_episodes
+    from .repositories.reset_repo import get_reset_repo
+
+    repo = get_inbox_repo()
+    reset_repo = get_reset_repo()
+    now = int(time.time())
+
+    reset_id = reset_repo.record(reset_at=now, reset_by=actor or "unknown")
+
+    # Snapshot before archiving. If the snapshot fails the reset still stands;
+    # doing it first only means a crash leaves a baseline nobody reads.
+    try:
+        snapshot = _current_restart_counts()
+        saved = reset_repo.save_restart_baseline(reset_id, snapshot)
+        reset_repo.prune_baselines_before(reset_id)
+    except Exception:
+        _inbox_logger.exception("Reset baseline snapshot failed — restart counts stay cumulative")
+        saved = 0
+
+    rows = repo.fetch_all_open_items()
+    archived = pinned = claimed = 0
+    for row in rows:
+        item = _deserialize_row(row)
+        if item.get("pinned_by"):
+            pinned += 1
+        if item.get("claimed_by"):
+            claimed += 1
+        repo.archive_with_reason(item["id"], f"Inbox reset by {actor}", item.get("metadata") or {}, now)
+        _publish_event("inbox_item_updated", item["id"], {"status": "archived", "reason": "reset"})
+        archived += 1
+    if archived:
+        repo.commit()
+
+    # Episodes outlive their symptoms, so clearing the inbox without closing
+    # them would leave a banner pointing at symptoms that are no longer there.
+    episodes_closed = 0
+    for episode in list_open_episodes():
+        if dismiss_episode(episode["id"], f"reset:{actor}"):
+            episodes_closed += 1
+
+    reset_repo.record_outcome(reset_id=reset_id, items_archived=archived, episodes_closed=episodes_closed)
+    baseline.invalidate()
+
+    _inbox_logger.info(
+        "Inbox reset by %s — archived %d items (%d pinned, %d claimed), closed %d episodes, baselined %d containers",
+        actor,
+        archived,
+        pinned,
+        claimed,
+        episodes_closed,
+        saved,
+    )
+    return {
+        "reset_id": reset_id,
+        "reset_at": now,
+        "reset_by": actor,
+        "items_archived": archived,
+        "pinned_archived": pinned,
+        "claimed_archived": claimed,
+        "episodes_closed": episodes_closed,
+        "containers_baselined": saved,
+    }
+
+
 def update_item_status(item_id: str, new_status: str, actor: str = "") -> bool:
     item = get_inbox_item(item_id)
     if item is None:
