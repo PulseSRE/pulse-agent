@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from .errors import ToolError
 from .k8s_client import get_apps_client, get_core_client, get_custom_client, get_rbac_client, safe
 from .monitor import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING, _make_finding, _skip_namespace
+from .monitor.scanner_health import report_failure
 
 logger = logging.getLogger("pulse_agent")
 
@@ -96,6 +97,7 @@ def scan_config_changes() -> list[dict]:
 
     except Exception as e:
         logger.error("Config change scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -186,6 +188,7 @@ def scan_rbac_changes() -> list[dict]:
 
     except Exception as e:
         logger.error("RBAC change scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -287,6 +290,7 @@ def scan_recent_deployments() -> list[dict]:
 
     except Exception as e:
         logger.error("Deployment audit scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -346,6 +350,7 @@ def scan_warning_events() -> list[dict]:
 
     except Exception as e:
         logger.error("Warning events scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -483,4 +488,5 @@ def scan_auth_events() -> list[dict]:
 
     except Exception as e:
         logger.error("Auth events scan failed: %s", e)
+        report_failure(e)
     return findings

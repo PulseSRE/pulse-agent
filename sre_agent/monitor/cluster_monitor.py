@@ -36,6 +36,9 @@ try:
     _METRICS_AVAILABLE = True
 except ImportError:
     _METRICS_AVAILABLE = False
+from .scanner_health import get_failure as get_reported_failure
+from .scanner_health import reset as reset_reported_failures
+from .scanner_health import scanning
 from .webhook import _send_webhook
 
 if TYPE_CHECKING:
@@ -602,21 +605,36 @@ class ClusterMonitor:
             scanner_start = time.monotonic()
             meta = scanner.meta
             try:
-                if getattr(scanner, "is_async", False):
-                    findings = await scanner.async_scan(shared_resources)
-                else:
-                    findings = await asyncio.to_thread(scanner.scan, shared_resources)
+                with scanning(meta.name):
+                    if getattr(scanner, "is_async", False):
+                        findings = await scanner.async_scan(shared_resources)
+                    else:
+                        findings = await asyncio.to_thread(scanner.scan, shared_resources)
                 elapsed_ms = int((time.monotonic() - scanner_start) * 1000)
+                # A scanner that caught its own error still returns a list, and
+                # an empty list is what a healthy scan of a healthy cluster
+                # returns too. Only the scanner knows which happened, so take
+                # its word for it rather than reading "clean" off the shape.
+                self_reported = get_reported_failure(meta.name)
+                if self_reported:
+                    status = "error"
+                elif findings:
+                    status = "warning"
+                else:
+                    status = "clean"
+                result = {
+                    "name": meta.name,
+                    "displayName": meta.display_name,
+                    "description": meta.description,
+                    "duration_ms": elapsed_ms,
+                    "findings_count": len(findings) if isinstance(findings, list) else 0,
+                    "checks": list(meta.checks),
+                    "status": status,
+                }
+                if self_reported:
+                    result["error"] = self_reported
                 return {
-                    "result": {
-                        "name": meta.name,
-                        "displayName": meta.display_name,
-                        "description": meta.description,
-                        "duration_ms": elapsed_ms,
-                        "findings_count": len(findings) if isinstance(findings, list) else 0,
-                        "checks": list(meta.checks),
-                        "status": "warning" if findings else "clean",
-                    },
+                    "result": result,
                     "findings": findings if isinstance(findings, list) else [],
                 }
             except Exception as e:
@@ -636,6 +654,7 @@ class ClusterMonitor:
                     "findings": [],
                 }
 
+        reset_reported_failures()
         parallel_results = await asyncio.gather(*[_run_scanner(s) for s in active_scanners])
         for pr in parallel_results:
             scanner_results.append(pr["result"])
