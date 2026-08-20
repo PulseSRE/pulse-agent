@@ -108,9 +108,12 @@ Unified worklist for findings, alerts, and predictions -- replaces the old multi
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/inbox` | token | List inbox items (filters: status, priority, category, assignee) |
+| `GET` | `/inbox` | token | List inbox items (filters: status, priority, category, assignee). Returns `collapsedIntoEpisodes`: how many items an open episode already explains and were therefore left out  |
 | `GET` | `/inbox/stats` | token | Aggregate inbox counts by status/priority |
 | `GET` | `/inbox/mutes` | token | List active mutes (declared before `/inbox/{item_id}` so it is reachable) |
+| `GET` | `/episodes` | token | Open episodes, newest first, each with cause, symptom count and affected namespaces |
+| `GET` | `/episodes/{id}` | token | One episode: `episode`, `symptoms`, `changes` (config/RBAC/deployment activity in the 30m before it began, each with `seconds_before`), `recurrence` (`occurrences`, `window_seconds`, optional `interval_seconds` when the cadence is regular) |
+| `POST` | `/episodes/{id}/detach` | token + owner | Record that a symptom was not caused by this episode (`{"correlationKey": "..."}`). Stored, never re-attached |
 | `GET` | `/inbox/{item_id}` | token | Get a single inbox item |
 | `POST` | `/inbox` | token | Create a new inbox item |
 | `PATCH` | `/inbox/{item_id}` | token | Update an inbox item |

@@ -156,6 +156,21 @@ class InboxRepository(BaseRepository):
 
     # -- Status updates ------------------------------------------------------
 
+    def archive_with_reason(self, item_id: str, reason: str, metadata: dict[str, Any], now: int) -> None:
+        """Archive an item and record why, so it never just disappears.
+
+        The reason goes in metadata rather than a new column: it is read by the
+        UI to explain the row and by nothing else, and a migration for one
+        string is not worth the schema churn.
+        """
+        metadata = dict(metadata or {})
+        metadata["archived_reason"] = reason
+        metadata["archived_at"] = now
+        self.db.execute(
+            "UPDATE inbox_items SET status = 'archived', metadata = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(metadata), now, item_id),
+        )
+
     def update_status(
         self,
         item_id: str,
