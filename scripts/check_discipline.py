@@ -131,9 +131,7 @@ def check_no_silent_scanner_failure() -> list[str]:
                 if not broad:
                     continue
                 calls = {
-                    n.func.id
-                    for n in ast.walk(handler)
-                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    n.func.id for n in ast.walk(handler) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
                 }
                 logs_it = any(
                     isinstance(n, ast.Call)
@@ -151,12 +149,36 @@ def check_no_silent_scanner_failure() -> list[str]:
     return violations
 
 
+def check_one_unreleased_section() -> list[str]:
+    """CHANGELOG.md must have at most one "## [Unreleased]" heading.
+
+    Several branches each adding their own Unreleased section merge without a
+    conflict, because they land at different offsets in the file. The result is
+    two sections that both look current, and a release promotes only one of
+    them — so half the entries silently ship under the wrong version, or none.
+
+    This happened twice in one day across two repos before anyone noticed,
+    which is the argument for checking it rather than watching for it.
+    """
+    changelog = ROOT / "CHANGELOG.md"
+    if not changelog.exists():
+        return []
+    count = sum(1 for line in changelog.read_text().splitlines() if line.strip() == "## [Unreleased]")
+    if count > 1:
+        return [
+            f"CHANGELOG.md has {count} '## [Unreleased]' sections. A release promotes one "
+            f"and the rest ship under the wrong version or not at all — merge them into one."
+        ]
+    return []
+
+
 def main() -> int:
     failed = False
     for name, check in (
         ("no-silent-skip", check_no_silent_skip),
         ("no-by-value-global-import", check_no_by_value_global_import),
         ("no-silent-scanner-failure", check_no_silent_scanner_failure),
+        ("one-unreleased-section", check_one_unreleased_section),
     ):
         violations = check()
         if violations:

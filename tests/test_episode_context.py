@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from sre_agent.monitor import episodes as ep
 from sre_agent.monitor.episodes import _CHANGE_LOOKBACK_SECONDS, changes_around, recurrence_summary
 
 MODULE = "sre_agent.monitor.episodes"
@@ -143,3 +144,74 @@ def test_a_database_error_reports_no_changes_rather_than_raising(repo):
     repo.get.return_value = _episode("ep-1", 1_786_000_000)
     with patch("sre_agent.repositories.inbox_repo.get_inbox_repo", side_effect=RuntimeError("db down")):
         assert changes_around("ep-1") == []
+
+
+# ── the investigation that already ran ────────────────────────────────────
+# Causes are eligible for automatic investigation, so by the time an operator
+# opens the card the work has usually been attempted — 22 attempts on a live
+# cluster, all failed. Offering a fresh "ask the AI" without showing that
+# gives two routes to the same call and implies nothing was tried.
+
+
+def _investigation(**over):
+    base = {
+        "id": "inv-1",
+        "status": "completed",
+        "summary": "etcd lost quorum briefly",
+        "suspected_cause": "peer latency",
+        "recommended_fix": "check the network path",
+        "confidence": 0.8,
+        "error": None,
+        "timestamp": 1786000000000,
+    }
+    base.update(over)
+    return base
+
+
+def _db_returning(row):
+    db = MagicMock()
+    db.fetchone.return_value = row
+    return patch("sre_agent.db.get_database", return_value=db)
+
+
+def test_the_investigation_already_run_is_returned(repo):
+    repo.get.return_value = {"id": "ep-1", "cause_finding_id": "f-1"}
+    with _db_returning(_investigation()):
+        found = ep.investigation_for("ep-1")
+    assert found["suspected_cause"] == "peer latency"
+    assert found["failed"] is False
+
+
+def test_a_failed_investigation_is_shown_not_hidden(repo):
+    """An empty panel reads as 'nothing worth investigating' — the wrong conclusion."""
+    repo.get.return_value = {"id": "ep-1", "cause_finding_id": "f-1"}
+    with _db_returning(_investigation(status="failed", error="Connection error.", summary=None)):
+        found = ep.investigation_for("ep-1")
+    assert found["failed"] is True
+    assert found["error"] == "Connection error."
+
+
+def test_an_episode_with_no_investigation_returns_none(repo):
+    repo.get.return_value = {"id": "ep-1", "cause_finding_id": "f-1"}
+    with _db_returning(None):
+        assert ep.investigation_for("ep-1") is None
+
+
+def test_an_episode_with_no_cause_finding_returns_none(repo):
+    repo.get.return_value = {"id": "ep-1", "cause_finding_id": ""}
+    assert ep.investigation_for("ep-1") is None
+
+
+def test_a_database_error_does_not_take_the_episode_down(repo):
+    repo.get.return_value = {"id": "ep-1", "cause_finding_id": "f-1"}
+    with patch("sre_agent.db.get_database", side_effect=RuntimeError("db down")):
+        assert ep.investigation_for("ep-1") is None
+
+
+def test_the_newest_investigation_wins(repo):
+    """A cause re-investigated later should show the latest attempt."""
+    import inspect
+
+    source = inspect.getsource(ep.investigation_for)
+    assert "ORDER BY timestamp DESC" in source
+    assert "LIMIT 1" in source

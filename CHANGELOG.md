@@ -9,11 +9,12 @@ All notable changes to Pulse Agent are documented in this file.
 - A standing posture is nobody's symptom. 117 `Security: …` findings were attached to an etcd write failure, because a posture finding sits at the signal layer and the layer test alone said yes. Forecasts and posture findings can now be neither cause nor symptom
 - Confirmed fixed by this release rather than newly broken: the same etcd cause opened 13 separate episodes in two hours, each living ~80s. `control_plane` ran every 5th cycle, so its finding vanished for the four cycles in between, the stale sweep closed the episode, and the next run opened a new one. Running it every cycle removes the churn
 
-## [Unreleased]
-
 ### An episode you can actually clear
 - Findings raised on a one-hour window stayed true for a full hour after the problem stopped. Reported from real use: the cluster recovered, the agent said so, and the card would not go away — at 17:22 `increase(etcd_server_proposals_failed_total[1h])` still read 15 with **zero** failures in the preceding fifteen minutes. Every windowed check is now two: the long window says the problem is real, a 15-minute window says it is still happening. Detect slowly, clear quickly. Verified against the live cluster at that exact timestamp — the old query fires, the new one does not
 - `POST /episodes/{id}/dismiss` — an operator can close an episode the scanner will not close itself. Recorded with who dismissed it, because an operator overriding the scanner is evidence the clearing logic is wrong and worth counting. If the cause re-fires it opens a *new* episode with `recurrence_of` set, so dismissing can never hide a problem that comes back (migration 027)
+
+### The episode shows the work already done
+- `GET /episodes/{id}` now returns the investigation already run against the cause. Causes are eligible for automatic investigation, so by the time an operator opens the card the work has usually been attempted — 22 attempts on the reference cluster, all failed. Showing a fresh "ask the AI" without that would give two routes to the same call and imply nothing had been tried. A failed attempt is returned rather than hidden, because an empty panel reads as "nothing worth investigating"
 
 ## [2.11.0] - 2026-08-20
 
