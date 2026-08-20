@@ -11,6 +11,7 @@ from ..config import get_settings
 from ..errors import ToolError
 from ..k8s_client import get_apps_client, get_autoscaling_client, get_core_client, get_custom_client, safe
 from ..prometheus import PrometheusBackend, PrometheusConfigError, get_prometheus_client
+from .baseline import occurred_since_reset, restarts_since_reset
 from .findings import _make_finding, _skip_namespace
 from .registry import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING
 from .scanner_health import report_failure
@@ -56,6 +57,19 @@ def _last_restart_epoch(cs: Any) -> int | None:
         return None
 
 
+def _since_reset_suffix(candidate: dict[str, Any]) -> str:
+    """Say when the count started, but only when that is not the whole story.
+
+    "restarted 4 times" reads as a lifetime figure unless told otherwise, and
+    after a reset it is not one. The lifetime number is kept alongside so the
+    operator can see both without going to the cluster.
+    """
+    lifetime = candidate.get("lifetime_restarts")
+    if lifetime is None or lifetime == candidate["restarts"]:
+        return ""
+    return f" since the inbox was reset ({lifetime} in the pod's lifetime)"
+
+
 def scan_crashlooping_pods(pods=None) -> list[dict]:
     """Find pods in CrashLoopBackOff or high restart counts.
 
@@ -78,11 +92,19 @@ def scan_crashlooping_pods(pods=None) -> list[dict]:
             if _skip_namespace(ns):
                 continue
             for cs in pod.status.container_statuses or []:
-                if cs.restart_count >= crashloop_threshold:
+                # After a reset, only restarts since that moment count. The
+                # lifetime figure is what makes an inbox say "122x" about a
+                # workload that has restarted twice today.
+                restarts = restarts_since_reset(ns, name, cs.name, cs.restart_count)
+                if restarts >= crashloop_threshold:
                     last_restart = _last_restart_epoch(cs)
                     if last_restart is not None and (now_epoch - last_restart) > _STABILISED_AFTER_SECONDS:
                         # Recovered. Reporting it again would also keep the
                         # existing inbox item alive forever.
+                        continue
+                    if not occurred_since_reset(last_restart):
+                        # Crossed the threshold before the reset and has not
+                        # restarted since. Historical, not active.
                         continue
                     waiting = cs.state.waiting
                     candidates.append(
@@ -90,7 +112,8 @@ def scan_crashlooping_pods(pods=None) -> list[dict]:
                             "ns": ns,
                             "name": name,
                             "container": cs.name,
-                            "restarts": cs.restart_count,
+                            "restarts": restarts,
+                            "lifetime_restarts": cs.restart_count,
                             "reason": waiting.reason if waiting else "Unknown",
                             "last_restart": last_restart,
                         }
@@ -105,6 +128,12 @@ def scan_crashlooping_pods(pods=None) -> list[dict]:
             buckets.setdefault(key, []).append(c)
 
         for key, group in buckets.items():
+            if key is not None and not occurred_since_reset((key + 1) * _BURST_WINDOW_SECONDS - 1):
+                # The whole bucket predates the reset. Compare its *end*, not
+                # its start: a restart thirty seconds ago sits in a bucket that
+                # began up to half an hour before, and testing the start threw
+                # away live findings.
+                continue
             if key is not None and len(group) >= _BURST_MIN_PODS:
                 when = datetime.fromtimestamp(key * _BURST_WINDOW_SECONDS, tz=UTC)
                 namespaces = sorted({c["ns"] for c in group})
@@ -139,7 +168,8 @@ def scan_crashlooping_pods(pods=None) -> list[dict]:
                         category="crashloop",
                         title=f"Pod {c['name']} restarting ({c['restarts']}x)",
                         summary=(
-                            f"Container '{c['container']}' has restarted {c['restarts']} times. Reason: {c['reason']}"
+                            f"Container '{c['container']}' has restarted {c['restarts']} times"
+                            f"{_since_reset_suffix(c)}. Reason: {c['reason']}"
                         ),
                         resources=[{"kind": "Pod", "name": c["name"], "namespace": c["ns"]}],
                         auto_fixable=True,

@@ -355,6 +355,43 @@ def _migrate_027_episode_dismissal(db: Database) -> None:
     db.execute("ALTER TABLE episodes ADD COLUMN IF NOT EXISTS dismissed_by TEXT")
 
 
+def _migrate_028_inbox_reset_baseline(db: Database) -> None:
+    """Let an operator re-baseline the inbox: count from now, keep the history.
+
+    Two tables rather than one. `inbox_resets` is the watermark every
+    count-based scanner reads — after a reset, an occurrence only counts if it
+    happened after this moment. `restart_baselines` is the part that cannot be
+    derived: a container's restart_count is cumulative for the life of the pod
+    and the Kubernetes API will not tell you how many of those happened in the
+    last hour. Without a snapshot taken at reset time, the next scan reports
+    "restarting (122x)" again and the reset looks broken.
+
+    Event counts get no such snapshot on purpose. Events expire (one hour by
+    default), so a baseline taken at reset is meaningless within a scan or two;
+    filtering on last-seen is both simpler and more honest.
+    """
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS inbox_resets (
+            id SERIAL PRIMARY KEY,
+            reset_at BIGINT NOT NULL,
+            reset_by TEXT NOT NULL,
+            items_archived INTEGER NOT NULL DEFAULT 0,
+            episodes_closed INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS restart_baselines (
+            reset_id INTEGER NOT NULL,
+            namespace TEXT NOT NULL,
+            pod TEXT NOT NULL,
+            container TEXT NOT NULL,
+            restart_count INTEGER NOT NULL,
+            PRIMARY KEY (reset_id, namespace, pod, container)
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inbox_resets_at ON inbox_resets(reset_at DESC)")
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -383,4 +420,5 @@ MIGRATIONS = [
     (25, "rekey_inbox_correlation_keys", _migrate_025_rekey_inbox_correlation_keys),
     (26, "episodes", _migrate_026_episodes),
     (27, "episode_dismissal", _migrate_027_episode_dismissal),
+    (28, "inbox_reset_baseline", _migrate_028_inbox_reset_baseline),
 ]

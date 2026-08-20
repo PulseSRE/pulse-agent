@@ -2,6 +2,16 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [Unreleased]
+
+### Reset the inbox: count from now, keep the history
+- `POST /inbox/reset` archives every open item, records a baseline, and rescans. Measured on the reference cluster before building it: 339 items, 306 of them resolved, and a critical item reading "Pod promoter-controller-manager restarting (122x)" for a container whose lifetime counter had been climbing for days. The number was true and useless
+- Restart counts are the part that cannot be derived. `restart_count` is cumulative for the life of the pod and Kubernetes will not say how many of those happened recently, so the count at reset time is snapshotted per container and findings report the difference — "restarting (6x) … (128 in the pod's lifetime)". Without the snapshot the next scan re-reports 122x and the button looks broken
+- Event frequency gets no snapshot on purpose: events expire within the hour, so a baseline taken at reset is stale within a scan or two. Filtering on last-seen is simpler and closer to what "still happening" means
+- Current-state scanners are untouched. A deployment at 0/2 or a firing alert already describes now, which is why those reappear immediately after a reset if they still hold — the intended behaviour, not a leak
+- Nothing is deleted. Items move to `archived` with a reason naming who reset and when, and the reset itself is recorded with what it took: items archived, how many were pinned or claimed, episodes closed
+- Gated on a real authenticated user rather than the shared UI token: this clears a queue several people may be working from, and "somebody with the UI credential" is not an answer to who (migration 028)
+
 ## [2.12.0] - 2026-08-20
 
 ### Fixes found by watching v2.11.0 on a real cluster

@@ -480,6 +480,20 @@ class InboxRepository(BaseRepository):
         )
         self.db.commit()
 
+    # -- Reset ---------------------------------------------------------------
+
+    def fetch_all_open_items(self) -> list[Any]:
+        """Every item still in front of somebody, whatever its open status.
+
+        Listed explicitly rather than as NOT IN ('resolved', 'archived'): a
+        status added later would otherwise be swept up by a reset before anyone
+        had decided that was right.
+        """
+        return self.db.fetchall(
+            """SELECT id, metadata, status, pinned_by, claimed_by FROM inbox_items
+            WHERE status IN ('new', 'triaged', 'agent_reviewing', 'agent_review_failed', 'agent_cleared')"""
+        )
+
     # -- Generator cycle -----------------------------------------------------
 
     def fetch_generator_items(self) -> list[Any]:

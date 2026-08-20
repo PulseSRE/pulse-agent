@@ -9,10 +9,12 @@ from __future__ import annotations
 import logging
 import os
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from .errors import ToolError
 from .k8s_client import get_apps_client, get_core_client, get_custom_client, get_rbac_client, safe
 from .monitor import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING, _make_finding, _skip_namespace
+from .monitor.baseline import occurred_since_reset
 from .monitor.scanner_health import report_failure
 
 logger = logging.getLogger("pulse_agent")
@@ -294,6 +296,27 @@ def scan_recent_deployments() -> list[dict]:
     return findings
 
 
+def _event_last_seen(event: Any) -> int | None:
+    """Epoch seconds of an event's most recent occurrence, if known.
+
+    Kubernetes has two spellings. ``last_timestamp`` is the original; the
+    events.k8s.io form leaves it empty and fills ``series.last_observed_time``
+    instead, falling back to ``event_time`` for a one-off. Reading only the
+    first would treat every event on a modern cluster as undated.
+    """
+    for value in (
+        getattr(event, "last_timestamp", None),
+        getattr(getattr(event, "series", None), "last_observed_time", None),
+        getattr(event, "event_time", None),
+    ):
+        if value is not None:
+            try:
+                return int(value.timestamp())
+            except (AttributeError, OSError, ValueError):
+                continue
+    return None
+
+
 def scan_warning_events() -> list[dict]:
     """Surface high-frequency warning events that may indicate systemic issues."""
     findings: list[dict] = []
@@ -316,6 +339,13 @@ def scan_warning_events() -> list[dict]:
         for event in events.items:
             ns = event.metadata.namespace
             if _skip_namespace(ns) or ns == agent_ns:
+                continue
+            # An event that has not recurred since the reset is history. Event
+            # counts get no snapshot the way restart counts do: events expire
+            # (an hour by default), so a baseline taken at reset time is stale
+            # within a scan or two. Filtering on last-seen is both simpler and
+            # closer to what "still happening" means.
+            if not occurred_since_reset(_event_last_seen(event)):
                 continue
             key = f"{ns}:{event.reason}"
             if key not in event_groups:
