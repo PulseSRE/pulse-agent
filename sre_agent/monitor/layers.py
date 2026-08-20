@@ -104,6 +104,7 @@ def can_head_episode(category: str, finding_type: str = "current") -> bool:
         return False
     return layer_of(category) <= L_PLATFORM
 
+
 # An unknown category sits at workload level: it can be explained by
 # infrastructure, and it will not silently swallow anything beneath it.
 DEFAULT_LAYER = L_WORKLOAD
