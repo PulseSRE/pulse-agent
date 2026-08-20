@@ -91,6 +91,53 @@ NON_CAUSAL_CATEGORIES = frozenset(
 )
 
 
+def layer_for_finding(finding: dict) -> int:
+    """The causal layer of a specific finding, honouring an explicit override.
+
+    A scanner that knows more about its own output than the category does may
+    set ``layer`` on the finding. The firing-alert scanner is the case this
+    exists for: every alert carries ``category="alerts"``, but an alert about
+    node memory and an alert about a scrape target are not the same kind of
+    fact, and only the scanner is holding the alert name that tells them apart.
+    """
+    explicit = finding.get("layer")
+    if isinstance(explicit, int) and explicit in LAYER_NAMES:
+        return explicit
+    return layer_of(finding.get("category", ""))
+
+
+def is_non_causal_finding(finding: dict) -> bool:
+    """Whether this finding is a forecast or a standing posture.
+
+    Category-level for most scanners; a per-finding ``posture`` flag for
+    alerts, where one scanner emits both events and standing configuration.
+    """
+    if finding.get("posture") is True:
+        return True
+    return finding.get("category", "") in NON_CAUSAL_CATEGORIES
+
+
+def can_head_episode_finding(finding: dict) -> bool:
+    """Finding-aware form of :func:`can_head_episode`."""
+    category = finding.get("category", "")
+    if category in STANDALONE_CATEGORIES or is_non_causal_finding(finding):
+        return False
+    if finding.get("findingType", "current") != "current":
+        return False
+    return layer_for_finding(finding) <= L_PLATFORM
+
+
+def can_explain_finding(cause: dict, symptom: dict) -> bool:
+    """Finding-aware form of :func:`can_explain`."""
+    if cause.get("category", "") in STANDALONE_CATEGORIES:
+        return False
+    if symptom.get("category", "") in STANDALONE_CATEGORIES:
+        return False
+    if is_non_causal_finding(symptom):
+        return False
+    return layer_for_finding(cause) < layer_for_finding(symptom)
+
+
 def can_head_episode(category: str, finding_type: str = "current") -> bool:
     """Whether a finding of this kind may be the cause an episode is built around.
 

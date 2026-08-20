@@ -23,7 +23,18 @@ def _make_finding(
     runbook_id: str | None = None,
     confidence: float | None = None,
     finding_type: str = "current",
+    layer: int | None = None,
+    posture: bool = False,
+    started_at: int | None = None,
 ) -> dict:
+    """Build a finding.
+
+    ``layer``, ``posture`` and ``started_at`` are for scanners that know more
+    about their own output than the category does. They exist for firing
+    alerts: one scanner emits facts about nodes, about operators and about the
+    monitoring stack, all under ``category="alerts"``, and only it is holding
+    the alert name and the moment Prometheus started firing.
+    """
     finding: dict = {
         "type": "finding",
         "id": f"f-{uuid.uuid4().hex[:12]}",
@@ -39,6 +50,16 @@ def _make_finding(
     }
     if confidence is not None:
         finding["confidence"] = round(max(0.0, min(1.0, confidence)), 2)
+    if layer is not None:
+        finding["layer"] = layer
+    if posture:
+        finding["posture"] = True
+    if started_at is not None:
+        # When the condition itself began, as distinct from when Pulse noticed
+        # it. Episodes correlate on this: Pulse's own first-sight is lost on
+        # every restart, so without it a redeploy makes every standing problem
+        # look like it started at the same second.
+        finding["startedAt"] = started_at
     return finding
 
 
