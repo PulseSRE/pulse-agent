@@ -284,3 +284,33 @@ def test_the_full_can_head_matrix(category, finding_type, expected):
     from sre_agent.monitor.layers import can_head_episode
 
     assert can_head_episode(category, finding_type) is expected
+
+
+def test_a_posture_finding_is_nobody_symptom(repo):
+    """Found on a live cluster: 117 security findings attached to an etcd fault.
+
+    A posture finding sits at the signal layer, so the layer test alone said
+    yes. Having too many privileged containers is a property of the cluster,
+    not something etcd did to it.
+    """
+    now = int(time.time())
+    repo.get.return_value = _open_episode(now)
+    posture = _finding("security", "88 privileged containers across 16 namespaces", "", "cluster", "Cluster")
+    ep.attach_symptoms("ep-1", "control_plane", [posture], {})
+    assert not repo.attach.called
+
+
+def test_a_forecast_is_nobody_symptom_either(repo):
+    now = int(time.time())
+    repo.get.return_value = _open_episode(now)
+    forecast = _finding("cert_expiry", "Certificate expiring in 9d", "ns", "cert", "Secret")
+    ep.attach_symptoms("ep-1", "control_plane", [forecast], {})
+    assert not repo.attach.called
+
+
+def test_real_symptoms_still_attach_after_the_exclusion(repo):
+    """The fix must not silence the case the feature exists for."""
+    now = int(time.time())
+    repo.get.return_value = _open_episode(now)
+    ep.attach_symptoms("ep-1", "control_plane", [DEPLOY, POD, ALERT], {})
+    assert repo.attach.call_count == 3
