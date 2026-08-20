@@ -44,6 +44,17 @@ FAILURE_STREAK_THRESHOLD = 3
 # row without a word.
 INVESTIGATION_STREAK_THRESHOLD = 5
 
+# A streak alone is not enough, and this was found the hard way. Watching the
+# same cluster after deploying the streak check: 65 of the last 70
+# investigations had failed — a 93% failure rate — and the check said nothing,
+# because the most recent one happened to succeed and the streak was 0.
+#
+# A quota-limited backend does not fail in a clean run. It flaps. So the rate
+# is checked too, over a window big enough that a couple of transient failures
+# do not trip it.
+INVESTIGATION_RATE_WINDOW = 40
+INVESTIGATION_RATE_THRESHOLD = 0.5
+
 
 @contextlib.contextmanager
 def scanning(name: str):
@@ -133,6 +144,32 @@ def consecutive_failures(limit: int = 20) -> dict[str, tuple[int, str]]:
     return {n: v for n, v in streaks.items() if v[0] >= FAILURE_STREAK_THRESHOLD}
 
 
+def investigation_failure_rate() -> tuple[int, int, str]:
+    """Failures out of the last INVESTIGATION_RATE_WINDOW attempts, and the last error.
+
+    Catches the case a consecutive-failure streak cannot: a backend that fails
+    most of the time but succeeds often enough to keep resetting the streak.
+    """
+    from ..db import get_database
+
+    rows = get_database().fetchall(
+        "SELECT status, error FROM investigations ORDER BY timestamp DESC LIMIT %s",
+        (INVESTIGATION_RATE_WINDOW,),
+    )
+    total = 0
+    failed = 0
+    last_error = ""
+    for row in rows or []:
+        status = row["status"] if isinstance(row, dict) else row[0]
+        error = (row["error"] if isinstance(row, dict) else row[1]) or ""
+        total += 1
+        if status == "failed":
+            failed += 1
+            if not last_error:
+                last_error = str(error)[:200]
+    return failed, total, last_error
+
+
 def investigation_failure_streak() -> tuple[int, str]:
     """Consecutive failed investigations, newest first, and the last error."""
     from ..db import get_database
@@ -186,6 +223,13 @@ def scan_degraded_capabilities() -> list[dict]:
 
     try:
         streak, error = investigation_failure_streak()
+        failed, total, rate_error = investigation_failure_rate()
+        rate = (failed / total) if total else 0.0
+
+        # Streak and rate catch different shapes of the same problem: a backend
+        # that is flatly down, and one that is failing most of the time while
+        # succeeding often enough to keep resetting the streak. Report whichever
+        # is the stronger evidence rather than raising two findings for one fault.
         if streak >= INVESTIGATION_STREAK_THRESHOLD:
             findings.append(
                 _make_finding(
@@ -197,6 +241,23 @@ def scan_degraded_capabilities() -> list[dict]:
                         f"raised without any root-cause analysis behind them. An empty "
                         f"investigation reads as 'nothing worth investigating', which is the "
                         f"opposite of what is happening. Last error: {error}"
+                    ),
+                    resources=[{"kind": "Agent", "name": "investigations"}],
+                    runbook_id="pulse-degraded",
+                    confidence=1.0,
+                )
+            )
+        elif total >= INVESTIGATION_RATE_WINDOW and rate >= INVESTIGATION_RATE_THRESHOLD:
+            findings.append(
+                _make_finding(
+                    severity=SEVERITY_CRITICAL if rate >= 0.9 else SEVERITY_WARNING,
+                    category="degraded",
+                    title=f"AI investigations mostly failing — {failed} of the last {total}",
+                    summary=(
+                        f"{failed} of the last {total} investigations failed ({rate:.0%}). The "
+                        f"occasional success keeps a consecutive-failure check quiet, but most "
+                        f"findings are still reaching you with no root-cause analysis behind "
+                        f"them. Last error: {rate_error}"
                     ),
                     resources=[{"kind": "Agent", "name": "investigations"}],
                     runbook_id="pulse-degraded",

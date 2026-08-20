@@ -166,9 +166,33 @@ async def lifespan(app: FastAPI):
 
     watchdog_task = asyncio.create_task(_event_loop_watchdog())
 
+    # Start the cluster monitor here, not when a browser connects.
+    #
+    # It used to start inside the /ws/monitor handler, which meant the agent
+    # scanned the cluster only while somebody had the UI open. Scan history on
+    # a live cluster shows exactly that shape: bursts a minute apart while
+    # someone was looking, then hours of nothing. An overnight incident was
+    # therefore only partly observed, and every claim about autonomous or
+    # overnight monitoring was untrue whenever the tab was closed.
+    #
+    # The WS handler still starts it if it somehow is not running, so a
+    # connecting client never waits on this.
+    monitor_task = None
+    try:
+        from ..monitor import get_cluster_monitor
+
+        _monitor = await get_cluster_monitor()
+        if not _monitor.running:
+            monitor_task = asyncio.create_task(_monitor.run_loop())
+            logger.info("Monitor scan loop started (interval %ds)", _monitor.scan_interval)
+    except Exception:
+        logger.exception("Monitor scan loop failed to start — the cluster is not being scanned")
+
     yield
 
     watchdog_task.cancel()
+    if monitor_task is not None and not monitor_task.done():
+        monitor_task.cancel()
 
     # Signal MCP background loop to stop, then disconnect, then cancel the task
     _mcp_shutdown.set()
