@@ -564,6 +564,45 @@ CREATE TABLE IF NOT EXISTS operational_flags (
 );
 """
 
+EPISODES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS episodes (
+    id                TEXT PRIMARY KEY,
+    status            TEXT NOT NULL DEFAULT 'open',
+    cause_category    TEXT NOT NULL,
+    cause_title       TEXT NOT NULL,
+    cause_finding_id  TEXT,
+    cause_layer       INTEGER NOT NULL,
+    started_at        BIGINT NOT NULL,
+    ended_at          BIGINT,
+    last_seen_at      BIGINT NOT NULL,
+    symptom_count     INTEGER NOT NULL DEFAULT 0,
+    namespaces        TEXT NOT NULL DEFAULT '[]',
+    correlation_key   TEXT NOT NULL,
+    recurrence_of     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_episodes_status ON episodes (status);
+CREATE INDEX IF NOT EXISTS idx_episodes_corr   ON episodes (correlation_key);
+
+-- One row per finding attached to an episode. Detachment is recorded rather
+-- than deleted: an operator saying "this was not caused by that" is the only
+-- ground truth this system ever gets about its own correlation, and throwing
+-- it away would waste the most valuable signal the product produces.
+CREATE TABLE IF NOT EXISTS episode_symptoms (
+    episode_id      TEXT NOT NULL,
+    correlation_key TEXT NOT NULL,
+    category        TEXT NOT NULL,
+    title           TEXT NOT NULL,
+    namespace       TEXT NOT NULL DEFAULT '',
+    attached_at     BIGINT NOT NULL,
+    detached_at     BIGINT,
+    detached_by     TEXT,
+    PRIMARY KEY (episode_id, correlation_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_episode_symptoms_key ON episode_symptoms (correlation_key);
+"""
+
 INBOX_MUTES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS inbox_mutes (
     correlation_key TEXT PRIMARY KEY,

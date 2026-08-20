@@ -326,6 +326,23 @@ def _migrate_025_rekey_inbox_correlation_keys(db: Database) -> None:
     )
 
 
+def _migrate_026_episodes(db: Database) -> None:
+    """Give an incident an identity.
+
+    Until now the product had findings and inbox items — both of which mean
+    "this is wrong". Neither means "this happened". So when one cause produced
+    fourteen wrong things, there were fourteen equal rows and no way to say
+    they were one event with a cause and a blast radius.
+
+    Note the name: `incidents` was already taken by the agent's memory store
+    (past queries, tool sequences, scores), and the UI's "Incident Center" is a
+    findings list. The word was spoken for twice and meant neither thing.
+    """
+    from .db_schema import EPISODES_SCHEMA
+
+    db.executescript(EPISODES_SCHEMA)
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -352,4 +369,5 @@ MIGRATIONS = [
     (23, "operational_flags", _migrate_023_operational_flags),
     (24, "inbox_mutes", _migrate_024_inbox_mutes),
     (25, "rekey_inbox_correlation_keys", _migrate_025_rekey_inbox_correlation_keys),
+    (26, "episodes", _migrate_026_episodes),
 ]
