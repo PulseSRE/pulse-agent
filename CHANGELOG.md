@@ -2,7 +2,7 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
-## [Unreleased]
+## [2.10.0] - 2026-08-20
 
 ### Fixes
 - The inbox listed items an open episode already explained, so an episode *added* rows instead of removing them: the panel showed a cause with its symptoms folded underneath, and the queue below still listed the same symptoms. `symptom_keys_by_episode()` existed for exactly this and had no caller. Both list paths now drop symptoms of open episodes and return `collapsedIntoEpisodes` so the UI can say how many were folded away — items disappearing from a work queue with no explanation is its own way of losing trust. The lookup fails open: if episodes cannot be read, every item is shown

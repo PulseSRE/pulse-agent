@@ -132,7 +132,7 @@ Full DDL: `sre_agent/db_schema.py`
 4. Migrations are forward-only — no rollback support
 5. Failures roll back the individual migration and raise an exception
 
-### Current Migrations (v001 – v022)
+### Current Migrations (v001 – v026)
 
 | Version | Name | What it does |
 |---------|------|-------------|
@@ -158,6 +158,10 @@ Full DDL: `sre_agent/db_schema.py`
 | 20 | action_outcomes | Adds outcome-tracking columns to `actions` |
 | 21 | inbox_items | Adds `inbox_items` table (unified Ops Inbox) |
 | 22 | user_interactions | Adds `user_interactions` table (aggregated interaction outcomes) |
+| 23 | operational_flags | Adds `operational_flags` table so the auto-fix kill switch survives restarts |
+| 24 | inbox_mutes | Adds `inbox_mutes` table (silence a known-noisy condition) |
+| 25 | rekey_inbox_correlation_keys | Re-keys inbox items orphaned when correlation keys gained a namespace |
+| 26 | episodes | Adds `episodes` and `episode_symptoms` — one event with a cause, and what it explains |
 
 ### Adding a New Migration
 
