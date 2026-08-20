@@ -23,6 +23,15 @@ from dataclasses import dataclass, field
 logger = logging.getLogger("pulse_agent.skill_selector")
 
 
+# Where a query goes when nothing in it points anywhere.
+DEFAULT_SKILL = "sre"
+
+# Channels that describe recent usage rather than this query. They are priors:
+# useful for breaking ties between real candidates, worthless for deciding
+# where an unrecognised query goes. Kept out of the fallback for that reason.
+PRIOR_CHANNELS = frozenset({"temporal", "historical"})
+
+
 @dataclass
 class SelectionResult:
     """Result of multi-signal skill selection."""
@@ -389,9 +398,34 @@ class SkillSelector:
             _last_selection_result_var.set(result)
             return result
 
-        # Below threshold — fallback
+        # Below threshold — fallback.
+        #
+        # Keeping the argmax here is right when the query pointed *somewhere*
+        # and merely pointed weakly: "audit cluster-admin bindings" scores 0.40
+        # against a 0.45 threshold on keyword and semantic evidence, and
+        # routing it to security is better than routing it nowhere.
+        #
+        # It is wrong when the only thing that scored was a prior. On a cluster
+        # where slo_management had been used recently, classify_query("hello")
+        # returned slo_management on a fused score of 0.01 — the temporal
+        # channel deciding, alone, where an unrecognised query goes. Because
+        # that channel is learned, the same code routed differently in CI and
+        # locally, which is how it stayed hidden.
+        #
+        # So: fall back to the default only when no channel that actually read
+        # the query produced anything.
+        has_query_evidence = any(
+            score > 0
+            for channel, scores in channel_scores.items()
+            if channel not in PRIOR_CHANNELS
+            for score in scores.values()
+        )
+        if has_query_evidence and best_name in self._skills:
+            fallback_name = best_name
+        else:
+            fallback_name = DEFAULT_SKILL if DEFAULT_SKILL in self._skills else best_name
         result = SelectionResult(
-            skill_name=best_name if best_name in self._skills else "sre",
+            skill_name=fallback_name,
             fused_scores=fused,
             channel_scores=channel_scores,
             threshold_used=threshold,
