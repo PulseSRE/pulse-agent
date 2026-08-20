@@ -143,13 +143,13 @@ def can_head_episode(category: str, finding_type: str = "current") -> bool:
 
     Three ways to fail: it is about Pulse itself, it forecasts rather than
     observes, or it sits too far up the stack to explain anything beneath it.
+
+    The category-level form, for callers holding a category and nothing else.
+    It delegates rather than restating the rule: two copies of a causal model
+    is one copy too many, and the last thing this file needs is a version that
+    quietly disagrees with the one the monitor actually runs.
     """
-    if category in STANDALONE_CATEGORIES or category in NON_CAUSAL_CATEGORIES:
-        return False
-    if finding_type != "current":
-        # Trend and prediction findings describe what has not happened yet.
-        return False
-    return layer_of(category) <= L_PLATFORM
+    return can_head_episode_finding({"category": category, "findingType": finding_type})
 
 
 # An unknown category sits at workload level: it can be explained by
@@ -174,14 +174,13 @@ def can_explain(cause_category: str, symptom_category: str) -> bool:
     is how one noisy finding would swallow a whole cluster's worth of unrelated
     ones. Burst correlation already groups same-layer siblings and is the right
     tool for that job.
+
+    A forecast or a standing posture is nobody's symptom either. Seen on a live
+    cluster: 117 "Security: Resource Limits" findings attached to an etcd write
+    failure, because a posture finding sits at the signal layer and the layer
+    test alone said yes. Having too many privileged containers is a property of
+    the cluster, not something etcd did to it.
+
+    The category-level form; see :func:`can_head_episode` on why it delegates.
     """
-    if cause_category in STANDALONE_CATEGORIES or symptom_category in STANDALONE_CATEGORIES:
-        return False
-    # A forecast or a standing posture is nobody's symptom either. Seen on a
-    # live cluster: 117 "Security: Resource Limits" findings attached to an
-    # etcd write failure, because a posture finding sits at the signal layer
-    # and the layer test alone said yes. Having too many privileged containers
-    # is a property of the cluster, not something etcd did to it.
-    if symptom_category in NON_CAUSAL_CATEGORIES:
-        return False
-    return layer_of(cause_category) < layer_of(symptom_category)
+    return can_explain_finding({"category": cause_category}, {"category": symptom_category})
