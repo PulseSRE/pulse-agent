@@ -143,6 +143,7 @@ def test_a_broken_scanner_becomes_a_finding_that_says_unwatched():
     with (
         patch(f"{MODULE}.consecutive_failures", return_value={"alerts": (7, "timeout")}),
         patch(f"{MODULE}.investigation_failure_streak", return_value=(0, "")),
+        patch(f"{MODULE}.investigation_failure_rate", return_value=(0, 0, "")),
     ):
         finding = sh.scan_degraded_capabilities()[0]
     assert "alerts" in finding["title"]
@@ -155,6 +156,7 @@ def test_a_long_ai_outage_is_critical_not_a_warning():
     with (
         patch(f"{MODULE}.consecutive_failures", return_value={}),
         patch(f"{MODULE}.investigation_failure_streak", return_value=(1111, "Connection error.")),
+        patch(f"{MODULE}.investigation_failure_rate", return_value=(0, 0, "")),
     ):
         finding = sh.scan_degraded_capabilities()[0]
     assert finding["severity"] == "critical"
@@ -165,6 +167,7 @@ def test_a_short_ai_blip_stays_a_warning():
     with (
         patch(f"{MODULE}.consecutive_failures", return_value={}),
         patch(f"{MODULE}.investigation_failure_streak", return_value=(6, "timeout")),
+        patch(f"{MODULE}.investigation_failure_rate", return_value=(0, 0, "")),
     ):
         assert sh.scan_degraded_capabilities()[0]["severity"] == "warning"
 
@@ -173,6 +176,7 @@ def test_below_the_investigation_threshold_says_nothing():
     with (
         patch(f"{MODULE}.consecutive_failures", return_value={}),
         patch(f"{MODULE}.investigation_failure_streak", return_value=(2, "timeout")),
+        patch(f"{MODULE}.investigation_failure_rate", return_value=(0, 0, "")),
     ):
         assert sh.scan_degraded_capabilities() == []
 
@@ -181,6 +185,7 @@ def test_a_healthy_pulse_reports_nothing():
     with (
         patch(f"{MODULE}.consecutive_failures", return_value={}),
         patch(f"{MODULE}.investigation_failure_streak", return_value=(0, "")),
+        patch(f"{MODULE}.investigation_failure_rate", return_value=(0, 0, "")),
     ):
         assert sh.scan_degraded_capabilities() == []
 
@@ -239,3 +244,76 @@ def test_partial_results_survive_a_reported_failure():
     with sh.scanning("crashloop"):
         sh.report_failure("item 50 was malformed")
     assert sh.get_failure("crashloop") == "item 50 was malformed"
+
+
+# ── flapping failure, which a consecutive streak cannot see ───────────────
+# Found on a live cluster after the streak check shipped: 65 of the last 70
+# investigations had failed — 93% — and the check said nothing, because the
+# most recent one happened to succeed. A quota-limited backend does not fail
+# in a clean run; it flaps.
+
+
+def _mixed(*statuses):
+    return [{"status": s, "error": "Connection error."} for s in statuses]
+
+
+def test_a_mostly_failing_backend_is_reported_even_with_a_zero_streak():
+    with _db(_mixed(*(["completed"] + ["failed"] * 39))):
+        failed, total, _ = sh.investigation_failure_rate()
+    assert failed == 39
+    assert total == 40
+    # the streak from newest is zero — the rate is the only evidence
+    with _db(_mixed(*(["completed"] + ["failed"] * 39))):
+        assert sh.investigation_failure_streak()[0] == 0
+
+
+def test_the_rate_finding_names_the_proportion():
+    with (
+        patch(f"{MODULE}.consecutive_failures", return_value={}),
+        patch(f"{MODULE}.investigation_failure_streak", return_value=(0, "")),
+        patch(f"{MODULE}.investigation_failure_rate", return_value=(65, 70, "Connection error.")),
+    ):
+        finding = sh.scan_degraded_capabilities()[0]
+    assert "65 of the last 70" in finding["title"]
+    assert "93%" in finding["summary"]
+
+
+def test_an_almost_total_failure_rate_is_critical():
+    with (
+        patch(f"{MODULE}.consecutive_failures", return_value={}),
+        patch(f"{MODULE}.investigation_failure_streak", return_value=(0, "")),
+        patch(f"{MODULE}.investigation_failure_rate", return_value=(39, 40, "err")),
+    ):
+        assert sh.scan_degraded_capabilities()[0]["severity"] == "critical"
+
+
+def test_a_healthy_backend_with_occasional_failures_stays_quiet():
+    """Two failures in forty is a backend working, not a backend broken."""
+    with (
+        patch(f"{MODULE}.consecutive_failures", return_value={}),
+        patch(f"{MODULE}.investigation_failure_streak", return_value=(0, "")),
+        patch(f"{MODULE}.investigation_failure_rate", return_value=(2, 40, "err")),
+    ):
+        assert sh.scan_degraded_capabilities() == []
+
+
+def test_a_small_sample_is_not_enough_to_call_it_degraded():
+    """Three failures out of three is a blip, not evidence of a broken backend."""
+    with (
+        patch(f"{MODULE}.consecutive_failures", return_value={}),
+        patch(f"{MODULE}.investigation_failure_streak", return_value=(0, "")),
+        patch(f"{MODULE}.investigation_failure_rate", return_value=(3, 3, "err")),
+    ):
+        assert sh.scan_degraded_capabilities() == []
+
+
+def test_one_fault_produces_one_finding_not_two():
+    """A flat outage trips both checks; the operator should see it once."""
+    with (
+        patch(f"{MODULE}.consecutive_failures", return_value={}),
+        patch(f"{MODULE}.investigation_failure_streak", return_value=(80, "err")),
+        patch(f"{MODULE}.investigation_failure_rate", return_value=(40, 40, "err")),
+    ):
+        findings = sh.scan_degraded_capabilities()
+    assert len(findings) == 1
+    assert "in a row" in findings[0]["title"]
