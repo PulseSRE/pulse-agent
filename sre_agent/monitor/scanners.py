@@ -11,6 +11,7 @@ from ..config import get_settings
 from ..errors import ToolError
 from ..k8s_client import get_apps_client, get_autoscaling_client, get_core_client, get_custom_client, safe
 from ..prometheus import PrometheusBackend, PrometheusConfigError, get_prometheus_client
+from .alert_layers import alert_layer, is_posture_alert
 from .baseline import occurred_since_reset, restarts_since_reset
 from .findings import _make_finding, _skip_namespace
 from .registry import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING
@@ -370,6 +371,31 @@ def scan_expiring_certs() -> list[dict]:
     return findings
 
 
+def _alert_active_since(alert: dict) -> int | None:
+    """Epoch seconds at which Prometheus started firing this alert.
+
+    ``activeAt`` is RFC3339 and may carry more than six fractional digits,
+    which ``fromisoformat`` rejects before Python 3.11 and which no version
+    accepts alongside a trailing Z on older releases. Truncate rather than
+    lose the field: an alert whose onset cannot be parsed simply has none, and
+    episodes fall back to when Pulse first saw it.
+    """
+    raw = alert.get("activeAt")
+    if not raw or not isinstance(raw, str):
+        return None
+    text = raw.replace("Z", "+00:00")
+    if "." in text:
+        head, _, tail = text.partition(".")
+        digits = "".join(c for c in tail if c.isdigit())[:6]
+        offset = tail[len(tail) - 6 :] if ("+" in tail or "-" in tail) else ""
+        text = f"{head}.{digits}{offset}" if digits else head + offset
+    try:
+        return int(datetime.fromisoformat(text).timestamp())
+    except ValueError:
+        logger.debug("Unparseable alert activeAt: %s", raw[:40])
+        return None
+
+
 def scan_firing_alerts() -> list[dict]:
     """Check Prometheus for firing alerts."""
     findings: list[dict[str, Any]] = []
@@ -417,6 +443,13 @@ def scan_firing_alerts() -> list[dict]:
                             title=alertname,
                             summary=summary[:200] if summary else f"Alert {alertname} firing",
                             resources=resources,
+                            # What the alert is *about*, and when it actually
+                            # started. Both are on the alert already; dropping
+                            # them left every alert a signal-layer observation
+                            # of unknown age, which no episode can build on.
+                            layer=alert_layer(alertname),
+                            posture=is_posture_alert(alertname),
+                            started_at=_alert_active_since(alert),
                         )
                     )
     except PrometheusConfigError as e:

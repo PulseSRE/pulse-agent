@@ -2,6 +2,16 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [Unreleased]
+
+### An alert can be a cause
+- Every firing alert arrived as `category="alerts"`, which the layer model reads as *signal* — able to be explained, never able to explain. On the reference cluster that made the episode layer structurally dead: 15 of 15 standing findings were alerts, `/episodes` returned `[]`, and meanwhile a single investigation of one of those same alerts correctly tied four of them into one story. The deterministic layer knew less than the model did, about data it already had. Alerts are now layered by what they are *about* — node memory is infrastructure, a stuck CSV is platform, `TargetDown` really is signal
+- The table is deliberately incomplete. An unclassified alert stays at the signal layer, where it can be a symptom but never a cause. Being wrong in that direction costs a missed correlation; being wrong the other way costs a wrong one, and a wrong episode tells an operator a confident story about a cause that is not the cause
+- Standing configuration is neither cause nor symptom, the same treatment posture findings already had. `AlertmanagerReceiversNotConfigured` had been firing for fifty hours: nobody had configured a receiver, which no outage caused and which caused no outage
+- Findings now carry the moment the condition *began*, taken from Prometheus rather than from Pulse's own bookkeeping. The old signal was an in-memory dict on the monitor, lost on every restart — after a redeploy every standing problem on the cluster claimed to have started at the same second, which is exactly when correlation matters most and exactly when it was least trustworthy
+- Symptoms are compared against the *cause's* onset rather than against when Pulse got around to opening the episode, with a 15-minute window. Prometheus holds a per-rule `for:` duration before an alert fires at all, so two alerts describing one event start minutes apart — memory pressure and the OLM install loop were six minutes apart, and the old 180-second grace would have split them
+- One event, one cause: a symptom belongs to a single episode, and a finding that something deeper already explains no longer heads its own. Without both rules the layer fix alone produced three episodes each claiming the same `TargetDown`, which is the "N findings that are wrong" problem wearing a different hat
+
 ## [2.13.0] - 2026-08-20
 
 ### Reset the inbox: count from now, keep the history

@@ -25,17 +25,26 @@ import time
 import uuid
 from typing import Any
 
-from .layers import can_explain, can_head_episode, layer_of
+from .layers import can_explain_finding, can_head_episode_finding, layer_for_finding
 
 logger = logging.getLogger("pulse_agent.monitor")
 
 OPEN_STATUS = "open"
 CLOSED_STATUS = "closed"
 
-# How far back a symptom may have been first seen and still count as caused by
-# the episode. Slightly generous: scan cycles are 60s and a cause is often
-# detected a cycle or two after the damage starts.
+# How far back a symptom may have started and still count as caused by the
+# episode. Slightly generous: scan cycles are 60s and a cause is often detected
+# a cycle or two after the damage starts.
 _ATTACH_GRACE_SECONDS = 180
+
+# The same window, for conditions that report their own onset rather than
+# relying on when Pulse noticed them. Firing alerts are the case: Prometheus
+# holds a `for:` duration before an alert fires at all, and those durations
+# differ per rule, so two alerts describing one event can start minutes apart.
+# On the reference cluster the control-plane memory alert and the OLM install
+# loop began six minutes apart and were plainly one event; 180 seconds would
+# have split them.
+_ONSET_GRACE_SECONDS = 15 * 60
 
 # Two episodes with the same cause inside this window are the same recurring
 # problem rather than unrelated events.
@@ -59,13 +68,13 @@ def _cause_key(finding: dict[str, Any]) -> str:
     return _finding_corr_key(finding)
 
 
-def open_or_touch(finding: dict[str, Any]) -> str | None:
+def open_or_touch(finding: dict[str, Any], claimed: dict[str, str] | None = None) -> str | None:
     """Open an episode for a cause-capable finding, or mark an existing one live.
 
     Returns the episode id, or None if this finding cannot head an episode.
     """
     category = finding.get("category", "")
-    if not can_head_episode(category, finding.get("findingType", "current")):
+    if not can_head_episode_finding(finding):
         return None
 
     key = _cause_key(finding)
@@ -73,6 +82,13 @@ def open_or_touch(finding: dict[str, Any]) -> str | None:
         return None
 
     repo = _repo()
+    owner = (symptom_keys_by_episode() if claimed is None else claimed).get(key)
+    if owner is not None:
+        # Something deeper already explains this. On the reference cluster the
+        # OLM install loop was both a platform-layer cause and a symptom of the
+        # control-plane memory beneath it; heading its own episode as well
+        # would report one event twice, with the same symptoms under each.
+        return None
     now = _now()
     existing = repo.find_open_by_correlation(key)
     if existing:
@@ -86,7 +102,7 @@ def open_or_touch(finding: dict[str, Any]) -> str | None:
         cause_category=category,
         cause_title=finding.get("title", "")[:400],
         cause_finding_id=finding.get("id", ""),
-        cause_layer=layer_of(category),
+        cause_layer=layer_for_finding(finding),
         started_at=now,
         correlation_key=key,
         recurrence_of=prior["id"] if prior else None,
@@ -100,13 +116,40 @@ def open_or_touch(finding: dict[str, Any]) -> str | None:
     return episode_id
 
 
-def attach_symptoms(episode_id: str, cause_category: str, findings: list[dict], first_seen: dict[str, int]) -> int:
+def _onset_of(finding: dict) -> int | None:
+    """When the condition itself began, if it knows.
+
+    Only firing alerts carry this today, from Prometheus. Everything else
+    returns None and falls back to when Pulse first saw it.
+    """
+    value = finding.get("startedAt")
+    return int(value) if isinstance(value, int | float) else None
+
+
+def attach_symptoms(
+    episode_id: str,
+    cause: dict | str,
+    findings: list[dict],
+    first_seen: dict[str, int],
+    claimed: dict[str, str] | None = None,
+) -> int:
     """Attach findings this episode can explain. Returns how many were attached.
 
+    ``cause`` is the finding the episode was opened around. A bare category
+    string is still accepted and behaves exactly as before — no declared layer,
+    no onset — which is what every caller that does not have the finding to
+    hand should pass.
+
     ``first_seen`` maps a finding's correlation key to when the monitor first
-    saw that condition, which is the only way to tell a symptom from something
-    that was already broken.
+    saw that condition. It is the fallback, not the preferred signal: it lives
+    in memory on the monitor and is lost on every restart, so after a redeploy
+    every standing problem on the cluster claims to have started at the same
+    second. Where a finding reports its own onset, that is used instead and the
+    comparison is made against the *cause's* onset rather than against when
+    Pulse got around to opening the episode.
     """
+    cause_finding: dict = {"category": cause} if isinstance(cause, str) else cause
+
     repo = _repo()
     episode = repo.get(episode_id)
     if not episode or episode["status"] != OPEN_STATUS:
@@ -114,23 +157,42 @@ def attach_symptoms(episode_id: str, cause_category: str, findings: list[dict], 
 
     started = int(episode["started_at"])
     cutoff = started - _ATTACH_GRACE_SECONDS
+    cause_onset = _onset_of(cause_finding)
     detached = repo.detached_keys(episode_id)
+    owned = symptom_keys_by_episode() if claimed is None else claimed
     attached = 0
 
     for finding in findings:
-        category = finding.get("category", "")
-        if not can_explain(cause_category, category):
+        if not can_explain_finding(cause_finding, finding):
             continue
         key = _cause_key(finding)
         if not key or key in detached:
             # An operator already said this one was not related. Never re-attach.
             continue
-        if first_seen.get(key, started) < cutoff:
+        owner = owned.get(key)
+        if owner is not None and owner != episode_id:
+            # Already a symptom of another open episode. One event with a
+            # cause means one cause: letting three episodes each list the same
+            # TargetDown is the "N findings that are wrong" problem wearing a
+            # different hat. The deepest, oldest cause claims it first — see
+            # the ordering in the monitor's correlation pass.
+            continue
+        symptom_onset = _onset_of(finding)
+        if cause_onset is not None and symptom_onset is not None:
+            if symptom_onset < cause_onset - _ONSET_GRACE_SECONDS:
+                # It was already firing before the cause began. Measured on the
+                # reference cluster: an unconfigured Alertmanager receiver had
+                # been alerting for fifty hours. Nothing caused it, and it is
+                # not evidence about anything that started yesterday.
+                continue
+        elif first_seen.get(key, started) < cutoff:
             # Already broken before the cause appeared.
             continue
+        category = finding.get("category", "")
         resources = finding.get("resources") or []
         namespace = resources[0].get("namespace", "") if resources else ""
         if repo.attach(episode_id, key, category, finding.get("title", "")[:400], namespace, _now()):
+            owned[key] = episode_id
             attached += 1
 
     if attached:

@@ -86,7 +86,8 @@ class ClusterMonitor:
         cycles ago can still absorb a symptom that only appeared this cycle.
         """
         from ..inbox import _finding_corr_key
-        from .episodes import attach_symptoms, open_or_touch
+        from .episodes import attach_symptoms, open_or_touch, symptom_keys_by_episode
+        from .layers import layer_for_finding
 
         first_seen = {}
         for f in findings:
@@ -94,10 +95,22 @@ class ClusterMonitor:
             if key:
                 first_seen[key] = self._first_seen.get(_finding_key(f), int(time.time()))
 
-        for f in findings:
-            episode_id = open_or_touch(f)
+        # Deepest cause first, and among equals the one that started earliest.
+        # Order decides ownership: a symptom belongs to the first episode that
+        # claims it, and the answer to "what explains this TargetDown" should
+        # be the control plane underneath it, not the operator that is itself
+        # a symptom of the same thing.
+        def _depth(f: dict) -> tuple[int, int]:
+            return (layer_for_finding(f), int(f.get("startedAt") or first_seen.get(_finding_corr_key(f), 0) or 0))
+
+        claimed = symptom_keys_by_episode()
+        for f in sorted(findings, key=_depth):
+            episode_id = open_or_touch(f, claimed)
             if episode_id:
-                attach_symptoms(episode_id, f.get("category", ""), findings, first_seen)
+                # The finding, not just its category: it carries the declared
+                # layer and the condition's own onset, both of which the
+                # category alone throws away.
+                attach_symptoms(episode_id, f, findings, first_seen, claimed)
 
     def __init__(self) -> None:
         self.running = False

@@ -96,6 +96,10 @@ def repo():
     r.find_recent_closed_by_correlation.return_value = None
     r.detached_keys.return_value = set()
     r.attach.return_value = True
+    # No symptom is spoken for unless a test says so. Left as a MagicMock this
+    # reads as "every key is already owned by another episode" and nothing
+    # opens or attaches at all.
+    r.open_symptom_index.return_value = {}
     with patch(f"{MODULE}._repo", return_value=r):
         yield r
 
