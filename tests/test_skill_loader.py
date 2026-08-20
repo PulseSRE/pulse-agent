@@ -336,3 +336,38 @@ class TestSkillToDict:
         assert isinstance(d["keywords"], list)
         assert isinstance(d["prompt_length"], int)
         assert d["prompt_length"] > 0
+
+
+class TestFallbackIsNotArgmax:
+    """When no channel clears the threshold, routing must be deterministic.
+
+    The fallback previously returned the highest-scoring skill even though the
+    threshold check had just declared that score insufficient. The temporal
+    channel is learned from usage, so on a cluster where one skill had been
+    used recently, an unrelated query would route to it on a score of 0.01
+    against a 0.45 threshold — and the same code would route differently in
+    CI and locally, which is exactly how it stayed hidden.
+    """
+
+    def test_an_unmatched_query_routes_to_the_default(self):
+        from sre_agent.skill_loader import classify_query
+
+        assert classify_query("hello").name == "sre"
+
+    def test_the_fallback_ignores_a_below_threshold_winner(self):
+        from sre_agent.skill_loader import _get_selector
+
+        result = _get_selector().select("hello")
+        assert result.source == "fallback"
+        assert result.skill_name == "sre"
+        # ...even though something did score highest.
+        if result.fused_scores:
+            best = max(result.fused_scores.values())
+            assert best < result.threshold_used
+
+    def test_a_matched_query_still_routes_on_its_own_evidence(self):
+        """The fix must not flatten real routing into the default."""
+        from sre_agent.skill_loader import classify_query
+
+        assert classify_query("audit cluster-admin bindings for privilege escalation").name == "security"
+        assert classify_query("forecast capacity for next quarter").name == "capacity_planner"
