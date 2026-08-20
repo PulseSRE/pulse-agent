@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/tools-154_(118+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
   <img src="https://img.shields.io/badge/scanners-27-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-2695-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-2709-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/eval_suites-16_(192_scenarios)-10b981?style=for-the-badge" alt="Eval Suites">
   <img src="https://img.shields.io/badge/release_gate-99.6%25-10b981?style=for-the-badge" alt="Release Gate">
   <img src="https://img.shields.io/badge/PromQL%20recipes-83-10b981?style=for-the-badge" alt="PromQL Recipes">
@@ -225,6 +225,11 @@ export PULSE_AGENT_DATABASE_URL=postgresql://pulse:pulse@localhost:5433/pulse_te
 
 Schema migrations are applied automatically on startup.
 
+The test suite (`make test`) uses `PULSE_AGENT_TEST_DATABASE_URL`, defaulting to the
+same URL. Create that database as **UTF-8** — a `SQL_ASCII` cluster (the default for
+some standalone macOS builds) fails on fixtures containing an em dash, and the error
+surfaces as an unrelated-looking empty result rather than an encoding error.
+
 ## Deploy to OpenShift
 
 The [pulse-operator README](https://github.com/PulseSRE/pulse-operator#install-via-olm) is the canonical install guide — it is the only place the steps are maintained, so anything here that contradicts it is wrong.
@@ -397,7 +402,7 @@ All WebSocket endpoints require `?token=...` query parameter (constant-time comp
 ---
 
 <p align="center">
-  <strong>104 native tools + MCP</strong> &bull; <strong>7 skills</strong> &bull; <strong>27 scanners</strong> &bull; <strong>13 runbooks</strong> &bull; <strong>83 PromQL recipes</strong> &bull; <strong>16 eval suites (192 scenarios)</strong> &bull; <strong>2,695 tests</strong> &bull; <strong>Migration v026</strong> &bull; <strong>Protocol v2</strong>
+  <strong>104 native tools + MCP</strong> &bull; <strong>7 skills</strong> &bull; <strong>27 scanners</strong> &bull; <strong>13 runbooks</strong> &bull; <strong>83 PromQL recipes</strong> &bull; <strong>16 eval suites (192 scenarios)</strong> &bull; <strong>2,709 tests</strong> &bull; <strong>Migration v027</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

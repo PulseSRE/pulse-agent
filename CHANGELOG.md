@@ -2,7 +2,7 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
-## [Unreleased]
+## [2.12.0] - 2026-08-20
 
 ### Fixes found by watching v2.11.0 on a real cluster
 - Untouched-item expiry could never fire. The query filtered `pinned_by IS NULL`, but `pinned_by` is a JSON list defaulting to `'[]'` — 323 of 323 rows had `'[]'` and none had NULL, so it matched nothing. The stubbed unit tests passed because they never ran the SQL
