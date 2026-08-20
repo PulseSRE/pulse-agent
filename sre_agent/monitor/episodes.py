@@ -182,6 +182,93 @@ def symptom_keys_by_episode() -> dict[str, str]:
         return {}
 
 
+def recurrence_summary(episode_id: str) -> dict[str, Any]:
+    """How often this cause has come back, and whether it is getting worse.
+
+    Returns occurrences (this one included), the window they span, and the
+    interval between them when it is regular enough to name — a cause that
+    returns on a fixed cadence is a different problem from one that returns at
+    random, and the cadence is usually the clue.
+    """
+    repo = _repo()
+    chain = repo.recurrence_chain(episode_id)
+    if not chain:
+        return {"occurrences": 1, "recurring": False}
+
+    this = repo.get(episode_id)
+    starts = [int(this["started_at"])] + [int(e["started_at"]) for e in chain]
+    starts.sort(reverse=True)
+    gaps = [starts[i] - starts[i + 1] for i in range(len(starts) - 1)]
+
+    summary: dict[str, Any] = {
+        "occurrences": len(starts),
+        "recurring": True,
+        "first_seen": starts[-1],
+        "window_seconds": starts[0] - starts[-1],
+        "prior_episode_ids": [e["id"] for e in chain],
+    }
+    if gaps:
+        mean = sum(gaps) / len(gaps)
+        # Regular enough to call a cadence: every gap within 25% of the mean.
+        if mean > 0 and all(abs(g - mean) <= mean * 0.25 for g in gaps):
+            summary["interval_seconds"] = int(mean)
+    return summary
+
+
+# How far before an episode started to look for changes. A rollout or a config
+# edit that preceded the damage by more than this is unlikely to be the reason,
+# and widening it turns "what changed" into "everything that ever changed".
+_CHANGE_LOOKBACK_SECONDS = 30 * 60
+
+
+def changes_around(episode_id: str) -> list[dict[str, Any]]:
+    """Config, RBAC and deployment activity in the window before an episode began.
+
+    The first question in any incident is "what changed", and the product has
+    been collecting the answer all along — audit_config, audit_rbac and
+    audit_deployment file their findings as ordinary inbox rows, where they sit
+    among everything else and answer nothing.
+
+    Placing them on the episode's timeline is the whole difference between data
+    and an answer. Nothing here claims causation: it reports what happened
+    shortly before, in time order, and lets the reader draw the line.
+    """
+    repo = _repo()
+    episode = repo.get(episode_id)
+    if not episode:
+        return []
+
+    started = int(episode["started_at"])
+    window_start = started - _CHANGE_LOOKBACK_SECONDS
+
+    from ..repositories.inbox_repo import get_inbox_repo
+
+    try:
+        rows = get_inbox_repo().fetch_items_by_category_window(
+            ("audit_config", "audit_rbac", "audit_deployment"), window_start, started
+        )
+    except Exception:
+        logger.exception("Could not read change history for episode %s", episode_id)
+        return []
+
+    changes = []
+    for row in rows or []:
+        created = int(row["created_at"])
+        changes.append(
+            {
+                # The correlation key is built as category:namespace:resource,
+                # and category is not a column of its own.
+                "category": str(row["correlation_key"] or "").split(":", 1)[0],
+                "title": row["title"],
+                "namespace": row["namespace"] or "",
+                "at": created,
+                "seconds_before": started - created,
+            }
+        )
+    changes.sort(key=lambda c: c["at"])
+    return changes
+
+
 def list_open() -> list[dict]:
     """Open episodes, newest first, each with its symptom rollup."""
     episodes = _repo().list_open()
