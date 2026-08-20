@@ -198,6 +198,17 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "auto_fixable": False,
         "scan_every": 5,
     },
+    "degraded": {
+        "displayName": "Pulse Self-Check",
+        "description": "Reports Pulse's own failing scanners and backends, so silence is never mistaken for health",
+        "category": "liveness",
+        "checks": [
+            "scanner failed 3+ consecutive runs",
+            "5+ consecutive failed investigations",
+        ],
+        "auto_fixable": False,
+        "scan_every": 5,
+    },
     "trend_memory": {
         "displayName": "Memory Pressure Forecast",
         "description": "Predicts node memory exhaustion using 7-day trends",

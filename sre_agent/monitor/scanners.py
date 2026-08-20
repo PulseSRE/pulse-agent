@@ -13,6 +13,7 @@ from ..k8s_client import get_apps_client, get_autoscaling_client, get_core_clien
 from ..prometheus import PrometheusBackend, PrometheusConfigError, get_prometheus_client
 from .findings import _make_finding, _skip_namespace
 from .registry import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING
+from .scanner_health import report_failure
 
 logger = logging.getLogger("pulse_agent.monitor")
 
@@ -147,6 +148,7 @@ def scan_crashlooping_pods(pods=None) -> list[dict]:
                 )
     except Exception as e:
         logger.error("Crash loop scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -184,6 +186,7 @@ def scan_pending_pods() -> list[dict]:
                     )
     except Exception as e:
         logger.error("Pending pod scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -216,6 +219,7 @@ def scan_failed_deployments() -> list[dict]:
                 )
     except Exception as e:
         logger.error("Deployment scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -252,6 +256,7 @@ def scan_node_pressure() -> list[dict]:
                     )
     except Exception as e:
         logger.error("Node pressure scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -331,6 +336,7 @@ def scan_expiring_certs() -> list[dict]:
                 logger.debug("Failed to parse certificate: %s", e)
     except Exception as e:
         logger.error("Certificate scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -436,6 +442,7 @@ def scan_oom_killed_pods(pods=None) -> list[dict]:
                     )
     except Exception as e:
         logger.error("OOMKilled scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -468,6 +475,7 @@ def scan_image_pull_errors(pods=None) -> list[dict]:
                     )
     except Exception as e:
         logger.error("Image pull scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -500,6 +508,7 @@ def scan_degraded_operators() -> list[dict]:
                     )
     except Exception as e:
         logger.error("Degraded operators scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -530,6 +539,7 @@ def scan_daemonset_gaps() -> list[dict]:
                 )
     except Exception as e:
         logger.error("DaemonSet gap scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -560,6 +570,7 @@ def scan_hpa_saturation() -> list[dict]:
                 )
     except Exception as e:
         logger.error("HPA saturation scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -587,6 +598,7 @@ def _get_all_scanners() -> list[tuple[str, Callable[..., Any]]]:
         scan_recent_deployments,
         scan_warning_events,
     )
+    from .scanner_health import scan_degraded_capabilities
     from .stuck_scanners import scan_control_plane_stalls, scan_hot_reconcile_loops, scan_stuck_deletions
     from .trend_scanners import (
         get_trend_degraded_finding,
@@ -612,6 +624,7 @@ def _get_all_scanners() -> list[tuple[str, Callable[..., Any]]]:
         ("stuck", scan_stuck_deletions),
         ("hot_loop", scan_hot_reconcile_loops),
         ("control_plane", scan_control_plane_stalls),
+        ("degraded", scan_degraded_capabilities),
     ]
 
 
@@ -669,6 +682,7 @@ class AsyncPendingPodsScanner(AsyncScanner):
                         )
         except Exception as e:
             logger.error("Async pending pod scan failed: %s", e)
+            report_failure(e)
         return findings
 
 
@@ -706,6 +720,7 @@ class AsyncFailedDeploymentsScanner(AsyncScanner):
                     )
         except Exception as e:
             logger.error("Async deployment scan failed: %s", e)
+            report_failure(e)
         return findings
 
 
@@ -747,6 +762,7 @@ class AsyncNodePressureScanner(AsyncScanner):
                         )
         except Exception as e:
             logger.error("Async node pressure scan failed: %s", e)
+            report_failure(e)
         return findings
 
 
@@ -784,6 +800,7 @@ class AsyncDegradedOperatorsScanner(AsyncScanner):
                         )
         except Exception as e:
             logger.error("Async degraded operators scan failed: %s", e)
+            report_failure(e)
         return findings
 
 
@@ -819,6 +836,7 @@ class AsyncDaemonsetGapsScanner(AsyncScanner):
                     )
         except Exception as e:
             logger.error("Async daemonset gap scan failed: %s", e)
+            report_failure(e)
         return findings
 
 
@@ -854,6 +872,7 @@ class AsyncHpaSaturationScanner(AsyncScanner):
                     )
         except Exception as e:
             logger.error("Async HPA saturation scan failed: %s", e)
+            report_failure(e)
         return findings
 
 
@@ -881,6 +900,7 @@ def get_all_scanner_instances() -> list[FunctionScanner]:
         scan_recent_deployments,
         scan_warning_events,
     )
+    from .scanner_health import scan_degraded_capabilities
     from .stuck_scanners import scan_control_plane_stalls, scan_hot_reconcile_loops, scan_stuck_deletions
     from .trend_scanners import (
         get_trend_degraded_finding,
@@ -906,6 +926,7 @@ def get_all_scanner_instances() -> list[FunctionScanner]:
         FunctionScanner(_meta("stuck"), scan_stuck_deletions, accepts_pods=True),
         FunctionScanner(_meta("hot_loop"), scan_hot_reconcile_loops),
         FunctionScanner(_meta("control_plane"), scan_control_plane_stalls),
+        FunctionScanner(_meta("degraded"), scan_degraded_capabilities),
     ]
 
 
@@ -1005,5 +1026,6 @@ def scan_security_posture() -> list[dict]:
             )
     except Exception as e:
         logger.error("Security posture scan failed: %s", e)
+        report_failure(e)
 
     return findings
