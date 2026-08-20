@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -578,6 +579,91 @@ class TestCreateAsyncClient:
 
         client = create_async_client()
         assert isinstance(client, anthropic.AsyncAnthropic)
+
+
+class _FakeAsyncClient:
+    """Minimal stand-in that just tracks whether close() was awaited."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class TestBorrowAsyncClient:
+    """Regression coverage for the shared-client-cancellation bug.
+
+    A timed-out proactive investigation used to cancel an in-flight streamed
+    call on the monitor's one long-lived AsyncAnthropicVertex client, which
+    can corrupt that client's connection pool for the rest of the process.
+    borrow_async_client(client=None) is the fix's foundation: it always
+    creates a disposable client and always closes it — including when the
+    caller is cancelled mid-`async with` — so a timeout only ever damages a
+    client nobody else will reuse.
+    """
+
+    @pytest.mark.asyncio
+    async def test_creates_and_closes_a_fresh_client_when_none_given(self):
+        from sre_agent.agent import borrow_async_client
+
+        created: list[_FakeAsyncClient] = []
+
+        def _factory():
+            c = _FakeAsyncClient()
+            created.append(c)
+            return c
+
+        with patch("sre_agent.agent.create_async_client", side_effect=_factory):
+            async with borrow_async_client(None) as c:
+                assert c is created[0]
+                assert c.closed is False
+
+        assert created[0].closed is True
+
+    @pytest.mark.asyncio
+    async def test_cancellation_closes_the_owned_client_without_touching_a_shared_one(self):
+        """Cancelling mid-call must close the fresh client and never touch a
+        caller-supplied (shared, long-lived) client at all."""
+        from sre_agent.agent import borrow_async_client
+
+        created: list[_FakeAsyncClient] = []
+
+        def _factory():
+            c = _FakeAsyncClient()
+            created.append(c)
+            return c
+
+        shared = _FakeAsyncClient()
+
+        async def _slow_investigation_using_fresh_client():
+            with patch("sre_agent.agent.create_async_client", side_effect=_factory):
+                async with borrow_async_client(None) as c:
+                    assert c is not shared
+                    await asyncio.sleep(10)
+
+        task = asyncio.create_task(_slow_investigation_using_fresh_client())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert len(created) == 1
+        assert created[0].closed is True, "a cancelled call must still close its own disposable client"
+        assert shared.closed is False, "cancellation must never close/touch a client it didn't create"
+
+    @pytest.mark.asyncio
+    async def test_never_closes_a_caller_supplied_shared_client(self):
+        """Passing an explicit client (e.g. a long-lived shared one) must leave
+        it open — borrow_async_client only closes clients it created itself."""
+        from sre_agent.agent import borrow_async_client
+
+        shared = _FakeAsyncClient()
+
+        async with borrow_async_client(shared) as c:
+            assert c is shared
+
+        assert shared.closed is False
 
 
 class TestTokenForwarding:

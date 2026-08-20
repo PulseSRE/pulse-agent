@@ -1,6 +1,7 @@
 """Tests for the monitor module — fix history, findings, and scan functions."""
 
 import asyncio
+import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -524,6 +525,250 @@ class TestSecurityFollowup:
 
         # Should only be called once despite multiple investigations
         assert mock_sec.call_count == 1
+
+
+class TestInvestigationClientIsolation:
+    """Regression coverage for the shared-client-cancellation bug.
+
+    cluster_monitor.py used to hand every proactive investigation the same
+    long-lived monitor._client, and investigation_runner.py wrapped each call
+    in asyncio.wait_for(timeout=investigation_timeout). Cancelling an
+    in-flight streamed call on a *shared* client can corrupt its connection
+    pool for the rest of the process — on the reference cluster this showed up
+    as genuine 20s timeouts followed by hundreds of near-instant
+    "Connection error." failures with zero further network attempts. The fix
+    is to never hand this path monitor._client at all.
+    """
+
+    def _make_monitor_with_subscriber(self):
+        sent_messages: list[dict] = []
+
+        class FakeSocket:
+            async def send_json(self, data):
+                sent_messages.append(data)
+
+        monitor = ClusterMonitor()
+        session = MonitorSession(FakeSocket(), trust_level=1)
+        monitor._subscribers.append(session)
+        return monitor, sent_messages
+
+    def test_flat_investigation_never_passed_the_shared_cancellable_client(self, monkeypatch):
+        """run_investigations must call _run_proactive_investigation/_run_security_followup
+        with client=None (a fresh, disposable client), never monitor._client."""
+        monkeypatch.setenv("PULSE_AGENT_SECURITY_FOLLOWUP", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "5")
+        from sre_agent.config import _reset_settings
+
+        _reset_settings()
+
+        monitor, _sent_messages = self._make_monitor_with_subscriber()
+        shared_client = monitor._client  # the long-lived client created at monitor init
+
+        seen_investigation_clients = []
+        seen_security_clients = []
+
+        async def fake_investigation(finding, *, client=None):
+            seen_investigation_clients.append(client)
+            return {"summary": "ok", "suspected_cause": "x", "recommended_fix": "y", "confidence": 0.5}
+
+        async def fake_security_followup(finding, *, client=None):
+            seen_security_clients.append(client)
+            return {"security_issues": [], "risk_level": "low"}
+
+        finding = _make_finding(
+            severity="critical",
+            category="crashloop",
+            title="Pod crashing",
+            summary="restarts",
+            resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
+        )
+
+        with (
+            patch(
+                "sre_agent.monitor.investigation_runner._run_proactive_investigation",
+                side_effect=fake_investigation,
+            ),
+            patch(
+                "sre_agent.monitor.investigation_runner._run_security_followup",
+                side_effect=fake_security_followup,
+            ),
+            patch("sre_agent.agent._circuit_breaker") as mock_cb,
+            patch.object(monitor, "_try_plan_execution", return_value=False),
+            patch("sre_agent.plan_templates.match_template", return_value=None),
+        ):
+            mock_cb.is_open = False
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(monitor.run_investigations([finding]))
+            finally:
+                loop.close()
+
+        assert seen_investigation_clients == [None]
+        assert seen_security_clients == [None]
+        assert shared_client not in seen_investigation_clients
+        assert shared_client not in seen_security_clients
+
+    def test_timed_out_investigation_does_not_poison_the_next_investigation(self, monkeypatch):
+        """A cancelled/timed-out investigation must not prevent the very next
+        investigation (a different finding, same scan pipeline) from succeeding."""
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "1")
+        from sre_agent.config import _reset_settings
+
+        _reset_settings()
+
+        monitor, sent_messages = self._make_monitor_with_subscriber()
+
+        call_count = {"n": 0}
+
+        async def fake_investigation(finding, *, client=None):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                # Outruns the 1s investigation_timeout — asyncio.wait_for
+                # cancels this coroutine, simulating a real multi-turn call
+                # that took longer than the budget.
+                await asyncio.sleep(5)
+            return {
+                "summary": "OOM diagnosed",
+                "suspected_cause": "memory limit too low",
+                "recommended_fix": "raise the limit",
+                "confidence": 0.6,
+            }
+
+        finding_a = _make_finding(
+            severity="critical",
+            category="crashloop",
+            title="Pod A crashing",
+            summary="restarts",
+            resources=[{"kind": "Pod", "name": "a", "namespace": "prod"}],
+        )
+        finding_b = _make_finding(
+            severity="critical",
+            category="crashloop",
+            title="Pod B crashing",
+            summary="restarts",
+            resources=[{"kind": "Pod", "name": "b", "namespace": "prod"}],
+        )
+
+        with (
+            patch(
+                "sre_agent.monitor.investigation_runner._run_proactive_investigation",
+                side_effect=fake_investigation,
+            ),
+            patch("sre_agent.agent._circuit_breaker") as mock_cb,
+            patch.object(monitor, "_try_plan_execution", return_value=False),
+            patch("sre_agent.plan_templates.match_template", return_value=None),
+        ):
+            mock_cb.is_open = False
+            loop = asyncio.new_event_loop()
+            try:
+                # Two separate scan-style calls, like two consecutive scan
+                # cycles each investigating one new finding.
+                loop.run_until_complete(monitor.run_investigations([finding_a]))
+                loop.run_until_complete(monitor.run_investigations([finding_b]))
+            finally:
+                loop.close()
+
+        reports = [m for m in sent_messages if m.get("type") == "investigation_report"]
+        assert len(reports) == 2
+        assert reports[0]["status"] == "failed"
+        assert reports[0]["error"] == "Investigation timed out after 1s"
+        assert reports[1]["status"] == "completed"
+        assert reports[1]["suspectedCause"] == "memory limit too low"
+
+    def test_investigation_timeout_is_logged_with_a_warning(self, monkeypatch, caplog):
+        """A timed-out investigation must be visible in application logs, not
+        just recorded silently in report['error']."""
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "1")
+        from sre_agent.config import _reset_settings
+
+        _reset_settings()
+
+        monitor, _sent_messages = self._make_monitor_with_subscriber()
+
+        async def hanging_investigation(finding, *, client=None):
+            await asyncio.sleep(5)
+
+        finding = _make_finding(
+            severity="critical",
+            category="crashloop",
+            title="Pod crashing",
+            summary="restarts",
+            resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
+        )
+
+        with (
+            patch(
+                "sre_agent.monitor.investigation_runner._run_proactive_investigation",
+                side_effect=hanging_investigation,
+            ),
+            patch("sre_agent.agent._circuit_breaker") as mock_cb,
+            patch.object(monitor, "_try_plan_execution", return_value=False),
+            patch("sre_agent.plan_templates.match_template", return_value=None),
+        ):
+            mock_cb.is_open = False
+            loop = asyncio.new_event_loop()
+            try:
+                with caplog.at_level(logging.WARNING, logger="pulse_agent.monitor"):
+                    loop.run_until_complete(monitor.run_investigations([finding]))
+            finally:
+                loop.close()
+
+        assert any("timed out" in r.message and r.levelno >= logging.WARNING for r in caplog.records)
+
+    def test_investigation_failure_is_logged_with_full_exception_info(self, monkeypatch, caplog):
+        """The 'Connection error.' failure mode on the reference cluster was
+        completely invisible in application logs: report['error'] = str(e)
+        with no logger call at all. A generic (non-timeout) investigation
+        failure must now be logged with the full exception traceback."""
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "1")
+        monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "5")
+        from sre_agent.config import _reset_settings
+
+        _reset_settings()
+
+        monitor, sent_messages = self._make_monitor_with_subscriber()
+
+        async def failing_investigation(finding, *, client=None):
+            raise RuntimeError("Connection error.")
+
+        finding = _make_finding(
+            severity="critical",
+            category="crashloop",
+            title="Pod crashing",
+            summary="restarts",
+            resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
+        )
+
+        with (
+            patch(
+                "sre_agent.monitor.investigation_runner._run_proactive_investigation",
+                side_effect=failing_investigation,
+            ),
+            patch("sre_agent.agent._circuit_breaker") as mock_cb,
+            patch.object(monitor, "_try_plan_execution", return_value=False),
+            patch("sre_agent.plan_templates.match_template", return_value=None),
+        ):
+            mock_cb.is_open = False
+            loop = asyncio.new_event_loop()
+            try:
+                with caplog.at_level(logging.ERROR, logger="pulse_agent.monitor"):
+                    loop.run_until_complete(monitor.run_investigations([finding]))
+            finally:
+                loop.close()
+
+        reports = [m for m in sent_messages if m.get("type") == "investigation_report"]
+        assert reports[0]["status"] == "failed"
+        assert reports[0]["error"] == "Connection error."
+
+        error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert error_records, "the investigation failure must produce at least one ERROR log record"
+        assert any(r.exc_info for r in error_records), (
+            "the log record must carry the full exception (exc_info), not just a message"
+        )
+        assert any("Connection error." in str(r.exc_info[1]) for r in error_records if r.exc_info)
 
 
 class TestMonitorAutoLearn:

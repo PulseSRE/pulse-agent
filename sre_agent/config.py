@@ -41,7 +41,12 @@ class MonitorConfig(BaseModel):
     crashloop_threshold: int = 3
     max_daily_investigations: int = 20
     investigations_max_per_scan: int = 2
-    investigation_timeout: int = 20
+    # A proactive investigation is one uninterrupted Claude call that triages
+    # AND diagnoses a finding (tool calls + reasoning). Plan-based investigations
+    # break that same work into phases and give the *shortest* single phase
+    # (triage alone, in every sre_agent/plan_templates/*.yaml) 120s — this path
+    # does triage and diagnosis in one shot, so it needs at least that much.
+    investigation_timeout: int = 120
     investigation_cooldown: int = 300
     autofix_enabled: bool = True
     security_followup: bool = False
@@ -138,7 +143,7 @@ class PulseAgentSettings(BaseSettings):
     crashloop_threshold: int = 3
     max_daily_investigations: int = 20
     investigations_max_per_scan: int = 2
-    investigation_timeout: int = 20
+    investigation_timeout: int = 120
     investigation_cooldown: int = 300
     autofix_enabled: bool = True
     security_followup: bool = False
