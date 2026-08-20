@@ -106,11 +106,57 @@ def check_no_by_value_global_import() -> list[str]:
     return violations
 
 
+def check_no_silent_scanner_failure() -> list[str]:
+    """A scanner that swallows an exception must say so.
+
+    Scanners return a list. An empty list is what a healthy scan of a healthy
+    cluster returns, so a scanner that catches its own error and returns []
+    is indistinguishable from one that worked and found nothing — the
+    dispatcher records "clean" either way, and whatever that scanner watches
+    is silently unwatched.
+
+    Twenty-two scanners were in that state. The fix is one line in the handler:
+    report_failure(e) next to the logging that was already there.
+    """
+    violations: list[str] = []
+    for path in sorted((ROOT / "sre_agent").rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            if not node.name.startswith(("scan_", "get_trend")):
+                continue
+            for handler in [h for n in ast.walk(node) if isinstance(n, ast.Try) for h in n.handlers]:
+                broad = isinstance(handler.type, ast.Name) and handler.type.id == "Exception"
+                if not broad:
+                    continue
+                calls = {
+                    n.func.id
+                    for n in ast.walk(handler)
+                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                }
+                logs_it = any(
+                    isinstance(n, ast.Call)
+                    and isinstance(n.func, ast.Attribute)
+                    and n.func.attr in ("error", "exception")
+                    for n in ast.walk(handler)
+                )
+                if logs_it and "report_failure" not in calls:
+                    rel = path.relative_to(ROOT)
+                    violations.append(
+                        f"{rel}:{handler.lineno} {node.name}() logs a swallowed exception "
+                        f"without report_failure(e) — the run will be recorded as clean and "
+                        f"whatever it watches will be silently unwatched."
+                    )
+    return violations
+
+
 def main() -> int:
     failed = False
     for name, check in (
         ("no-silent-skip", check_no_silent_skip),
         ("no-by-value-global-import", check_no_by_value_global_import),
+        ("no-silent-scanner-failure", check_no_silent_scanner_failure),
     ):
         violations = check()
         if violations:

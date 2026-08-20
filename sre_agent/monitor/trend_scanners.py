@@ -9,6 +9,7 @@ from typing import Any
 from ..prometheus import PrometheusConfigError, get_prometheus_client
 from .findings import _make_finding
 from .registry import SEVERITY_WARNING
+from .scanner_health import report_failure
 
 logger = logging.getLogger("pulse_agent.monitor")
 
@@ -91,6 +92,7 @@ def scan_memory_pressure_forecast() -> list[dict]:
                     logger.debug("Failed to parse memory pressure value for node", exc_info=True)
     except Exception as e:
         logger.error("Memory pressure forecast scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -138,6 +140,7 @@ def scan_disk_pressure_forecast() -> list[dict]:
                 )
     except Exception as e:
         logger.error("Disk pressure forecast scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -176,6 +179,7 @@ def scan_hpa_exhaustion_trend() -> list[dict]:
                     logger.debug("Failed to parse HPA utilization value", exc_info=True)
     except Exception as e:
         logger.error("HPA exhaustion trend scan failed: %s", e)
+        report_failure(e)
     return findings
 
 
@@ -216,6 +220,7 @@ def scan_error_rate_acceleration() -> list[dict]:
                     logger.debug("Failed to parse error rate derivative value", exc_info=True)
     except Exception as e:
         logger.error("Error rate acceleration scan failed: %s", e)
+        report_failure(e)
     return findings
 
 

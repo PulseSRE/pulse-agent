@@ -4,6 +4,14 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### Pulse now admits when it is broken
+
+The rule: **absence of findings must never be indistinguishable from absence of problems.**
+
+- Twenty-two scanners caught their own top-level exception, logged it, and returned an empty list — which is exactly what a healthy scan of a healthy cluster returns. The dispatcher recorded `status: "clean"` and whatever that scanner watched was silently unwatched. Each now calls `report_failure(e)` beside the logging it already did, and the dispatcher takes the scanner's word over the shape of its return value. Partial findings are still returned: losing 49 real findings because the 50th pod had an odd shape would be the worse trade
+- New `degraded` scanner — the only one that looks inward. Reports any scanner that has errored on 3+ consecutive runs, and the AI backend once 5+ investigations fail in a row. It reads `scan_runs.scanner_results`, which has recorded per-scanner status as JSON since migration 005 and which nothing has ever read back
+- On the reference cluster this matters: 1,155 of 1,177 investigations had failed (98.1%), 1,111 with `Connection error.`, and the product said nothing. An empty investigation panel reads as "nothing worth investigating", which is the opposite of the truth
+- New discipline rule `no-silent-scanner-failure` makes it mechanical: a `scan_*` function that logs a swallowed exception without reporting it fails CI. It caught five violations on its first run, three of them in scanners added the same day
 ### Fixes
 - Skill routing was decided by usage history when a query matched nothing. Below the confidence threshold the selector returned the highest-scoring skill anyway — and for an unrecognised query the only thing scoring was the *temporal* channel, a learned prior about what had been used recently. `classify_query("hello")` returned `slo_management` on a fused score of 0.01 against a 0.45 threshold. Because the prior is learned, identical code routed differently in CI and locally, which is how the broken default went unnoticed and left `main` red. The fallback now ignores prior-only channels: a query with real keyword or semantic evidence still routes on it (`audit cluster-admin bindings` → security at 0.40), and one with none goes to the default
 

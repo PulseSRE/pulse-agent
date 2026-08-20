@@ -29,6 +29,7 @@ from ..errors import ToolError
 from ..k8s_client import get_core_client, get_custom_client, safe
 from .findings import _make_finding
 from .registry import SEVERITY_CRITICAL, SEVERITY_WARNING
+from .scanner_health import report_failure
 
 logger = logging.getLogger("pulse_agent.monitor")
 
@@ -279,6 +280,7 @@ def scan_stuck_deletions(pods: Any = None) -> list[dict]:
             findings.extend(sub_scan())
         except Exception as e:
             logger.error("Stuck-deletion scan failed for %s: %s", label, e)
+            report_failure(e)
     return findings
 
 
@@ -434,6 +436,7 @@ def scan_hot_reconcile_loops() -> list[dict]:
             findings.extend(sub_scan())
         except Exception as e:
             logger.error("Hot-loop scan failed for %s: %s", label, e)
+            report_failure(e)
     return findings
 
 
@@ -679,4 +682,5 @@ def scan_control_plane_stalls() -> list[dict]:
             findings.extend(sub_scan())
         except Exception as e:
             logger.error("Control-plane scan failed for %s: %s", label, e)
+            report_failure(e)
     return findings
