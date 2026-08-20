@@ -314,3 +314,50 @@ def test_real_symptoms_still_attach_after_the_exclusion(repo):
     repo.get.return_value = _open_episode(now)
     ep.attach_symptoms("ep-1", "control_plane", [DEPLOY, POD, ALERT], {})
     assert repo.attach.call_count == 3
+
+
+# ── clearing an episode ───────────────────────────────────────────────────
+# Reported from real use: the cluster had recovered, the AI said so, and the
+# card would not go away. Two causes — a metric window that kept the finding
+# alive for an hour after the problem stopped, and no way for a person to say
+# "this is over".
+
+
+def test_an_operator_can_close_an_episode(repo):
+    repo.dismiss.return_value = True
+    assert ep.dismiss("ep-1", "alice") is True
+    assert repo.dismiss.call_args.args[1] == "alice"
+
+
+def test_dismissing_an_already_closed_episode_reports_false(repo):
+    repo.dismiss.return_value = False
+    assert ep.dismiss("ep-1", "alice") is False
+
+
+def test_every_windowed_check_also_requires_a_current_signal():
+    """A long window decides something is real; it must not decide it is over.
+
+    increase(...[1h]) still reported 15 refused writes at 17:22 with zero in
+    the preceding fifteen minutes, so the card stayed up for the best part of
+    an hour after the cluster recovered.
+    """
+    from unittest.mock import patch as _patch
+
+    import sre_agent.monitor.stuck_scanners as ss
+
+    queries = []
+    with _patch.object(ss, "_query", side_effect=lambda q: queries.append(q) or []):
+        ss.scan_control_plane_stalls()
+        ss.scan_hot_reconcile_loops()
+
+    windowed = [q for q in queries if "[1h]" in q]
+    assert windowed, "expected some checks to use a sustained window"
+    for q in windowed:
+        assert " and " in q, f"sustained check with no current-signal guard: {q[:70]}"
+        assert ss._RECENT_WINDOW in q, f"no recent window in: {q[:70]}"
+
+
+def test_the_recent_window_is_short_enough_to_clear_promptly():
+    import sre_agent.monitor.stuck_scanners as ss
+
+    assert ss._RECENT_WINDOW == "15m"

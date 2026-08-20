@@ -83,6 +83,20 @@ class EpisodeRepository(BaseRepository):
         )
         self.db.commit()
 
+    def dismiss(self, episode_id: str, actor: str, now: int) -> bool:
+        """Close an episode because an operator says it is over.
+
+        Recorded as a distinct reason from a self-closing episode: an operator
+        overriding the scanner is evidence the clearing logic is wrong, and
+        that is worth being able to count later.
+        """
+        cur = self.db.execute(
+            "UPDATE episodes SET status = ?, ended_at = ?, dismissed_by = ? WHERE id = ? AND status = ?",
+            (_CLOSED, now, actor, episode_id, _OPEN),
+        )
+        self.db.commit()
+        return bool(getattr(cur, "rowcount", 0))
+
     def list_open(self) -> list[dict[str, Any]]:
         return self.db.fetchall("SELECT * FROM episodes WHERE status = ? ORDER BY started_at DESC", (_OPEN,)) or []
 

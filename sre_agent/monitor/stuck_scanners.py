@@ -72,6 +72,25 @@ _WRITE_RATE_EXCLUDED_RESOURCES = (
 )
 
 
+# A long window is right for deciding something is real, and wrong for deciding
+# it is over. increase(...[1h]) keeps reporting a problem for a full hour after
+# it stops: a finding raised at 16:49 was still "true" at 17:22 with zero
+# failures in the preceding fifteen minutes, so an operator whose cluster had
+# already recovered had no way to make the card go away.
+#
+# Every windowed check is therefore two. The long window says the problem is
+# real; a short one says it is still happening. Detect slowly, clear quickly.
+_RECENT_WINDOW = "15m"
+
+
+def _sustained_and_current(long_expr: str, short_expr: str) -> str:
+    """Fire only while the sustained and the recent views agree.
+
+    PromQL `and` matches on labels, so both sides carry the same grouping.
+    """
+    return f"({long_expr}) and ({short_expr})"
+
+
 def _age_seconds(timestamp: Any) -> float | None:
     """Seconds since an API timestamp, or None if it is missing/unparseable."""
     if timestamp is None:
@@ -314,7 +333,14 @@ def _scan_controller_retries() -> list[dict]:
     during a rollout cannot trip it.
     """
     findings: list[dict[str, Any]] = []
-    query = f"sum by (name, namespace) (rate(workqueue_retries_total[1h])) > {_RETRY_RATE_WARNING}"
+
+    def retries(window: str) -> str:
+        return f"sum by (name, namespace) (rate(workqueue_retries_total[{window}]))"
+
+    query = _sustained_and_current(
+        f"{retries('1h')} > {_RETRY_RATE_WARNING}",
+        f"{retries(_RECENT_WINDOW)} > {_RETRY_RATE_WARNING}",
+    )
     for result in _query(query):
         rate = _rate(result)
         if rate is None:
@@ -355,9 +381,18 @@ def _scan_write_amplification() -> list[dict]:
     """
     findings: list[dict[str, Any]] = []
     excluded = "|".join(_WRITE_RATE_EXCLUDED_RESOURCES)
-    query = (
-        f"sum by (resource, verb, group) (rate(apiserver_request_total{{"
-        f'verb=~"POST|PUT|PATCH|DELETE",resource!~"{excluded}"}}[1h])) > {_WRITE_RATE_WARNING}'
+
+    # Built with an f-string per window rather than .format(): the label
+    # selector contains braces of its own and .format() reads them as fields.
+    def writes(window: str) -> str:
+        return (
+            f"sum by (resource, verb, group) (rate(apiserver_request_total{{"
+            f'verb=~"POST|PUT|PATCH|DELETE",resource!~"{excluded}"}}[{window}]))'
+        )
+
+    query = _sustained_and_current(
+        f"{writes('1h')} > {_WRITE_RATE_WARNING}",
+        f"{writes(_RECENT_WINDOW)} > {_WRITE_RATE_WARNING}",
     )
     for result in _query(query):
         rate = _rate(result)
@@ -393,9 +428,13 @@ def _scan_client_error_loops() -> list[dict]:
     crash it leaves no restart count behind to notice.
     """
     findings: list[dict[str, Any]] = []
-    query = (
-        f'sum by (namespace, pod, code) (rate(rest_client_requests_total{{code=~"4..|5.."}}[1h])) '
-        f"> {_CLIENT_ERROR_RATE_WARNING}"
+
+    def client_errors(window: str) -> str:
+        return f'sum by (namespace, pod, code) (rate(rest_client_requests_total{{code=~"4..|5.."}}[{window}]))'
+
+    query = _sustained_and_current(
+        f"{client_errors('1h')} > {_CLIENT_ERROR_RATE_WARNING}",
+        f"{client_errors(_RECENT_WINDOW)} > {_CLIENT_ERROR_RATE_WARNING}",
     )
     for result in _query(query):
         rate = _rate(result)
@@ -490,7 +529,15 @@ def _scan_etcd_consensus() -> list[dict]:
     """
     findings: list[dict[str, Any]] = []
 
-    for result in _query(f"sum(increase(etcd_server_leader_changes_seen_total[1h])) > {_ETCD_LEADER_CHANGES_WARNING}"):
+    def leader(window: str) -> str:
+        return f"sum(increase(etcd_server_leader_changes_seen_total[{window}]))"
+
+    for result in _query(
+        _sustained_and_current(
+            f"{leader('1h')} > {_ETCD_LEADER_CHANGES_WARNING}",
+            f"{leader(_RECENT_WINDOW)} > 0",
+        )
+    ):
         rate = _rate(result)
         if rate is None:
             continue
@@ -512,7 +559,10 @@ def _scan_etcd_consensus() -> list[dict]:
         )
 
     for result in _query(
-        f"sum by (instance) (increase(etcd_server_proposals_failed_total[1h])) > {_ETCD_FAILED_PROPOSALS_WARNING}"
+        _sustained_and_current(
+            f"sum by (instance) (increase(etcd_server_proposals_failed_total[1h])) > {_ETCD_FAILED_PROPOSALS_WARNING}",
+            f"sum by (instance) (increase(etcd_server_proposals_failed_total[{_RECENT_WINDOW}])) > 0",
+        )
     ):
         rate = _rate(result)
         if rate is None:
@@ -638,9 +688,13 @@ def _scan_read_amplification() -> list[dict]:
     its kind, decoded into memory, every time.
     """
     findings: list[dict[str, Any]] = []
-    query = (
-        'sum by (resource, group) (rate(apiserver_request_total{verb="LIST",scope="cluster"}[1h])) '
-        f"> {_CLUSTER_LIST_RATE_WARNING}"
+
+    def lists(window: str) -> str:
+        return f'sum by (resource, group) (rate(apiserver_request_total{{verb="LIST",scope="cluster"}}[{window}]))'
+
+    query = _sustained_and_current(
+        f"{lists('1h')} > {_CLUSTER_LIST_RATE_WARNING}",
+        f"{lists(_RECENT_WINDOW)} > {_CLUSTER_LIST_RATE_WARNING}",
     )
     for result in _query(query):
         rate = _rate(result)
