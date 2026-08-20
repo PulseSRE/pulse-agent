@@ -129,7 +129,12 @@ pytest tests across 121 test files in `tests/`. Major coverage areas:
 | K8s tools | `test_k8s_tools.py` | All 42 `@beta_tool` functions, input validation, `safe()` error handling |
 | Security tools | `test_security_tools.py` | 9 security scanning tools |
 | API endpoints | `test_api_http.py`, `test_api_websocket.py`, `test_api_tools.py` | REST + WebSocket endpoints, auth, protocol v2 |
-| Monitor/scanners | `test_monitor.py`, `test_scanners.py`, `test_audit_scanner.py` | 22 scanners, auto-fix, noise learning |
+| Monitor/scanners | `test_monitor.py`, `test_scanners.py`, `test_audit_scanner.py` | 27 scanners, auto-fix, noise learning |
+| Liveness scanners | `test_stuck_scanners.py` | Stuck deletions, hot reconcile loops, control-plane degradation; thresholds asserted against both a measured healthy value and a measured incident value |
+| Self-check | `test_scanner_health.py` | A failing scanner must not look like a clean one; consecutive-failure streak and failure rate |
+| Episodes | `test_episodes.py`, `test_episode_context.py` | Causal layers, over-attachment guards, recurrence cadence, what-changed correlation |
+| Pipeline | `test_pipeline_integration.py` | scan → finding → episode → inbox, end to end. Exists because every layer was unit-tested and green while the composition was wrong |
+| Monitor lifecycle | `test_monitor_lifecycle.py` | The scan loop starts at app startup, not on WebSocket connect |
 | Agent loop | `test_agent.py` | Streaming loop, circuit breaker, confirmation gate |
 | Harness | `test_harness.py` | Dynamic tool selection, prompt caching |
 | Orchestrator | `test_orchestrator.py` | Intent classification, typo correction |
