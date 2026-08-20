@@ -56,9 +56,27 @@ if [[ -f "$UMBRELLA_CHART" ]]; then
     rm -f "$UMBRELLA_CHART.bak"
     UMBRELLA_VER=$(grep -A1 'name: openshift-sre-agent' "$UMBRELLA_CHART" | grep version | sed 's/.*"\(.*\)"/\1/')
     if [[ "$UMBRELLA_VER" == "$VERSION" ]]; then
-        echo "  UI umbrella chart subchart → $VERSION"
+        # Chart.yaml alone is not enough. The umbrella pins the subchart in
+        # Chart.lock and vendors it as a .tgz under charts/; editing only the
+        # requirement leaves all three disagreeing and helm refuses to render
+        # ("the lock file is out of sync"). Re-vendor so the bump is complete
+        # rather than half-done.
+        if command -v helm >/dev/null 2>&1; then
+            if helm dependency update "$(dirname "$UMBRELLA_CHART")" >/dev/null 2>&1; then
+                echo "  UI umbrella chart subchart → $VERSION (lock + vendored chart rebuilt)"
+            else
+                echo "  ⚠️ Chart.yaml updated but 'helm dependency update' failed —"
+                echo "     Chart.lock and charts/*.tgz are now stale. Fix before releasing."
+                exit 1
+            fi
+        else
+            echo "  ⚠️ Chart.yaml updated but helm is not installed —"
+            echo "     run 'helm dependency update $(dirname "$UMBRELLA_CHART")' before releasing."
+            exit 1
+        fi
     else
         echo "  ⚠️ Failed to update umbrella chart (got $UMBRELLA_VER)"
+        exit 1
     fi
 else
     echo "  ⚠️ UI repo not found at $UI_REPO — update umbrella chart manually"
