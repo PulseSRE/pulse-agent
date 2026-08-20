@@ -2,7 +2,7 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
-## [Unreleased]
+## [2.11.0] - 2026-08-20
 
 ### Review pass
 - `control_plane` ran every 5th scan cycle — a 5-minute detection lag on the layer that explains everything above it, while `crashloop` (one of its symptoms) ran every 60s. That inverts the precedence the whole layer model exists to establish. It now runs every cycle; `hot_loop` moved to every 3rd. `stuck` and `degraded` stay at 5, where a 15-minute threshold and a failure streak make the lag irrelevant
