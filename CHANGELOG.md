@@ -4,6 +4,11 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### Review pass
+- `control_plane` ran every 5th scan cycle — a 5-minute detection lag on the layer that explains everything above it, while `crashloop` (one of its symptoms) ran every 60s. That inverts the precedence the whole layer model exists to establish. It now runs every cycle; `hot_loop` moved to every 3rd. `stuck` and `degraded` stay at 5, where a 15-minute threshold and a failure streak make the lag irrelevant
+- Removed `take_failures()`, which had no production caller and was kept alive by its own tests. The behaviour those tests covered is real and is now asserted through `get_failure` and `reset`, which are used
+
+
 ### The inbox is a queue again
 - `sweep_stale_items` runs on every scan cycle, not only at startup. It had a five-minute threshold and ran once per process, so three items sat in `agent_reviewing` for 73 minutes on a live cluster. A guard that only runs at boot does not guard anything while the process is running
 - Items nobody has claimed, pinned or acted on in 48 hours are archived. Measured: 40 of 76 open items were more than 40 hours old, which is how an inbox stops being a queue. Deliberately narrow — anything claimed, pinned, or created by a person is left alone regardless of age, and a database error expires nothing

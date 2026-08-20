@@ -86,13 +86,6 @@ def get_failure(name: str) -> str | None:
     return _failures_this_cycle.get(name)
 
 
-def take_failures() -> dict[str, str]:
-    """Drain and return the failures reported during this cycle."""
-    failures = dict(_failures_this_cycle)
-    _failures_this_cycle.clear()
-    return failures
-
-
 def reset() -> None:
     """Clear reported failures — for tests and for a fresh scan cycle."""
     _failures_this_cycle.clear()
