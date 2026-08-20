@@ -183,6 +183,40 @@ def get_inbox_item(item_id: str) -> dict[str, Any] | None:
     return _deserialize_row(row)
 
 
+def _collapse_episode_symptoms(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Take out the items an open episode already explains.
+
+    They are not dropped from the product — the episode panel lists them under
+    their cause, which is the whole point of having a cause. Leaving them in
+    the queue as well would make an episode *add* rows rather than remove them,
+    and the complaint episodes exist to answer was volume.
+
+    The count comes back with them so the caller can say how many were folded
+    away. Items disappearing from a work queue with no explanation is its own
+    way of losing someone's trust.
+    """
+    try:
+        from .monitor.episodes import symptom_keys_by_episode
+
+        index = symptom_keys_by_episode()
+    except Exception:
+        _inbox_logger.exception("Could not read episode symptoms — showing every item")
+        return items, 0
+
+    if not index:
+        return items, 0
+
+    kept: list[dict[str, Any]] = []
+    collapsed = 0
+    for item in items:
+        episode_id = index.get(item.get("correlation_key") or "")
+        if episode_id:
+            collapsed += 1
+            continue
+        kept.append(item)
+    return kept, collapsed
+
+
 def list_inbox_items(
     item_type: str | None = None,
     status: str | None = None,
@@ -269,12 +303,14 @@ def list_inbox_items(
     else:
         ungrouped = items
 
+    ungrouped, collapsed = _collapse_episode_symptoms(ungrouped)
     all_for_stats = ungrouped + [i for g in groups for i in g["items"]]
     return {
         "items": ungrouped,
         "groups": groups,
         "stats": _compute_stats(all_for_stats),
         "total": len(all_for_stats),
+        "collapsedIntoEpisodes": collapsed,
     }
 
 
@@ -416,12 +452,14 @@ async def async_list_inbox_items(
     else:
         ungrouped = items
 
+    ungrouped, collapsed = _collapse_episode_symptoms(ungrouped)
     all_for_stats = ungrouped + [i for g in groups for i in g["items"]]
     return {
         "items": ungrouped,
         "groups": groups,
         "stats": _compute_stats(all_for_stats),
         "total": len(all_for_stats),
+        "collapsedIntoEpisodes": collapsed,
     }
 
 
