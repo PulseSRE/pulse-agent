@@ -120,6 +120,40 @@ class InboxRepository(BaseRepository):
             (stale_cutoff,),
         )
 
+    def fetch_untouched_open_items(self, cutoff: int) -> list[Any]:
+        """Open items last updated before the cutoff and never claimed or pinned.
+
+        Filtered here rather than in Python so an inbox with thousands of rows
+        does not have to be deserialised to find the handful that are stale.
+        """
+        return self.db.fetchall(
+            """SELECT * FROM inbox_items
+            WHERE status IN ('new', 'triaged')
+            AND updated_at < ?
+            AND claimed_by IS NULL
+            AND pinned_by IS NULL""",
+            (cutoff,),
+        )
+
+    def fetch_items_by_category_window(self, categories: tuple[str, ...], start: int, end: int) -> list[Any]:
+        """Items in these categories created inside a time window, oldest first.
+
+        Used to answer "what changed" for an episode. `category` is not a
+        column — it lives in the item's metadata — so this matches on the
+        correlation key, which is built as `category:namespace:resource`.
+        """
+        prefixes = " OR ".join("correlation_key LIKE ?" for _ in categories)
+        params: list[Any] = [f"{c}:%" for c in categories]
+        params.extend([start, end])
+        return self.db.fetchall(
+            f"""SELECT id, title, namespace, correlation_key, created_at
+            FROM inbox_items
+            WHERE ({prefixes})
+            AND created_at >= ? AND created_at <= ?
+            ORDER BY created_at""",
+            tuple(params),
+        )
+
     # -- Status updates ------------------------------------------------------
 
     def update_status(

@@ -474,7 +474,15 @@ _STALE_THRESHOLD = 300  # 5 minutes
 
 
 def sweep_stale_items() -> int:
-    """Reset items stuck in agent_reviewing after restart (>5 min stale)."""
+    """Return items stuck in agent_reviewing to the queue.
+
+    Called from the scan cycle as well as at startup. It used to run only at
+    startup, so an item the agent picked up and never finished sat in
+    agent_reviewing until the next restart — three were found stuck for 73
+    minutes on a live cluster, with a five-minute threshold that could not fire.
+    A guard that only runs when the process boots does not guard anything while
+    it is running.
+    """
     repo = get_inbox_repo()
     now = int(time.time())
     stale_cutoff = now - _STALE_THRESHOLD
@@ -489,6 +497,43 @@ def sweep_stale_items() -> int:
     if swept:
         _inbox_logger.info("Startup sweep: reset %d stale agent_reviewing items to new", swept)
     return swept
+
+
+# An item nobody has looked at in this long is not work anybody is going to do.
+# On a live cluster 40 of 76 open items were more than 40 hours old, which is
+# how an inbox stops being a queue and becomes a wall people scroll past.
+_UNTOUCHED_EXPIRY_HOURS = 48
+
+
+def expire_untouched_items() -> int:
+    """Archive open items nobody has claimed, snoozed or acted on in 48 hours.
+
+    Deliberately narrow. Anything claimed by a person, pinned, or created by a
+    human is left alone regardless of age — the point is to clear machine-raised
+    noise nobody engaged with, not to tidy away somebody's work.
+    """
+    repo = get_inbox_repo()
+    cutoff = int(time.time()) - _UNTOUCHED_EXPIRY_HOURS * 3600
+    try:
+        rows = repo.fetch_untouched_open_items(cutoff)
+    except Exception:
+        _inbox_logger.exception("Could not look for untouched items — expiring nothing")
+        return 0
+
+    now = int(time.time())
+    expired = 0
+    for row in rows:
+        item = _deserialize_row(row)
+        if item.get("claimed_by") or item.get("pinned_by"):
+            continue
+        if item.get("created_by") not in SYSTEM_CREATORS:
+            continue
+        repo.update_status(item["id"], "archived", now, now)
+        _publish_event("inbox_item_updated", item["id"], {"status": "archived", "reason": "untouched"})
+        expired += 1
+    if expired:
+        repo.commit()
+    return expired
 
 
 def update_item_status(item_id: str, new_status: str, actor: str = "") -> bool:
@@ -1450,6 +1495,14 @@ def run_generator_cycle() -> None:
     repo.commit()
 
     _prune_stale_resources()
+
+    swept = sweep_stale_items()
+    if swept:
+        _inbox_logger.info("Returned %d items stuck in agent_reviewing to the queue", swept)
+
+    expired = expire_untouched_items()
+    if expired:
+        _inbox_logger.info("Expired %d items nobody had touched in %dh", expired, _UNTOUCHED_EXPIRY_HOURS)
 
     unsnooze_expired()
     prune_old_items()

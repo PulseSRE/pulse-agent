@@ -86,6 +86,29 @@ class EpisodeRepository(BaseRepository):
     def list_open(self) -> list[dict[str, Any]]:
         return self.db.fetchall("SELECT * FROM episodes WHERE status = ? ORDER BY started_at DESC", (_OPEN,)) or []
 
+    def recurrence_chain(self, episode_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Walk `recurrence_of` back through earlier occurrences, newest first.
+
+        The chain is what makes recurrence actionable. "etcd lost its leader"
+        is a page; "sixth time today, every two hours, each worse than the
+        last" is a diagnosis, and it was the single most useful sentence
+        available about a real outage — found by a human reading graphs.
+        """
+        chain: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        current = self.get(episode_id)
+        while current and len(chain) < limit:
+            prior_id = current.get("recurrence_of")
+            if not prior_id or prior_id in seen:
+                break
+            seen.add(prior_id)
+            prior = self.get(prior_id)
+            if not prior:
+                break
+            chain.append(prior)
+            current = prior
+        return chain
+
     # -- symptoms ----------------------------------------------------------
 
     def attach(

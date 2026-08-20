@@ -4,6 +4,20 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### The inbox is a queue again
+- `sweep_stale_items` runs on every scan cycle, not only at startup. It had a five-minute threshold and ran once per process, so three items sat in `agent_reviewing` for 73 minutes on a live cluster. A guard that only runs at boot does not guard anything while the process is running
+- Items nobody has claimed, pinned or acted on in 48 hours are archived. Measured: 40 of 76 open items were more than 40 hours old, which is how an inbox stops being a queue. Deliberately narrow — anything claimed, pinned, or created by a person is left alone regardless of age, and a database error expires nothing
+
+### Episodes answer the next two questions
+- `changes_around()` puts config, RBAC and deployment activity from the 30 minutes before an episode on its timeline. The audit scanners have been collecting this all along and filing it as ordinary inbox rows, where it answered nothing. It reports what happened shortly before, in time order, and claims no causation
+- `recurrence_summary()` reads the `recurrence_of` chain the schema already recorded: how many times a cause has returned, over what window, and the interval when it is regular enough to name. "Sixth time today, every two hours, escalating" was the most useful sentence available about a real outage, and a human found it by reading graphs afterwards
+- Both are returned by `GET /episodes/{id}` — what is broken, what changed, and has this happened before, in one response
+
+### Tests
+- End-to-end pipeline test: real findings through the real correlation into the real collapse. Every layer was unit-tested and green while the engine opened seven episodes headed by "Certificate expiring in 9d" and absorbed 21 of 23 findings — the fault was in how correct layers composed, and only a live cluster caught it. Verified: reverting that fix now fails this suite
+- Monitor lifecycle test. The loop was started only on WebSocket connect for most of this product's life and nothing tested it, which is why nobody noticed
+
+
 ### Fixes
 - The monitor only ran while a WebSocket client was connected. `run_loop()` was started inside the `/ws/monitor` handler and nowhere else, so the agent scanned the cluster only while somebody had the UI open — scan history on a live cluster shows exactly that: bursts a minute apart while someone was looking, then hours of nothing. Every claim about autonomous or overnight monitoring was untrue whenever the tab was closed. It now starts in the app lifespan; the WS handler still starts it if it somehow is not running
 - The `degraded` scanner missed a backend that fails most of the time but not all of it. Watching the cluster after deploying the consecutive-failure check: 65 of the last 70 investigations had failed — 93% — and it said nothing, because the newest one happened to succeed and the streak was 0. A quota-limited backend flaps rather than failing cleanly, so the failure *rate* over the last 40 attempts is now checked alongside the streak. One fault still produces one finding
