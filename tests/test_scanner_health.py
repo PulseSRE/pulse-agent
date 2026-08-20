@@ -49,7 +49,7 @@ def test_a_scanner_can_report_a_failure_it_swallowed():
 def test_reporting_outside_a_scan_is_ignored_not_an_error():
     """Scanners get called directly by tests and by the CLI."""
     sh.report_failure(RuntimeError("nowhere"))
-    assert sh.take_failures() == {}
+    assert sh.get_failure("crashloop") is None
 
 
 def test_the_name_comes_from_the_dispatcher_not_the_scanner():
@@ -65,15 +65,17 @@ def test_nested_scans_restore_the_outer_name():
         with sh.scanning("inner"):
             sh.report_failure("inner failed")
         sh.report_failure("outer failed")
-    failures = sh.take_failures()
-    assert failures == {"inner": "inner failed", "outer": "outer failed"}
+    assert sh.get_failure("inner") == "inner failed"
+    assert sh.get_failure("outer") == "outer failed"
 
 
-def test_take_failures_drains():
+def test_reset_clears_reported_failures():
+    """The dispatcher resets before each cycle so a stale error cannot linger."""
     with sh.scanning("hpa"):
         sh.report_failure("x")
-    assert sh.take_failures() == {"hpa": "x"}
-    assert sh.take_failures() == {}
+    assert sh.get_failure("hpa") == "x"
+    sh.reset()
+    assert sh.get_failure("hpa") is None
 
 
 # ── reading the streak history nothing ever read ──────────────────────────

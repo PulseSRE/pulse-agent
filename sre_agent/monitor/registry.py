@@ -181,7 +181,8 @@ SCANNER_REGISTRY: dict[str, dict] = {
             'rate(rest_client_requests_total{code=~"4..|5.."}[1h]) > 5/s per pod',
         ],
         "auto_fixable": False,
-        "scan_every": 5,
+        # a loop is worth catching before it has run for five minutes.
+        "scan_every": 3,
     },
     "control_plane": {
         "displayName": "Control Plane Stalls",
@@ -196,7 +197,8 @@ SCANNER_REGISTRY: dict[str, dict] = {
             "cluster-scoped LIST rate > 2/s per resource",
         ],
         "auto_fixable": False,
-        "scan_every": 5,
+        # the cause has to be seen at least as fast as its symptoms.
+        "scan_every": 1,
     },
     "degraded": {
         "displayName": "Pulse Self-Check",
