@@ -222,8 +222,19 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
             "timestamp": _ts(),
         }
         try:
+            # Deliberately NOT monitor._client. That client is long-lived and
+            # reused across every investigation; asyncio.wait_for below can
+            # cancel this call mid-stream on timeout, and cancelling an
+            # in-flight streamed HTTP call on a *shared* Anthropic client can
+            # corrupt its connection pool for the rest of the process (every
+            # investigation after that keeps failing near-instantly with
+            # "Connection error.", never touching the network again). A fresh
+            # client is cheap to create for the handful of investigations run
+            # per scan, and borrow_async_client() always closes it afterwards
+            # — including on cancellation — so a timed-out investigation only
+            # ever damages a client nobody else will use.
             result = await asyncio.wait_for(
-                _run_proactive_investigation(finding, client=monitor._client),
+                _run_proactive_investigation(finding, client=None),
                 timeout=timeout_seconds,
             )
             _sc = result.get("suspected_cause", "")
@@ -271,8 +282,11 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
                 and now - monitor._last_security_followup >= security_followup_cooldown
             ):
                 try:
+                    # Same reasoning as above: a fresh client per call, not the
+                    # shared monitor._client, so a cancelled followup can't
+                    # poison it either.
                     sec_result = await asyncio.wait_for(
-                        _run_security_followup(finding, client=monitor._client),
+                        _run_security_followup(finding, client=None),
                         timeout=timeout_seconds,
                     )
                     report["securityFollowup"] = {
@@ -285,7 +299,9 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
                 except TimeoutError:
                     logger.warning("Security followup timed out for finding %s", finding.get("id", ""))
                 except Exception as e:
-                    logger.warning("Security followup failed for finding %s: %s", finding.get("id", ""), e)
+                    logger.warning(
+                        "Security followup failed for finding %s: %s", finding.get("id", ""), e, exc_info=True
+                    )
 
             if get_settings().agent.memory and result.get("confidence", 0) >= 0.7:
                 try:
@@ -360,8 +376,27 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
 
         except TimeoutError:
             report["error"] = f"Investigation timed out after {timeout_seconds}s"
+            logger.warning(
+                "Investigation timed out after %ds for finding %s (category=%s, title=%s)",
+                timeout_seconds,
+                finding.get("id", ""),
+                finding.get("category", ""),
+                finding.get("title", "")[:60],
+            )
         except Exception as e:
             report["error"] = str(e)
+            # This used to be silent: report["error"] carried the message to the
+            # database, but nothing surfaced it in application logs, and the
+            # Anthropic SDK itself only logs the underlying exception at DEBUG.
+            # That's how a shared client stuck failing with "Connection error."
+            # ran for hundreds of consecutive investigations without a single
+            # log line pointing at it.
+            logger.exception(
+                "Investigation failed for finding %s (category=%s, title=%s)",
+                finding.get("id", ""),
+                finding.get("category", ""),
+                finding.get("title", "")[:60],
+            )
 
         await monitor._broadcast_raw(report)
         try:

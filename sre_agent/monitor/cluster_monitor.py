@@ -133,7 +133,12 @@ class ClusterMonitor:
         self._cost_budget_cache: tuple[float, float] | None = None
         self._session_id = f"mon-{uuid.uuid4().hex[:12]}"
 
-        # Shared Anthropic client (async)
+        # Shared Anthropic client (async). NOT used by the proactive
+        # investigation path in investigation_runner.py — that path wraps
+        # each call in asyncio.wait_for() and needs a fresh, disposable client
+        # per attempt so a timeout can't corrupt a connection pool that later
+        # investigations depend on. This shared instance remains for callers
+        # that don't cancel it mid-stream (e.g. handoff/plan execution).
         from ..agent import create_async_client
 
         self._client = create_async_client()
