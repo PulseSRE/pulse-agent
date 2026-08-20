@@ -282,6 +282,45 @@ def changes_around(episode_id: str) -> list[dict[str, Any]]:
     return changes
 
 
+def investigation_for(episode_id: str) -> dict[str, Any] | None:
+    """The investigation already run against this episode's cause, if any.
+
+    Causes are eligible for automatic investigation, so by the time an operator
+    opens the card the work has usually been attempted. Offering a fresh
+    "ask the AI" without showing that would give two routes to the same call
+    and imply nothing had been tried — and on a cluster where the backend is
+    failing, quietly hide that it was tried and failed.
+
+    A failed attempt is returned rather than hidden. An empty panel reads as
+    "nothing worth investigating", which is exactly the wrong conclusion.
+    """
+    repo = _repo()
+    episode = repo.get(episode_id)
+    if not episode:
+        return None
+    finding_id = episode.get("cause_finding_id")
+    if not finding_id:
+        return None
+
+    from ..db import get_database
+
+    try:
+        row = get_database().fetchone(
+            "SELECT id, status, summary, suspected_cause, recommended_fix, confidence, error, timestamp "
+            "FROM investigations WHERE finding_id = %s ORDER BY timestamp DESC LIMIT 1",
+            (finding_id,),
+        )
+    except Exception:
+        logger.exception("Could not read the investigation for episode %s", episode_id)
+        return None
+    if not row:
+        return None
+
+    record = dict(row)
+    record["failed"] = record.get("status") == "failed"
+    return record
+
+
 def list_open() -> list[dict]:
     """Open episodes, newest first, each with its symptom rollup."""
     episodes = _repo().list_open()

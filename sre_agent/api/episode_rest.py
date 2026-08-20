@@ -11,7 +11,14 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..monitor.episodes import changes_around, detach, dismiss, list_open, recurrence_summary
+from ..monitor.episodes import (
+    changes_around,
+    detach,
+    dismiss,
+    investigation_for,
+    list_open,
+    recurrence_summary,
+)
 from ..repositories.episode_repo import get_episode_repo
 from .auth import get_owner, verify_token
 
@@ -43,6 +50,7 @@ async def rest_get_episode(episode_id: str):
         "symptoms": [dict(s) for s in repo.symptoms(episode_id)],
         "changes": changes_around(episode_id),
         "recurrence": recurrence_summary(episode_id),
+        "investigation": investigation_for(episode_id),
     }
 
 
