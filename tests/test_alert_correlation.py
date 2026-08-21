@@ -191,28 +191,32 @@ def test_it_still_heads_an_episode_when_nothing_explains_it(repo):
 
 # ── the whole cluster, end to end ─────────────────────────────────────────
 
-# Read from the live cluster via `time() - ALERTS_FOR_STATE`.
+# Onsets measured on the live cluster with `time() - ALERTS_FOR_STATE`, as
+# minutes relative to the cause. An earlier version of this fixture carried
+# invented figures for the four alerts the first query truncated away, and
+# predicted five symptoms; the measured onsets give two. Recorded here as
+# offsets rather than absolute ages so the arithmetic the rule performs is the
+# arithmetic the test states.
 LIVE_CLUSTER = [
-    ("AlertmanagerReceiversNotConfigured", "openshift-monitoring", 50.1),
-    ("ArgoCDSyncAlert", "openshift-gitops", 50.1),
-    ("CsvAbnormalFailedOver2Min", "openshift-operator-lifecycle-manager", 23.6),
-    ("HighOverallControlPlaneMemory", "openshift-machine-config-operator", 23.5),
-    ("ControlPlaneNodeMemoryHigh", "openshift-monitoring", 3.0),
-    ("InsightsRecommendationActive", "openshift-insights", 1.6),
-    ("TargetDown", "multicluster-engine", 1.6),
-    ("TargetDown", "openshift-lightspeed", 1.6),
-    ("KubeJobFailed", "openshift-marketplace", 1.6),
-    ("SearchPVCNotPresent", "open-cluster-management", 1.6),
+    # (alert, namespace, minutes relative to the cause's onset)
+    ("HighOverallControlPlaneMemory", "openshift-machine-config-operator", 0.0),
+    ("CsvAbnormalFailedOver2Min", "openshift-operator-lifecycle-manager", -4.5),
+    ("KubeJobFailed", "openshift-marketplace", -293.6),
+    ("ArgoCDSyncAlert", "openshift-gitops", -144.7),
+    ("SearchPVCNotPresent", "open-cluster-management", -1594.2),
+    ("TargetDown", "open-cluster-management", -1594.0),
+    ("TargetDown", "multicluster-engine", -1594.0),
+    ("TargetDown", "openshift-lightspeed", -1593.5),
+    ("AlertmanagerReceiversNotConfigured", "openshift-monitoring", -1593.8),
+    ("InsightsRecommendationActive", "openshift-insights", 1318.4),
+    ("ControlPlaneNodeMemoryHigh", "openshift-monitoring", 1283.5),
 ]
 
 
-def test_the_real_cluster_resolves_to_one_story():
-    """Fifteen flat alerts became one episode with five symptoms — the same
-    conclusion Pulse's own investigation reached from the same data."""
-    findings = [_alert(n, ns, h) for n, ns, h in LIVE_CLUSTER]
-
+def _correlate(findings):
+    """The monitor's ordering and ownership rules, over a fixed finding set."""
     claimed: dict[str, str] = {}
-    episodes: dict[str, list] = {}
+    episodes: dict[str, list[str]] = {}
     for f in sorted(findings, key=lambda x: (layer_for_finding(x), x["startedAt"])):
         key = _finding_corr_key(f)
         if not can_head_episode_finding(f) or key in claimed or key in episodes:
@@ -226,18 +230,51 @@ def test_the_real_cluster_resolves_to_one_story():
                 continue
             claimed[gk] = key
             episodes[key].append(g["title"])
+    return episodes, claimed
+
+
+def test_the_real_cluster_attaches_only_what_started_with_the_cause():
+    """The OLM install loop began four and a half minutes before the memory
+    alert — inside the window, and the whole reason the window is fifteen
+    minutes rather than the old one hundred and eighty seconds. Everything else
+    standing on that cluster predates the cause by hours and is nobody's
+    symptom."""
+    findings = [_alert(n, ns, hours_firing=-m / 60) for n, ns, m in LIVE_CLUSTER]
+    episodes, _ = _correlate(findings)
 
     headline = next(k for k, v in episodes.items() if v)
     assert "HighOverallControlPlaneMemory" in headline
-    assert sorted(episodes[headline]) == [
-        "CsvAbnormalFailedOver2Min",
+    assert episodes[headline] == ["CsvAbnormalFailedOver2Min"]
+
+
+def test_alerts_that_predate_the_cause_are_nobody_symptom():
+    findings = [_alert(n, ns, hours_firing=-m / 60) for n, ns, m in LIVE_CLUSTER]
+    episodes, claimed = _correlate(findings)
+    accounted = set(episodes) | set(claimed)
+    alone = sorted({f["title"] for f in findings if _finding_corr_key(f) not in accounted})
+    assert alone == [
+        "AlertmanagerReceiversNotConfigured",
+        "ArgoCDSyncAlert",
+        "InsightsRecommendationActive",
         "KubeJobFailed",
         "SearchPVCNotPresent",
         "TargetDown",
-        "TargetDown",
     ]
 
-    # The fifty-hour standing conditions belong to nobody.
-    accounted = set(episodes) | set(claimed)
-    alone = sorted({f["title"] for f in findings if _finding_corr_key(f) not in accounted})
-    assert alone == ["AlertmanagerReceiversNotConfigured", "ArgoCDSyncAlert", "InsightsRecommendationActive"]
+
+def test_one_symptom_never_lands_in_two_episodes():
+    """Synthetic, not measured: it takes two causes at different depths sharing
+    a symptom that started after both, which the reference cluster did not
+    happen to be doing. The rule still has to hold — without it the layer fix
+    lets every cause list the same symptom, which is the "N findings that are
+    wrong" problem wearing a different hat."""
+    deep = _alert("HighOverallControlPlaneMemory", "openshift-machine-config-operator", hours_firing=3.0)
+    shallow = _alert("CsvAbnormalFailedOver2Min", "openshift-operator-lifecycle-manager", hours_firing=2.0)
+    shared = _alert("TargetDown", "openshift-lightspeed", hours_firing=1.0)
+
+    episodes, _claimed = _correlate([deep, shallow, shared])
+    owners = [k for k, v in episodes.items() if "TargetDown" in v]
+    assert len(owners) == 1, "a symptom must belong to exactly one episode"
+    assert "HighOverallControlPlaneMemory" in owners[0], "the deepest cause owns it"
+    # And the shallower cause, being itself explained, heads nothing.
+    assert not any("Csv" in k for k in episodes)
