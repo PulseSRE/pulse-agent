@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from ..config import get_settings
+from ..evidence import derive_confidence, parse_evidence
 from .confidence import _extract_json_object, _sanitize_for_prompt
 
 logger = logging.getLogger("pulse_agent.monitor")
@@ -91,13 +92,23 @@ def _build_investigation_prompt(finding: dict) -> str:
         '  "suspected_cause": "likely root cause",\n'
         '  "recommended_fix": "next best action",\n'
         '  "confidence": 0.0,\n'
-        '  "evidence": ["fact 1", "fact 2"],\n'
+        '  "evidence": [\n'
+        '    {"observation": "p99 latency rose from 180ms to 730ms at 14:06",\n'
+        '     "kind": "metric|log|event|resource|change|trace",\n'
+        '     "source": "the tool or signal this came from",\n'
+        '     "stance": "supports|contradicts|context",\n'
+        '     "confidence": 0.0}\n'
+        "  ],\n"
         '  "alternatives_considered": ["hypothesis ruled out"],\n'
         '  "viewPlan": [\n'
         '    {"kind": "<component>", "title": "...", "props": {...}},\n'
         '    {"kind": "<component>", "title": "...", "tool": "<tool_name>", "args": {...}}\n'
         "  ]\n"
         "}\n\n"
+        "evidence: cite the signal behind every claim. Record evidence that argues "
+        "AGAINST your suspected cause with stance=contradicts — it is used to temper "
+        "confidence, not held against you. An investigation with no evidence is capped "
+        "at low confidence no matter what value you report.\n\n"
         "viewPlan: 3-5 widgets to help the user verify your diagnosis.\n"
         f"Valid kinds: {', '.join(view_kinds)}\n"
         f"Valid tools: {', '.join(read_tools[:20])}\n"
@@ -304,12 +315,20 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
     except Exception:
         logger.debug("viewPlan validation failed, dropping plan", exc_info=True)
         view_plan = []
+    # Confidence is derived from the evidence rather than taken from the model's
+    # self-assessment. `asserted_confidence` is retained so the gap between what an
+    # investigation claimed and what it could support stays observable.
+    parsed_evidence = parse_evidence(evidence)[:10]
+    derived = derive_confidence(parsed_evidence, confidence)
+
     return {
         "summary": summary,
         "suspected_cause": suspected_cause,
         "recommended_fix": recommended_fix,
-        "confidence": round(confidence, 2),
-        "evidence": [str(e) for e in evidence[:10]],
+        "confidence": derived,
+        "asserted_confidence": round(confidence, 2),
+        "evidence": [e.observation for e in parsed_evidence],
+        "evidence_detail": [e.model_dump() for e in parsed_evidence],
         "alternatives_considered": [str(a) for a in alternatives[:10]],
         "view_plan": view_plan,
     }
