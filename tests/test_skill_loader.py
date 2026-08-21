@@ -371,3 +371,77 @@ class TestFallbackIsNotArgmax:
 
         assert classify_query("audit cluster-admin bindings for privilege escalation").name == "security"
         assert classify_query("forecast capacity for next quarter").name == "capacity_planner"
+
+
+class TestToolCategoryCoverage:
+    """Every registered tool must be reachable, or the agent can never call it."""
+
+    def test_no_unreachable_tools(self):
+        import re
+        from pathlib import Path as _Path
+
+        from sre_agent.tool_categories import ALWAYS_INCLUDE, TOOL_CATEGORIES
+
+        # A tool is reachable if some category offers it, or if it is always
+        # included regardless of category.
+        categorized: set[str] = set(ALWAYS_INCLUDE)
+        for cat in TOOL_CATEGORIES.values():
+            categorized.update(cat.get("tools", []))
+
+        defined: set[str] = set()
+        for path in _Path("sre_agent").rglob("*.py"):
+            for match in re.finditer(r"@beta_tool[^\n]*\ndef ([a-z_][a-z0-9_]*)", path.read_text(encoding="utf-8")):
+                defined.add(match.group(1))
+
+        orphaned = defined - categorized
+        assert not orphaned, f"tools defined but unreachable (no category, not always-included): {sorted(orphaned)}"
+
+    def test_memory_tools_are_reachable(self):
+        from sre_agent.tool_categories import MODE_CATEGORIES, TOOL_CATEGORIES
+
+        sre_tools: set[str] = set()
+        for cat_name in MODE_CATEGORIES["sre"]:
+            sre_tools.update(TOOL_CATEGORIES.get(cat_name, {}).get("tools", []))
+
+        # Without these the agent cannot consult anything it has previously learned.
+        for tool in ("search_past_incidents", "get_learned_runbooks", "get_cluster_patterns"):
+            assert tool in sre_tools, f"{tool} unreachable in sre mode"
+
+
+class TestBudgetRelevance:
+    """The budget cut must drop the least relevant tools, not the last-registered ones."""
+
+    @staticmethod
+    def _tool(name: str):
+        class _T:
+            def __init__(self, n: str) -> None:
+                self.name = n
+
+        return _T(name)
+
+    def test_query_named_tool_survives_truncation(self):
+        from sre_agent.skill_loader import _rank_by_relevance
+
+        # list_nodes sits last, exactly the position the old slice discarded.
+        tools = [self._tool(f"unrelated_tool_{i}") for i in range(60)] + [self._tool("list_nodes")]
+        ranked = _rank_by_relevance(tools, "One of our cluster nodes is showing as NotReady")
+        assert ranked[0].name == "list_nodes"
+
+    def test_singular_plural_still_matches(self):
+        from sre_agent.skill_loader import _rank_by_relevance
+
+        tools = [self._tool("unrelated_a"), self._tool("describe_node")]
+        assert _rank_by_relevance(tools, "why are the nodes unhealthy")[0].name == "describe_node"
+
+    def test_ties_keep_original_order(self):
+        from sre_agent.skill_loader import _rank_by_relevance
+
+        tools = [self._tool("alpha_thing"), self._tool("beta_thing"), self._tool("gamma_thing")]
+        ranked = _rank_by_relevance(tools, "completely unrelated wording")
+        assert [t.name for t in ranked] == ["alpha_thing", "beta_thing", "gamma_thing"]
+
+    def test_empty_query_is_a_no_op(self):
+        from sre_agent.skill_loader import _rank_by_relevance
+
+        tools = [self._tool("a_tool"), self._tool("b_tool")]
+        assert [t.name for t in _rank_by_relevance(tools, "")] == ["a_tool", "b_tool"]

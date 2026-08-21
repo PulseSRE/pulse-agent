@@ -13,6 +13,7 @@ moved to skill_router.py.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -481,6 +482,7 @@ def get_mode_categories() -> dict[str, list[str] | None]:
 _TOOL_RISK_LEVELS: dict[str, str] = {}  # populated lazily
 
 MAX_TOOL_BUDGET = 50  # hard cap on tools per agent turn
+_TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
 
 
 def get_tool_risk_level(tool_name: str) -> str:
@@ -547,6 +549,49 @@ def _get_deprioritized_tools() -> set[str]:
         return set()
 
 
+def _query_relevance(tool_name: str, query_lower: str, query_stems: set[str]) -> int:
+    """Score a tool against the query so the budget cut keeps what was asked about.
+
+    Two deterministic signals: the tool's own name sharing a word with the query
+    (``list_nodes`` for "a node is NotReady"), and the keywords of the category the
+    tool belongs to appearing in it. A name match outranks a category match, since
+    naming the thing is stronger evidence than sharing a topic with it.
+    """
+    score = 0
+
+    name_stems = {t.rstrip("s") for t in tool_name.lower().split("_") if len(t) > 2}
+    if name_stems & query_stems:
+        score += 3
+
+    category = get_tool_category(tool_name)
+    if category:
+        for kw in TOOL_CATEGORIES.get(category, {}).get("keywords", ()):
+            if not kw:
+                continue
+            # Multi-word keywords ("not running") only match as a phrase; single
+            # words match on stem so "restarts" finds the "restart" keyword.
+            hit = kw in query_lower if " " in kw else kw.rstrip("s") in query_stems
+            if hit:
+                score += 1
+                break
+    return score
+
+
+def _rank_by_relevance(tools: list, query: str) -> list:
+    """Stable-sort tools by relevance to *query*, most relevant first.
+
+    Ties keep their original order, so this only ever reorders on evidence and
+    leaves an unscored set exactly as it was.
+    """
+    query_lower = query.lower()
+    query_stems = {t.rstrip("s") for t in _TOKEN_SPLIT.split(query_lower) if len(t) > 2}
+    if not query_stems:
+        return tools
+    scored = [(-_query_relevance(t.name, query_lower, query_stems), i, t) for i, t in enumerate(tools)]
+    scored.sort(key=lambda x: (x[0], x[1]))
+    return [t for _, _, t in scored]
+
+
 def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "sre") -> tuple[list, dict, list[str]]:
     """Select tools based on agent mode.
 
@@ -610,6 +655,10 @@ def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "s
         always = [t for t in ordered if t.name in protected]
         rest = [t for t in ordered if t.name not in protected]
         budget_remaining = max(MAX_TOOL_BUDGET - len(always), 0)
+        # Rank before truncating. This slice used to take rest[:budget_remaining]
+        # in registration order, so a query about a NotReady node could have
+        # list_nodes cut purely by list position while unrelated tools survived.
+        rest = _rank_by_relevance(rest, query)
         ordered = always + rest[:budget_remaining]
         logger.info(
             "Tool budget enforced: %d → %d tools (budget=%d) for mode=%s",
