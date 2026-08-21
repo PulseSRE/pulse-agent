@@ -2,6 +2,14 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [Unreleased]
+
+### A long-running cause is not a magnet
+- Symptom attachment had a lower bound and no upper bound, so anything that started after the cause qualified no matter how long after. On the reference cluster a memory alert firing for thirty hours had collected **22 symptoms**, among them a missing PVC — something memory pressure does not cause and cannot cause. The cause had stopped being an explanation and become a bucket
+- A symptom must now begin within two hours of the cause. A cascade propagates in minutes — memory starves the API server, the API server times out probes, the probes kill pods — so two hours is generous for the real shape and still says no to a coincidence a day later
+- The window is measured between the two onsets, not from now, so an old cause and its equally old symptom are still one event
+- One existing test asserted the opposite, with a 21.9-hour gap between cause and symptom. It was built on onsets I had guessed rather than measured — the real ones predated the cause by 26 hours — so it had been encoding the magnet rather than defending against it
+
 ## [2.16.4] - 2026-08-21
 
 ### A rejected fix showed its raw exception, not what happened

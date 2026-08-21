@@ -147,8 +147,15 @@ def test_onsets_minutes_apart_are_still_one_event(repo):
 
 
 def test_a_symptom_that_started_after_the_cause_attaches(repo):
+    """A cascade runs downhill in time, so later is the normal direction.
+
+    The gap used to be 21.9 hours here, built on onsets I had guessed rather
+    than measured; the real TargetDown on that cluster predated the cause by 26
+    hours. Left as written it asserted the magnet — that a cause firing all day
+    explains anything that breaks before midnight.
+    """
     cause = _alert("HighOverallControlPlaneMemory", hours_firing=23.5)
-    later = _alert("TargetDown", "openshift-lightspeed", hours_firing=1.6)
+    later = _alert("TargetDown", "openshift-lightspeed", hours_firing=23.0)
     assert ep.attach_symptoms("ep-1", cause, [later], {}) == 1
 
 
@@ -278,3 +285,33 @@ def test_one_symptom_never_lands_in_two_episodes():
     assert "HighOverallControlPlaneMemory" in owners[0], "the deepest cause owns it"
     # And the shallower cause, being itself explained, heads nothing.
     assert not any("Csv" in k for k in episodes)
+
+
+# ── a long-running cause is not a magnet ──────────────────────────────────
+
+
+def test_a_symptom_that_began_long_after_the_cause_is_not_attached(repo):
+    """Measured on the reference cluster: a memory alert firing for thirty
+    hours had collected 22 symptoms, among them a missing PVC — something
+    memory pressure does not cause and cannot cause. Everything that broke
+    during those thirty hours qualified, because "started after the cause" was
+    the whole test."""
+    cause = _alert("HighOverallControlPlaneMemory", hours_firing=30.0)
+    much_later = _alert("SearchPVCNotPresentCritical", "open-cluster-management", hours_firing=1.0)
+    assert ep.attach_symptoms("ep-1", cause, [much_later], {}) == 0
+
+
+def test_a_cascade_within_the_hour_still_attaches(repo):
+    """The real shape of a cascade: memory starves the API server, the API
+    server times out probes, the probes kill pods. Minutes, not days."""
+    cause = _alert("HighOverallControlPlaneMemory", hours_firing=30.0)
+    cascade = _alert("TargetDown", "openshift-lightspeed", hours_firing=29.5)
+    assert ep.attach_symptoms("ep-1", cause, [cascade], {}) == 1
+
+
+def test_the_window_is_measured_from_the_cause_not_from_now(repo):
+    """An old cause with an old symptom is still one event. The test is the gap
+    between them, not how long ago either happened."""
+    cause = _alert("HighOverallControlPlaneMemory", hours_firing=50.0)
+    together = _alert("CsvAbnormalFailedOver2Min", "openshift-operator-lifecycle-manager", hours_firing=49.5)
+    assert ep.attach_symptoms("ep-1", cause, [together], {}) == 1

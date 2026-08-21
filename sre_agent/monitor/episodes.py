@@ -46,6 +46,22 @@ _ATTACH_GRACE_SECONDS = 180
 # have split them.
 _ONSET_GRACE_SECONDS = 15 * 60
 
+# ...and how long *after* the cause a symptom may begin and still be its
+# symptom. There was no upper bound at all, which turns a long-running cause
+# into a magnet: measured on the reference cluster, a memory alert firing for
+# thirty hours had collected 22 symptoms, among them a missing PVC — something
+# memory pressure does not cause and cannot cause. Everything that broke during
+# those thirty hours qualified, because "started after the cause" was the whole
+# test.
+#
+# A cascade propagates on the order of minutes: memory pressure starves the API
+# server, the API server times out probes, the probes kill pods. Two hours is
+# generous for that and still says no to a coincidence a day later. It is a
+# judgement rather than a measurement, which is why it is one constant with its
+# reasoning attached — and why erring short is right: a missed correlation
+# costs less than a confident story about the wrong cause.
+_ONSET_SPREAD_SECONDS = 2 * 3600
+
 # Two episodes with the same cause inside this window are the same recurring
 # problem rather than unrelated events.
 _RECURRENCE_WINDOW_SECONDS = 24 * 3600
@@ -188,6 +204,12 @@ def attach_symptoms(
                 # reference cluster: an unconfigured Alertmanager receiver had
                 # been alerting for fifty hours. Nothing caused it, and it is
                 # not evidence about anything that started yesterday.
+                continue
+            if symptom_onset > cause_onset + _ONSET_SPREAD_SECONDS:
+                # It began long after the cause did. A cause still firing a day
+                # later is not an explanation for everything that has broken
+                # since — that is coincidence with a long tail, and attaching it
+                # tells an operator a confident story about the wrong cause.
                 continue
         elif first_seen.get(key, started) < cutoff:
             # Already broken before the cause appeared.
