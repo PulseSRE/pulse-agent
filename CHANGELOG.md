@@ -2,7 +2,7 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
-## [Unreleased]
+## [2.16.5] - 2026-08-21
 
 ### A long-running cause is not a magnet
 - Symptom attachment had a lower bound and no upper bound, so anything that started after the cause qualified no matter how long after. On the reference cluster a memory alert firing for thirty hours had collected **22 symptoms**, among them a missing PVC — something memory pressure does not cause and cannot cause. The cause had stopped being an explanation and become a bucket
