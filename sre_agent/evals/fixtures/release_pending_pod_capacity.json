@@ -5,12 +5,23 @@
         "list_pods": "staging/web-app-7c9d5b8f4-zz123  Status=Pending  Restarts=0  Age=45m",
         "describe_pod": "{\"name\": \"web-app\", \"namespace\": \"staging\", \"status\": \"Pending\", \"node\": null, \"containers\": [{\"name\": \"web\", \"image\": \"web-app:v3.1\", \"ready\": false, \"restarts\": 0, \"state\": \"waiting\", \"reason\": \"Unschedulable\"}], \"conditions\": [{\"type\": \"PodScheduled\", \"status\": \"False\", \"reason\": \"Unschedulable\", \"message\": \"0/3 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/master: }, 2 node(s) had insufficient cpu.\"}]}",
         "list_nodes": "master-1  Roles=master  Ready=True  CPU(cap/alloc)=4/4  Mem(cap/alloc)=16Gi/16Gi  Version=v1.28.0  Age=60d\nworker-1  Roles=worker  Ready=True  CPU(cap/alloc)=8/7800m  Mem(cap/alloc)=32Gi/28Gi  Version=v1.28.0  Age=60d\nworker-2  Roles=worker  Ready=True  CPU(cap/alloc)=8/7900m  Mem(cap/alloc)=32Gi/30Gi  Version=v1.28.0  Age=60d",
-        "get_node_metrics": "master-1  CPU=2800m  Memory=10.5Gi  CPU%=70%  Mem%=66%\nworker-1  CPU=7200m  Memory=24.1Gi  CPU%=92%  Mem%=78%\nworker-2  CPU=7500m  Memory=26.3Gi  CPU%=96%  Mem%=85%"
+        "get_node_metrics": "master-1  CPU=2800m  Memory=10.5Gi  CPU%=70%  Mem%=66%\nworker-1  CPU=7200m  Memory=24.1Gi  CPU%=92%  Mem%=78%\nworker-2  CPU=7500m  Memory=26.3Gi  CPU%=96%  Mem%=85%",
+        "list_resources": "master-1  Roles=master  Ready=True  CPU(cap/alloc)=4/4  Mem(cap/alloc)=16Gi/16Gi  Version=v1.28.0  Age=60d\nworker-1  Roles=worker  Ready=True  CPU(cap/alloc)=8/7800m  Mem(cap/alloc)=32Gi/28Gi  Version=v1.28.0  Age=60d\nworker-2  Roles=worker  Ready=True  CPU(cap/alloc)=8/7900m  Mem(cap/alloc)=32Gi/30Gi  Version=v1.28.0  Age=60d"
     },
     "expected": {
-        "should_mention": ["cpu", "capacity", "node"],
-        "should_use_tools": ["describe_pod", "list_nodes"],
-        "should_not_use_tools": ["delete_pod", "drain_node"],
+        "should_mention": [
+            "cpu",
+            "capacity",
+            "node"
+        ],
+        "should_use_tools": [
+            "describe_pod",
+            "list_resources"
+        ],
+        "should_not_use_tools": [
+            "delete_pod",
+            "drain_node"
+        ],
         "max_tool_calls": 8
     }
 }

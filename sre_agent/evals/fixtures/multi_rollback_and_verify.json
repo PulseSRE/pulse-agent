@@ -7,11 +7,18 @@
             "recorded_responses": {
                 "list_deployments": "production/checkout-service  Ready=0/3  Age=20m  Image=checkout:v5.0.0\nproduction/payment-gateway  Ready=2/2  Age=10d  Image=payment:v3.1.0",
                 "describe_deployment": "{\"name\": \"checkout-service\", \"namespace\": \"production\", \"replicas\": {\"desired\": 3, \"ready\": 0, \"unavailable\": 3}, \"containers\": [{\"name\": \"checkout\", \"image\": \"checkout:v5.0.0\"}], \"revision\": 8, \"revisionHistory\": [{\"revision\": 7, \"image\": \"checkout:v4.9.0\"}, {\"revision\": 8, \"image\": \"checkout:v5.0.0\"}]}",
-                "get_pod_logs": "2024-01-15T15:00:01Z [ERROR] Failed to connect to payments-v2 API: endpoint removed in v5.0\n2024-01-15T15:00:01Z [FATAL] Cannot initialize checkout pipeline without payments integration. Exiting."
+                "get_pod_logs": "2024-01-15T15:00:01Z [ERROR] Failed to connect to payments-v2 API: endpoint removed in v5.0\n2024-01-15T15:00:01Z [FATAL] Cannot initialize checkout pipeline without payments integration. Exiting.",
+                "list_resources": "production/checkout-service  Ready=0/3  Age=20m  Image=checkout:v5.0.0\nproduction/payment-gateway  Ready=2/2  Age=10d  Image=payment:v3.1.0"
             },
             "expected": {
-                "should_mention": ["checkout", "v5.0.0", "payments"],
-                "should_use_tools": ["get_pod_logs"]
+                "should_mention": [
+                    "checkout",
+                    "v5.0.0",
+                    "payments"
+                ],
+                "should_use_tools": [
+                    "get_pod_logs"
+                ]
             }
         },
         {
@@ -20,8 +27,14 @@
                 "rollback_deployment": "{\"status\": \"success\", \"message\": \"Deployment checkout-service rolled back to revision 7\", \"image\": \"checkout:v4.9.0\", \"replicas\": {\"desired\": 3, \"ready\": 3}}"
             },
             "expected": {
-                "should_mention": ["rollback", "v4.9.0", "revision 7"],
-                "should_use_tools": ["rollback_deployment"]
+                "should_mention": [
+                    "rollback",
+                    "v4.9.0",
+                    "revision 7"
+                ],
+                "should_use_tools": [
+                    "rollback_deployment"
+                ]
             }
         },
         {
@@ -31,15 +44,33 @@
                 "describe_deployment": "{\"name\": \"checkout-service\", \"namespace\": \"production\", \"replicas\": {\"desired\": 3, \"ready\": 3, \"available\": 3}, \"containers\": [{\"name\": \"checkout\", \"image\": \"checkout:v4.9.0\"}], \"conditions\": [{\"type\": \"Available\", \"status\": \"True\"}]}"
             },
             "expected": {
-                "should_mention": ["healthy", "3", "running"],
-                "should_use_tools": ["list_pods"]
+                "should_mention": [
+                    "healthy",
+                    "3",
+                    "running"
+                ],
+                "should_use_tools": [
+                    "list_pods"
+                ]
             }
         }
     ],
     "expected": {
-        "overall_should_mention": ["checkout", "rollback", "v4.9.0", "healthy"],
+        "overall_should_mention": [
+            "checkout",
+            "rollback",
+            "v4.9.0",
+            "healthy"
+        ],
         "max_total_tool_calls": 12,
-        "should_use_tools_in_order": ["get_pod_logs", "rollback_deployment", "list_pods"],
-        "should_use_tools": ["rollback_deployment", "list_pods"]
+        "should_use_tools_in_order": [
+            "get_pod_logs",
+            "rollback_deployment",
+            "list_pods"
+        ],
+        "should_use_tools": [
+            "rollback_deployment",
+            "list_pods"
+        ]
     }
 }

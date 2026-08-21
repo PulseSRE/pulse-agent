@@ -6,7 +6,8 @@
         "describe_deployment": "{\"name\": \"orders-api\", \"namespace\": \"production\", \"replicas\": 3, \"strategy\": \"RollingUpdate\", \"selector\": {\"app\": \"orders-api\"}, \"labels\": {\"app\": \"orders-api\"}, \"conditions\": [{\"type\": \"Available\", \"status\": \"True\", \"reason\": \"MinimumReplicasAvailable\"}, {\"type\": \"Progressing\", \"status\": \"False\", \"reason\": \"ProgressDeadlineExceeded\", \"message\": \"ReplicaSet \\\"orders-api-6d9f\\\" has timed out progressing.\"}], \"containers\": [{\"name\": \"orders-api\", \"image\": \"quay.io/acme/orders-api:v3.2.1\", \"resources\": {\"requests\": {\"cpu\": \"200m\", \"memory\": \"512Mi\"}, \"limits\": {\"cpu\": \"1\", \"memory\": \"1Gi\"}}, \"ports\": [{\"port\": 8080, \"protocol\": \"TCP\"}]}], \"ready_replicas\": 2, \"desired_replicas\": 3}",
         "get_pod_logs": "2026-08-21T02:11:04Z [WARN] config checksum mismatch: expected 9f2a1c, loaded 4b7e08\n2026-08-21T02:11:04Z [ERROR] stale ConfigMap revision held by this replica; refusing readiness\n2026-08-21T02:11:09Z [ERROR] readiness probe failed: /healthz returned 503",
         "restart_deployment": "Rolling restart triggered for production/orders-api.",
-        "list_pods": "production/orders-api-7c4b8d9f5-aa111  Status=Running  Restarts=0  Age=40s\nproduction/orders-api-7c4b8d9f5-bb222  Status=Running  Restarts=0  Age=37s\nproduction/orders-api-7c4b8d9f5-cc333  Status=Running  Restarts=0  Age=33s"
+        "list_pods": "production/orders-api-7c4b8d9f5-aa111  Status=Running  Restarts=0  Age=40s\nproduction/orders-api-7c4b8d9f5-bb222  Status=Running  Restarts=0  Age=37s\nproduction/orders-api-7c4b8d9f5-cc333  Status=Running  Restarts=0  Age=33s",
+        "list_resources": "production/orders-api  Ready=2/3  Updated=3  Available=2  Age=14d\nproduction/checkout-svc  Ready=4/4  Updated=4  Available=4  Age=21d"
     },
     "expected": {
         "should_mention": [

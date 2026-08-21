@@ -5,12 +5,23 @@
         "list_pods": "monitoring/node-exporter-abc12  Node=worker-1  Status=Running\nmonitoring/node-exporter-def34  Node=worker-2  Status=Running\nmonitoring/node-exporter-ghi56  Node=worker-4  Status=Running\nmonitoring/node-exporter-jkl78  Node=worker-6  Status=Running\nmonitoring/fluentd-mno90  Node=worker-1  Status=Running\nmonitoring/fluentd-pqr12  Node=worker-2  Status=Running\nmonitoring/fluentd-stu34  Node=worker-3  Status=Running\nmonitoring/fluentd-vwx56  Node=worker-4  Status=Running\nmonitoring/fluentd-yza78  Node=worker-5  Status=Running\nmonitoring/fluentd-bcd90  Node=worker-6  Status=Running",
         "list_nodes": "worker-1  Ready  Age=30d\nworker-2  Ready  Age=30d\nworker-3  Ready  Age=30d  Taints=[dedicated=gpu:NoSchedule]\nworker-4  Ready  Age=30d\nworker-5  Ready  Age=30d  MemoryPressure=True\nworker-6  Ready  Age=30d",
         "describe_node": "{\"name\": \"worker-3\", \"taints\": [{\"key\": \"dedicated\", \"value\": \"gpu\", \"effect\": \"NoSchedule\"}], \"allocatable\": {\"cpu\": \"16\", \"memory\": \"64Gi\"}, \"conditions\": [{\"type\": \"Ready\", \"status\": \"True\"}]}",
-        "get_events": "30m ago  Warning  FailedScheduling  Pod/node-exporter-pending  0/6 nodes are available: 1 node(s) had taint {dedicated: gpu}, that the pod didn't tolerate, 1 node(s) had insufficient memory\n15m ago  Warning  FailedScheduling  Pod/node-exporter-pending2  0/6 nodes: same constraints"
+        "get_events": "30m ago  Warning  FailedScheduling  Pod/node-exporter-pending  0/6 nodes are available: 1 node(s) had taint {dedicated: gpu}, that the pod didn't tolerate, 1 node(s) had insufficient memory\n15m ago  Warning  FailedScheduling  Pod/node-exporter-pending2  0/6 nodes: same constraints",
+        "list_resources": "worker-1  Ready  Age=30d\nworker-2  Ready  Age=30d\nworker-3  Ready  Age=30d  Taints=[dedicated=gpu:NoSchedule]\nworker-4  Ready  Age=30d\nworker-5  Ready  Age=30d  MemoryPressure=True\nworker-6  Ready  Age=30d"
     },
     "expected": {
-        "should_mention": ["node-exporter", "worker-3", "taint", "toleration"],
-        "should_use_tools": ["list_nodes"],
-        "should_not_use_tools": ["delete_pod", "drain_node"],
+        "should_mention": [
+            "node-exporter",
+            "worker-3",
+            "taint",
+            "toleration"
+        ],
+        "should_use_tools": [
+            "list_resources"
+        ],
+        "should_not_use_tools": [
+            "delete_pod",
+            "drain_node"
+        ],
         "max_tool_calls": 8
     }
 }

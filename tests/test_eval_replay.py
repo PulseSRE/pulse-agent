@@ -892,9 +892,9 @@ class TestToolRegistryInReplay:
         # discovery silently failed we would be measuring a different agent.
         assert count > 80, f"only {count} tools registered — discovery did not run"
 
-    def test_node_tools_are_offerable_to_a_skill(self):
-        """TOOL_REGISTRY only holds @beta_tool(category=...) tools, so the union
-        with the module maps is what makes plain-decorated tools selectable."""
+    def test_node_investigation_is_offered_the_tools_it_needs(self):
+        """The union of module maps and registry is what makes plain-decorated
+        tools selectable — TOOL_REGISTRY only holds @beta_tool(category=...) ones."""
         from sre_agent.evals.replay_config import ensure_tool_registry
         from sre_agent.skill_loader import build_config_from_skill, get_skill
 
@@ -904,9 +904,20 @@ class TestToolRegistryInReplay:
         config = build_config_from_skill(skill, query="a cluster node is NotReady, investigate it")
         offered = set(config["tool_map"])
 
-        # the exact tools the first real-config run reported as never offered
-        for tool in ("list_nodes", "describe_node"):
-            assert tool in offered, f"{tool} not offered to the sre skill"
+        # list_resources supersedes the per-kind listing tools, so that is what a
+        # node investigation should be offered — not list_nodes.
+        assert "list_resources" in offered, "the universal listing tool must be offered"
+
+    def test_superseded_tools_are_not_re_offered(self):
+        """list_resources replaced the per-kind listers; they must stay retired."""
+        from sre_agent.tool_categories import TOOL_CATEGORIES
+
+        categorised: set[str] = set()
+        for cat in TOOL_CATEGORIES.values():
+            categorised.update(cat.get("tools", []))
+
+        for tool in ("list_namespaces", "get_services", "list_daemonsets", "get_resource_quotas"):
+            assert tool not in categorised, f"{tool} is superseded by list_resources and must not be categorised"
 
     def test_is_idempotent(self):
         from sre_agent.evals.replay_config import ensure_tool_registry
