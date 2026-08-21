@@ -172,7 +172,6 @@ def _setup_model(model: str, dry_run: bool):
         return create_async_client(), thinking
 
 
-
 def _expected_for(expected: dict, dry_run: bool) -> dict:
     """Drop content checks when replaying against the mock client.
 
