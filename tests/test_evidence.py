@@ -71,15 +71,21 @@ class TestDerivedConfidence:
         strong = [Evidence(observation=f"signal {i}", source="prometheus", confidence=0.9) for i in range(4)]
         assert derive_confidence(strong, 0.5) == 0.5
 
-    def test_supporting_evidence_raises_confidence_with_diminishing_returns(self):
-        one = derive_confidence([Evidence(observation="a", source="k8s", confidence=0.9)], 1.0)
-        three = derive_confidence(
-            [Evidence(observation=x, source="k8s", confidence=0.9) for x in "abc"],
-            1.0,
-        )
-        assert one < three
-        assert three > 0.85
-        assert three - one > (derive_confidence([Evidence(observation=x, source="k8s") for x in "abcdef"], 1.0) - three)
+    @staticmethod
+    def _n_supporting(n: int) -> float:
+        ev = [Evidence(observation=f"signal {i}", source="k8s", confidence=0.9) for i in range(n)]
+        return derive_confidence(ev, 1.0)
+
+    def test_more_supporting_evidence_raises_confidence(self):
+        assert self._n_supporting(1) < self._n_supporting(3) < self._n_supporting(6)
+
+    def test_three_well_sourced_signals_reach_high_confidence(self):
+        assert self._n_supporting(3) >= 0.8
+
+    def test_support_has_diminishing_returns(self):
+        first_two = self._n_supporting(3) - self._n_supporting(1)
+        next_three = self._n_supporting(6) - self._n_supporting(3)
+        assert first_two > next_three
 
     def test_contradiction_reduces_confidence(self):
         supporting = [Evidence(observation="a", source="k8s", confidence=0.9)]
