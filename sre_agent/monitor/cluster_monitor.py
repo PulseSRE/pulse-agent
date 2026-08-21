@@ -39,7 +39,7 @@ except ImportError:
 from .scanner_health import get_failure as get_reported_failure
 from .scanner_health import reset as reset_reported_failures
 from .scanner_health import scanning
-from .webhook import _send_webhook
+from .webhook import _send_webhook, notify_episode_opened, notify_fix_proposed
 
 if TYPE_CHECKING:
     from .session import MonitorClient
@@ -79,11 +79,17 @@ class ClusterMonitor:
 
     _MAX_FINDINGS = 500
 
-    def _correlate_episodes(self, findings: list[dict]) -> None:
+    def _correlate_episodes(self, findings: list[dict]) -> list[tuple[str, dict]]:
         """Open episodes for cause-capable findings and attach what they explain.
 
         Called with every finding currently standing, so a cause found three
         cycles ago can still absorb a symptom that only appeared this cycle.
+
+        Returns the episodes opened for the first time this cycle, paired with
+        their cause, so the caller can notify about them. Newly-opened is
+        distinguished from touched-again by the ids seen on previous cycles:
+        an episode announces itself once, not on every scan for as long as it
+        stays open.
         """
         from ..inbox import _finding_corr_key
         from .episodes import attach_symptoms, open_or_touch, symptom_keys_by_episode
@@ -103,14 +109,30 @@ class ClusterMonitor:
         def _depth(f: dict) -> tuple[int, int]:
             return (layer_for_finding(f), int(f.get("startedAt") or first_seen.get(_finding_corr_key(f), 0) or 0))
 
+        if not self._episodes_seeded:
+            # Whatever is already open was announced by whoever was running
+            # before this process. Restarting the agent is not news.
+            try:
+                from .episodes import list_open
+
+                self._known_episodes.update(e["id"] for e in list_open())
+            except Exception:
+                logger.debug("Could not seed known episodes", exc_info=True)
+            self._episodes_seeded = True
+
         claimed = symptom_keys_by_episode()
+        opened: list[tuple[str, dict]] = []
         for f in sorted(findings, key=_depth):
             episode_id = open_or_touch(f, claimed)
             if episode_id:
+                if episode_id not in self._known_episodes:
+                    self._known_episodes.add(episode_id)
+                    opened.append((episode_id, f))
                 # The finding, not just its category: it carries the declared
                 # layer and the condition's own onset, both of which the
                 # category alone throws away.
                 attach_symptoms(episode_id, f, findings, first_seen, claimed)
+        return opened
 
     def __init__(self) -> None:
         self.running = False
@@ -119,6 +141,10 @@ class ClusterMonitor:
         # When each condition was first observed. Episodes need it to tell a
         # symptom from something that was already broken before the cause.
         self._first_seen: dict[str, int] = {}
+        # Episodes already announced. Seeded from the database on first use so
+        # a restart does not re-announce every open episode on the cluster.
+        self._known_episodes: set[str] = set()
+        self._episodes_seeded = False
         self._subscribers_lock = asyncio.Lock()
 
         # Scan state — previously owned by MonitorSession
@@ -489,6 +515,10 @@ class ClusterMonitor:
                     action_report["reasoning"] += " — proposed while nobody was connected to approve it"
                     await self._broadcast_raw(action_report)
                     save_action(action_report, category=category, resources=resources, finding=finding)
+                    # The one notification that asks for something back. If
+                    # nobody was connected to approve it, nobody is going to
+                    # find it by looking either.
+                    await notify_fix_proposed(action_report, finding)
                     logger.info(
                         "Auto-fix proposed (no subscriber to approve): %s",
                         finding.get("title", "")[:80],
@@ -800,7 +830,11 @@ class ClusterMonitor:
         # not just the new ones: a cause detected three cycles ago must still
         # be able to absorb a symptom that only appeared now.
         try:
-            await asyncio.to_thread(self._correlate_episodes, list(self._last_findings.values()))
+            opened = await asyncio.to_thread(self._correlate_episodes, list(self._last_findings.values()))
+            for episode_id, cause in opened:
+                # One message for one event. The symptoms underneath it stay
+                # silent — see the suppression in webhook._send_webhook.
+                await notify_episode_opened(episode_id, cause)
         except Exception:
             logger.exception("Episode correlation failed")
 

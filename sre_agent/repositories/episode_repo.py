@@ -36,11 +36,12 @@ class EpisodeRepository(BaseRepository):
         started_at: int,
         correlation_key: str,
         recurrence_of: str | None = None,
+        cause_started_at: int | None = None,
     ) -> None:
         self.db.execute(
             "INSERT INTO episodes (id, status, cause_category, cause_title, cause_finding_id, "
-            "cause_layer, started_at, last_seen_at, correlation_key, recurrence_of) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "cause_layer, started_at, last_seen_at, correlation_key, recurrence_of, cause_started_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 episode_id,
                 _OPEN,
@@ -52,6 +53,7 @@ class EpisodeRepository(BaseRepository):
                 started_at,
                 correlation_key,
                 recurrence_of,
+                cause_started_at,
             ),
         )
         self.db.commit()

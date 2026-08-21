@@ -4,6 +4,20 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### "What changed just before this started" finally has an answer
+- The change window was anchored on when Pulse *opened* an episode, not on when the condition began. Observed live: a cause firing for 30 hours, an episode 12 minutes old, and a window covering the half hour before the episode — a day after anything that could have caused it. Episodes now record the cause's own onset where it is known and measure back from that (migration 030). Conditions that report no onset still fall back to the episode's start, which is the best that is known for them
+
+### Something reaches a person who is not looking at Pulse
+- Notifications used to fire per critical finding, which for one control-plane problem on the reference cluster would have been 33 messages — that is how a monitoring system teaches people to filter it. The outbound events are now the two that mean something to a human: an **episode opening**, which is one event with a cause, and a **fix proposed**, which is something waiting on *them*
+- A finding that an open episode already explains stays silent. Its episode spoke for it
+- The proposal notification carries the call that answers it — `POST /fix-history/{id}/approve`. A message that reports a problem without saying what to do about it is only half a notification
+- An episode announces itself once. Known episodes are seeded from the database on startup, because restarting the agent is not news
+
+### A remedy for the one recurring problem Pulse could not touch
+- Every firing alert arrived under one category, and a category cannot carry a remedy — so the OLM install loop that has been firing for 30 hours on the reference cluster had no fix path at all, despite being both well understood and safely reversible. Alerts now dispatch to a fix strategy by name: `CsvAbnormalFailedOver2Min` and `CsvAbnormalOver30Min` restart the operator that is stuck re-running an install strategy and starving its own probes
+- Deliberately a short list. An alert says something is wrong, not what to do about it, and guessing a remedy from an alert name is how an automated fixer earns its reputation
+- An alert with a known remedy but no pod to act on gets no proposal. A proposal an operator could never carry out is worse than none
+
 ### A proposal can be answered after the moment has passed
 - `POST /fix-history/{action_id}/approve` runs a fix that was proposed while nobody was connected. Until now the only way to answer a trust-level-2 proposal was to be holding a WebSocket open when the question was asked, with 120 seconds to reply — nobody is watching a dashboard at 03:00, which is how the reference cluster reached 2,528 investigations and zero actions
 - The proposal is a pointer to work, not a captured command. Approving re-derives the plan from the finding as it stands now: an image tag, a resource limit or an owning Deployment may all have moved since it was raised, and running a stale plan against a changed cluster is worse than refusing. A proposal whose condition has since cleared is declined — acting then would be operating on a memory of the cluster rather than on the cluster
