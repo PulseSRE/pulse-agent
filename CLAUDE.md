@@ -223,6 +223,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `change_risk.py` — deploy risk scoring for findings (correlates recent changes with incidents)
 - `plan_runtime.py` — phased investigation plan execution engine (plan templates, phase lifecycle, progress events)
 - `skill_scaffolder.py` — AI-generated skill packages from conversation patterns and usage data
+- `trajectory.py` — verified-trajectory learning gate. Investigations record a `LearningCandidate` instead of scaffolding immediately; `monitor/verification_pipeline.py` promotes it to a skill/plan/eval only once the finding is confirmed resolved, discards it if the fix did not hold, and the daily flywheel expires candidates whose verification never arrived. Learning is gated on outcome, not on self-assessed confidence
 - `eval_scaffolder.py` — auto-generates eval scenarios when skills are scaffolded (`scaffold_eval_from_plan()` for full scenario + replay fixture, `scaffold_eval_from_investigation()` for scenario only); writes to non-gating `scaffolded` eval suite
 - `selector_learning.py` — ORCA selector weight learning from feedback signals (routing decisions, overrides, outcomes)
 - `synthesis.py` — parallel skill output merging with Sonnet-powered conflict detection and fallback concatenation

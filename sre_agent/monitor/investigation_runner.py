@@ -334,45 +334,30 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
 
             from ..plan_templates import match_template as _match_tmpl
 
+            # Hold the trajectory rather than learning from it now. Scaffolding used
+            # to fire here, on the diagnosis alone, before any fix had been applied
+            # — so a confidently wrong root cause became a skill that then routed
+            # future incidents. The verification pipeline promotes this candidate
+            # only once the finding is confirmed resolved.
             _has_template = _match_tmpl(category=finding.get("category", "")) is not None
             if not _has_template and result.get("confidence", 0) >= 0.75:
                 try:
-                    from ..skill_scaffolder import (
-                        save_scaffolded_skill,
-                        scaffold_plan_template,
-                        scaffold_skill_from_resolution,
-                    )
+                    from ..trajectory import LearningCandidate, candidate_key, get_learner
 
-                    skill_content = scaffold_skill_from_resolution(
-                        query=finding.get("title", ""),
-                        tools_called=["proactive_investigation"],
-                        investigation_summary=result.get("summary", ""),
-                        root_cause=result.get("suspected_cause", "unknown"),
-                        confidence=result.get("confidence", 0),
-                    )
-                    tokens = finding.get("title", "unknown").lower().split()[:3]
-                    skill_name = "-".join(t for t in tokens if t.isalnum())[:40] or "auto-skill"
-                    save_scaffolded_skill(skill_content, skill_name)
-                    scaffold_plan_template(
-                        skill_name=skill_name,
-                        plan_phases=["triage", "diagnose", "remediate", "verify"],
-                        incident_type=finding.get("category", "unknown"),
-                        confidence=result.get("confidence", 0),
-                    )
-                    logger.info("Scaffolded skill '%s' from novel flat investigation", skill_name)
-
-                    try:
-                        from ..eval_scaffolder import scaffold_eval_from_investigation
-
-                        scaffold_eval_from_investigation(
-                            skill_name=skill_name,
-                            finding=finding,
-                            investigation_result=result,
+                    get_learner().record(
+                        LearningCandidate(
+                            key=candidate_key(finding.get("category", ""), finding.get("resources", [])),
+                            category=finding.get("category", ""),
+                            title=finding.get("title", ""),
+                            root_cause=result.get("suspected_cause", "unknown"),
+                            summary=result.get("summary", ""),
+                            confidence=float(result.get("confidence", 0) or 0),
+                            evidence=list(result.get("evidence_detail", []) or []),
+                            tools_called=["proactive_investigation"],
                         )
-                    except Exception:
-                        logger.debug("Eval scaffolding from investigation failed", exc_info=True)
+                    )
                 except Exception:
-                    logger.debug("Skill scaffolding from flat investigation failed", exc_info=True)
+                    logger.debug("Recording learning candidate failed", exc_info=True)
 
         except TimeoutError:
             report["error"] = f"Investigation timed out after {timeout_seconds}s"
