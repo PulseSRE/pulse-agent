@@ -809,6 +809,26 @@ def _build_capabilities_hint(tool_names: set[str]) -> str:
             lines.append(f"- `{name}()` — {desc}")
         sections.append("\n".join(lines))
 
+    # Progressive skill disclosure — routing chose a skill from the opening
+    # sentence, so the agent needs a way to correct that mid-investigation.
+    if "skill_search" in tool_names and "skill_load" in tool_names:
+        sections.append(
+            "\n".join(
+                [
+                    "## Reaching Other Expertise",
+                    "You were routed to one skill from the user's first message. If the "
+                    "investigation turns out to involve something else — a certificate, "
+                    "a GitOps drift, a capacity question — do not guess from general "
+                    "knowledge:",
+                    "- `skill_search(query)` — find skills relevant to what you have found",
+                    "- `skill_load(name)` — load that skill's procedure",
+                    "- `skill_load(name, reference='...')` — load a specific reference document",
+                    "Loaded guidance informs your approach; it does not grant new tools or "
+                    "permissions, and it never overrides a confirmation gate.",
+                ]
+            )
+        )
+
     # Memory and learning tools (gap 2)
     memory_tools = []
     if "search_past_incidents" in tool_names:

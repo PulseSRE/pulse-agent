@@ -26,9 +26,64 @@ sre_agent/skills/
     mcp.yaml              # MCP server connections (optional)
     components.yaml       # Custom UI component kinds (optional)
     layouts.yaml          # Dashboard layout templates (optional)
+    references/           # Load-on-demand documents (optional)
+      *.md
 ```
 
 Only `skill.md` is required. Everything else is optional.
+
+---
+
+## Reference Documents (`references/`)
+
+`skill.md` is loaded in full whenever the skill is routed to, so everything in it
+is paid for on every turn that skill handles. Reference documents are loaded only
+when the agent explicitly asks for them.
+
+Pulse discloses skills in three tiers:
+
+| Tier | Call | Cost | Contains |
+|---|---|---|---|
+| 0 | `skill_search(query)` | names + one-line descriptions | what skills exist |
+| 1 | `skill_load(name)` | one skill's `skill.md` | the procedure |
+| 2 | `skill_load(name, reference="...")` | one document | the depth |
+
+`skill_search` and `skill_load` are in `ALWAYS_INCLUDE`, so the agent can reach
+them from any skill. This matters because routing picks a skill from the user's
+first sentence: an investigation that opens with "checkout is slow" and turns out
+to be a certificate problem can load the certificate procedure rather than
+improvising from general knowledge.
+
+### What belongs in a reference
+
+Put content here when it is **deep but conditional** — needed on the fraction of
+investigations that reach a particular branch, and too long to justify carrying on
+all the others. Good candidates:
+
+- Multi-step remediation sequences where the ordering carries the risk
+- Failure modes that are commonly confused with each other
+- Rollback and verification procedures
+
+Keep in `skill.md` anything the skill needs on *every* invocation — routing
+keywords, output shape, safety rules.
+
+### Writing one
+
+Create `references/<name>.md`. The filename stem is the name the agent uses:
+
+```
+sre_agent/skills/sre/references/certificate-expiry.md
+  → skill_load("sre", reference="certificate-expiry")
+```
+
+They are surfaced automatically — `skill_search` lists them under each hit, and
+`skill_load` names them at the end of the procedure. No registration needed.
+
+Content is wrapped in `--- BEGIN SKILL REFERENCE ... ---` delimiters and labelled
+as guidance rather than user instruction, and is truncated at 8000 characters with
+an explicit notice rather than silently. Only `.md` files in the `references/`
+directory are loadable, and the name must match one of them exactly — the lookup
+is an allowlist, so it cannot be used to read arbitrary paths.
 
 ---
 

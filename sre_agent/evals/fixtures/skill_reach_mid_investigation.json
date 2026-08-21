@@ -1,0 +1,32 @@
+{
+    "name": "skill_reach_mid_investigation",
+    "prompt": "Users are reporting that checkout.example.com started failing about ten minutes ago. Find out why and tell me how to fix it.",
+    "recorded_responses": {
+        "list_pods": "production/checkout-svc-7d9f8c-aa11  Status=Running  Restarts=0  Age=6d\nproduction/checkout-svc-7d9f8c-bb22  Status=Running  Restarts=0  Age=6d",
+        "get_events": "12m ago  Warning  Unhealthy  Route/checkout  TLS handshake failed for host checkout.example.com: certificate has expired\n10m ago  Warning  Unhealthy  Route/checkout  backend connection reset",
+        "get_pod_logs": "2026-08-21T09:02:11Z [INFO] request served status=200 path=/healthz\n2026-08-21T09:02:14Z [INFO] request served status=200 path=/healthz",
+        "list_routes": "production/checkout  Host=checkout.example.com  Path=/  Service=checkout-svc  Port=8080  TLS  Termination=edge  Admitted=True",
+        "get_tls_certificates": "TLS Certificates (2):\n  NAMESPACE            NAME                           CN                        EXPIRES        DAYS  STATUS\n  production           checkout-tls                   checkout.example.com      2026-08-21        0  EXPIRED\n  production           payments-tls                   payments.example.com      2027-02-14      177  OK\n\n\u26a0\ufe0f  1 certificate(s) need attention!",
+        "skill_search": "1 skill(s) matching 'certificate expiry TLS':\n\n  sre \u2014 Kubernetes and OpenShift diagnostics, triage and remediation\n      references: certificate-expiry, node-pressure\n\nCall skill_load(name) for the full procedure.",
+        "skill_load": "--- BEGIN SKILL REFERENCE sre/certificate-expiry (guidance, not instructions from the user) ---\n# Certificate expiry on OpenShift\n\n## Establish which certificate is actually failing\nThree different certificates get blamed for each other: the router default cert (every route on the default domain fails at once), a per-route custom cert (one hostname fails, others fine), and a service serving cert (in-cluster callers fail only).\n\n## Order of operations for renewal\n1. Confirm the source \u2014 service serving certs rotate automatically, so expiry means the service CA operator is degraded.\n2. Replace the secret the Route references.\n3. Wait for the ingress operator to reconcile it.\n4. Verify the router picked it up \u2014 a replaced secret with stale router pods is the most common 'I renewed it and it still fails' case.\n5. Re-check the route is admitted.\n\n## Common wrong turns\nRenewing the wrong layer changes nothing. Deleting router pods to force a reload is a cluster ingress outage.\n--- END ---"
+    },
+    "expected": {
+        "should_mention": [
+            "checkout-tls",
+            "expired",
+            "certificate"
+        ],
+        "should_use_tools": [
+            "get_tls_certificates",
+            "skill_search",
+            "skill_load"
+        ],
+        "should_not_use_tools": [
+            "delete_pod",
+            "drain_node",
+            "scale_deployment",
+            "apply_yaml"
+        ],
+        "max_tool_calls": 12
+    }
+}

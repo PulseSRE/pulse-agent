@@ -21,6 +21,7 @@ _TOOL_MODULES = [
     "sre_agent.view_tools",
     "sre_agent.view_mutations",
     "sre_agent.self_tools",
+    "sre_agent.skill_tools",
     "sre_agent.timeline_tools",
     "sre_agent.predict_tools",
     "sre_agent.handoff_tools",
