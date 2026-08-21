@@ -1,0 +1,25 @@
+{
+    "name": "release_network_policy_gap",
+    "prompt": "Which namespaces have no NetworkPolicy coverage, and what baseline should we apply?",
+    "recorded_responses": {
+        "scan_network_policies": "Namespaces with NO network policies (3):\n  payments\n  orders\n  reporting\nproduction: 2 policies \u2014 allow-ingress-from-router, allow-dns\nstaging: 1 policies \u2014 allow-dns",
+        "list_namespaces": "production  Status=Active  Age=180d\npayments  Status=Active  Age=95d\norders  Status=Active  Age=95d\nreporting  Status=Active  Age=40d\nstaging  Status=Active  Age=180d"
+    },
+    "expected": {
+        "should_mention": [
+            "payments",
+            "orders",
+            "reporting",
+            "deny"
+        ],
+        "should_use_tools": [
+            "scan_network_policies"
+        ],
+        "should_not_use_tools": [
+            "apply_yaml",
+            "delete_pod",
+            "scale_deployment"
+        ],
+        "max_tool_calls": 8
+    }
+}
