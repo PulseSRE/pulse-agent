@@ -57,6 +57,16 @@ def _make_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use a mock Claude client (no API key needed). Tests tool wiring and scoring only.",
     )
+    p.add_argument(
+        "--judge-min",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Gate on the judge's total score (0-100) instead of keyword matching. "
+            "Requires --judge. Content checks become advisory; structure checks still gate."
+        ),
+    )
     return p
 
 
@@ -192,13 +202,59 @@ def _expected_for(expected: dict, dry_run: bool) -> dict:
     return trimmed
 
 
-def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet-4-6", dry_run: bool = False) -> dict:
+
+def _apply_judge_gate(score: dict, judge: dict | None, judge_min: int | None) -> dict:
+    """Let the judge decide correctness instead of keyword matching.
+
+    ``score_replay`` fails a fixture unless every ``should_mention`` substring
+    appears verbatim, so a correct diagnosis phrased differently fails while a
+    wrong one that name-drops the right nouns passes. When a judge score is
+    available and a threshold is set, content checks drop to advisory and the
+    judge's total gates instead. Structure checks — tools dispatched, forbidden
+    tools avoided, call budget — always keep gating, since those are objective.
+
+    With no threshold or no judge result the score is returned untouched, so
+    existing behaviour is unchanged unless ``--judge-min`` is passed.
+    """
+    if judge_min is None or not judge:
+        return score
+
+    total = judge.get("total")
+    if not isinstance(total, (int, float)):
+        return score
+
+    checks = []
+    for check in score.get("checks", []):
+        if check.get("kind") == "content":
+            check = {**check, "advisory": True}
+        checks.append(check)
+
+    checks.append(
+        {
+            "check": f"judge total >= {judge_min} (actual: {total})",
+            "passed": total >= judge_min,
+            "weight": 1,
+            "kind": "judge",
+        }
+    )
+
+    gating = [c for c in checks if not c.get("advisory")]
+    return {**score, "checks": checks, "passed": all(c["passed"] for c in gating)}
+
+
+def _run_fixture(
+    name: str,
+    use_judge: bool = False,
+    model: str = "claude-sonnet-4-6",
+    dry_run: bool = False,
+    judge_min: int | None = None,
+) -> dict:
     """Run a single fixture (single-turn or multi-turn) and return the scored result."""
     fixture = load_fixture(name)
 
     # Multi-turn fixture
     if fixture.get("multi_turn"):
-        return _run_multi_turn_fixture(name, fixture, use_judge, model, dry_run)
+        return _run_multi_turn_fixture(name, fixture, use_judge, model, dry_run, judge_min)
 
     harness = ReplayHarness(fixture["recorded_responses"])
     client, thinking = _setup_model(model, dry_run)
@@ -230,11 +286,19 @@ def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet
             )
         )
         output["judge"] = judge_result
+        output["score"] = _apply_judge_gate(output["score"], judge_result, judge_min)
 
     return output
 
 
-def _run_multi_turn_fixture(name: str, fixture: dict, use_judge: bool, model: str, dry_run: bool) -> dict:
+def _run_multi_turn_fixture(
+    name: str,
+    fixture: dict,
+    use_judge: bool,
+    model: str,
+    dry_run: bool,
+    judge_min: int | None = None,
+) -> dict:
     """Run a multi-turn fixture."""
     from .replay import MultiTurnReplayHarness
 
@@ -275,6 +339,7 @@ def _run_multi_turn_fixture(name: str, fixture: dict, use_judge: bool, model: st
             )
         )
         output["judge"] = judge_result
+        output["score"] = _apply_judge_gate(output["score"], judge_result, judge_min)
 
     return output
 
@@ -295,6 +360,8 @@ def _format_text(results: list[dict]) -> str:
         lines.append("Checks:")
         for check in score["checks"]:
             mark = "  [x]" if check["passed"] else "  [ ]"
+            if check.get("advisory"):
+                mark = "  [~]" if check["passed"] else "  [!]"
             lines.append(f"  {mark} {check['check']}")
         if r.get("judge"):
             j = r["judge"]
@@ -321,7 +388,13 @@ def main() -> None:
     results = []
     for name in fixtures:
         try:
-            result = _run_fixture(name, use_judge=args.judge, model=args.model, dry_run=args.dry_run)
+            result = _run_fixture(
+                name,
+                use_judge=args.judge,
+                model=args.model,
+                dry_run=args.dry_run,
+                judge_min=args.judge_min,
+            )
             results.append(result)
         except Exception as e:
             results.append(

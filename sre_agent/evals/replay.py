@@ -306,32 +306,43 @@ def score_multi_turn(result: dict, expected: dict) -> dict:
 
         for keyword in turn_expected.get("should_mention", []):
             found = _keyword_match(keyword, turn_response)
-            checks.append({"check": f"turn {i + 1} mentions '{keyword}'", "passed": found, "weight": 1})
+            checks.append(
+                {"check": f"turn {i + 1} mentions '{keyword}'", "passed": found, "weight": 1, "kind": "content"}
+            )
 
         for tool in turn_expected.get("should_use_tools", []):
             found = tool in turn_tools
-            checks.append({"check": f"turn {i + 1} used tool '{tool}'", "passed": found, "weight": 1})
+            checks.append(
+                {"check": f"turn {i + 1} used tool '{tool}'", "passed": found, "weight": 1, "kind": "structure"}
+            )
 
         for tool in turn_expected.get("should_not_use_tools", []):
             found = tool in turn_tools
-            checks.append({"check": f"turn {i + 1} avoided tool '{tool}'", "passed": not found, "weight": 1})
+            checks.append(
+                {"check": f"turn {i + 1} avoided tool '{tool}'", "passed": not found, "weight": 1, "kind": "structure"}
+            )
 
     # Overall keyword checks (with synonym support)
     for keyword in expected.get("overall_should_mention", []):
         found = _keyword_match(keyword, all_responses)
-        checks.append({"check": f"any turn mentions '{keyword}'", "passed": found, "weight": 1})
+        checks.append({"check": f"any turn mentions '{keyword}'", "passed": found, "weight": 1, "kind": "content"})
 
     # Required tools (any order) — more flexible than ordered check
     for tool in expected.get("should_use_tools", []):
         found = tool in all_tool_calls
-        checks.append({"check": f"used tool '{tool}'", "passed": found, "weight": 1})
+        checks.append({"check": f"used tool '{tool}'", "passed": found, "weight": 1, "kind": "structure"})
 
     # Tool budget
     max_calls = expected.get("max_total_tool_calls")
     if max_calls is not None:
         within = len(all_tool_calls) <= max_calls
         checks.append(
-            {"check": f"total tool calls <= {max_calls} (actual: {len(all_tool_calls)})", "passed": within, "weight": 1}
+            {
+                "check": f"total tool calls <= {max_calls} (actual: {len(all_tool_calls)})",
+                "passed": within,
+                "weight": 1,
+                "kind": "structure",
+            }
         )
 
     # Tool ordering — soft check (weight: 0.5 instead of 1)
@@ -346,7 +357,9 @@ def score_multi_turn(result: dict, expected: dict) -> dict:
             except ValueError:
                 positions.append(-1)
         in_order = all(p >= 0 for p in positions) and positions == sorted(positions)
-        checks.append({"check": f"tools in order: {ordered_tools}", "passed": in_order, "weight": 0.5})
+        checks.append(
+            {"check": f"tools in order: {ordered_tools}", "passed": in_order, "weight": 0.5, "kind": "structure"}
+        )
 
     # Compute score
     if not checks:
@@ -400,6 +413,7 @@ def score_replay(result: dict, expected: dict) -> dict:
                 "check": f"mentions '{keyword}'",
                 "passed": found,
                 "weight": 1,
+                "kind": "content",
             }
         )
 
@@ -411,6 +425,7 @@ def score_replay(result: dict, expected: dict) -> dict:
                 "check": f"used tool '{tool}'",
                 "passed": found,
                 "weight": 1,
+                "kind": "structure",
             }
         )
 
@@ -422,6 +437,7 @@ def score_replay(result: dict, expected: dict) -> dict:
                 "check": f"avoided tool '{tool}'",
                 "passed": not found,
                 "weight": 1,
+                "kind": "structure",
             }
         )
 
@@ -434,6 +450,7 @@ def score_replay(result: dict, expected: dict) -> dict:
                 "check": f"tool calls <= {max_calls} (actual: {len(called_tools)})",
                 "passed": within,
                 "weight": 1,
+                "kind": "structure",
             }
         )
 
