@@ -2,7 +2,7 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
-## [Unreleased]
+## [2.15.0] - 2026-08-21
 
 ### "What changed just before this started" finally has an answer
 - The change window was anchored on when Pulse *opened* an episode, not on when the condition began. Observed live: a cause firing for 30 hours, an episode 12 minutes old, and a window covering the half hour before the episode — a day after anything that could have caused it. Episodes now record the cause's own onset where it is known and measure back from that (migration 030). Conditions that report no onset still fall back to the episode's start, which is the best that is known for them
