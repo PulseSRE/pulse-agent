@@ -4,6 +4,13 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### A proposal can be answered after the moment has passed
+- `POST /fix-history/{action_id}/approve` runs a fix that was proposed while nobody was connected. Until now the only way to answer a trust-level-2 proposal was to be holding a WebSocket open when the question was asked, with 120 seconds to reply — nobody is watching a dashboard at 03:00, which is how the reference cluster reached 2,528 investigations and zero actions
+- The proposal is a pointer to work, not a captured command. Approving re-derives the plan from the finding as it stands now: an image tag, a resource limit or an owning Deployment may all have moved since it was raised, and running a stale plan against a changed cluster is worse than refusing. A proposal whose condition has since cleared is declined — acting then would be operating on a memory of the cluster rather than on the cluster
+- The status check lives in the `WHERE` clause rather than in a read-then-write, so two operators approving at the same instant produce one fix and one conflict. Verified against a real Postgres: the first claim returns true, the second false
+- Gated on a real authenticated user rather than the shared UI token, and the approver's name is recorded against the action (migration 029). Approving a change to a live cluster is a person taking responsibility, which deserves more than an anonymous state transition
+- Fix history used to lose the `tool`, `before_state` and `reasoning` of any action that transitioned in place, because the upsert did not carry them. A proposal approved later would have shown as completed while never saying what it did
+
 ### Remediation no longer depends on somebody having a browser tab open
 - `auto_fix` runs only at trust level >= 2, and the effective trust level was "the highest among connected subscribers, or 1 if there are none". Subscribers are browser tabs. With nobody watching, the level was 1, `auto_fix` was never entered, and the agent quietly did nothing about problems it had correctly diagnosed. Measured on the reference cluster after days of running: 2,528 investigations, **zero actions**, and not one auto-fix line anywhere in the logs. `PULSE_AGENT_TRUST_LEVEL=2` was set on the deployment and never consulted by this path
 - This is the same bug as the scan loop only running while a client was connected. That half was found and fixed; this half was left behind, which is what makes it worth naming rather than quietly correcting — "works only while someone is looking" is a shape worth recognising on sight

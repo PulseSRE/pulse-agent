@@ -78,6 +78,12 @@ class MonitorRepository(BaseRepository):
                ON CONFLICT (id) DO UPDATE SET
                status = EXCLUDED.status, after_state = EXCLUDED.after_state,
                error = EXCLUDED.error, duration_ms = EXCLUDED.duration_ms,
+               -- A proposal approved later transitions in place. Without these
+               -- three the row keeps the empty tool and the proposal's own
+               -- reasoning, so fix history shows a completed action that never
+               -- says what it actually did.
+               tool = EXCLUDED.tool, before_state = EXCLUDED.before_state,
+               reasoning = EXCLUDED.reasoning,
                verification_status = EXCLUDED.verification_status,
                verification_evidence = EXCLUDED.verification_evidence,
                verification_timestamp = EXCLUDED.verification_timestamp""",
@@ -103,6 +109,23 @@ class MonitorRepository(BaseRepository):
             ),
         )
         db.commit()
+
+    def claim_proposed_action(self, action_id: str, approver: str, timestamp: int) -> bool:
+        """Take ownership of a pending proposal. False if it was not still pending.
+
+        The status check lives in the WHERE clause rather than in a read-then-write
+        so that two operators approving at the same instant produce one fix and
+        one conflict, not two fixes against the same cluster.
+        """
+        self.ensure_tables()
+        cur = self.db.execute(
+            "UPDATE actions SET status = 'approved', approved_by = ?, approved_at = ? "
+            "WHERE id = ? AND status = 'proposed'",
+            (approver, timestamp, action_id),
+        )
+        claimed = cur.rowcount == 1
+        self.db.commit()
+        return claimed
 
     def get_action_by_id(self, action_id: str) -> dict | None:
         """Get a single raw action row by ID."""
@@ -305,6 +328,12 @@ class MonitorRepository(BaseRepository):
                ON CONFLICT (id) DO UPDATE SET
                status = EXCLUDED.status, after_state = EXCLUDED.after_state,
                error = EXCLUDED.error, duration_ms = EXCLUDED.duration_ms,
+               -- A proposal approved later transitions in place. Without these
+               -- three the row keeps the empty tool and the proposal's own
+               -- reasoning, so fix history shows a completed action that never
+               -- says what it actually did.
+               tool = EXCLUDED.tool, before_state = EXCLUDED.before_state,
+               reasoning = EXCLUDED.reasoning,
                verification_status = EXCLUDED.verification_status,
                verification_evidence = EXCLUDED.verification_evidence,
                verification_timestamp = EXCLUDED.verification_timestamp""",

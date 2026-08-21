@@ -13,7 +13,7 @@ from ..monitor import (
     get_action_detail,
     get_fix_history,
 )
-from .auth import verify_token
+from .auth import require_admin, verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -216,6 +216,32 @@ async def rest_action_detail(action_id: str, _auth=Depends(verify_token)):
 
         return JSONResponse(status_code=404, content={"error": "Action not found"})
     return result
+
+
+@router.post("/fix-history/{action_id}/approve")
+async def approve_action(action_id: str, approver: str = Depends(require_admin)):
+    """Run a fix that was proposed while nobody was connected to approve it.
+
+    Gated on a real authenticated user rather than the shared UI token: this
+    changes a live cluster, and "somebody holding the UI credential" is not an
+    answer to who authorised it.
+
+    The plan is re-derived from the finding as it stands now rather than
+    replayed from the proposal. An image tag, a resource limit or an owning
+    Deployment may all have moved since; executing a stale plan against a
+    changed cluster is a worse outcome than refusing, so a proposal whose
+    condition has cleared is declined rather than run.
+    """
+    import asyncio
+
+    from ..monitor.approvals import ApprovalError, approve_fix
+
+    try:
+        return await asyncio.to_thread(approve_fix, action_id, approver)
+    except ApprovalError as e:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(status_code=e.status_code, content={"error": e.reason})
 
 
 @router.post("/fix-history/{action_id}/rollback")
