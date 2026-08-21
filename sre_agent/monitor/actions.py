@@ -20,6 +20,13 @@ def save_action(
     from .findings import _make_rollback_info
 
     try:
+        # Stamp the condition's identity on the row. The action's own id and
+        # its finding id are both per-sighting; this is the one thing that
+        # says "the same problem, seen again" across scans.
+        if finding is not None and not action.get("correlationKey"):
+            from ..inbox import _finding_corr_key
+
+            action["correlationKey"] = _finding_corr_key(finding)
         rollback_available, rollback_action_json = _make_rollback_info(action, finding)
         get_monitor_repo().save_action(
             action=action,

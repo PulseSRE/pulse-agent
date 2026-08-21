@@ -342,6 +342,8 @@ class ClusterMonitor:
             logger.info("Auto-fix disabled via PULSE_AGENT_AUTOFIX_ENABLED — skipping")
             return
 
+        from ..inbox import _finding_corr_key
+
         trust_level = self.effective_trust_level
         auto_fix_categories = self.effective_auto_fix_categories
 
@@ -476,7 +478,7 @@ class ClusterMonitor:
 
             if targeted_plan and targeted_plan.strategy == "require_human_review":
                 try:
-                    existing = get_monitor_repo().check_existing_human_review(finding["id"])
+                    existing = get_monitor_repo().check_existing_human_review(_finding_corr_key(finding))
                     if existing:
                         continue
                 except Exception:
@@ -513,7 +515,7 @@ class ClusterMonitor:
             if trust_level == 2:
                 async with self._subscribers_lock:
                     nobody_to_ask = not self._subscribers
-                if nobody_to_ask and get_monitor_repo().check_pending_proposal(finding["id"]):
+                if nobody_to_ask and get_monitor_repo().check_pending_proposal(_finding_corr_key(finding)):
                     # Already asked, still unanswered. Asking again every scan
                     # is a flood, not persistence — measured on the reference
                     # cluster, one hour of this produced 701 rows for two

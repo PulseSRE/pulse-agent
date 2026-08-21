@@ -73,8 +73,8 @@ class MonitorRepository(BaseRepository):
                (id, finding_id, timestamp, category, tool, input, status,
                 before_state, after_state, error, reasoning, duration_ms,
                 rollback_available, rollback_action, resources, verification_status,
-                verification_evidence, verification_timestamp)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                verification_evidence, verification_timestamp, correlation_key)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (id) DO UPDATE SET
                status = EXCLUDED.status, after_state = EXCLUDED.after_state,
                error = EXCLUDED.error, duration_ms = EXCLUDED.duration_ms,
@@ -106,6 +106,7 @@ class MonitorRepository(BaseRepository):
                 action.get("verificationStatus"),
                 action.get("verificationEvidence"),
                 action.get("verificationTimestamp"),
+                action.get("correlationKey", ""),
             ),
         )
         db.commit()
@@ -196,25 +197,36 @@ class MonitorRepository(BaseRepository):
             (days,),
         )
 
-    def check_pending_proposal(self, finding_id: str) -> dict | None:
-        """Any proposal for this finding still waiting for an answer.
+    def check_pending_proposal(self, correlation_key: str) -> dict | None:
+        """Any proposal for this *condition* still waiting for an answer.
 
-        A proposal is a question. Asking it again every 65 seconds because
-        nobody has answered yet is not persistence, it is a flood: on the
-        reference cluster the first hour of unattended proposing produced 701
-        rows for two findings.
+        Keyed on the correlation key, never on the finding id. ``_make_finding``
+        mints ``f-{uuid4}`` on every scan, so the same condition arrives with a
+        different finding id every 65 seconds and a finding-id lookup can never
+        match its own previous proposal. That is precisely how unattended
+        proposing produced 718 proposals on the reference cluster — one per
+        sighting, each one looking brand new.
         """
+        if not correlation_key:
+            return None
         return self.db.fetchone(
-            "SELECT id FROM actions WHERE finding_id = ? AND status IN ('proposed', 'approved') LIMIT 1",
-            (finding_id,),
+            "SELECT id FROM actions WHERE correlation_key = ? AND status IN ('proposed', 'approved') LIMIT 1",
+            (correlation_key,),
         )
 
-    def check_existing_human_review(self, finding_id: str) -> dict | None:
-        """Check if a human_review action already exists for a finding."""
-        db = self.db
-        return db.fetchone(
-            "SELECT id FROM actions WHERE finding_id = ? AND tool = ? AND status = ?",
-            (finding_id, "require_human_review", "proposed"),
+    def check_existing_human_review(self, correlation_key: str) -> dict | None:
+        """Whether this condition already has a human-review action pending.
+
+        Same correction as :meth:`check_pending_proposal`: this took a finding
+        id for as long as it existed and so never matched anything. It went
+        unnoticed because ``auto_fix`` was never entered until the trust-level
+        fix, which meant the guard had never once been asked a real question.
+        """
+        if not correlation_key:
+            return None
+        return self.db.fetchone(
+            "SELECT id FROM actions WHERE correlation_key = ? AND tool = ? AND status = ?",
+            (correlation_key, "require_human_review", "proposed"),
         )
 
     # ── Briefing queries ─────────────────────────────────────────────────
@@ -336,8 +348,8 @@ class MonitorRepository(BaseRepository):
                (id, finding_id, timestamp, category, tool, input, status,
                 before_state, after_state, error, reasoning, duration_ms,
                 rollback_available, rollback_action, resources, verification_status,
-                verification_evidence, verification_timestamp)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                verification_evidence, verification_timestamp, correlation_key)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (id) DO UPDATE SET
                status = EXCLUDED.status, after_state = EXCLUDED.after_state,
                error = EXCLUDED.error, duration_ms = EXCLUDED.duration_ms,
@@ -368,6 +380,7 @@ class MonitorRepository(BaseRepository):
             action.get("verificationStatus"),
             action.get("verificationEvidence"),
             action.get("verificationTimestamp"),
+            action.get("correlationKey", ""),
         )
 
     async def async_update_action_verification(
