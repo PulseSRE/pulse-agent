@@ -879,3 +879,30 @@ class TestMultiTurnRealConfig:
         kwargs = _stream_kwargs(client)[0]
         assert _system_text(kwargs["system"]) == "You are an SRE agent. Diagnose the issue."
         assert kwargs["tools"][0]["description"] == "Recorded stub for list_pods"
+
+
+class TestToolRegistryInReplay:
+    """Replay must select from the same tool universe production does."""
+
+    def test_registry_is_populated(self):
+        from sre_agent.evals.replay_config import ensure_tool_registry
+
+        count = ensure_tool_registry()
+        # The curated static fallback is far smaller than the full registry; if
+        # discovery silently failed we would be measuring a different agent.
+        assert count > 80, f"only {count} tools registered — discovery did not run"
+
+    def test_node_tools_are_reachable_after_discovery(self):
+        from sre_agent.evals.replay_config import ensure_tool_registry
+
+        ensure_tool_registry()
+        from sre_agent.tool_registry import TOOL_REGISTRY
+
+        # the exact tools the first real-config run reported as never offered
+        for tool in ("list_nodes", "describe_node"):
+            assert tool in TOOL_REGISTRY, f"{tool} missing from the replay tool registry"
+
+    def test_is_idempotent(self):
+        from sre_agent.evals.replay_config import ensure_tool_registry
+
+        assert ensure_tool_registry() == ensure_tool_registry()
