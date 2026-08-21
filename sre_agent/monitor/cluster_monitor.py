@@ -79,6 +79,14 @@ class ClusterMonitor:
 
     _MAX_FINDINGS = 500
 
+    # Declared here rather than only in __init__ because _correlate_episodes is
+    # defined above it and writes them. mypy resolves an attribute from its
+    # first *textual* assignment, so without these it infers the type from
+    # inside that method and then rejects __init__'s annotation as a
+    # redefinition — 17 errors, none of them about anything real.
+    _known_episodes: set[str]
+    _episodes_seeded: bool
+
     def _correlate_episodes(self, findings: list[dict]) -> list[tuple[str, dict]]:
         """Open episodes for cause-capable findings and attach what they explain.
 
@@ -143,7 +151,7 @@ class ClusterMonitor:
         self._first_seen: dict[str, int] = {}
         # Episodes already announced. Seeded from the database on first use so
         # a restart does not re-announce every open episode on the cluster.
-        self._known_episodes: set[str] = set()
+        self._known_episodes = set()
         self._episodes_seeded = False
         self._subscribers_lock = asyncio.Lock()
 
