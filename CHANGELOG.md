@@ -2,6 +2,12 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [Unreleased]
+
+### A proposal is a question, not a chant
+- Unattended proposing re-asked the same question every scan. One hour on the reference cluster produced **701 proposal rows for two findings**, burying the two that mattered. This is the cost of the previous release finally letting `auto_fix` run: the flood was impossible before, because the function was never entered. A finding with a proposal still awaiting an answer is now skipped
+- The notification-gap finding carried its count in the title, so every time the number moved it became a different correlation key: the item resolved and was raised again rather than staying open. Observed live — raised once, resolved, gone. The count lives in the summary now
+
 ## [2.16.0] - 2026-08-21
 
 ### Pulse says when what it found cannot reach anyone

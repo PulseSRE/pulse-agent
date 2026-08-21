@@ -196,6 +196,19 @@ class MonitorRepository(BaseRepository):
             (days,),
         )
 
+    def check_pending_proposal(self, finding_id: str) -> dict | None:
+        """Any proposal for this finding still waiting for an answer.
+
+        A proposal is a question. Asking it again every 65 seconds because
+        nobody has answered yet is not persistence, it is a flood: on the
+        reference cluster the first hour of unattended proposing produced 701
+        rows for two findings.
+        """
+        return self.db.fetchone(
+            "SELECT id FROM actions WHERE finding_id = ? AND status IN ('proposed', 'approved') LIMIT 1",
+            (finding_id,),
+        )
+
     def check_existing_human_review(self, finding_id: str) -> dict | None:
         """Check if a human_review action already exists for a finding."""
         db = self.db

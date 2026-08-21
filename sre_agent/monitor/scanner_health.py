@@ -268,7 +268,11 @@ def scan_degraded_capabilities() -> list[dict]:
                 _make_finding(
                     severity=SEVERITY_WARNING,
                     category="degraded",
-                    title=f"Nothing Pulse found will reach anyone — {undelivered} waiting",
+                    # The count belongs in the summary, not the title. A title
+                    # that changes with the number is a different correlation
+                    # key every time it changes, so the item resolves and is
+                    # raised again instead of staying open — observed live.
+                    title="Nothing Pulse found will reach anyone",
                     summary=(
                         f"No notification channel is configured, and {undelivered} open "
                         f"episode(s) or proposed fix(es) are waiting for somebody to open the "
