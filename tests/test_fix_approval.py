@@ -13,9 +13,11 @@ running a stale plan against a changed cluster is worse than refusing.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from kubernetes.client.rest import ApiException
 
 from sre_agent.monitor.approvals import ApprovalError, approve_fix
 
@@ -163,3 +165,36 @@ def test_a_failed_fix_is_saved_as_failed(wired):
     assert report["status"] == "failed"
     assert "api server said no" in report["error"]
     assert wired.saved, "a failed approval still has to reach fix history"
+
+
+def test_a_forbidden_fix_is_saved_with_a_readable_message_not_a_header_dump(wired):
+    """A rejected K8s API call must not surface str(ApiException) — that dumps
+    the entire HTTPHeaderDict (Audit-Id, Content-Length, the works) into what
+    a person sees in the Inbox. Only the Status body's own message belongs there.
+    """
+    forbidden = ApiException(status=403, reason="Forbidden")
+    forbidden.headers = {"Audit-Id": "d5f6ffee-5dec-485f-9461-7ef164a8a160", "Content-Length": "400"}
+    forbidden.body = json.dumps(
+        {
+            "kind": "Status",
+            "apiVersion": "v1",
+            "status": "Failure",
+            "message": (
+                'pods "klusterlet-646d4fdd8b-4kz56" is forbidden: User '
+                '"system:serviceaccount:openshiftpulse:pulse-openshift-sre-agent" cannot delete resource '
+                '"pods" in API group "" in the namespace "open-cluster-management-agent"'
+            ),
+            "reason": "Forbidden",
+            "code": 403,
+        }
+    )
+    with patch("sre_agent.monitor.fix_planner.execute_fix", side_effect=forbidden):
+        report = approve_fix("a-1", "sre@example.com")
+    assert report["status"] == "failed"
+    assert report["error"] == (
+        'pods "klusterlet-646d4fdd8b-4kz56" is forbidden: User '
+        '"system:serviceaccount:openshiftpulse:pulse-openshift-sre-agent" cannot delete resource '
+        '"pods" in API group "" in the namespace "open-cluster-management-agent"'
+    )
+    assert "HTTPHeaderDict" not in report["error"]
+    assert "Audit-Id" not in report["error"]

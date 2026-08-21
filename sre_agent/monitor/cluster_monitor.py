@@ -654,8 +654,13 @@ class ClusterMonitor:
                     if _METRICS_AVAILABLE:
                         AUTOFIX_TOTAL.labels(outcome="success").inc()
                 else:
+                    from ..errors import classify_exception
+
+                    # str(e) on a kubernetes ApiException dumps the whole object,
+                    # headers and all — classify_exception extracts the structured
+                    # Status body's message instead, so this stays readable.
                     action_report["status"] = "failed"
-                    action_report["error"] = str(e)
+                    action_report["error"] = str(classify_exception(e, category))[:500]
                     action_report["durationMs"] = duration_ms
                     if _METRICS_AVAILABLE:
                         AUTOFIX_TOTAL.labels(outcome="failure").inc()
