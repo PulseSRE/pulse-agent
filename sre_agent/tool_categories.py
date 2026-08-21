@@ -332,6 +332,8 @@ TOOL_CATEGORIES = {
 # broadly useful. Better to include a few extra tools than to miss one the
 # user needs.
 ALWAYS_INCLUDE = {
+    "skill_search",
+    "skill_load",
     "list_resources",
     "list_pods",
     "get_events",

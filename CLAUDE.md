@@ -207,7 +207,8 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `evals/compare.py` — A/B comparison of eval suite results (baseline vs current, regression detection)
 - `evals/ablation.py` — prompt section ablation framework (tests impact of removing prompt sections on scores)
 - `evals/history.py` — eval history DB (eval_runs table, trend queries, migration 006)
-- `skill_loader.py` — skill package loader, tool selection, MCP inclusion (consolidates harness tool selection); ALWAYS_INCLUDE trimmed to 5 (adaptive), self-describe tools conditional
+- `skill_loader.py` — skill package loader, tool selection, MCP inclusion (consolidates harness tool selection); ALWAYS_INCLUDE trimmed to 5 (adaptive) plus `skill_search`/`skill_load`, self-describe tools conditional. `_rank_by_relevance()` orders candidates by query relevance before the MAX_TOOL_BUDGET cut, so tools named in the query survive truncation
+- `skill_tools.py` — progressive skill disclosure: `skill_search` (tier 0, names + descriptions), `skill_load` (tier 1, one skill's procedure), `skill_load(name, reference=...)` (tier 2, a document from the skill's `references/` directory). Lets the agent reach expertise mid-investigation instead of being fixed to whatever routing chose from the first sentence
 - `skill_router.py` — query routing, pre-route handoff, exclusive skill enforcement, bidirectional conflict checking, multi-skill secondary selection
 - `tool_categories.py` — tool category definitions extracted from skill_loader.py
 - `mcp_client.py` — MCP server connections (SSE transport), tool/prompt discovery, registration
