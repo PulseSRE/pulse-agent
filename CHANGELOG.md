@@ -2,6 +2,13 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [2.16.4] - 2026-08-21
+
+### A rejected fix showed its raw exception, not what happened
+- Approving a fix that then failed against the API server stored `str(e)` on the `kubernetes.client.rest.ApiException` as the failure reason -- the object's entire repr, HTTP response headers and all, dumped verbatim into the Inbox's "Fixes applied" banner. Observed live: a `restart_controller` fix on `klusterlet-646d4fdd8b-4kz56` in `open-cluster-management-agent` was denied by RBAC, and the banner read as several hundred characters of `HTTPHeaderDict({'Audit-Id': ...})`, cut off mid-header by the UI
+- Both `approve_fix` and the unattended `auto_fix` path now run the exception through `classify_exception` -- already used everywhere else a K8s call can fail -- before storing it, so the message is the Kubernetes API's own `Status.message` (e.g. `pods "klusterlet-646d4fdd8b-4kz56" is forbidden: ... in the namespace "open-cluster-management-agent"`), not the transport object around it
+- Checked whether the agent should have had permission to make this call at all: it should not have. `allowWriteOperations` is false on this cluster, the operator's ClusterRole correctly omits `delete(pods)`/`patch(deployments)` as a result, and the 403 is RBAC working as designed -- the gap was only in how the failure was displayed, not in what the agent was allowed to do
+
 ## [2.16.3] - 2026-08-21
 
 ### A proposal outlives the condition it was raised for, unless something says so

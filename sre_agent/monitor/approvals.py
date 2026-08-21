@@ -123,7 +123,13 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
             durationMs=_ts() - started,
         )
     except Exception as e:
-        report.update(status="failed", error=str(e)[:500], durationMs=_ts() - started)
+        from ..errors import classify_exception
+
+        # str(e) on a kubernetes ApiException dumps the whole object, headers
+        # and all — classify_exception extracts the structured Status body's
+        # message instead, so this stays something a person can read.
+        error_message = str(classify_exception(e, plan.strategy))[:500]
+        report.update(status="failed", error=error_message, durationMs=_ts() - started)
         logger.error("Approved fix failed: action=%s error=%s", action_id, e)
 
     save_action(
