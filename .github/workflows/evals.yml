@@ -142,9 +142,10 @@ jobs:
       # This gates harness breakage only — it is not a quality signal.
       - name: Replay harness check (dry-run)
         run: |
+          set -o pipefail
           mkdir -p artifacts
-          python -m sre_agent.evals.replay_cli --all --dry-run --format json > artifacts/replay.json
-          python -m sre_agent.evals.replay_cli --all --dry-run --format text > artifacts/replay.txt
+          python -m sre_agent.evals.replay_cli --all --dry-run --format json > artifacts/replay.json || true
+          python -m sre_agent.evals.replay_cli --all --dry-run --format text | tee artifacts/replay.txt
 
       # THE RELEASE GATE. This is the only step that puts the real model against recorded
       # cluster state and scores what it actually said. It must be allowed to fail.
@@ -281,6 +282,7 @@ jobs:
           PY
 
       - name: Upload eval artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pulse-agent-eval-artifacts
