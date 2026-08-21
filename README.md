@@ -5,11 +5,11 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/PulseSRE/pulse-agent/releases/tag/v2.16.2"><img src="https://img.shields.io/badge/release-v2.16.2-2563eb?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/PulseSRE/pulse-agent/releases/tag/v2.16.5"><img src="https://img.shields.io/badge/release-v2.16.5-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-154_(118+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
   <img src="https://img.shields.io/badge/scanners-27-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-2808-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-2848-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/eval_suites-16_(192_scenarios)-10b981?style=for-the-badge" alt="Eval Suites">
   <img src="https://img.shields.io/badge/release_gate-99.6%25-10b981?style=for-the-badge" alt="Release Gate">
   <img src="https://img.shields.io/badge/PromQL%20recipes-83-10b981?style=for-the-badge" alt="PromQL Recipes">
@@ -402,7 +402,7 @@ All WebSocket endpoints require `?token=...` query parameter (constant-time comp
 ---
 
 <p align="center">
-  <strong>104 native tools + MCP</strong> &bull; <strong>7 skills</strong> &bull; <strong>27 scanners</strong> &bull; <strong>13 runbooks</strong> &bull; <strong>83 PromQL recipes</strong> &bull; <strong>16 eval suites (192 scenarios)</strong> &bull; <strong>2,808 tests</strong> &bull; <strong>Migration v031</strong> &bull; <strong>Protocol v2</strong>
+  <strong>104 native tools + MCP</strong> &bull; <strong>7 skills</strong> &bull; <strong>27 scanners</strong> &bull; <strong>13 runbooks</strong> &bull; <strong>83 PromQL recipes</strong> &bull; <strong>16 eval suites (192 scenarios)</strong> &bull; <strong>2,848 tests</strong> &bull; <strong>Migration v031</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">
