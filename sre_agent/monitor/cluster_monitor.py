@@ -189,15 +189,39 @@ class ClusterMonitor:
 
     @property
     def effective_trust_level(self) -> int:
-        """Max trust level among all subscribers, or 1 if none."""
+        """The server's configured trust level, raised by any subscriber above it.
+
+        It used to be "max among subscribers, or 1 if none" — and subscribers
+        are browser tabs. Since ``auto_fix`` is only called at trust >= 2, that
+        made remediation depend on somebody having the UI open: no tab meant
+        trust 1, ``auto_fix`` was never entered, and the agent quietly did
+        nothing about problems it had correctly diagnosed. Measured on the
+        reference cluster after days of running: 2,528 investigations, zero
+        actions, and not one auto-fix line in the logs.
+
+        This is the same bug as the scan loop only running while a client was
+        connected. That half was fixed; this half was left behind.
+
+        A subscriber may still raise the level above the configured one — that
+        is a human electing to supervise more closely — but it can no longer
+        lower it by being absent.
+        """
+        configured = get_settings().monitor.max_trust_level
         if not self._subscribers:
-            return 1
-        return max(c.trust_level for c in self._subscribers)
+            return configured
+        return max(configured, max(c.trust_level for c in self._subscribers))
 
     @property
     def effective_auto_fix_categories(self) -> set[str]:
-        """Union of all subscribers' auto-fix categories."""
-        result: set[str] = set()
+        """What may be auto-fixed: everything the server can do, plus subscribers'.
+
+        Same reasoning as the trust level. An empty union meant that with no tab
+        open the allowed set was empty, so a trust-3 deployment filtered every
+        category out and fixed nothing.
+        """
+        from .autofix import AUTO_FIX_HANDLERS
+
+        result: set[str] = set(AUTO_FIX_HANDLERS)
         for c in self._subscribers:
             result |= c.auto_fix_categories
         return result
@@ -453,6 +477,24 @@ class ClusterMonitor:
 
             # Ask-first mode: broadcast proposal and wait for first approval from ANY subscriber
             if trust_level == 2:
+                async with self._subscribers_lock:
+                    nobody_to_ask = not self._subscribers
+                if nobody_to_ask:
+                    # There is no one to answer. Record the proposal and move
+                    # on: waiting 120 seconds for an approval that cannot
+                    # arrive would stall a 65-second scan loop, and executing
+                    # unsupervised because nobody is watching is the opposite
+                    # of what trust level 2 means. The proposal persists in fix
+                    # history, where an operator can approve it later.
+                    action_report["reasoning"] += " — proposed while nobody was connected to approve it"
+                    await self._broadcast_raw(action_report)
+                    save_action(action_report, category=category, resources=resources, finding=finding)
+                    logger.info(
+                        "Auto-fix proposed (no subscriber to approve): %s",
+                        finding.get("title", "")[:80],
+                    )
+                    continue
+
                 await self._broadcast_raw(action_report)
                 loop = asyncio.get_running_loop()
                 approval_future = loop.create_future()
