@@ -2,7 +2,15 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
-## [2.14.0] - 2026-08-20
+## [Unreleased]
+
+### Remediation no longer depends on somebody having a browser tab open
+- `auto_fix` runs only at trust level >= 2, and the effective trust level was "the highest among connected subscribers, or 1 if there are none". Subscribers are browser tabs. With nobody watching, the level was 1, `auto_fix` was never entered, and the agent quietly did nothing about problems it had correctly diagnosed. Measured on the reference cluster after days of running: 2,528 investigations, **zero actions**, and not one auto-fix line anywhere in the logs. `PULSE_AGENT_TRUST_LEVEL=2` was set on the deployment and never consulted by this path
+- This is the same bug as the scan loop only running while a client was connected. That half was found and fixed; this half was left behind, which is what makes it worth naming rather than quietly correcting — "works only while someone is looking" is a shape worth recognising on sight
+- The trust level now comes from the server's configuration, and a subscriber may raise it but no longer lower it by being absent. Auto-fix categories likewise start from what the server can actually do rather than from an empty union
+- Trust level 2 means *ask first*, and with no subscriber there is nobody to ask. Rather than waiting 120 seconds per finding for an approval that cannot arrive — which would stall a 65-second scan loop — the proposal is recorded and the scan moves on. It stays in fix history, where an operator can approve it later. Absence of a reviewer is not consent
+
+
 
 ### An alert can be a cause
 - Every firing alert arrived as `category="alerts"`, which the layer model reads as *signal* — able to be explained, never able to explain. On the reference cluster that made the episode layer structurally dead: 15 of 15 standing findings were alerts, `/episodes` returned `[]`, and meanwhile a single investigation of one of those same alerts correctly tied four of them into one story. The deterministic layer knew less than the model did, about data it already had. Alerts are now layered by what they are *about* — node memory is infrastructure, a stuck CSV is platform, `TargetDown` really is signal
