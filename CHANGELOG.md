@@ -2,6 +2,13 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [2.16.3] - 2026-08-21
+
+### A proposal outlives the condition it was raised for, unless something says so
+- `approve_fix` already refused a proposal whose finding had cleared on its own -- but only at the moment a person clicked Approve. Until then it kept counting toward "N fixes waiting on you," asking for a decision about a fix that no longer applied. Observed live: a crashloop proposal sat in fix history for the better part of an hour after the pod stopped restarting, Approve returned 409 every time, and the banner never dropped to zero
+- `expire_orphaned_proposals` now answers these the same way `approve_fix` would, once per scan cycle -- so a self-healed condition stops asking instead of waiting for someone to find out the hard way that there is nothing left to fix
+- Clicking Approve on a stale proposal was already safe (a 409, no fix executed) -- this closes the other half: nobody has to click it to hear no
+
 ## [2.16.2] - 2026-08-21
 
 ### Dedupe on the condition, not on one sighting of it
