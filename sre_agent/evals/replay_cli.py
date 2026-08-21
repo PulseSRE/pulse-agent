@@ -202,7 +202,6 @@ def _expected_for(expected: dict, dry_run: bool) -> dict:
     return trimmed
 
 
-
 def _apply_judge_gate(score: dict, judge: dict | None, judge_min: int | None) -> dict:
     """Let the judge decide correctness instead of keyword matching.
 
@@ -383,6 +382,10 @@ def main() -> None:
         for name in list_fixtures():
             print(name)
         return
+
+    if args.judge_min is not None and not args.judge:
+        print("--judge-min requires --judge (there is no judge score to gate on).", file=sys.stderr)
+        sys.exit(2)
 
     fixtures = list_fixtures() if args.all else [args.fixture]
     results = []
