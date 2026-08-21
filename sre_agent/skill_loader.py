@@ -683,17 +683,19 @@ def build_config_from_skill(skill: Skill, query: str = "") -> dict:
     """
     from .tool_registry import TOOL_REGISTRY, WRITE_TOOL_NAMES
 
-    # Full registry includes ALL tools: SRE, security, view designer, MCP, etc.
-    # If registry is populated, use it. Otherwise fall back to legacy module-level maps.
-    if TOOL_REGISTRY:
-        all_tools = dict(TOOL_REGISTRY)
-    else:
-        # Fallback: merge tool maps from all agent modules
-        from .agent import TOOL_MAP as SRE_MAP
-        from .security_agent import TOOL_MAP as SEC_MAP
-        from .view_designer import TOOL_MAP as VD_MAP
+    # TOOL_REGISTRY only holds tools decorated with @beta_tool(category=...) —
+    # plain @beta_tool does not auto-register (see decorators.py). Preferring the
+    # registry over the module maps therefore DROPPED every plain-decorated tool,
+    # list_nodes and describe_node among them, from skill-based selection entirely.
+    # The two sources are complementary, so union them: the module maps carry the
+    # curated per-mode sets, the registry adds anything registered dynamically.
+    from .agent import TOOL_MAP as SRE_MAP
+    from .security_agent import TOOL_MAP as SEC_MAP
+    from .view_designer import TOOL_MAP as VD_MAP
 
-        all_tools = {**SRE_MAP, **SEC_MAP, **VD_MAP}
+    all_tools = {**SRE_MAP, **SEC_MAP, **VD_MAP}
+    if TOOL_REGISTRY:
+        all_tools.update(TOOL_REGISTRY)
 
     # Build the set of tools allowed by this skill's categories
     allowed_tool_names: set[str] = set()

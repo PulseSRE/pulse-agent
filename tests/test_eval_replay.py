@@ -892,15 +892,21 @@ class TestToolRegistryInReplay:
         # discovery silently failed we would be measuring a different agent.
         assert count > 80, f"only {count} tools registered — discovery did not run"
 
-    def test_node_tools_are_reachable_after_discovery(self):
+    def test_node_tools_are_offerable_to_a_skill(self):
+        """TOOL_REGISTRY only holds @beta_tool(category=...) tools, so the union
+        with the module maps is what makes plain-decorated tools selectable."""
         from sre_agent.evals.replay_config import ensure_tool_registry
+        from sre_agent.skill_loader import build_config_from_skill, get_skill
 
         ensure_tool_registry()
-        from sre_agent.tool_registry import TOOL_REGISTRY
+        skill = get_skill("sre")
+        assert skill is not None
+        config = build_config_from_skill(skill, query="a cluster node is NotReady, investigate it")
+        offered = set(config["tool_map"])
 
         # the exact tools the first real-config run reported as never offered
         for tool in ("list_nodes", "describe_node"):
-            assert tool in TOOL_REGISTRY, f"{tool} missing from the replay tool registry"
+            assert tool in offered, f"{tool} not offered to the sre skill"
 
     def test_is_idempotent(self):
         from sre_agent.evals.replay_config import ensure_tool_registry
