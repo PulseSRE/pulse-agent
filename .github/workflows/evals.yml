@@ -169,9 +169,19 @@ jobs:
           python -m sre_agent.evals.replay_cli --all --dry-run --format json > artifacts/replay.json || true
           python -m sre_agent.evals.replay_cli --all --dry-run --format text | tee artifacts/replay.txt
 
-      # THE RELEASE GATE. This is the only step that puts the real model against recorded
-      # cluster state and scores what it actually said. It must be allowed to fail.
-      - name: Live judged replay (RELEASE GATE)
+      # The only step that puts the real model against recorded cluster state and scores
+      # what it actually said. REPORTING ONLY FOR NOW — continue-on-error is deliberate.
+      #
+      # It is not yet measuring the right thing: until #59 lands, replay runs the model
+      # with a one-line system prompt and parameterless tool stubs rather than Pulse's
+      # real config, which also makes all 96 `should_not_use_tools` checks vacuous.
+      # Blocking merges on that number would be blocking on the wrong number.
+      #
+      # TO RE-ARM: delete continue-on-error below once #59 has merged, the fixture
+      # budgets have been re-tuned against the real tool set, and --judge-min has a
+      # threshold derived from a real-config run. Track in the eval hardening work.
+      - name: Live judged replay (reported, not gating)
+        continue-on-error: true
         if: >-
           (github.event_name == 'schedule')
           || (github.event_name == 'push' && github.ref == 'refs/heads/main')
@@ -245,9 +255,14 @@ jobs:
 
           if live_judge and isinstance(live_judge, list):
               gate_passed = all(r.get("score", {}).get("passed") for r in live_judge)
-              lines.append(f"- **RELEASE GATE (live judged replay): {'PASS' if gate_passed else 'FAIL'}**")
+              passed_n = sum(1 for r in live_judge if r.get("score", {}).get("passed"))
+              verdict = "PASS" if gate_passed else "FAIL"
+              lines.append(
+                  f"- **live judged replay: {verdict}** ({passed_n}/{len(live_judge)} fixtures) "
+                  "— reported only, does not block merges"
+              )
           else:
-              lines.append("- **RELEASE GATE (live judged replay): did not run**")
+              lines.append("- **live judged replay: did not run** — reported only, does not block merges")
 
           if release:
               lines.append(
