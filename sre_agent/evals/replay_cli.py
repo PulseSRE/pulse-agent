@@ -173,20 +173,22 @@ def _setup_model(model: str, dry_run: bool):
 
 
 def _expected_for(expected: dict, dry_run: bool) -> dict:
-    """Drop content checks when replaying against the mock client.
+    """Drop the checks a mock client decides, when replaying in dry-run.
 
-    In dry-run the response is a fixed string from ``_make_mock_client``, so
-    ``should_mention`` can only ever measure that string, not the agent. What
-    remains — tools used, tools avoided, call budget — verifies that the replay
-    harness dispatches tools and respects limits, which is the whole point of
-    the dry-run mode. Live runs are scored against the full expectation.
+    In dry-run the response is a fixed string from ``_make_mock_client`` and the
+    call sequence is synthesised from the fixture, so ``should_mention`` measures
+    that string and ``should_use_tools_in_order`` measures the mock's ordering —
+    neither says anything about the agent. What remains (tools dispatched, forbidden
+    tools avoided, call budget respected) verifies that the replay harness still
+    drives the loop, which is all this mode can honestly check. Live runs are scored
+    against the full expectation.
     """
     if not dry_run:
         return expected
-    content_keys = {"should_mention", "overall_should_mention"}
-    trimmed = {k: v for k, v in expected.items() if k not in content_keys}
+    mock_determined = {"should_mention", "overall_should_mention", "should_use_tools_in_order"}
+    trimmed = {k: v for k, v in expected.items() if k not in mock_determined}
     if "per_turn" in trimmed:
-        trimmed["per_turn"] = [{k: v for k, v in turn.items() if k not in content_keys} for turn in trimmed["per_turn"]]
+        trimmed["per_turn"] = [{k: v for k, v in t.items() if k not in mock_determined} for t in trimmed["per_turn"]]
     return trimmed
 
 
