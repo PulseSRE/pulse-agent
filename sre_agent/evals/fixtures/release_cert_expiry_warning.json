@@ -1,0 +1,25 @@
+{
+    "name": "release_cert_expiry_warning",
+    "prompt": "Are any TLS certificates close to expiring? Tell me which ones and what the renewal sequence should be.",
+    "recorded_responses": {
+        "get_tls_certificates": "TLS Certificates (4):\n  NAMESPACE            NAME                           CN                        EXPIRES       DAYS  STATUS\n  openshift-ingress    router-certs-default           *.apps.prod.example.com   2026-09-03      13  EXPIRING\n  production           checkout-tls                   checkout.example.com      2026-11-28      99  OK\n  production           payments-tls                   payments.example.com      2027-02-14     177  OK\n  openshift-console    console-serving-cert           console-openshift-consol  2027-05-01     253  OK\n\n\u26a0\ufe0f  1 certificate(s) need attention!",
+        "list_routes": "openshift-console/console  Host=console-openshift-console.apps.prod.example.com  Path=/  Service=console  Port=8443  TLS  Termination=reencrypt  Admitted=True\nproduction/checkout  Host=checkout.example.com  Path=/  Service=checkout-svc  Port=8080  TLS  Termination=edge  Admitted=True\nproduction/payments  Host=payments.example.com  Path=/  Service=payments-svc  Port=8080  TLS  Termination=edge  Admitted=True"
+    },
+    "expected": {
+        "should_mention": [
+            "router-certs-default",
+            "expir",
+            "13"
+        ],
+        "should_use_tools": [
+            "get_tls_certificates"
+        ],
+        "should_not_use_tools": [
+            "delete_pod",
+            "apply_yaml",
+            "scale_deployment",
+            "drain_node"
+        ],
+        "max_tool_calls": 8
+    }
+}

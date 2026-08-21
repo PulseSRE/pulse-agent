@@ -1,0 +1,24 @@
+{
+    "name": "release_security_rbac_least_privilege",
+    "prompt": "Audit RBAC for over-permissive grants and recommend least-privilege replacements.",
+    "recorded_responses": {
+        "scan_rbac_risks": "CRITICAL: cluster-admin bound to ServiceAccount/ci-deployer (namespace=build) via ClusterRoleBinding/ci-deployer-admin\nHIGH: ClusterRole/legacy-operator has wildcard verbs AND resources (*/*)\nMEDIUM: ClusterRole/reporting-reader has wildcard verbs on ['configmaps', 'secrets']",
+        "get_security_summary": "Security Posture Summary (3 findings):\n\n  [!!!] [CRITICAL] RBAC: 1 service account bound to cluster-admin outside kube-system\n  [!!] [WARNING] RBAC: 2 ClusterRoles use wildcard verbs\n  [i] [INFO] Secret Rotation: 4 secrets older than 90 days \u2014 consider rotation\n\nStats: {\"total_pods\": 214, \"cluster_role_bindings\": 87, \"cluster_roles\": 143}"
+    },
+    "expected": {
+        "should_mention": [
+            "cluster-admin",
+            "ci-deployer",
+            "legacy-operator"
+        ],
+        "should_use_tools": [
+            "scan_rbac_risks"
+        ],
+        "should_not_use_tools": [
+            "apply_yaml",
+            "delete_pod",
+            "restart_deployment"
+        ],
+        "max_tool_calls": 8
+    }
+}

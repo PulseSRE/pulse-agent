@@ -1,8 +1,17 @@
 """Recorded replay harness for agent evaluation.
 
-Patches the agent's tool map so K8s tools return pre-recorded responses
-instead of making real API calls.  Runs the actual agent loop
-(run_agent_streaming) and captures the response, tool calls, and timing.
+Runs the real agent loop (``run_agent_streaming``) against Pulse's real
+configuration — the routed skill's system prompt, runbooks, component catalog
+and full tool schemas — with every tool replaced by a recorded response, so
+the model does the real work and no cluster is ever touched.
+
+Safety, in one place: ``replay_config.shadow_tool_map`` rebuilds *every* entry
+of the tool map as a stub before the loop starts, and
+``replay_config.offline_context`` patches out cluster reads that happen while
+the prompt is assembled.  See ``replay_config`` for the details.
+
+Pass ``stub_config=True`` to reproduce the old configuration (one-line prompt,
+parameterless tool stubs) for comparison.
 """
 
 from __future__ import annotations
@@ -12,9 +21,9 @@ import json
 import time
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 from ..agent import run_agent_streaming
+from .replay_config import build_replay_config, offline_context, shadow_tool_map
 
 # ---------------------------------------------------------------------------
 # Fixture loading
@@ -42,6 +51,23 @@ def load_fixture(name: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+async def _replay_confirm(tool_name: str, input_data: dict) -> bool:
+    """Approve write tools during replay.
+
+    The real config hands the agent write tools behind a confirmation gate.
+    With no callback the loop denies them, so fixtures that record a write
+    (scale_deployment, rollback_deployment) would measure a refusal rather
+    than the recorded outcome.  Approving is safe here precisely because the
+    tool map contains nothing but recorded stubs.
+    """
+    return True
+
+
+def _unrecorded_calls(effective_map: dict) -> list[str]:
+    """Names of tools the agent called that the fixture never recorded."""
+    return sorted(name for name, tool in effective_map.items() if getattr(tool, "missing", False) and tool.calls)
+
+
 class ReplayHarness:
     """Run the agent against recorded K8s tool responses.
 
@@ -51,11 +77,29 @@ class ReplayHarness:
         Maps tool name -> return value (string).  When the agent calls
         a tool whose name appears here the recorded value is returned
         instead of executing the real tool.
+    mode : str | None
+        Force a skill instead of routing the prompt.
+    stub_config : bool
+        Reproduce the pre-existing configuration (one-line system prompt,
+        parameterless tool stubs) instead of Pulse's real one.
+    allow_llm_tool_picker : bool
+        Let adaptive tool selection make its live Claude fallback call.
     """
 
-    def __init__(self, recorded_responses: dict[str, Any]):
+    def __init__(
+        self,
+        recorded_responses: dict[str, Any],
+        *,
+        mode: str | None = None,
+        stub_config: bool = False,
+        allow_llm_tool_picker: bool = False,
+    ):
         self.recorded_responses = recorded_responses
+        self.mode = mode
+        self.stub_config = stub_config
+        self.allow_llm_tool_picker = allow_llm_tool_picker
         self.tool_calls: list[dict] = []
+        self.config: dict | None = None
 
     # ----- public API -----
 
@@ -63,11 +107,12 @@ class ReplayHarness:
         self,
         client: Any,
         prompt: str,
-        system_prompt: str = "You are an SRE agent. Diagnose the issue.",
+        system_prompt: Any = None,
         tool_defs: list | None = None,
         tool_map: dict | None = None,
         write_tools: set[str] | None = None,
         thinking: dict | None = None,
+        config: dict | None = None,
     ) -> dict:
         """Execute the agent loop and return results.
 
@@ -75,29 +120,37 @@ class ReplayHarness:
         ----------
         client : Anthropic-compatible client (can be a mock).
         prompt : The user message to send.
-        system_prompt : System prompt for the agent.
-        tool_defs : Tool definitions (JSON schemas).  If *None*, minimal
-            stubs are generated from *recorded_responses*.
-        tool_map : Base tool map.  Recorded responses override entries.
-        write_tools : Set of tool names requiring confirmation.
+        system_prompt : Overrides the configuration's system prompt.
+        tool_defs : Overrides the configuration's tool definitions.
+        tool_map : Extra tools to merge in.  Every entry is replaced by a
+            recorded stub before execution — a real tool passed here is
+            never called.
+        write_tools : Overrides the configuration's write-tool set.
+        config : A pre-built config from ``build_replay_config``.
 
         Returns
         -------
-        dict with keys ``response``, ``tool_calls``, ``duration_ms``.
+        dict with keys ``response``, ``tool_calls``, ``duration_ms``, ``mode``,
+        ``unrecorded_tool_calls`` and ``unoffered_recorded_tools``.
         """
         self.tool_calls = []
 
-        # Build the mock tool map
-        effective_map = dict(tool_map or {})
-        for name, value in self.recorded_responses.items():
-            mock_tool = MagicMock()
-            mock_tool.name = name
-            mock_tool.call.return_value = value
-            effective_map[name] = mock_tool
+        cfg = config or build_replay_config(
+            prompt,
+            self.recorded_responses,
+            mode=self.mode,
+            stub=self.stub_config,
+            allow_llm_tool_picker=self.allow_llm_tool_picker,
+        )
+        self.config = cfg
 
-        # Build minimal tool defs if not provided
-        if tool_defs is None:
-            tool_defs = self._build_stub_defs()
+        # Recorded responses shadow everything: the config's map is already
+        # stubbed, and any caller-supplied map is re-shadowed here so no real
+        # tool object can reach the agent loop.
+        base_map = dict(cfg["tool_map"])
+        if tool_map:
+            base_map.update(tool_map)
+        effective_map = shadow_tool_map(base_map, self.recorded_responses)
 
         # Track every tool invocation via a callback
         async def _on_tool_use(tool_name: str) -> None:
@@ -107,41 +160,37 @@ class ReplayHarness:
         kwargs: dict[str, Any] = {
             "client": client,
             "messages": [{"role": "user", "content": prompt}],
-            "system_prompt": system_prompt,
-            "tool_defs": tool_defs,
+            "system_prompt": cfg["system_prompt"] if system_prompt is None else system_prompt,
+            "tool_defs": cfg["tool_defs"] if tool_defs is None else tool_defs,
             "tool_map": effective_map,
-            "write_tools": write_tools or set(),
+            "write_tools": set(cfg["write_tools"]) if write_tools is None else write_tools,
             "on_tool_use": _on_tool_use,
+            "on_confirm": _replay_confirm,
+            "mode": cfg["mode"],
         }
         if thinking is not None:
             kwargs["thinking"] = thinking
-        response = asyncio.run(run_agent_streaming(**kwargs))
+        with offline_context(allow_llm_tool_picker=self.allow_llm_tool_picker):
+            response = asyncio.run(run_agent_streaming(**kwargs))
         elapsed_ms = (time.monotonic() - start) * 1000
 
         return {
             "response": response,
             "tool_calls": list(self.tool_calls),
             "duration_ms": elapsed_ms,
+            "mode": cfg["mode"],
+            "offered_tool_count": len(cfg["tool_defs"]),
+            "unrecorded_tool_calls": _unrecorded_calls(effective_map),
+            "unoffered_recorded_tools": list(cfg.get("unoffered_recorded_tools", [])),
         }
 
     # ----- helpers -----
 
     def _build_stub_defs(self) -> list[dict]:
         """Generate minimal tool definitions from recorded response keys."""
-        defs = []
-        for name in self.recorded_responses:
-            defs.append(
-                {
-                    "name": name,
-                    "description": f"Recorded stub for {name}",
-                    "input_schema": {
-                        "type": "object",
-                        "properties": {},
-                        "required": [],
-                    },
-                }
-            )
-        return defs
+        from .replay_config import build_stub_config
+
+        return build_stub_config(self.recorded_responses)["tool_defs"]
 
 
 # ---------------------------------------------------------------------------
@@ -162,19 +211,34 @@ class MultiTurnReplayHarness:
         and optionally ``expected`` (dict) for per-turn scoring.
     """
 
-    def __init__(self, turns: list[dict]):
+    def __init__(
+        self,
+        turns: list[dict],
+        *,
+        mode: str | None = None,
+        stub_config: bool = False,
+        allow_llm_tool_picker: bool = False,
+    ):
         self.turns = turns
+        self.mode = mode
+        self.stub_config = stub_config
+        self.allow_llm_tool_picker = allow_llm_tool_picker
         self.all_tool_calls: list[list[dict]] = []
+        self.configs: list[dict] = []
 
     def run(
         self,
         client: Any,
-        system_prompt: str = "You are an SRE agent. Diagnose the issue.",
+        system_prompt: Any = None,
         tool_defs: list | None = None,
         write_tools: set[str] | None = None,
         thinking: dict | None = None,
     ) -> dict:
         """Execute multi-turn conversation and return results per turn.
+
+        Each turn is configured the way a real session would be: the turn's
+        prompt is routed to a skill (with the endpoint's sticky-mode rules
+        applied to follow-ups), and that skill's prompt and tools are used.
 
         Returns
         -------
@@ -183,37 +247,29 @@ class MultiTurnReplayHarness:
         messages: list[dict] = []
         turn_results: list[dict] = []
         total_start = time.monotonic()
-
-        # Build tool defs once from all turns' tools (reused across turns)
-        if tool_defs is None:
-            all_tool_names: set[str] = set()
-            for t in self.turns:
-                all_tool_names.update(t.get("recorded_responses", {}).keys())
-            stub_defs = [
-                {
-                    "name": name,
-                    "description": f"Recorded stub for {name}",
-                    "input_schema": {"type": "object", "properties": {}, "required": []},
-                }
-                for name in sorted(all_tool_names)
-            ]
-        else:
-            stub_defs = tool_defs
+        self.configs = []
+        last_mode: str | None = None
 
         for i, turn in enumerate(self.turns):
             turn_tool_calls: list[dict] = []
             recorded = turn.get("recorded_responses", {})
 
-            # Build mock tool map for this turn
-            effective_map: dict[str, Any] = {}
-            for name, value in recorded.items():
-                mock_tool = MagicMock()
-                mock_tool.name = name
-                mock_tool.call.return_value = value
-                effective_map[name] = mock_tool
+            cfg = build_replay_config(
+                turn["prompt"],
+                recorded,
+                mode=self.mode,
+                last_mode=last_mode,
+                stub=self.stub_config,
+                allow_llm_tool_picker=self.allow_llm_tool_picker,
+            )
+            last_mode = cfg["mode"]
+            self.configs.append(cfg)
 
-            async def _on_tool_use(tool_name: str) -> None:
-                turn_tool_calls.append({"name": tool_name, "timestamp": time.time()})
+            # Recorded responses shadow every tool the config offers.
+            effective_map = shadow_tool_map(dict(cfg["tool_map"]), recorded)
+
+            async def _on_tool_use(tool_name: str, _calls: list[dict] = turn_tool_calls) -> None:
+                _calls.append({"name": tool_name, "timestamp": time.time()})
 
             # Add user message
             messages.append({"role": "user", "content": turn["prompt"]})
@@ -222,16 +278,19 @@ class MultiTurnReplayHarness:
             kwargs: dict[str, Any] = {
                 "client": client,
                 "messages": list(messages),  # copy to avoid mutation
-                "system_prompt": system_prompt,
-                "tool_defs": stub_defs,
+                "system_prompt": cfg["system_prompt"] if system_prompt is None else system_prompt,
+                "tool_defs": cfg["tool_defs"] if tool_defs is None else tool_defs,
                 "tool_map": effective_map,
-                "write_tools": write_tools or set(),
+                "write_tools": set(cfg["write_tools"]) if write_tools is None else write_tools,
                 "on_tool_use": _on_tool_use,
+                "on_confirm": _replay_confirm,
+                "mode": cfg["mode"],
             }
             if thinking is not None:
                 kwargs["thinking"] = thinking
 
-            response = asyncio.run(run_agent_streaming(**kwargs))
+            with offline_context(allow_llm_tool_picker=self.allow_llm_tool_picker):
+                response = asyncio.run(run_agent_streaming(**kwargs))
             elapsed_ms = (time.monotonic() - start) * 1000
 
             # Add assistant response to history for next turn
@@ -245,6 +304,9 @@ class MultiTurnReplayHarness:
                     "response": response,
                     "tool_calls": turn_tool_calls,
                     "duration_ms": elapsed_ms,
+                    "mode": cfg["mode"],
+                    "unrecorded_tool_calls": _unrecorded_calls(effective_map),
+                    "unoffered_recorded_tools": list(cfg.get("unoffered_recorded_tools", [])),
                 }
             )
 
@@ -252,6 +314,9 @@ class MultiTurnReplayHarness:
         return {
             "turns": turn_results,
             "total_duration_ms": total_elapsed,
+            "modes": [c["mode"] for c in self.configs],
+            "unrecorded_tool_calls": sorted({n for t in turn_results for n in t["unrecorded_tool_calls"]}),
+            "unoffered_recorded_tools": sorted({n for t in turn_results for n in t["unoffered_recorded_tools"]}),
         }
 
 

@@ -458,3 +458,424 @@ class TestJudgeGate:
     def test_non_numeric_judge_total_is_ignored(self):
         score = self._score_with_missing_keyword()
         assert _apply_judge_gate(score, {"total": "n/a"}, 70) == score
+
+
+# ---------------------------------------------------------------------------
+# Real-configuration replay
+# ---------------------------------------------------------------------------
+#
+# The gate runs the real model, so whatever config the harness hands the agent
+# loop is what the judge scores. These tests pin the two properties that make
+# that measurement honest: the agent sees Pulse's real prompt and real tool
+# schemas, and nothing in the tool map can reach a cluster.
+
+
+_EXECUTED: list[str] = []
+
+
+class _RealTool:
+    """Stand-in for a registered tool — records if it is ever executed."""
+
+    def __init__(self, name: str):
+        self.name = name
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "description": f"Real description for {self.name}",
+            "input_schema": {
+                "type": "object",
+                "properties": {"namespace": {"type": "string"}},
+                "required": ["namespace"],
+            },
+        }
+
+    def call(self, input_data: dict) -> str:
+        _EXECUTED.append(self.name)
+        return "LIVE CLUSTER DATA"
+
+
+def _orchestrated_config(tool_names: list[str], write_tools: set[str] | None = None) -> dict:
+    tools = {name: _RealTool(name) for name in tool_names}
+    return {
+        "system_prompt": "REAL SKILL PROMPT",
+        "tool_defs": [t.to_dict() for t in tools.values()],
+        "tool_map": tools,
+        "write_tools": set(write_tools or set()),
+    }
+
+
+def _stream_kwargs(client) -> list[dict]:
+    return [c.kwargs for c in client.messages.stream.call_args_list]
+
+
+def _system_text(system) -> str:
+    if isinstance(system, str):
+        return system
+    return "\n".join(block.get("text", "") for block in system)
+
+
+class TestShadowToolMap:
+    """shadow_tool_map is the single choke point that keeps replay offline."""
+
+    def setup_method(self):
+        _EXECUTED.clear()
+
+    def test_every_real_tool_is_replaced(self):
+        from sre_agent.evals.replay_config import RecordedTool, shadow_tool_map
+
+        real = {"list_pods": _RealTool("list_pods"), "drain_node": _RealTool("drain_node")}
+        shadowed = shadow_tool_map(real, {"list_pods": "pod-1 Running"})
+
+        assert set(shadowed) == {"list_pods", "drain_node"}
+        assert all(isinstance(t, RecordedTool) for t in shadowed.values())
+        for tool in shadowed.values():
+            tool.call({})
+        assert _EXECUTED == []
+
+    def test_recorded_value_is_returned(self):
+        from sre_agent.evals.replay_config import shadow_tool_map
+
+        shadowed = shadow_tool_map({"list_pods": _RealTool("list_pods")}, {"list_pods": "pod-1 Running"})
+        assert shadowed["list_pods"].call({"namespace": "prod"}) == "pod-1 Running"
+        assert shadowed["list_pods"].calls == [{"namespace": "prod"}]
+
+    def test_unrecorded_tool_returns_sentinel(self):
+        from sre_agent.evals.replay_config import shadow_tool_map
+
+        shadowed = shadow_tool_map({"drain_node": _RealTool("drain_node")}, {})
+        result = shadowed["drain_node"].call({})
+        assert shadowed["drain_node"].missing is True
+        assert "no recorded response for 'drain_node'" in result
+        assert "LIVE CLUSTER DATA" not in result
+
+    def test_real_schema_is_preserved(self):
+        """A rebuilt tool_def must still carry the real description and params."""
+        from sre_agent.evals.replay_config import shadow_tool_map
+
+        shadowed = shadow_tool_map({"list_pods": _RealTool("list_pods")}, {"list_pods": "x"})
+        schema = shadowed["list_pods"].to_dict()
+        assert schema["description"] == "Real description for list_pods"
+        assert schema["input_schema"]["properties"] == {"namespace": {"type": "string"}}
+
+    def test_recorded_tools_missing_from_the_map_are_added(self):
+        from sre_agent.evals.replay_config import shadow_tool_map
+
+        shadowed = shadow_tool_map({}, {"correlate_incident": "recorded"})
+        assert shadowed["correlate_incident"].call({}) == "recorded"
+
+    def test_unreadable_schema_falls_back_to_an_empty_object(self):
+        from sre_agent.evals.replay_config import shadow_tool_map
+
+        class _Broken:
+            name = "broken"
+
+            def to_dict(self):
+                raise RuntimeError("schema unavailable")
+
+            def call(self, input_data):
+                _EXECUTED.append("broken")
+                return "LIVE"
+
+        shadowed = shadow_tool_map({"broken": _Broken()}, {"broken": "recorded"})
+        assert shadowed["broken"].to_dict()["input_schema"] == {"type": "object", "properties": {}, "required": []}
+        assert shadowed["broken"].call({}) == "recorded"
+        assert _EXECUTED == []
+
+
+class TestOfflineContext:
+    """Cluster reads at prompt-build time must be off during replay."""
+
+    def test_cluster_context_is_blanked_and_restored(self):
+        import sre_agent.harness as harness_mod
+        from sre_agent.evals.replay_config import offline_context
+
+        original = harness_mod.get_cluster_context
+        with patch.object(harness_mod, "get_cluster_context", lambda **kw: "LIVE CLUSTER STATE"):
+            with offline_context():
+                assert harness_mod.get_cluster_context(mode="sre") == ""
+            assert harness_mod.get_cluster_context(mode="sre") == "LIVE CLUSTER STATE"
+        assert harness_mod.get_cluster_context is original
+
+    def test_agent_module_alias_is_patched_too(self):
+        """agent.py imports get_cluster_context by value, so it needs its own patch."""
+        import sre_agent.agent as agent_mod
+        from sre_agent.evals.replay_config import offline_context
+
+        with offline_context():
+            assert agent_mod.get_cluster_context(mode="sre") == ""
+
+    def test_slo_prometheus_query_is_disabled(self):
+        """Skill routing asks the SLO registry for burn rates, which hits Prometheus."""
+        from sre_agent.evals.replay_config import offline_context
+        from sre_agent.slo_registry import get_slo_registry
+
+        registry = get_slo_registry()
+        assert registry._slos, "defaults should be registered, otherwise this proves nothing"
+        with offline_context():
+            assert registry.query_prometheus_values() == {}
+
+    def test_llm_tool_picker_is_suppressed_by_default(self):
+        import sre_agent.tool_predictor as tp
+        from sre_agent.evals.replay_config import offline_context
+
+        with offline_context():
+            assert tp.llm_pick_tools(query="pods are crashing", tool_names=["list_pods"]) == []
+
+    def test_llm_tool_picker_can_be_re_enabled(self):
+        import sre_agent.tool_predictor as tp
+        from sre_agent.evals.replay_config import offline_context
+
+        original = tp.llm_pick_tools
+        with offline_context(allow_llm_tool_picker=True):
+            assert tp.llm_pick_tools is original
+
+    def test_missing_required_patch_target_raises(self):
+        """Losing isolation silently is the one failure this must never allow."""
+        from sre_agent.evals import replay_config
+
+        bogus = [("sre_agent.does_not_exist", "get_cluster_context", lambda **kw: "", True)]
+        with patch.object(replay_config, "_ISOLATION_TARGETS", bogus):
+            with pytest.raises(RuntimeError, match="Replay isolation failed"):
+                with replay_config.offline_context():
+                    pass
+
+
+class TestBuildReplayConfig:
+    def test_stub_flag_reproduces_the_old_configuration(self):
+        from sre_agent.evals.replay_config import STUB_SYSTEM_PROMPT, build_replay_config
+
+        cfg = build_replay_config("pods are crashing", {"list_pods": "x", "get_events": "y"}, stub=True)
+        assert cfg["system_prompt"] == STUB_SYSTEM_PROMPT
+        assert cfg["stub"] is True
+        assert [d["name"] for d in cfg["tool_defs"]] == ["get_events", "list_pods"]
+        assert all(d["input_schema"]["properties"] == {} for d in cfg["tool_defs"])
+        assert cfg["write_tools"] == set()
+
+    def test_real_config_keeps_real_defs_and_stubs_the_map(self):
+        from sre_agent.evals.replay_config import RecordedTool, build_replay_config
+
+        config = _orchestrated_config(["list_pods", "drain_node"])
+        with patch("sre_agent.orchestrator.build_orchestrated_config", return_value=config):
+            cfg = build_replay_config("pods are crashing", {"list_pods": "recorded"}, mode="sre")
+
+        assert cfg["stub"] is False
+        assert cfg["mode"] == "sre"
+        # Real definitions reach the model...
+        names = {d["name"] for d in cfg["tool_defs"]}
+        assert names == {"list_pods", "drain_node"}
+        assert any(d["input_schema"]["properties"] for d in cfg["tool_defs"])
+        # ...but nothing executable does.
+        assert all(isinstance(t, RecordedTool) for t in cfg["tool_map"].values())
+
+    def test_real_config_assembles_the_product_system_prompt(self):
+        from sre_agent.evals.replay_config import build_replay_config
+
+        config = _orchestrated_config(["list_pods"])
+        with patch("sre_agent.orchestrator.build_orchestrated_config", return_value=config):
+            cfg = build_replay_config("a pod is crash-looping", {"list_pods": "recorded"}, mode="sre")
+
+        text = _system_text(cfg["system_prompt"])
+        assert isinstance(cfg["system_prompt"], list)
+        assert "Intent Analysis" in text  # prompt_builder.INTENT_PREFIX
+        assert len(text) > len("You are an SRE agent. Diagnose the issue.") * 10
+
+    def test_recorded_tools_the_config_did_not_offer_are_reported(self):
+        from sre_agent.evals.replay_config import build_replay_config
+
+        config = _orchestrated_config(["list_pods"])
+        recorded = {"list_pods": "a", "correlate_incident": "b"}
+        with patch("sre_agent.orchestrator.build_orchestrated_config", return_value=config):
+            cfg = build_replay_config("pods are crashing", recorded, mode="sre")
+
+        assert cfg["unoffered_recorded_tools"] == ["correlate_incident"]
+        assert {d["name"] for d in cfg["tool_defs"]} == {"list_pods"}
+        assert "correlate_incident" in cfg["tool_map"]
+
+
+class TestResolveMode:
+    """Multi-turn follow-ups must not swap the agent's toolset mid-conversation."""
+
+    def test_first_turn_uses_the_classifier(self):
+        from sre_agent.evals import replay_config
+
+        with patch.object(replay_config, "classify_mode", return_value="view_designer"):
+            assert replay_config.resolve_mode("build me a dashboard") == "view_designer"
+
+    def test_dashboard_follow_up_stays_in_view_designer(self):
+        from sre_agent.evals import replay_config
+
+        with patch.object(replay_config, "classify_mode", return_value="sre"):
+            mode = replay_config.resolve_mode("Add a memory chart to it", last_mode="view_designer")
+        assert mode == "view_designer"
+
+    def test_hard_sre_keyword_breaks_out_of_view_designer(self):
+        from sre_agent.evals import replay_config
+
+        with patch.object(replay_config, "classify_mode", return_value="sre"):
+            mode = replay_config.resolve_mode("the api-server pod is crashlooping", last_mode="view_designer")
+        assert mode == "sre"
+
+    def test_sre_turns_are_not_made_sticky(self):
+        from sre_agent.evals import replay_config
+
+        with patch.object(replay_config, "classify_mode", return_value="security"):
+            assert replay_config.resolve_mode("scan for rbac risks", last_mode="sre") == "security"
+
+
+class TestReplayHarnessRealConfig:
+    """End-to-end: the loop runs with the real config and no real tool fires."""
+
+    def setup_method(self):
+        _EXECUTED.clear()
+
+    @patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
+    def test_real_tools_are_never_executed(self):
+        client = _make_mock_client(
+            tool_names_to_call=["list_pods", "drain_node"],
+            final_text="Diagnosis complete.",
+        )
+        config = _orchestrated_config(["list_pods", "drain_node"])
+        with patch("sre_agent.orchestrator.build_orchestrated_config", return_value=config):
+            harness = ReplayHarness({"list_pods": "api-server CrashLoopBackOff"}, mode="sre")
+            result = harness.run(client=client, prompt="pods are crashing")
+
+        assert _EXECUTED == []
+        assert result["unrecorded_tool_calls"] == ["drain_node"]
+        messages = _stream_kwargs(client)[-1]["messages"]
+        blob = str(messages)
+        assert "api-server CrashLoopBackOff" in blob
+        assert "LIVE CLUSTER DATA" not in blob
+        assert "no recorded response for 'drain_node'" in blob
+
+    @patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
+    def test_a_real_tool_passed_in_by_a_caller_is_still_shadowed(self):
+        client = _make_mock_client(tool_names_to_call=["get_events"], final_text="Done.")
+        config = _orchestrated_config(["list_pods"])
+        with patch("sre_agent.orchestrator.build_orchestrated_config", return_value=config):
+            harness = ReplayHarness({"list_pods": "x"}, mode="sre")
+            harness.run(
+                client=client,
+                prompt="pods are crashing",
+                tool_map={"get_events": _RealTool("get_events")},
+            )
+
+        assert _EXECUTED == []
+
+    @patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
+    def test_real_prompt_and_schemas_reach_the_model(self):
+        client = _make_mock_client(final_text="Done.")
+        config = _orchestrated_config(["list_pods"])
+        with patch("sre_agent.orchestrator.build_orchestrated_config", return_value=config):
+            harness = ReplayHarness({"list_pods": "x"}, mode="sre")
+            harness.run(client=client, prompt="a pod is crash-looping")
+
+        kwargs = _stream_kwargs(client)[0]
+        assert kwargs["tools"][0]["description"] == "Real description for list_pods"
+        assert kwargs["tools"][0]["input_schema"]["required"] == ["namespace"]
+        assert "Intent Analysis" in _system_text(kwargs["system"])
+
+    @patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
+    def test_stub_config_flag_restores_the_old_behaviour(self):
+        client = _make_mock_client(final_text="Done.")
+        harness = ReplayHarness({"list_pods": "x"}, stub_config=True)
+        harness.run(client=client, prompt="a pod is crash-looping")
+
+        kwargs = _stream_kwargs(client)[0]
+        assert kwargs["tools"] == [
+            {
+                "name": "list_pods",
+                "description": "Recorded stub for list_pods",
+                "input_schema": {"type": "object", "properties": {}, "required": []},
+            }
+        ]
+        assert _system_text(kwargs["system"]) == "You are an SRE agent. Diagnose the issue."
+
+    @patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
+    def test_write_tools_are_confirmed_and_return_their_recording(self):
+        """Without a confirm callback the loop denies writes, measuring a refusal."""
+        client = _make_mock_client(tool_names_to_call=["scale_deployment"], final_text="Scaled.")
+        config = _orchestrated_config(["scale_deployment"], write_tools={"scale_deployment"})
+        with patch("sre_agent.orchestrator.build_orchestrated_config", return_value=config):
+            harness = ReplayHarness({"scale_deployment": "scaled checkout to 5"}, mode="sre")
+            result = harness.run(client=client, prompt="scale checkout to 5")
+
+        assert [tc["name"] for tc in result["tool_calls"]] == ["scale_deployment"]
+        blob = str(_stream_kwargs(client)[-1]["messages"])
+        assert "scaled checkout to 5" in blob
+        assert "Operation denied" not in blob
+        assert _EXECUTED == []
+
+
+class TestMultiTurnRealConfig:
+    def setup_method(self):
+        _EXECUTED.clear()
+
+    @patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
+    def test_each_turn_is_configured_and_shadowed(self):
+        from sre_agent.evals.replay import MultiTurnReplayHarness
+
+        turns = [
+            {"prompt": "list pods in staging", "recorded_responses": {"list_pods": "frontend-1 Running"}},
+            {
+                "prompt": "show me the logs for the first one",
+                "recorded_responses": {"get_pod_logs": "connection refused"},
+            },
+        ]
+        client = _make_mock_client(tool_names_to_call=["list_pods"], final_text="Pods listed.")
+        client2 = _make_mock_client(tool_names_to_call=["get_pod_logs"], final_text="Logs read.")
+        client.messages.stream.side_effect = list(client.messages.stream.side_effect) + list(
+            client2.messages.stream.side_effect
+        )
+
+        config = _orchestrated_config(["list_pods", "get_pod_logs", "drain_node"])
+        with patch("sre_agent.orchestrator.build_orchestrated_config", return_value=config):
+            harness = MultiTurnReplayHarness(turns, mode="sre")
+            result = harness.run(client=client)
+
+        assert _EXECUTED == []
+        assert len(result["turns"]) == 2
+        assert result["modes"] == ["sre", "sre"]
+        assert len(harness.configs) == 2
+        # Turn 2 must not still be serving turn 1's recording.
+        assert harness.configs[1]["tool_map"]["list_pods"].missing is True
+        assert harness.configs[1]["tool_map"]["get_pod_logs"].value == "connection refused"
+
+    @patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
+    def test_sticky_mode_is_applied_across_turns(self):
+        from sre_agent.evals import replay_config
+        from sre_agent.evals.replay import MultiTurnReplayHarness
+
+        turns = [
+            {"prompt": "Create a dashboard for production", "recorded_responses": {"create_dashboard": "made"}},
+            {"prompt": "Add a memory chart to it", "recorded_responses": {"add_widget_to_view": "added"}},
+        ]
+        client = _make_mock_client(final_text="One.")
+        client2 = _make_mock_client(final_text="Two.")
+        client.messages.stream.side_effect = list(client.messages.stream.side_effect) + list(
+            client2.messages.stream.side_effect
+        )
+
+        modes = iter(["view_designer", "sre"])
+        config = _orchestrated_config(["create_dashboard", "add_widget_to_view"])
+        with (
+            patch.object(replay_config, "classify_mode", side_effect=lambda q: next(modes)),
+            patch("sre_agent.orchestrator.build_orchestrated_config", return_value=config),
+        ):
+            harness = MultiTurnReplayHarness(turns)
+            result = harness.run(client=client)
+
+        assert result["modes"] == ["view_designer", "view_designer"]
+
+    @patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
+    def test_stub_config_flag_restores_the_old_multi_turn_behaviour(self):
+        from sre_agent.evals.replay import MultiTurnReplayHarness
+
+        turns = [{"prompt": "list pods", "recorded_responses": {"list_pods": "frontend-1 Running"}}]
+        client = _make_mock_client(final_text="Done.")
+        harness = MultiTurnReplayHarness(turns, stub_config=True)
+        harness.run(client=client)
+
+        kwargs = _stream_kwargs(client)[0]
+        assert _system_text(kwargs["system"]) == "You are an SRE agent. Diagnose the issue."
+        assert kwargs["tools"][0]["description"] == "Recorded stub for list_pods"

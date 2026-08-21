@@ -33,6 +33,23 @@ Scenario fixtures live in `sre_agent/evals/scenarios_data/*.json`.
 
 43 replay fixtures capture real agent tool-call traces for offline evaluation. Used by the replay harness to test scoring without live cluster access.
 
+### Replay runs the real agent
+
+The replay harness (`replay.py` + `replay_config.py`) configures each turn the way `/ws/agent` does: the prompt is routed to a skill, `build_orchestrated_config()` selects that skill's tools, and `prompt_builder.assemble_prompt()` assembles the real system prompt (skill prompt, intent prefix, component catalog, runbooks). The judge therefore scores Pulse, not a bare model with a one-line prompt.
+
+Two guarantees keep it offline:
+
+- **Every** tool in the map is rebuilt as a recorded stub by `shadow_tool_map()` before the loop starts — a recorded response when the fixture has one, otherwise a "no recorded response" sentinel that tells the agent the tool is unavailable. No executable tool object reaches the agent loop.
+- `offline_context()` patches out cluster-context injection (`harness.get_cluster_context` and the alias in `agent`) and the tool selector's live LLM fallback for the duration of the run. A required patch that cannot be applied raises rather than silently running without isolation.
+
+```bash
+python -m sre_agent.evals.replay_cli --fixture crashloop_diagnosis --judge   # real Pulse config (default)
+python -m sre_agent.evals.replay_cli --fixture crashloop_diagnosis --judge --stub-config  # old stub config
+python -m sre_agent.evals.replay_cli --all --dry-run --mode sre              # force a skill
+```
+
+Text output reports the routed skill, how many tools were offered, tools the agent called with no recording, and recorded tools the real config did not offer (a tool-selection miss worth investigating).
+
 ## 4-Dimension ORCA Rubric
 
 Every scenario is scored across four dimensions:

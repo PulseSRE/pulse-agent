@@ -58,6 +58,19 @@ def _make_parser() -> argparse.ArgumentParser:
         help="Use a mock Claude client (no API key needed). Tests tool wiring and scoring only.",
     )
     p.add_argument(
+        "--stub-config",
+        action="store_true",
+        help=(
+            "Replay with the old stub configuration (one-line system prompt, parameterless tool "
+            "stubs) instead of Pulse's real skill prompt and tool schemas. For comparison only."
+        ),
+    )
+    p.add_argument(
+        "--mode",
+        default=None,
+        help="Force a skill (sre, security, view_designer, ...) instead of routing each prompt.",
+    )
+    p.add_argument(
         "--judge-min",
         type=int,
         default=None,
@@ -159,7 +172,13 @@ def _make_multi_turn_mock_client(turns: list[dict], expected_keywords: list[str]
 
 
 def _setup_model(model: str, dry_run: bool):
-    """Configure model settings and return (client, thinking)."""
+    """Configure model settings and return (client, thinking).
+
+    ``PULSE_AGENT_HARNESS=0`` disables the agent loop's *own* prompt assembly
+    and tool re-selection. The replay harness has already done both, offline,
+    via ``build_replay_config`` — leaving the loop's copy enabled would rebuild
+    the prompt from live cluster state mid-run.
+    """
     import os
 
     os.environ["PULSE_AGENT_HARNESS"] = "0"
@@ -247,15 +266,21 @@ def _run_fixture(
     model: str = "claude-sonnet-4-6",
     dry_run: bool = False,
     judge_min: int | None = None,
+    stub_config: bool = False,
+    mode: str | None = None,
 ) -> dict:
     """Run a single fixture (single-turn or multi-turn) and return the scored result."""
     fixture = load_fixture(name)
 
     # Multi-turn fixture
     if fixture.get("multi_turn"):
-        return _run_multi_turn_fixture(name, fixture, use_judge, model, dry_run, judge_min)
+        return _run_multi_turn_fixture(name, fixture, use_judge, model, dry_run, judge_min, stub_config, mode)
 
-    harness = ReplayHarness(fixture["recorded_responses"])
+    harness = ReplayHarness(
+        fixture["recorded_responses"],
+        mode=mode or fixture.get("mode"),
+        stub_config=stub_config,
+    )
     client, thinking = _setup_model(model, dry_run)
 
     if dry_run:
@@ -271,6 +296,10 @@ def _run_fixture(
         "score": score,
         "response_preview": result["response"][:500],
         "duration_ms": result["duration_ms"],
+        "mode": result.get("mode"),
+        "offered_tool_count": result.get("offered_tool_count"),
+        "unrecorded_tool_calls": result.get("unrecorded_tool_calls", []),
+        "unoffered_recorded_tools": result.get("unoffered_recorded_tools", []),
     }
 
     if use_judge:
@@ -297,11 +326,17 @@ def _run_multi_turn_fixture(
     model: str,
     dry_run: bool,
     judge_min: int | None = None,
+    stub_config: bool = False,
+    mode: str | None = None,
 ) -> dict:
     """Run a multi-turn fixture."""
     from .replay import MultiTurnReplayHarness
 
-    harness = MultiTurnReplayHarness(fixture["turns"])
+    harness = MultiTurnReplayHarness(
+        fixture["turns"],
+        mode=mode or fixture.get("mode"),
+        stub_config=stub_config,
+    )
     client, thinking = _setup_model(model, dry_run)
 
     if dry_run:
@@ -320,6 +355,9 @@ def _run_multi_turn_fixture(
         "response_preview": result["turns"][-1]["response"][:500] if result["turns"] else "",
         "duration_ms": result["total_duration_ms"],
         "turn_count": len(result["turns"]),
+        "mode": " → ".join(result.get("modes", [])),
+        "unrecorded_tool_calls": result.get("unrecorded_tool_calls", []),
+        "unoffered_recorded_tools": result.get("unoffered_recorded_tools", []),
     }
 
     if use_judge and result["turns"]:
@@ -352,8 +390,16 @@ def _format_text(results: list[dict]) -> str:
         turn_info = f"  ({r['turn_count']} turns)" if r.get("multi_turn") else ""
         lines.append(f"Fixture: {r['fixture']}{turn_info}  [{status}]  Score: {score['score']}/100")
         lines.append(f"Duration: {r['duration_ms']:.0f}ms")
+        if r.get("mode"):
+            offered = r.get("offered_tool_count")
+            offered_txt = f", {offered} tools offered" if offered else ""
+            lines.append(f"Skill: {r['mode']}{offered_txt}")
         tool_calls = score.get("total_tool_calls", score.get("tool_calls", []))
         lines.append(f"Tools called: {', '.join(tool_calls) or '(none)'}")
+        if r.get("unrecorded_tool_calls"):
+            lines.append(f"Called with no recording: {', '.join(r['unrecorded_tool_calls'])}")
+        if r.get("unoffered_recorded_tools"):
+            lines.append(f"Recorded but not offered: {', '.join(r['unoffered_recorded_tools'])}")
         if r.get("error"):
             lines.append(f"Error: {r['error']}")
         lines.append("Checks:")
@@ -397,6 +443,8 @@ def main() -> None:
                 model=args.model,
                 dry_run=args.dry_run,
                 judge_min=args.judge_min,
+                stub_config=args.stub_config,
+                mode=args.mode,
             )
             results.append(result)
         except Exception as e:
