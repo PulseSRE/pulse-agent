@@ -2,7 +2,7 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
-## [Unreleased]
+## [2.16.1] - 2026-08-21
 
 ### A proposal is a question, not a chant
 - Unattended proposing re-asked the same question every scan. One hour on the reference cluster produced **701 proposal rows for two findings**, burying the two that mattered. This is the cost of the previous release finally letting `auto_fix` run: the flood was impossible before, because the function was never entered. A finding with a proposal still awaiting an answer is now skipped
