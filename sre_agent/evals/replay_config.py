@@ -343,7 +343,6 @@ def _assemble_system_prompt(config: dict, mode: str, query: str, tool_names: lis
     return build_cached_system_prompt(base + (f"\n\n{hint}" if hint else ""), "")
 
 
-
 _registry_ready = False
 
 
