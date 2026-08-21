@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger("pulse_agent.monitor")
 
 
-
 def _scaffold_from_verified(candidate) -> None:
     """Turn a verified trajectory into a skill, plan template and eval scenario.
 

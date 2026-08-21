@@ -40,7 +40,6 @@ MIN_CONFIDENCE_TO_LEARN = 0.6
 MIN_EVIDENCE_TO_LEARN = 1
 
 
-
 def candidate_key(category: str, resources: list[dict] | None) -> str:
     """Key a trajectory by what both sides of the gate can see.
 
