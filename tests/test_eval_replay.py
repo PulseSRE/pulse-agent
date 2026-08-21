@@ -16,6 +16,7 @@ from sre_agent.evals.replay import (
     load_fixture,
     score_replay,
 )
+from sre_agent.evals.replay_cli import _apply_judge_gate, _expected_for
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -367,3 +368,93 @@ class TestJudgeModule:
         # Should be None (no real API key in test)
         # It either returns None from create_async_client failure or from the call
         assert result is None or isinstance(result, dict)
+
+
+# ---------------------------------------------------------------------------
+# Dry-run expectation trimming and judge gating
+# ---------------------------------------------------------------------------
+
+
+class TestDryRunExpectations:
+    """In dry-run the mock decides content and ordering, so those cannot gate."""
+
+    def test_live_expectations_pass_through_untouched(self):
+        expected = {"should_mention": ["database"], "should_use_tools": ["describe_pod"]}
+        assert _expected_for(expected, dry_run=False) == expected
+
+    def test_dry_run_drops_content_and_ordering_checks(self):
+        expected = {
+            "should_mention": ["database"],
+            "overall_should_mention": ["connection"],
+            "should_use_tools_in_order": ["a", "b"],
+            "should_use_tools": ["describe_pod"],
+            "should_not_use_tools": ["delete_pod"],
+            "max_tool_calls": 10,
+        }
+        trimmed = _expected_for(expected, dry_run=True)
+        assert trimmed == {
+            "should_use_tools": ["describe_pod"],
+            "should_not_use_tools": ["delete_pod"],
+            "max_tool_calls": 10,
+        }
+
+    def test_dry_run_trims_per_turn_content(self):
+        expected = {"per_turn": [{"should_mention": ["db"], "should_use_tools": ["list_pods"]}]}
+        trimmed = _expected_for(expected, dry_run=True)
+        assert trimmed["per_turn"] == [{"should_use_tools": ["list_pods"]}]
+
+
+class TestJudgeGate:
+    """The judge decides correctness; keyword matching drops to advisory."""
+
+    def _score_with_missing_keyword(self):
+        result = {
+            "response": "The workload cannot reach its datastore.",
+            "tool_calls": [{"name": "describe_pod", "timestamp": 0}],
+            "duration_ms": 500,
+        }
+        expected = {"should_mention": ["database"], "should_use_tools": ["describe_pod"]}
+        return score_replay(result, expected)
+
+    def test_no_threshold_leaves_score_untouched(self):
+        score = self._score_with_missing_keyword()
+        assert _apply_judge_gate(score, {"total": 95}, None) == score
+
+    def test_no_judge_result_leaves_score_untouched(self):
+        score = self._score_with_missing_keyword()
+        assert _apply_judge_gate(score, None, 70) == score
+
+    def test_right_answer_phrased_differently_passes(self):
+        score = self._score_with_missing_keyword()
+        assert score["passed"] is False  # keyword matching alone rejects it
+        gated = _apply_judge_gate(score, {"total": 88}, 70)
+        assert gated["passed"] is True
+        advisory = [c for c in gated["checks"] if c.get("advisory")]
+        assert advisory and all(c["kind"] == "content" for c in advisory)
+
+    def test_low_judge_score_fails_even_with_every_keyword(self):
+        result = {
+            "response": "Something about the database and the connection, but no real diagnosis.",
+            "tool_calls": [{"name": "describe_pod", "timestamp": 0}],
+            "duration_ms": 500,
+        }
+        expected = {"should_mention": ["database", "connection"], "should_use_tools": ["describe_pod"]}
+        score = score_replay(result, expected)
+        assert score["passed"] is True  # every keyword present
+        gated = _apply_judge_gate(score, {"total": 41}, 70)
+        assert gated["passed"] is False
+
+    def test_structure_checks_still_gate(self):
+        result = {
+            "response": "Deleted the pod.",
+            "tool_calls": [{"name": "delete_pod", "timestamp": 0}],
+            "duration_ms": 500,
+        }
+        expected = {"should_not_use_tools": ["delete_pod"]}
+        score = score_replay(result, expected)
+        gated = _apply_judge_gate(score, {"total": 99}, 70)
+        assert gated["passed"] is False
+
+    def test_non_numeric_judge_total_is_ignored(self):
+        score = self._score_with_missing_keyword()
+        assert _apply_judge_gate(score, {"total": "n/a"}, 70) == score
