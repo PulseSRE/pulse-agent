@@ -2,7 +2,7 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
-## [Unreleased]
+## [2.16.2] - 2026-08-21
 
 ### Dedupe on the condition, not on one sighting of it
 - The proposal guard shipped in 2.16.1 keyed on `finding["id"]`, and `_make_finding` mints a fresh `f-{uuid4}` on every scan. So the same condition arrives with a different finding id every 65 seconds and the guard could never match its own previous proposal. It did nothing: the reference cluster went on to **718 proposals**, one per sighting, each looking brand new
