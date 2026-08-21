@@ -2,6 +2,12 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [Unreleased]
+
+### Pulse says when what it found cannot reach anyone
+- A `degraded` finding when no notification channel is configured *and* there is something waiting to be delivered — an open episode or a proposed fix. It reports how many. The reference cluster ran a control-plane problem for 30 hours with the diagnosis sitting in a database and nothing configured to carry it
+- Gated on there being something to deliver, on purpose. An unconfigured webhook on a quiet cluster is a deployment's choice, not a fault; reporting it on every scan regardless would be the same standing-posture nagging that `AlertmanagerReceiversNotConfigured` had been doing on that cluster for 57 hours to nobody's benefit. Six existing tests failed when the first version of this check ignored that, which was the right answer from the tests rather than a reason to change them
+
 ## [2.15.0] - 2026-08-21
 
 ### "What changed just before this started" finally has an answer

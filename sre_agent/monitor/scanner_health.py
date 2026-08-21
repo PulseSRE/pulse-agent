@@ -261,4 +261,51 @@ def scan_degraded_capabilities() -> list[dict]:
         logger.error("Investigation health check failed: %s", e)
         report_failure(e)
 
+    try:
+        undelivered = _undelivered_count()
+        if undelivered:
+            findings.append(
+                _make_finding(
+                    severity=SEVERITY_WARNING,
+                    category="degraded",
+                    title=f"Nothing Pulse found will reach anyone — {undelivered} waiting",
+                    summary=(
+                        f"No notification channel is configured, and {undelivered} open "
+                        f"episode(s) or proposed fix(es) are waiting for somebody to open the "
+                        f"UI and look. On the reference cluster that meant a control-plane "
+                        f"problem ran for 30 hours with the diagnosis sitting in a database. "
+                        f"Set PULSE_AGENT_WEBHOOK_URL to change that."
+                    ),
+                    resources=[{"kind": "Agent", "name": "notifications"}],
+                    runbook_id="pulse-degraded",
+                    confidence=1.0,
+                )
+            )
+    except Exception as e:
+        logger.error("Notification channel check failed: %s", e)
+        report_failure(e)
+
     return findings
+
+
+def _undelivered_count() -> int:
+    """How much is waiting that nobody will be told about.
+
+    Zero when a channel is configured, and zero when there is nothing to say.
+    An unconfigured webhook on a quiet cluster is a deployment's choice, not a
+    fault — reporting it every scan regardless would be the same standing-posture
+    nagging that `AlertmanagerReceiversNotConfigured` had been doing on the
+    reference cluster for 57 hours to nobody's benefit. It only becomes a
+    problem when there is something to deliver.
+    """
+    from ..config import get_settings
+
+    if get_settings().server.webhook_url:
+        return 0
+
+    from ..repositories import get_monitor_repo
+    from .episodes import list_open
+
+    waiting = len(list_open())
+    rows = get_monitor_repo().db.fetchone("SELECT count(*) AS n FROM actions WHERE status = 'proposed'")
+    return waiting + int(rows["n"] if rows else 0)

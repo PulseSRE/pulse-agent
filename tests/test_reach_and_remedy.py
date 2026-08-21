@@ -179,3 +179,51 @@ def test_most_alerts_still_have_no_automated_remedy(alertname):
 def test_the_alert_path_does_not_disturb_the_category_path():
     assert default_fix_plan("crashloop", {"resources": POD}).strategy == "restart_controller"
     assert default_fix_plan("nonsense", {"resources": POD}) is None
+
+
+# ── saying so when nothing can reach anyone ───────────────────────────────
+
+
+def _degraded_titles(webhook_url: str, open_episodes=0, proposals=0) -> list[str]:
+    from sre_agent.monitor import scanner_health
+
+    repo = MagicMock()
+    repo.db.fetchone.return_value = {"n": proposals}
+    with (
+        patch("sre_agent.config.get_settings") as settings,
+        patch("sre_agent.monitor.episodes.list_open", return_value=[{"id": f"ep-{i}"} for i in range(open_episodes)]),
+        patch("sre_agent.repositories.get_monitor_repo", return_value=repo),
+        patch.object(scanner_health, "consecutive_failures", return_value={}),
+        patch.object(scanner_health, "investigation_failure_streak", return_value=(0, "")),
+        patch.object(scanner_health, "investigation_failure_rate", return_value=(0, 0, "")),
+    ):
+        settings.return_value.server.webhook_url = webhook_url
+        return [f["title"] for f in scanner_health.scan_degraded_capabilities()]
+
+
+def _unreachable(titles: list[str]) -> bool:
+    return any("will reach anyone" in t for t in titles)
+
+
+def test_it_says_so_when_what_it_found_cannot_reach_anyone():
+    """The reference cluster ran a control-plane problem for 30 hours with the
+    diagnosis sitting in a database and no channel configured to carry it."""
+    assert _unreachable(_degraded_titles("", open_episodes=2))
+    assert _unreachable(_degraded_titles("", proposals=1))
+
+
+def test_a_quiet_cluster_is_not_nagged_about_configuration():
+    """An unconfigured webhook with nothing to deliver is a deployment's choice,
+    not a fault. Reporting it every scan regardless is the standing-posture
+    nagging that AlertmanagerReceiversNotConfigured had been doing for 57
+    hours to nobody's benefit."""
+    assert not _unreachable(_degraded_titles("", open_episodes=0, proposals=0))
+
+
+def test_a_configured_channel_is_never_reported():
+    assert not _unreachable(_degraded_titles("https://hooks.example.com/pulse", open_episodes=5, proposals=3))
+
+
+def test_it_says_how_much_is_waiting():
+    titles = [t for t in _degraded_titles("", open_episodes=2, proposals=3) if "will reach anyone" in t]
+    assert "5 waiting" in titles[0]
