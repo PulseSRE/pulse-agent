@@ -405,6 +405,24 @@ def _migrate_029_action_approval(db: Database) -> None:
     db.execute("ALTER TABLE actions ADD COLUMN IF NOT EXISTS approved_at BIGINT")
 
 
+def _migrate_030_episode_cause_onset(db: Database) -> None:
+    """When the *cause* began, as distinct from when Pulse opened the episode.
+
+    "What changed just before this started" is the first question in any
+    incident, and the answer was always empty on a real cluster. The window was
+    anchored on the episode's own creation time — but an episode opens when
+    Pulse first manages to build one, which can be a day after the condition
+    began. Observed live: a cause firing for 30 hours, an episode 12 minutes
+    old, and a change window covering the 30 minutes before the episode, which
+    is a day after anything interesting happened.
+
+    Nullable on purpose. Only conditions that report their own onset (firing
+    alerts, via Prometheus) can fill it; everything else keeps falling back to
+    the episode's start, which is the best that is known for it.
+    """
+    db.execute("ALTER TABLE episodes ADD COLUMN IF NOT EXISTS cause_started_at BIGINT")
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -435,4 +453,5 @@ MIGRATIONS = [
     (27, "episode_dismissal", _migrate_027_episode_dismissal),
     (28, "inbox_reset_baseline", _migrate_028_inbox_reset_baseline),
     (29, "action_approval", _migrate_029_action_approval),
+    (30, "episode_cause_onset", _migrate_030_episode_cause_onset),
 ]

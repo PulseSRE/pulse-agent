@@ -147,12 +147,66 @@ _FAST_PATH_STRATEGIES: dict[str, tuple[str, str]] = {
 }
 
 
+# Firing alerts whose remedy is known and narrow. Deliberately a short list:
+# an alert says something is wrong, not what to do about it, and guessing at a
+# remedy from an alert name is how an automated fixer earns its reputation.
+#
+# The OLM entries come from a real, recurring failure on the reference cluster.
+# The operator gets stuck re-running an install strategy for a CSV that never
+# leaves 'Installing', which starves its own /healthz, times out its probes and
+# takes the packageserver pods with it. Restarting the operator breaks the loop
+# and the Deployment recreates it immediately. It has been firing for 30 hours
+# with nothing able to act on it.
+_ALERT_STRATEGIES: dict[str, tuple[str, str]] = {
+    "CsvAbnormalFailedOver2Min": (
+        "restart_controller",
+        "Restart the OLM operator — it is stuck re-running an install strategy and starving its own probes",
+    ),
+    "CsvAbnormalOver30Min": (
+        "restart_controller",
+        "Restart the OLM operator — a CSV has been mid-install for over 30 minutes",
+    ),
+}
+
+
+def alert_fix_plan(finding: dict) -> FixPlan | None:
+    """A fix plan for a firing alert, where one is known.
+
+    Requires the alert to name a real pod. Alerts that carry no pod label get a
+    placeholder ``Alert`` resource instead, and there is nothing to restart.
+    """
+    strategy_entry = _ALERT_STRATEGIES.get(finding.get("title", ""))
+    if not strategy_entry:
+        return None
+    resources = finding.get("resources") or []
+    if not resources or resources[0].get("kind") != "Pod":
+        return None
+
+    strategy, description = strategy_entry
+    return FixPlan(
+        strategy=strategy,
+        cause_category="alerts",
+        confidence=0.6,
+        description=description,
+        params={
+            "suspected_cause": f"Alert {finding.get('title', '')} firing",
+            "recommended_fix": description,
+            "resources": resources,
+        },
+    )
+
+
 def default_fix_plan(category: str, finding: dict) -> FixPlan | None:
     """Create a default fix plan for known categories without an investigation.
 
     Used as a fast-path when the async investigation hasn't completed yet
     but the category has a well-known remediation strategy.
     """
+    if category == "alerts":
+        # Alerts are not one category of problem, so they cannot share one
+        # strategy. Dispatch on the alert itself.
+        return alert_fix_plan(finding)
+
     entry = _FAST_PATH_STRATEGIES.get(category)
     if not entry:
         return None

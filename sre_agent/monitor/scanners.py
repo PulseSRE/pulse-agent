@@ -396,6 +396,20 @@ def _alert_active_since(alert: dict) -> int | None:
         return None
 
 
+def _alert_is_fixable(alertname: str, resources: list[dict]) -> bool:
+    """Whether a known remedy exists for this alert *and* has something to act on.
+
+    Both halves matter. An alert with a strategy but no pod label gets a
+    placeholder ``Alert`` resource, and marking that auto-fixable would put a
+    proposal in front of an operator that could never be carried out.
+    """
+    from .fix_planner import _ALERT_STRATEGIES
+
+    if alertname not in _ALERT_STRATEGIES:
+        return False
+    return bool(resources) and resources[0].get("kind") == "Pod"
+
+
 def scan_firing_alerts() -> list[dict]:
     """Check Prometheus for firing alerts."""
     findings: list[dict[str, Any]] = []
@@ -450,6 +464,10 @@ def scan_firing_alerts() -> list[dict]:
                             layer=alert_layer(alertname),
                             posture=is_posture_alert(alertname),
                             started_at=_alert_active_since(alert),
+                            # Only the handful of alerts with a known, narrow
+                            # remedy. At trust level 2 this produces a proposal
+                            # for a person to approve, not an action.
+                            auto_fixable=_alert_is_fixable(alertname, resources),
                         )
                     )
     except PrometheusConfigError as e:

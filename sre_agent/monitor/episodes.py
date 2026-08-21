@@ -106,6 +106,10 @@ def open_or_touch(finding: dict[str, Any], claimed: dict[str, str] | None = None
         started_at=now,
         correlation_key=key,
         recurrence_of=prior["id"] if prior else None,
+        # When the condition itself began, where it knows. The episode's own
+        # start is when Pulse first managed to build one, which on a cluster
+        # that has been unhappy for a day is a day too late to ask what changed.
+        cause_started_at=_onset_of(finding),
     )
     logger.info(
         "Episode %s opened: %s%s",
@@ -313,7 +317,13 @@ def changes_around(episode_id: str) -> list[dict[str, Any]]:
     if not episode:
         return []
 
-    started = int(episode["started_at"])
+    # Anchor on when the *condition* began, not on when Pulse opened an episode
+    # for it. Observed live: a cause firing for 30 hours, an episode 12 minutes
+    # old, and a change window covering the half hour before the episode — a
+    # day after anything that could have caused it. Conditions that do not
+    # report their own onset still fall back to the episode's start, which is
+    # the best that is known for them.
+    started = int(episode.get("cause_started_at") or episode["started_at"])
     window_start = started - _CHANGE_LOOKBACK_SECONDS
 
     from ..repositories.inbox_repo import get_inbox_repo
