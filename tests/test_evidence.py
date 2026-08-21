@@ -83,9 +83,7 @@ class TestDerivedConfidence:
 
     def test_contradiction_reduces_confidence(self):
         supporting = [Evidence(observation="a", source="k8s", confidence=0.9)]
-        with_contra = supporting + [
-            Evidence(observation="b", source="k8s", confidence=0.9, stance="contradicts")
-        ]
+        with_contra = supporting + [Evidence(observation="b", source="k8s", confidence=0.9, stance="contradicts")]
         assert derive_confidence(with_contra, 1.0) < derive_confidence(supporting, 1.0)
 
     def test_lone_dissent_dents_rather_than_vetoes(self):

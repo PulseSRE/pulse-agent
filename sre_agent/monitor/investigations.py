@@ -98,7 +98,7 @@ def _build_investigation_prompt(finding: dict) -> str:
         '     "source": "the tool or signal this came from",\n'
         '     "stance": "supports|contradicts|context",\n'
         '     "confidence": 0.0}\n'
-        '  ],\n'
+        "  ],\n"
         '  "alternatives_considered": ["hypothesis ruled out"],\n'
         '  "viewPlan": [\n'
         '    {"kind": "<component>", "title": "...", "props": {...}},\n'
