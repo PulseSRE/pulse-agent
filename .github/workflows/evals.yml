@@ -59,6 +59,13 @@ jobs:
       - name: Format check
         run: ruff format --check sre_agent/ tests/
 
+      # The image build has always run this; pull requests never did. So a type
+      # error could pass every check on a PR, merge, and only surface after the
+      # release tag was pushed — which is exactly how it happened for v2.15.0.
+      # A gate that only fires after the point of no return is not a gate.
+      - name: Type check
+        run: mypy sre_agent
+
       - name: Discipline guardrails (no silent skips, no by-value global imports)
         # Two bug classes this repo has already shipped, now mechanically
         # blocked: a test that skips instead of failing, and `from mod import
