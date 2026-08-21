@@ -392,6 +392,19 @@ def _migrate_028_inbox_reset_baseline(db: Database) -> None:
     db.execute("CREATE INDEX IF NOT EXISTS idx_inbox_resets_at ON inbox_resets(reset_at DESC)")
 
 
+def _migrate_029_action_approval(db: Database) -> None:
+    """Record who approved a proposed fix.
+
+    Proposals can now outlive the moment they were raised — trust level 2 used
+    to require an operator holding a WebSocket open with 120 seconds to answer,
+    which is why nobody ever did. An approval that arrives hours later is a
+    person taking responsibility for a change to a live cluster, and that is
+    worth a name against it rather than an anonymous state transition.
+    """
+    db.execute("ALTER TABLE actions ADD COLUMN IF NOT EXISTS approved_by TEXT")
+    db.execute("ALTER TABLE actions ADD COLUMN IF NOT EXISTS approved_at BIGINT")
+
+
 MIGRATIONS = [
     (1, "baseline", _migrate_001_baseline),
     (2, "tool_usage", _migrate_002_tool_usage),
@@ -421,4 +434,5 @@ MIGRATIONS = [
     (26, "episodes", _migrate_026_episodes),
     (27, "episode_dismissal", _migrate_027_episode_dismissal),
     (28, "inbox_reset_baseline", _migrate_028_inbox_reset_baseline),
+    (29, "action_approval", _migrate_029_action_approval),
 ]
