@@ -77,13 +77,14 @@ class TestSkillLoad:
         import sre_agent.skill_tools as st
 
         class _FakeSkill:
-            name = "big"
-            description = "oversized"
-            keywords = ["big"]
-            system_prompt = "x" * (MAX_SKILL_CHARS + 500)
-            path = tmp_path
-            degraded = False
-            reviewed = True
+            def __init__(self) -> None:
+                self.name = "big"
+                self.description = "oversized"
+                self.keywords = ["big"]
+                self.system_prompt = "x" * (MAX_SKILL_CHARS + 500)
+                self.path = tmp_path
+                self.degraded = False
+                self.reviewed = True
 
         monkeypatch.setattr("sre_agent.skill_loader.get_skill", lambda n: _FakeSkill())
         out = st.skill_load("big")
