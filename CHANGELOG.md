@@ -2,7 +2,7 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
-## [Unreleased]
+## [2.16.0] - 2026-08-21
 
 ### Pulse says when what it found cannot reach anyone
 - A `degraded` finding when no notification channel is configured *and* there is something waiting to be delivered — an open episode or a proposed fix. It reports how many. The reference cluster ran a control-plane problem for 30 hours with the diagnosis sitting in a database and nothing configured to carry it
