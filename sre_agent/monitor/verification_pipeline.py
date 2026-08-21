@@ -18,6 +18,56 @@ if TYPE_CHECKING:
 logger = logging.getLogger("pulse_agent.monitor")
 
 
+
+def _scaffold_from_verified(candidate) -> None:
+    """Turn a verified trajectory into a skill, plan template and eval scenario.
+
+    This is the work that used to run at investigation time. It is unchanged apart
+    from when it happens: the trajectory reaching here has had its fix applied and
+    the finding confirmed gone, so what gets generalised is something that worked.
+    """
+    try:
+        from ..eval_scaffolder import scaffold_eval_from_investigation
+        from ..skill_scaffolder import (
+            save_scaffolded_skill,
+            scaffold_plan_template,
+            scaffold_skill_from_resolution,
+        )
+
+        skill_content = scaffold_skill_from_resolution(
+            query=candidate.title,
+            tools_called=candidate.tools_called,
+            investigation_summary=candidate.summary,
+            root_cause=candidate.root_cause,
+            confidence=candidate.confidence,
+        )
+        tokens = (candidate.title or "unknown").lower().split()[:3]
+        skill_name = "-".join(t for t in tokens if t.isalnum())[:40] or "auto-skill"
+        save_scaffolded_skill(skill_content, skill_name)
+        scaffold_plan_template(
+            skill_name=skill_name,
+            plan_phases=["triage", "diagnose", "remediate", "verify"],
+            incident_type=candidate.category or "unknown",
+            confidence=candidate.confidence,
+        )
+        logger.info("Scaffolded skill '%s' from a VERIFIED trajectory", skill_name)
+
+        try:
+            scaffold_eval_from_investigation(
+                skill_name=skill_name,
+                finding={"category": candidate.category, "title": candidate.title},
+                investigation_result={
+                    "summary": candidate.summary,
+                    "suspected_cause": candidate.root_cause,
+                    "confidence": candidate.confidence,
+                },
+            )
+        except Exception:
+            logger.debug("Eval scaffolding from verified trajectory failed", exc_info=True)
+    except Exception:
+        logger.debug("Scaffolding from verified trajectory failed", exc_info=True)
+
+
 async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -> None:
     """Verify whether previously applied fixes remained healthy on next scan."""
     if not monitor._pending_verifications:
@@ -138,6 +188,22 @@ async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -
                     logger.info("Auto-learned runbook from verified fix: %s", category)
             except Exception as e:
                 logger.warning("Failed to auto-learn from fix: %s", e)
+
+        # The trajectory gate. A held investigation becomes a skill only now, once
+        # the finding it diagnosed is confirmed resolved. A fix that did not hold
+        # drops its candidate unlearned rather than teaching the wrong lesson.
+        try:
+            from ..trajectory import candidate_key, get_learner
+
+            key = candidate_key(category, resources)
+            if status == "verified":
+                promoted = get_learner().promote(key)
+                if promoted is not None:
+                    _scaffold_from_verified(promoted)
+            else:
+                get_learner().discard(key, f"verification {status}")
+        except Exception:
+            logger.debug("Trajectory learning gate failed", exc_info=True)
 
         completed_ids.append(action_id)
 

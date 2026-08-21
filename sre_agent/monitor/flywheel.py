@@ -20,6 +20,18 @@ async def run_flywheel(monitor: ClusterMonitor) -> None:
 
     if now - monitor._last_daily_run > 86400:
         monitor._last_daily_run = now
+
+        # Candidates whose verification never arrived are dropped, not promoted.
+        # Silence is not a successful outcome.
+        try:
+            from ..trajectory import get_learner
+
+            learner = get_learner()
+            learner.expire_stale()
+            logger.info("Daily flywheel: trajectory learning %s", learner.stats())
+        except Exception:
+            logger.debug("Trajectory expiry failed", exc_info=True)
+
         try:
             from ..selector_learning import (
                 identify_skill_gaps,
