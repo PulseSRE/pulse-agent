@@ -14,9 +14,11 @@ half was left behind.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from kubernetes.client.rest import ApiException
 
 from sre_agent.monitor.cluster_monitor import ClusterMonitor
 
@@ -219,6 +221,51 @@ async def test_the_first_proposal_is_still_recorded(monitor):
         await monitor.auto_fix([dict(FINDING)])
 
     assert len(saved) == 1 and saved[0]["status"] == "proposed"
+
+
+# ── a failed fix is recorded readably, not as an object dump ──────────────
+
+
+@pytest.mark.asyncio
+async def test_a_forbidden_autofix_is_saved_with_a_readable_message_not_a_header_dump(monitor):
+    """str(ApiException) dumps the whole object — HTTPHeaderDict, Audit-Id,
+    Content-Length, the works. Only the Status body's own message belongs in
+    what a person sees for a failed unsupervised fix.
+    """
+    forbidden = ApiException(status=403, reason="Forbidden")
+    forbidden.headers = {"Audit-Id": "d5f6ffee-5dec-485f-9461-7ef164a8a160"}
+    forbidden.body = json.dumps(
+        {
+            "kind": "Status",
+            "status": "Failure",
+            "message": 'pods "klusterlet-646d4fdd8b-4kz56" is forbidden: cannot delete resource "pods"',
+            "reason": "Forbidden",
+            "code": 403,
+        }
+    )
+    saved = []
+    with (
+        patch("sre_agent.monitor.cluster_monitor.is_autofix_paused", return_value=False),
+        patch("sre_agent.monitor.cluster_monitor.get_settings") as settings,
+        patch("sre_agent.monitor.cluster_monitor.save_action", side_effect=lambda r, **kw: saved.append(r)),
+        patch("sre_agent.monitor.cluster_monitor.get_core_client") as core,
+        patch("sre_agent.monitor.cluster_monitor._estimate_auto_fix_confidence", return_value=0.9),
+        patch("sre_agent.monitor.fix_planner.get_investigation_for_finding", return_value=None),
+        patch("sre_agent.monitor.fix_planner.default_fix_plan", return_value=_PLAN),
+        patch("sre_agent.monitor.fix_planner.execute_fix", side_effect=forbidden),
+    ):
+        settings.return_value.monitor.autofix_enabled = True
+        settings.return_value.monitor.max_trust_level = 3
+        core.return_value.read_namespaced_pod.return_value = MagicMock(
+            metadata=MagicMock(owner_references=[MagicMock(kind="ReplicaSet", name="api")])
+        )
+        await monitor.auto_fix([dict(FINDING)])
+
+    assert len(saved) == 1
+    assert saved[0]["status"] == "failed"
+    assert saved[0]["error"] == 'pods "klusterlet-646d4fdd8b-4kz56" is forbidden: cannot delete resource "pods"'
+    assert "HTTPHeaderDict" not in saved[0]["error"]
+    assert "Audit-Id" not in saved[0]["error"]
 
 
 # ── against the real database, because mocks could not see this ───────────

@@ -2,6 +2,28 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [2.16.5] - 2026-08-21
+
+### A long-running cause is not a magnet
+- Symptom attachment had a lower bound and no upper bound, so anything that started after the cause qualified no matter how long after. On the reference cluster a memory alert firing for thirty hours had collected **22 symptoms**, among them a missing PVC — something memory pressure does not cause and cannot cause. The cause had stopped being an explanation and become a bucket
+- A symptom must now begin within two hours of the cause. A cascade propagates in minutes — memory starves the API server, the API server times out probes, the probes kill pods — so two hours is generous for the real shape and still says no to a coincidence a day later
+- The window is measured between the two onsets, not from now, so an old cause and its equally old symptom are still one event
+- One existing test asserted the opposite, with a 21.9-hour gap between cause and symptom. It was built on onsets I had guessed rather than measured — the real ones predated the cause by 26 hours — so it had been encoding the magnet rather than defending against it
+
+## [2.16.4] - 2026-08-21
+
+### A rejected fix showed its raw exception, not what happened
+- Approving a fix that then failed against the API server stored `str(e)` on the `kubernetes.client.rest.ApiException` as the failure reason -- the object's entire repr, HTTP response headers and all, dumped verbatim into the Inbox's "Fixes applied" banner. Observed live: a `restart_controller` fix on `klusterlet-646d4fdd8b-4kz56` in `open-cluster-management-agent` was denied by RBAC, and the banner read as several hundred characters of `HTTPHeaderDict({'Audit-Id': ...})`, cut off mid-header by the UI
+- Both `approve_fix` and the unattended `auto_fix` path now run the exception through `classify_exception` -- already used everywhere else a K8s call can fail -- before storing it, so the message is the Kubernetes API's own `Status.message` (e.g. `pods "klusterlet-646d4fdd8b-4kz56" is forbidden: ... in the namespace "open-cluster-management-agent"`), not the transport object around it
+- Checked whether the agent should have had permission to make this call at all: it should not have. `allowWriteOperations` is false on this cluster, the operator's ClusterRole correctly omits `delete(pods)`/`patch(deployments)` as a result, and the 403 is RBAC working as designed -- the gap was only in how the failure was displayed, not in what the agent was allowed to do
+
+## [2.16.3] - 2026-08-21
+
+### A proposal outlives the condition it was raised for, unless something says so
+- `approve_fix` already refused a proposal whose finding had cleared on its own -- but only at the moment a person clicked Approve. Until then it kept counting toward "N fixes waiting on you," asking for a decision about a fix that no longer applied. Observed live: a crashloop proposal sat in fix history for the better part of an hour after the pod stopped restarting, Approve returned 409 every time, and the banner never dropped to zero
+- `expire_orphaned_proposals` now answers these the same way `approve_fix` would, once per scan cycle -- so a self-healed condition stops asking instead of waiting for someone to find out the hard way that there is nothing left to fix
+- Clicking Approve on a stale proposal was already safe (a 409, no fix executed) -- this closes the other half: nobody has to click it to hear no
+
 ## [2.16.2] - 2026-08-21
 
 ### Dedupe on the condition, not on one sighting of it

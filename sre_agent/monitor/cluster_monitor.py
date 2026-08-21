@@ -18,6 +18,7 @@ from ..config import get_settings
 from ..k8s_client import get_core_client
 from ..repositories.monitor_repo import get_monitor_repo
 from .actions import mark_finding_actions_resolved, save_action
+from .approvals import expire_orphaned_proposals
 from .autofix import is_autofix_paused
 from .confidence import _estimate_auto_fix_confidence, _estimate_finding_confidence, _finding_key
 from .findings import _make_action_report, _ts
@@ -653,8 +654,13 @@ class ClusterMonitor:
                     if _METRICS_AVAILABLE:
                         AUTOFIX_TOTAL.labels(outcome="success").inc()
                 else:
+                    from ..errors import classify_exception
+
+                    # str(e) on a kubernetes ApiException dumps the whole object,
+                    # headers and all — classify_exception extracts the structured
+                    # Status body's message instead, so this stays readable.
                     action_report["status"] = "failed"
-                    action_report["error"] = str(e)
+                    action_report["error"] = str(classify_exception(e, category))[:500]
                     action_report["durationMs"] = duration_ms
                     if _METRICS_AVAILABLE:
                         AUTOFIX_TOTAL.labels(outcome="failure").inc()
@@ -879,6 +885,18 @@ class ClusterMonitor:
             if finding_id:
                 asyncio.get_running_loop().run_in_executor(None, mark_finding_actions_resolved, finding_id)
                 asyncio.get_running_loop().run_in_executor(None, _resolve_finding_inbox, finding_id, resolved_finding)
+
+        # Answer proposals whose condition cleared on its own -- including
+        # ones from before this finding's own resolution event, e.g. after an
+        # agent restart wiped _last_findings out from under a still-pending
+        # proposal. Once per scan, after _last_findings has settled for the
+        # cycle, so this sees exactly what approve_fix would see right now.
+        try:
+            expired = await asyncio.to_thread(expire_orphaned_proposals)
+            if expired:
+                logger.info("Expired %d stale fix proposal(s) whose condition cleared on its own", expired)
+        except Exception:
+            logger.exception("Failed to expire orphaned fix proposals")
 
         # Track transient findings
         for key in stale_keys:
