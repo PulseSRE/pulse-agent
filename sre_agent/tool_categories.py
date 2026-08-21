@@ -60,6 +60,11 @@ TOOL_CATEGORIES = {
             "search_logs",
             "get_resource_relationships",
             "create_live_table",
+            "describe_node",
+            "list_namespaces",
+            "search_past_incidents",
+            "get_learned_runbooks",
+            "get_cluster_patterns",
         ],
     },
     "workloads": {
@@ -90,6 +95,12 @@ TOOL_CATEGORIES = {
             "restart_deployment",
             "rollback_deployment",
             "delete_pod",
+            "list_daemonsets",
+            "list_replicasets",
+            "list_statefulsets",
+            "get_pod_disruption_budgets",
+            "get_resource_quotas",
+            "list_limit_ranges",
         ],
     },
     "networking": {
@@ -114,6 +125,7 @@ TOOL_CATEGORIES = {
             "create_network_policy",
             "scan_network_policies",
             "test_connectivity",
+            "get_services",
         ],
     },
     "security": {
@@ -147,6 +159,7 @@ TOOL_CATEGORIES = {
         "keywords": ["pvc", "storage", "volume", "persistent", "disk", "capacity"],
         "tools": [
             "list_resources",
+            "get_persistent_volume_claims",
         ],
     },
     "monitoring": {
@@ -171,6 +184,7 @@ TOOL_CATEGORIES = {
             "forecast_quota_exhaustion",
             "get_resource_recommendations",
             "analyze_hpa_thrashing",
+            "verify_query",
         ],
     },
     "operations": {
