@@ -172,6 +172,26 @@ def _setup_model(model: str, dry_run: bool):
         return create_async_client(), thinking
 
 
+def _expected_for(expected: dict, dry_run: bool) -> dict:
+    """Drop the checks a mock client decides, when replaying in dry-run.
+
+    In dry-run the response is a fixed string from ``_make_mock_client`` and the
+    call sequence is synthesised from the fixture, so ``should_mention`` measures
+    that string and ``should_use_tools_in_order`` measures the mock's ordering —
+    neither says anything about the agent. What remains (tools dispatched, forbidden
+    tools avoided, call budget respected) verifies that the replay harness still
+    drives the loop, which is all this mode can honestly check. Live runs are scored
+    against the full expectation.
+    """
+    if not dry_run:
+        return expected
+    mock_determined = {"should_mention", "overall_should_mention", "should_use_tools_in_order"}
+    trimmed = {k: v for k, v in expected.items() if k not in mock_determined}
+    if "per_turn" in trimmed:
+        trimmed["per_turn"] = [{k: v for k, v in t.items() if k not in mock_determined} for t in trimmed["per_turn"]]
+    return trimmed
+
+
 def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet-4-6", dry_run: bool = False) -> dict:
     """Run a single fixture (single-turn or multi-turn) and return the scored result."""
     fixture = load_fixture(name)
@@ -188,7 +208,7 @@ def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet
         client = _make_mock_client(expected_tools)
 
     result = harness.run(client=client, prompt=fixture["prompt"], thinking=thinking)
-    score = score_replay(result, fixture["expected"])
+    score = score_replay(result, _expected_for(fixture["expected"], dry_run))
 
     output = {
         "fixture": name,
@@ -227,7 +247,7 @@ def _run_multi_turn_fixture(name: str, fixture: dict, use_judge: bool, model: st
         client = _make_multi_turn_mock_client(fixture["turns"], expected_keywords)
 
     result = harness.run(client=client, thinking=thinking)
-    score = score_multi_turn(result, fixture.get("expected", {}))
+    score = score_multi_turn(result, _expected_for(fixture.get("expected", {}), dry_run))
 
     output = {
         "fixture": name,

@@ -1,4 +1,4 @@
-.PHONY: lint format type-check test verify test-all evals helm-lint release sync-token clean coverage perf perf-baseline
+.PHONY: lint format type-check test verify test-all evals eval-gate helm-lint release sync-token clean coverage perf perf-baseline
 
 lint:
 	python3 -m ruff check sre_agent/ tests/
@@ -25,13 +25,23 @@ perf-baseline:
 	python3 -m pytest tests/perf/ -v --tb=short | tee tests/perf/baselines/latest.txt
 	@echo "Baseline saved to tests/perf/baselines/latest.txt"
 
+# Offline checks. These do NOT measure agent quality: the fixture suites score
+# hand-authored scenario JSON, and dry-run replay grades a mock built from each
+# fixture's own expectations. Use `make eval-gate` for the real gate.
 evals:
-	@echo "Running deterministic evals..."
-	python3 -m sre_agent.evals.cli --suite release --fail-on-gate
-	python3 -m sre_agent.evals.cli --suite core
+	@echo "Replay harness check (plumbing only)..."
+	python3 -m sre_agent.evals.replay_cli --all --dry-run
+	@echo "Fixture suite reports (non-gating)..."
+	-python3 -m sre_agent.evals.cli --suite release
+	-python3 -m sre_agent.evals.cli --suite core
 	python3 -m sre_agent.evals.cli --suite safety
 	python3 -m sre_agent.evals.cli --audit-prompt --mode sre
-	@echo "All deterministic evals passed."
+	@echo "Offline checks done. Run 'make eval-gate' for the release gate (costs API calls)."
+
+# THE RELEASE GATE — runs the real model against recorded cluster state.
+eval-gate:
+	@echo "Running live judged replay (costs API calls)..."
+	python3 -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6
 
 evals-full: evals
 	@echo "Running LLM-judged evals (requires API key)..."
@@ -97,8 +107,8 @@ clean:
 
 release:
 	@test -n "$(VERSION)" || (echo "Usage: make release VERSION=x.y.z" && exit 1)
-	@echo "Running eval gate check..."
-	python3 -m sre_agent.evals.cli --suite release --compare-baseline || (echo "Eval regression detected — aborting release" && exit 1)
+	@echo "Running release gate (live judged replay)..."
+	python3 -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 || (echo "Release gate failed — aborting release" && exit 1)
 	./scripts/bump-version.sh $(VERSION)
 	python3 -m sre_agent.evals.cli --suite release --save-baseline
 	git add pyproject.toml chart/Chart.yaml
