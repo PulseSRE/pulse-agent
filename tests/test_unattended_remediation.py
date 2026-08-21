@@ -191,6 +191,9 @@ async def test_it_does_not_ask_the_same_question_every_scan(monitor):
         await monitor.auto_fix([dict(FINDING)])
 
     assert saved == [], "an unanswered proposal must not be raised again"
+    asked_with = repo.check_pending_proposal.call_args[0][0]
+    assert asked_with != FINDING["id"], "the finding id is per-scan and can never match"
+    assert asked_with == "crashloop:prod:Pod/api-7f9"
 
 
 @pytest.mark.asyncio
@@ -216,3 +219,42 @@ async def test_the_first_proposal_is_still_recorded(monitor):
         await monitor.auto_fix([dict(FINDING)])
 
     assert len(saved) == 1 and saved[0]["status"] == "proposed"
+
+
+# ── against the real database, because mocks could not see this ───────────
+
+
+def test_the_finding_id_can_never_match_its_own_previous_proposal():
+    """The bug in one test, run against a real Postgres.
+
+    Mocks could not catch it: they answer whatever key they are handed. Only
+    real rows show that ``_make_finding`` mints a new ``f-{uuid4}`` every scan,
+    so a finding-id lookup misses the proposal it made 65 seconds ago and
+    proposes again — 718 rows on the reference cluster, one per sighting.
+    """
+    from sre_agent.db import get_database
+    from sre_agent.inbox import _finding_corr_key
+    from sre_agent.monitor.actions import save_action
+    from sre_agent.monitor.findings import _make_finding
+    from sre_agent.repositories import get_monitor_repo
+
+    resources = [{"kind": "Pod", "name": "olm-operator-7f6-abcde", "namespace": "olm-dedupe-test"}]
+    first = _make_finding("critical", "crashloop", "Pod restarting", "", resources)
+    save_action(
+        {"id": "a-dedupe-1", "findingId": first["id"], "status": "proposed", "tool": "", "reasoning": "proposed"},
+        category="crashloop",
+        resources=resources,
+        finding=first,
+    )
+
+    # The next scan. Same condition, new finding id — always.
+    again = _make_finding("critical", "crashloop", "Pod restarting", "", resources)
+    assert again["id"] != first["id"]
+    assert _finding_corr_key(again) == _finding_corr_key(first)
+
+    db = get_database()
+    by_finding_id = db.fetchone("SELECT id FROM actions WHERE finding_id = ? AND status = 'proposed'", (again["id"],))
+    assert by_finding_id is None, "this is why the guard never fired"
+
+    by_key = get_monitor_repo().check_pending_proposal(_finding_corr_key(again))
+    assert by_key is not None and by_key["id"] == "a-dedupe-1"

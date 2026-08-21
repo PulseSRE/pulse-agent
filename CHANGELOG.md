@@ -2,6 +2,14 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [Unreleased]
+
+### Dedupe on the condition, not on one sighting of it
+- The proposal guard shipped in 2.16.1 keyed on `finding["id"]`, and `_make_finding` mints a fresh `f-{uuid4}` on every scan. So the same condition arrives with a different finding id every 65 seconds and the guard could never match its own previous proposal. It did nothing: the reference cluster went on to **718 proposals**, one per sighting, each looking brand new
+- Actions now carry the correlation key — the identity the rest of the system already uses for "this same condition, seen again" — and both guards key on it (migration 031)
+- `check_existing_human_review` had the same defect for as long as it has existed. It never matched anything, and nobody noticed because `auto_fix` was never entered until the trust-level fix, so the guard had never once been asked a real question
+- The regression test runs against a real database, because this class of bug is invisible to mocks: a mock answers whatever key it is handed, and only real rows show the id changing underneath the lookup
+
 ## [2.16.1] - 2026-08-21
 
 ### A proposal is a question, not a chant
