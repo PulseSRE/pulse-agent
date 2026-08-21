@@ -106,12 +106,14 @@ jobs:
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Prompt baseline comparison (gating on prompt changes)
+      # Non-gating: compares fixture scores, which cannot move (see note on the fixture
+      # suites below). Prompt changes are gated by the live judged replay instead.
+      - name: Prompt baseline comparison (non-gating)
         if: steps.prompt_changes.outputs.has_changes == 'true'
         run: |
           mkdir -p artifacts
-          python -m sre_agent.evals.cli --suite release --compare-baseline --fail-on-regression --format json --output artifacts/prompt_comparison.json
-          python -m sre_agent.evals.cli --suite view_designer --compare-baseline --fail-on-regression
+          python -m sre_agent.evals.cli --suite release --compare-baseline --format json --output artifacts/prompt_comparison.json || true
+          python -m sre_agent.evals.cli --suite view_designer --compare-baseline || true
 
       - name: Prompt token audit (non-gating)
         if: steps.prompt_changes.outputs.has_changes == 'true'
@@ -122,24 +124,33 @@ jobs:
           echo "### Prompt Token Audit" >> "$GITHUB_STEP_SUMMARY"
           python -m sre_agent.evals.cli --audit-prompt --mode sre >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Run view designer eval gate
-        run: |
-          python -m sre_agent.evals.cli --suite view_designer --format json --output artifacts/view_designer.json --fail-on-gate
-
-      - name: Run release eval gate
-        run: |
-          python -m sre_agent.evals.cli --suite release --format json --output artifacts/release.json --fail-on-gate
-          python -m sre_agent.evals.cli --suite release --format text --output artifacts/release.txt --fail-on-gate
-
-      - name: Run replay evals (dry-run, no API key needed)
+      # These suites score hand-authored scenario JSON; the agent is never invoked and
+      # `verification_passed` is set in the fixture, which pins runner._resolution() to 1.0
+      # (release: 19/19 hardcoded true, view_designer: 10/11). Kept as coverage/structure
+      # reports only. The release gate is the live judged replay below.
+      - name: Fixture suite reports (non-gating)
         run: |
           mkdir -p artifacts
-          python -m sre_agent.evals.replay_cli --all --dry-run --format json > artifacts/replay.json || true
-          python -m sre_agent.evals.replay_cli --all --dry-run --format text > artifacts/replay.txt || true
+          python -m sre_agent.evals.cli --suite view_designer --format json --output artifacts/view_designer.json || true
+          python -m sre_agent.evals.cli --suite release --format json --output artifacts/release.json || true
+          python -m sre_agent.evals.cli --suite release --format text --output artifacts/release.txt || true
 
-      - name: Run live replay with LLM judge (releases, daily cron, prompt changes, manual)
+      # Dry-run replay builds its mock client from each fixture's own `should_use_tools` and
+      # answers with canned text containing the graded keywords (replay_cli.py:113,187). It
+      # verifies the replay harness wires up — NOT that the agent reasons correctly. Gating
+      # here catches harness breakage only; do not read it as a quality signal.
+      - name: Replay harness check (dry-run)
+        run: |
+          mkdir -p artifacts
+          python -m sre_agent.evals.replay_cli --all --dry-run --format json > artifacts/replay.json
+          python -m sre_agent.evals.replay_cli --all --dry-run --format text > artifacts/replay.txt
+
+      # THE RELEASE GATE. This is the only step that puts the real model against recorded
+      # cluster state and scores what it actually said. It must be allowed to fail.
+      - name: Live judged replay (RELEASE GATE)
         if: >-
           (github.event_name == 'schedule')
+          || (github.event_name == 'push' && github.ref == 'refs/heads/main')
           || (github.event_name == 'workflow_dispatch' && inputs.run_live_judge)
           || (steps.prompt_changes.outputs.has_changes == 'true')
           || startsWith(github.ref, 'refs/tags/v')
@@ -149,20 +160,18 @@ jobs:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: |
           mkdir -p artifacts
-          if [ -n "$ANTHROPIC_VERTEX_PROJECT_ID" ] && [ -n "$GCP_SA_KEY" ]; then
-            echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
-            export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json
-            python -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 --format json > artifacts/live_judge.json 2>/dev/null || true
-            python -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 --format text > artifacts/live_judge.txt 2>/dev/null || true
-            echo "### Live Judge Results" >> "$GITHUB_STEP_SUMMARY"
-            if [ -s artifacts/live_judge.txt ]; then
-              tail -5 artifacts/live_judge.txt >> "$GITHUB_STEP_SUMMARY"
-            fi
-            rm -f /tmp/gcp-sa-key.json
-          else
-            echo "Skipping live judge — no Vertex AI credentials configured"
-            echo "Set VERTEX_PROJECT_ID, VERTEX_REGION, and GCP_SA_KEY secrets to enable"
+          if [ -z "$ANTHROPIC_VERTEX_PROJECT_ID" ] || [ -z "$GCP_SA_KEY" ]; then
+            echo "::error::Live judged replay is the release gate, but Vertex AI credentials are not configured."
+            echo "Set the VERTEX_PROJECT_ID, VERTEX_REGION and GCP_SA_KEY repository secrets."
+            exit 1
           fi
+          echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
+          trap 'rm -f /tmp/gcp-sa-key.json' EXIT
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json
+          # Single run: replay_cli exits non-zero if any fixture fails, and still writes the
+          # JSON, which the always() summary step below renders.
+          python -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 \
+            --format json > artifacts/live_judge.json
 
       - name: Run safety and integration evals (non-gating)
         run: |
@@ -210,10 +219,16 @@ jobs:
           outcomes = read_json(artifacts / "outcomes.json")
           live_judge = read_json(artifacts / "live_judge.json")
 
+          if live_judge and isinstance(live_judge, list):
+              gate_passed = all(r.get("score", {}).get("passed") for r in live_judge)
+              lines.append(f"- **RELEASE GATE (live judged replay): {'PASS' if gate_passed else 'FAIL'}**")
+          else:
+              lines.append("- **RELEASE GATE (live judged replay): did not run**")
+
           if release:
               lines.append(
-                  f"- release gate: {'PASS' if release.get('gate_passed') else 'FAIL'} "
-                  f"(scenarios={release.get('scenario_count')}, avg={release.get('average_overall')})"
+                  f"- release fixtures (non-gating, cannot fail): "
+                  f"scenarios={release.get('scenario_count')}, avg={release.get('average_overall')}"
               )
           if safety:
               lines.append(
@@ -227,8 +242,8 @@ jobs:
               )
           if view_designer:
               lines.append(
-                  f"- view_designer gate: {'PASS' if view_designer.get('gate_passed') else 'FAIL'} "
-                  f"(scenarios={view_designer.get('scenario_count')}, avg={view_designer.get('average_overall')})"
+                  f"- view_designer fixtures (non-gating): "
+                  f"scenarios={view_designer.get('scenario_count')}, avg={view_designer.get('average_overall')}"
               )
           if live_judge and isinstance(live_judge, list):
               passed = sum(1 for r in live_judge if r.get("score", {}).get("passed"))
