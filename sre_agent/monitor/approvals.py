@@ -23,6 +23,11 @@ logger = logging.getLogger("pulse_agent.monitor")
 
 PROPOSED = "proposed"
 
+# Answered the same way whether a person clicks Approve on it or the sweep
+# below gets there first — the condition is gone either way, so the message
+# should not depend on who noticed.
+STALE_PROPOSAL_MESSAGE = "The condition this was proposed for is no longer being reported — nothing to fix"
+
 
 class ApprovalError(Exception):
     """Refused, with a reason meant for a person to read."""
@@ -67,10 +72,7 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
     finding_id = action.get("findingId") or action.get("finding_id") or ""
     finding = _current_finding(finding_id)
     if finding is None:
-        raise ApprovalError(
-            "The condition this was proposed for is no longer being reported — nothing to fix",
-            status_code=409,
-        )
+        raise ApprovalError(STALE_PROPOSAL_MESSAGE, status_code=409)
 
     category = finding.get("category", "")
     investigation = get_investigation_for_finding(finding_id)
@@ -131,3 +133,29 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
         finding=finding,
     )
     return report
+
+
+def expire_orphaned_proposals() -> int:
+    """Answer every pending proposal whose condition has already cleared.
+
+    ``approve_fix`` already refuses these with ``STALE_PROPOSAL_MESSAGE`` — but
+    only at the moment a person happens to click Approve. Until then the
+    proposal keeps counting toward "N fixes waiting on you", asking for a
+    decision about a fix that no longer applies. Called once per scan, after
+    ``_last_findings`` has settled for the cycle, so a self-healed condition
+    stops asking instead of waiting for someone to find out the hard way that
+    there is nothing left to fix.
+
+    Returns the number of proposals answered this way.
+    """
+    from ..repositories import get_monitor_repo
+
+    repo = get_monitor_repo()
+    expired = 0
+    for row in repo.fetch_proposed_actions():
+        finding_id = row["finding_id"] or ""
+        if not finding_id:
+            continue
+        if _current_finding(finding_id) is None and repo.expire_proposal(row["id"], STALE_PROPOSAL_MESSAGE):
+            expired += 1
+    return expired

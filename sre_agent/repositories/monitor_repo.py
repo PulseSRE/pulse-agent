@@ -185,6 +185,31 @@ class MonitorRepository(BaseRepository):
         db.commit()
         return getattr(cursor, "rowcount", 0)
 
+    def fetch_proposed_actions(self) -> list[dict]:
+        """Every action still waiting for a human answer — id and finding_id only.
+
+        Used to reconcile proposals against live scan state: a proposal whose
+        finding has since cleared on its own has nothing left to approve.
+        """
+        self.ensure_tables()
+        return self.db.fetchall("SELECT id, finding_id FROM actions WHERE status = 'proposed'")
+
+    def expire_proposal(self, action_id: str, message: str) -> bool:
+        """Answer a proposal whose condition cleared before a person got to it.
+
+        The WHERE clause guards the same race claim_proposed_action guards:
+        if someone clicks Approve in the moment this runs, only one of the two
+        writes will find the row still 'proposed'.
+        """
+        self.ensure_tables()
+        db = self.db
+        cursor = db.execute(
+            "UPDATE actions SET status = 'expired', error = ? WHERE id = ? AND status = 'proposed'",
+            (message, action_id),
+        )
+        db.commit()
+        return getattr(cursor, "rowcount", 0) == 1
+
     def get_fix_success_rate_rows(self, days: int) -> list[dict]:
         """Return outcome aggregation rows for a time period."""
         self.ensure_tables()
