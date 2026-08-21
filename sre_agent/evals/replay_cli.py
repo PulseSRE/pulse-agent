@@ -187,9 +187,7 @@ def _expected_for(expected: dict, dry_run: bool) -> dict:
     content_keys = {"should_mention", "overall_should_mention"}
     trimmed = {k: v for k, v in expected.items() if k not in content_keys}
     if "per_turn" in trimmed:
-        trimmed["per_turn"] = [
-            {k: v for k, v in turn.items() if k not in content_keys} for turn in trimmed["per_turn"]
-        ]
+        trimmed["per_turn"] = [{k: v for k, v in turn.items() if k not in content_keys} for turn in trimmed["per_turn"]]
     return trimmed
 
 
