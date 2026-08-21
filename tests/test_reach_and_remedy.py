@@ -224,6 +224,10 @@ def test_a_configured_channel_is_never_reported():
     assert not _unreachable(_degraded_titles("https://hooks.example.com/pulse", open_episodes=5, proposals=3))
 
 
-def test_it_says_how_much_is_waiting():
-    titles = [t for t in _degraded_titles("", open_episodes=2, proposals=3) if "will reach anyone" in t]
-    assert "5 waiting" in titles[0]
+def test_the_title_does_not_change_with_the_count():
+    """A title that carries the number is a different correlation key every
+    time the number moves, so the item resolves and is raised again instead of
+    staying open. Observed live: raised once, resolved, gone."""
+    few = [t for t in _degraded_titles("", open_episodes=2) if "will reach anyone" in t]
+    many = [t for t in _degraded_titles("", open_episodes=9, proposals=4) if "will reach anyone" in t]
+    assert few == many == ["Nothing Pulse found will reach anyone"]

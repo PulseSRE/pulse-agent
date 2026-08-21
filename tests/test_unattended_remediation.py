@@ -163,3 +163,56 @@ async def test_it_never_executes_unsupervised_just_because_nobody_is_looking(mon
 
         handlers["crashloop"].assert_not_called()
     assert saved and saved[0]["status"] == "proposed"
+
+
+@pytest.mark.asyncio
+async def test_it_does_not_ask_the_same_question_every_scan(monitor):
+    """One hour of unattended proposing produced 701 rows for two findings on
+    the reference cluster. A proposal is a question; asking it again every 65
+    seconds because nobody has answered is a flood, not persistence."""
+    saved = []
+    repo = MagicMock()
+    repo.check_pending_proposal.return_value = {"id": "a-already-asked"}
+    with (
+        patch("sre_agent.monitor.cluster_monitor.is_autofix_paused", return_value=False),
+        patch("sre_agent.monitor.cluster_monitor.get_settings") as settings,
+        patch("sre_agent.monitor.cluster_monitor.get_monitor_repo", return_value=repo),
+        patch("sre_agent.monitor.cluster_monitor.save_action", side_effect=lambda r, **kw: saved.append(r)),
+        patch("sre_agent.monitor.cluster_monitor.get_core_client") as core,
+        patch("sre_agent.monitor.cluster_monitor._estimate_auto_fix_confidence", return_value=0.9),
+        patch("sre_agent.monitor.fix_planner.get_investigation_for_finding", return_value=None),
+        patch("sre_agent.monitor.fix_planner.default_fix_plan", return_value=_PLAN),
+    ):
+        settings.return_value.monitor.autofix_enabled = True
+        settings.return_value.monitor.max_trust_level = 2
+        core.return_value.read_namespaced_pod.return_value = MagicMock(
+            metadata=MagicMock(owner_references=[MagicMock(kind="ReplicaSet", name="api")])
+        )
+        await monitor.auto_fix([dict(FINDING)])
+
+    assert saved == [], "an unanswered proposal must not be raised again"
+
+
+@pytest.mark.asyncio
+async def test_the_first_proposal_is_still_recorded(monitor):
+    saved = []
+    repo = MagicMock()
+    repo.check_pending_proposal.return_value = None
+    with (
+        patch("sre_agent.monitor.cluster_monitor.is_autofix_paused", return_value=False),
+        patch("sre_agent.monitor.cluster_monitor.get_settings") as settings,
+        patch("sre_agent.monitor.cluster_monitor.get_monitor_repo", return_value=repo),
+        patch("sre_agent.monitor.cluster_monitor.save_action", side_effect=lambda r, **kw: saved.append(r)),
+        patch("sre_agent.monitor.cluster_monitor.get_core_client") as core,
+        patch("sre_agent.monitor.cluster_monitor._estimate_auto_fix_confidence", return_value=0.9),
+        patch("sre_agent.monitor.fix_planner.get_investigation_for_finding", return_value=None),
+        patch("sre_agent.monitor.fix_planner.default_fix_plan", return_value=_PLAN),
+    ):
+        settings.return_value.monitor.autofix_enabled = True
+        settings.return_value.monitor.max_trust_level = 2
+        core.return_value.read_namespaced_pod.return_value = MagicMock(
+            metadata=MagicMock(owner_references=[MagicMock(kind="ReplicaSet", name="api")])
+        )
+        await monitor.auto_fix([dict(FINDING)])
+
+    assert len(saved) == 1 and saved[0]["status"] == "proposed"

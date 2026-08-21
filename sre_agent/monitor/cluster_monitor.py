@@ -513,6 +513,13 @@ class ClusterMonitor:
             if trust_level == 2:
                 async with self._subscribers_lock:
                     nobody_to_ask = not self._subscribers
+                if nobody_to_ask and get_monitor_repo().check_pending_proposal(finding["id"]):
+                    # Already asked, still unanswered. Asking again every scan
+                    # is a flood, not persistence — measured on the reference
+                    # cluster, one hour of this produced 701 rows for two
+                    # findings and buried the two that mattered.
+                    continue
+
                 if nobody_to_ask:
                     # There is no one to answer. Record the proposal and move
                     # on: waiting 120 seconds for an approval that cannot
