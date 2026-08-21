@@ -1517,16 +1517,75 @@ class TestEvalScaffoldingIntegration:
                 loop.close()
 
         assert result is True
-        mock_eval.assert_called_once()
-        call_kwargs = mock_eval.call_args[1]
-        assert call_kwargs["skill_name"] is not None
+        # Scaffolding used to fire here, on the diagnosis alone. It must not.
+        mock_eval.assert_not_called()
+
+        from sre_agent.trajectory import candidate_key, get_learner
+
+        learner = get_learner()
+        assert learner.pending_count() >= 1, "investigation should hold a learning candidate"
+        assert learner.promoted == 0, "nothing may be learned before verification"
+        assert candidate_key("nodes", [{"kind": "Pod", "name": "web-1", "namespace": "prod"}])
+
+    def test_verified_trajectory_is_what_gets_scaffolded(self):
+        """The promoted path does the scaffolding the investigation path no longer does."""
+        from sre_agent.monitor.verification_pipeline import _scaffold_from_verified
+        from sre_agent.trajectory import LearningCandidate, TrajectoryLearner
+
+        learner = TrajectoryLearner()
+        candidate = LearningCandidate(
+            key="nodes:Pod:prod:web",
+            category="nodes",
+            title="node memory pressure",
+            root_cause="a workload regressed and exhausted node memory",
+            summary="web-1 evicted after memory climbed",
+            confidence=0.88,
+            evidence=[{"observation": "MemoryPressure=True on worker-1", "kind": "event"}],
+            tools_called=["describe_node"],
+        )
+        learner.record(candidate)
+        promoted = learner.promote(candidate.key)
+        assert promoted is not None
+
+        eval_mock = MagicMock()
+        with (
+            patch("sre_agent.skill_scaffolder.save_scaffolded_skill"),
+            patch(
+                "sre_agent.skill_scaffolder.scaffold_skill_from_resolution", return_value="---\nname: t\n---\nt"
+            ),
+            patch("sre_agent.skill_scaffolder.scaffold_plan_template"),
+            patch("sre_agent.eval_scaffolder.scaffold_eval_from_investigation", side_effect=eval_mock) as mock_eval2,
+        ):
+            _scaffold_from_verified(promoted)
+
+        mock_eval2.assert_called_once()
+        assert mock_eval2.call_args[1]["skill_name"] is not None
+
+    def test_unverified_trajectory_is_never_scaffolded(self):
+        """A high-confidence diagnosis whose fix did not hold teaches nothing."""
+        from sre_agent.trajectory import LearningCandidate, TrajectoryLearner
+
+        learner = TrajectoryLearner()
+        candidate = LearningCandidate(
+            key="nodes:Pod:prod:web",
+            category="nodes",
+            title="node memory pressure",
+            root_cause="confidently wrong cause",
+            summary="s",
+            confidence=0.99,
+            evidence=[{"observation": "something", "kind": "event"}],
+        )
+        learner.record(candidate)
+        learner.discard(candidate.key, "verification still_failing")
+        assert learner.promote(candidate.key) is None
+        assert learner.promoted == 0
         assert call_kwargs["finding"] is finding
         assert call_kwargs["plan_result"] is plan_result
         assert "describe_pod" in call_kwargs["tools_called"]
         assert call_kwargs["duration_seconds"] == 45.0
 
-    def test_flat_investigation_calls_scaffold_eval_from_investigation(self, monkeypatch):
-        """After flat investigation with high confidence and no template, scaffold_eval_from_investigation is called."""
+    def test_flat_investigation_records_a_candidate_without_scaffolding(self, monkeypatch):
+        """A confident diagnosis is held, not learned — nothing is scaffolded until a fix is verified."""
         monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "1")
         monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "30")
         monkeypatch.setenv("PULSE_AGENT_MEMORY", "0")
@@ -1578,9 +1637,68 @@ class TestEvalScaffoldingIntegration:
             finally:
                 loop.close()
 
-        mock_eval.assert_called_once()
-        call_kwargs = mock_eval.call_args[1]
-        assert call_kwargs["skill_name"] is not None
+        # Scaffolding used to fire here, on the diagnosis alone. It must not.
+        mock_eval.assert_not_called()
+
+        from sre_agent.trajectory import candidate_key, get_learner
+
+        learner = get_learner()
+        assert learner.pending_count() >= 1, "investigation should hold a learning candidate"
+        assert learner.promoted == 0, "nothing may be learned before verification"
+        assert candidate_key("nodes", [{"kind": "Pod", "name": "web-1", "namespace": "prod"}])
+
+    def test_verified_trajectory_is_what_gets_scaffolded(self):
+        """The promoted path does the scaffolding the investigation path no longer does."""
+        from sre_agent.monitor.verification_pipeline import _scaffold_from_verified
+        from sre_agent.trajectory import LearningCandidate, TrajectoryLearner
+
+        learner = TrajectoryLearner()
+        candidate = LearningCandidate(
+            key="nodes:Pod:prod:web",
+            category="nodes",
+            title="node memory pressure",
+            root_cause="a workload regressed and exhausted node memory",
+            summary="web-1 evicted after memory climbed",
+            confidence=0.88,
+            evidence=[{"observation": "MemoryPressure=True on worker-1", "kind": "event"}],
+            tools_called=["describe_node"],
+        )
+        learner.record(candidate)
+        promoted = learner.promote(candidate.key)
+        assert promoted is not None
+
+        eval_mock = MagicMock()
+        with (
+            patch("sre_agent.skill_scaffolder.save_scaffolded_skill"),
+            patch(
+                "sre_agent.skill_scaffolder.scaffold_skill_from_resolution", return_value="---\nname: t\n---\nt"
+            ),
+            patch("sre_agent.skill_scaffolder.scaffold_plan_template"),
+            patch("sre_agent.eval_scaffolder.scaffold_eval_from_investigation", side_effect=eval_mock) as mock_eval2,
+        ):
+            _scaffold_from_verified(promoted)
+
+        mock_eval2.assert_called_once()
+        assert mock_eval2.call_args[1]["skill_name"] is not None
+
+    def test_unverified_trajectory_is_never_scaffolded(self):
+        """A high-confidence diagnosis whose fix did not hold teaches nothing."""
+        from sre_agent.trajectory import LearningCandidate, TrajectoryLearner
+
+        learner = TrajectoryLearner()
+        candidate = LearningCandidate(
+            key="nodes:Pod:prod:web",
+            category="nodes",
+            title="node memory pressure",
+            root_cause="confidently wrong cause",
+            summary="s",
+            confidence=0.99,
+            evidence=[{"observation": "something", "kind": "event"}],
+        )
+        learner.record(candidate)
+        learner.discard(candidate.key, "verification still_failing")
+        assert learner.promote(candidate.key) is None
+        assert learner.promoted == 0
         assert call_kwargs["finding"] is finding
         assert call_kwargs["investigation_result"] is mock_inv_result
 
