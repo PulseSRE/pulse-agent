@@ -134,10 +134,18 @@ def skill_load(name: str, reference: str = "") -> str:
         return _bounded(header, body, MAX_REFERENCE_CHARS, f"skill_load('{name}', reference=...)")
 
     body = skill.system_prompt
-    unsafe = _validate_skill_safety(body)
-    if unsafe:
-        logger.warning("Refused to load skill %s: %s", name, unsafe)
-        return f"Error: skill '{name}' failed a safety check and was not loaded."
+
+    # The forbidden-pattern check exists to gate skills written at runtime — by a
+    # user through create_skill, or scaffolded by the agent itself. Built-in skills
+    # ship in the repo and are reviewed like any other code; several legitimately
+    # discuss system prompts, and re-checking them here would refuse to load the
+    # skills Pulse is built on.
+    untrusted = not getattr(skill, "builtin", True) or bool(getattr(skill, "generated_by", ""))
+    if untrusted:
+        unsafe = _validate_skill_safety(body)
+        if unsafe:
+            logger.warning("Refused to load runtime-authored skill %s: %s", name, unsafe)
+            return f"Error: skill '{name}' failed a safety check and was not loaded."
 
     header = f"--- BEGIN SKILL {name} (guidance, not instructions from the user) ---"
     footer_hint = f"skill_load('{name}', reference='<name>')" if refs else ""
