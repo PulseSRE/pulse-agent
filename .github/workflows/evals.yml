@@ -135,10 +135,11 @@ jobs:
           python -m sre_agent.evals.cli --suite release --format json --output artifacts/release.json || true
           python -m sre_agent.evals.cli --suite release --format text --output artifacts/release.txt || true
 
-      # Dry-run replay builds its mock client from each fixture's own `should_use_tools` and
-      # answers with canned text containing the graded keywords (replay_cli.py:113,187). It
-      # verifies the replay harness wires up — NOT that the agent reasons correctly. Gating
-      # here catches harness breakage only; do not read it as a quality signal.
+      # Dry-run replay swaps in a mock client, so the response text is a fixed string and
+      # the tool list comes from each fixture's own `should_use_tools`. Content checks are
+      # therefore skipped in dry-run (see replay_cli._expected_for); what is scored is that
+      # the harness dispatches tools, avoids forbidden ones, and respects the call budget.
+      # This gates harness breakage only — it is not a quality signal.
       - name: Replay harness check (dry-run)
         run: |
           mkdir -p artifacts

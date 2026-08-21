@@ -172,6 +172,27 @@ def _setup_model(model: str, dry_run: bool):
         return create_async_client(), thinking
 
 
+
+def _expected_for(expected: dict, dry_run: bool) -> dict:
+    """Drop content checks when replaying against the mock client.
+
+    In dry-run the response is a fixed string from ``_make_mock_client``, so
+    ``should_mention`` can only ever measure that string, not the agent. What
+    remains — tools used, tools avoided, call budget — verifies that the replay
+    harness dispatches tools and respects limits, which is the whole point of
+    the dry-run mode. Live runs are scored against the full expectation.
+    """
+    if not dry_run:
+        return expected
+    content_keys = {"should_mention", "overall_should_mention"}
+    trimmed = {k: v for k, v in expected.items() if k not in content_keys}
+    if "per_turn" in trimmed:
+        trimmed["per_turn"] = [
+            {k: v for k, v in turn.items() if k not in content_keys} for turn in trimmed["per_turn"]
+        ]
+    return trimmed
+
+
 def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet-4-6", dry_run: bool = False) -> dict:
     """Run a single fixture (single-turn or multi-turn) and return the scored result."""
     fixture = load_fixture(name)
@@ -188,7 +209,7 @@ def _run_fixture(name: str, use_judge: bool = False, model: str = "claude-sonnet
         client = _make_mock_client(expected_tools)
 
     result = harness.run(client=client, prompt=fixture["prompt"], thinking=thinking)
-    score = score_replay(result, fixture["expected"])
+    score = score_replay(result, _expected_for(fixture["expected"], dry_run))
 
     output = {
         "fixture": name,
@@ -227,7 +248,7 @@ def _run_multi_turn_fixture(name: str, fixture: dict, use_judge: bool, model: st
         client = _make_multi_turn_mock_client(fixture["turns"], expected_keywords)
 
     result = harness.run(client=client, thinking=thinking)
-    score = score_multi_turn(result, fixture.get("expected", {}))
+    score = score_multi_turn(result, _expected_for(fixture.get("expected", {}), dry_run))
 
     output = {
         "fixture": name,
