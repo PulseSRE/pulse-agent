@@ -374,15 +374,17 @@ class TestFallbackIsNotArgmax:
 
 
 class TestToolCategoryCoverage:
-    """Every registered tool must belong to a category or it can never be offered."""
+    """Every registered tool must be reachable, or the agent can never call it."""
 
-    def test_no_orphaned_tools(self):
+    def test_no_unreachable_tools(self):
         import re
         from pathlib import Path as _Path
 
-        from sre_agent.tool_categories import TOOL_CATEGORIES
+        from sre_agent.tool_categories import ALWAYS_INCLUDE, TOOL_CATEGORIES
 
-        categorized: set[str] = set()
+        # A tool is reachable if some category offers it, or if it is always
+        # included regardless of category.
+        categorized: set[str] = set(ALWAYS_INCLUDE)
         for cat in TOOL_CATEGORIES.values():
             categorized.update(cat.get("tools", []))
 
@@ -392,7 +394,7 @@ class TestToolCategoryCoverage:
                 defined.add(match.group(1))
 
         orphaned = defined - categorized
-        assert not orphaned, f"tools defined but in no category (never offered): {sorted(orphaned)}"
+        assert not orphaned, f"tools defined but unreachable (no category, not always-included): {sorted(orphaned)}"
 
     def test_memory_tools_are_reachable(self):
         from sre_agent.tool_categories import MODE_CATEGORIES, TOOL_CATEGORIES
