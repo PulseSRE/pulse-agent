@@ -549,7 +549,6 @@ def _get_deprioritized_tools() -> set[str]:
         return set()
 
 
-
 def _query_relevance(tool_name: str, query_lower: str, query_stems: set[str]) -> int:
     """Score a tool against the query so the budget cut keeps what was asked about.
 
