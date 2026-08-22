@@ -150,9 +150,7 @@ class TestBaselineComparison:
 
 class TestBaselineStorage:
     def test_round_trip(self, memory):
-        assert memory.record_baseline(
-            WorkloadBaseline("production", "checkout-api", "memory_bytes", 600.0, 800.0, 120)
-        )
+        assert memory.record_baseline(WorkloadBaseline("production", "checkout-api", "memory_bytes", 600.0, 800.0, 120))
         got = memory.get_baseline("production", "checkout-api", "memory_bytes")
         assert got is not None
         assert got.p50 == 600.0
