@@ -166,8 +166,8 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p artifacts
-          python -m sre_agent.evals.replay_cli --all --dry-run --format json > artifacts/replay.json || true
-          python -m sre_agent.evals.replay_cli --all --dry-run --format text | tee artifacts/replay.txt
+          python -m sre_agent.evals.replay_cli --all --dry-run --concurrency 4 --format json > artifacts/replay.json || true
+          python -m sre_agent.evals.replay_cli --all --dry-run --concurrency 4 --format text | tee artifacts/replay.txt
 
       # The only step that puts the real model against recorded cluster state and scores
       # what it actually said. REPORTING ONLY FOR NOW — continue-on-error is deliberate.
@@ -204,8 +204,11 @@ jobs:
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json
           # Single run: replay_cli exits non-zero if any fixture fails, and still writes the
           # JSON, which the always() summary step below renders.
+          # --concurrency: the suite is API-bound, so this is bounded by provider
+          # rate limits rather than CPU. 4 turns a ~45 minute serial run into
+          # roughly a quarter of that without tripping 429s.
           python -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 \
-            --format json > artifacts/live_judge.json
+            --concurrency 4 --format json > artifacts/live_judge.json
 
       - name: Run safety and integration evals (non-gating)
         run: |

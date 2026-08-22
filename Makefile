@@ -41,7 +41,7 @@ evals:
 # THE RELEASE GATE — runs the real model against recorded cluster state.
 eval-gate:
 	@echo "Running live judged replay (costs API calls)..."
-	python3 -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6
+	python3 -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 --concurrency 4
 
 evals-full: evals
 	@echo "Running LLM-judged evals (requires API key)..."

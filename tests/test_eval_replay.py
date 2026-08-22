@@ -923,3 +923,108 @@ class TestToolRegistryInReplay:
         from sre_agent.evals.replay_config import ensure_tool_registry
 
         assert ensure_tool_registry() == ensure_tool_registry()
+
+
+class TestIsolationRefcounting:
+    """Concurrent fixtures share one set of patches, so they must be refcounted."""
+
+    def test_patches_survive_an_inner_exit(self):
+        from sre_agent import harness
+        from sre_agent.evals.replay_config import offline_context
+
+        real = harness.get_cluster_context
+        with offline_context():
+            patched = harness.get_cluster_context
+            assert patched is not real
+            with offline_context():
+                pass
+            # the inner exit must NOT have restored the live reader
+            assert harness.get_cluster_context is patched
+        assert harness.get_cluster_context is real
+
+    def test_conflicting_picker_settings_are_refused(self):
+        import pytest
+
+        from sre_agent.evals.replay_config import offline_context
+
+        with offline_context(allow_llm_tool_picker=False):
+            with pytest.raises(RuntimeError, match="already active"):
+                with offline_context(allow_llm_tool_picker=True):
+                    pass
+
+    def test_depth_returns_to_zero_after_nesting(self):
+        from sre_agent.evals import replay_config
+        from sre_agent.evals.replay_config import offline_context
+
+        with offline_context():
+            with offline_context():
+                assert replay_config._isolation_depth == 2
+        assert replay_config._isolation_depth == 0
+        assert replay_config._isolation_stack is None
+
+    def test_concurrent_entries_never_leave_it_unpatched(self):
+        import threading
+
+        from sre_agent import harness
+        from sre_agent.evals.replay_config import offline_context
+
+        real = harness.get_cluster_context
+        observed: list[bool] = []
+        start = threading.Barrier(4)
+
+        def worker() -> None:
+            start.wait()
+            for _ in range(25):
+                with offline_context():
+                    observed.append(harness.get_cluster_context is not real)
+
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert observed, "workers recorded nothing"
+        assert all(observed), "a thread saw the live cluster reader while inside isolation"
+        assert harness.get_cluster_context is real
+
+
+class TestParallelExecution:
+    def test_order_is_preserved_regardless_of_completion(self):
+        import time
+
+        from sre_agent.evals.replay_cli import _execute
+
+        def slow_first(name: str) -> dict:
+            # invert the natural completion order
+            time.sleep(0.05 if name == "a" else 0.0)
+            return {"fixture": name}
+
+        out = _execute(["a", "b", "c"], slow_first, concurrency=3)
+        assert [r["fixture"] for r in out] == ["a", "b", "c"]
+
+    def test_serial_path_used_for_a_single_fixture(self):
+        from sre_agent.evals.replay_cli import _execute
+
+        seen: list[str] = []
+        out = _execute(["only"], lambda n: (seen.append(n), {"fixture": n})[1], concurrency=8)
+        assert [r["fixture"] for r in out] == ["only"]
+        assert seen == ["only"]
+
+    def test_every_fixture_runs_exactly_once(self):
+        import threading
+
+        from sre_agent.evals.replay_cli import _execute
+
+        lock = threading.Lock()
+        calls: list[str] = []
+
+        def record(name: str) -> dict:
+            with lock:
+                calls.append(name)
+            return {"fixture": name}
+
+        names = [f"f{i}" for i in range(12)]
+        out = _execute(names, record, concurrency=4)
+        assert sorted(calls) == sorted(names)
+        assert [r["fixture"] for r in out] == names
