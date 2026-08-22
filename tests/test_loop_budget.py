@@ -132,9 +132,7 @@ class TestCompaction:
         assert out == msgs
 
     def test_non_tool_result_blocks_survive(self):
-        msgs = [
-            {"role": "user", "content": [{"type": "text", "text": "w" * 50_000}]} for _ in range(8)
-        ]
+        msgs = [{"role": "user", "content": [{"type": "text", "text": "w" * 50_000}]} for _ in range(8)]
         out, reclaimed = compact_tool_results(msgs, keep_recent=6)
         assert reclaimed == 0
         assert out[0]["content"][0]["text"] == "w" * 50_000
