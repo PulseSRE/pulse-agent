@@ -1037,10 +1037,8 @@ class TestMultiTurnHistory:
         from sre_agent.loop_budget import compact_tool_results
 
         big = "x" * 60_000
-        original = [
-            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": big}]}
-            for _ in range(9)
-        ]
+        block = {"type": "tool_result", "tool_use_id": "t", "content": big}
+        original = [{"role": "user", "content": [dict(block)]} for _ in range(9)]
         held = original  # the caller keeps this reference across the agent turn
         compacted, reclaimed = compact_tool_results(original)
         assert reclaimed > 0
