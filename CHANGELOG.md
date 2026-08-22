@@ -4,6 +4,11 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### The trust level an operator reads should be the one that governs
+- `/monitor/capabilities` reported `max_trust_level` — the ceiling a client may *select* — and nothing about the level the scan loop is actually running at. Those became different numbers when `effective_trust_level` started reading the server's configured floor instead of whichever browser tabs happened to be open
+- The response now carries `effective_trust_level` alongside the ceiling. A subscriber can still raise the monitor above the floor, so the running level is read from the live monitor rather than re-derived from settings
+- No monitor yet means nothing is scanning, so the configured floor is the honest answer. A monitor that raises is caught for the same reason: Mission Control uses this response to decide which trust controls to enable, and a 500 here disables the operator's controls entirely
+
 ### An inbox row should say where
 - Inbox items took `namespace` from `finding.get("namespace")`, and `_make_finding` has never set a top-level namespace — every scanner puts it inside `resources[0]`. So the field was always None. Measured on the reference cluster: **0 of 31** open items carried a namespace while the resource underneath plainly did
 - The UI has rendered a namespace badge on every row this whole time and it has never once appeared, which is why four identical `TargetDown` rows sat in the list with nothing to tell them apart

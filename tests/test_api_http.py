@@ -187,6 +187,56 @@ class TestMonitorControl:
         data = r.json()
         assert "max_trust_level" in data
 
+    def test_capabilities_reports_what_is_actually_governing(self, api_client, api_headers, monkeypatch):
+        """The ceiling and the running level are different numbers.
+
+        A subscriber may raise the monitor above the configured floor, so the
+        level the scan loop runs at is not the level an operator configured.
+        The UI needs the running one to say anything true about what the agent
+        will do; ``max_trust_level`` only says what a client may ask for.
+        """
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(
+            "sre_agent.monitor.cluster_monitor.get_cluster_monitor_sync",
+            lambda: SimpleNamespace(effective_trust_level=3),
+        )
+        # Pin the configured floor to something that is NOT the running level,
+        # so the two fields cannot pass by being the same number. Settings are
+        # a frozen pydantic model, so stub the accessor rather than the value.
+        monkeypatch.setattr(
+            "sre_agent.api.scanner_rest.get_settings",
+            lambda: SimpleNamespace(monitor=SimpleNamespace(max_trust_level=1)),
+        )
+
+        data = api_client.get("/monitor/capabilities", headers=api_headers).json()
+        assert data["effective_trust_level"] == 3, "should report the level the scan loop runs at"
+        assert data["max_trust_level"] == 1, "the ceiling must not be overwritten by the running value"
+
+    def test_capabilities_falls_back_to_configured_with_no_monitor(self, api_client, api_headers, monkeypatch):
+        """Nothing scanning means the configured floor is the honest answer."""
+        monkeypatch.setattr(
+            "sre_agent.monitor.cluster_monitor.get_cluster_monitor_sync",
+            lambda: None,
+        )
+        data = api_client.get("/monitor/capabilities", headers=api_headers).json()
+        assert data["effective_trust_level"] == data["max_trust_level"]
+
+    def test_capabilities_survives_a_monitor_that_raises(self, api_client, api_headers, monkeypatch):
+        """A broken monitor must not take the whole capabilities call down.
+
+        Mission Control uses this response to decide which trust levels to
+        enable, so a 500 here disables the operator's controls entirely.
+        """
+
+        def boom():
+            raise RuntimeError("monitor is wedged")
+
+        monkeypatch.setattr("sre_agent.monitor.cluster_monitor.get_cluster_monitor_sync", boom)
+        r = api_client.get("/monitor/capabilities", headers=api_headers)
+        assert r.status_code == 200
+        assert r.json()["effective_trust_level"] == r.json()["max_trust_level"]
+
     def test_pause(self, api_client, api_headers):
         r = api_client.post("/monitor/pause", headers=api_headers)
         assert r.status_code == 200
