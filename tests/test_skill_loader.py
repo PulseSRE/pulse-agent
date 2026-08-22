@@ -527,3 +527,49 @@ class TestDestructiveGuidance:
 
     def test_scoped_requests_are_respected(self):
         assert "start with step 1" in self._sre_prompt()
+
+
+class TestContinuationStickiness:
+    """A follow-up stays with the skill already serving the conversation."""
+
+    def test_back_references_are_continuations(self):
+        from sre_agent.skill_router import is_continuation
+
+        for q in (
+            "Scale it back to 3 then, we don't have the capacity",
+            "Did it work? Are all pods running?",
+            "Add a memory chart to it",
+            "do that again",
+            "check the previous one instead",
+        ):
+            assert is_continuation(q), f"should be a continuation: {q}"
+
+    def test_new_tasks_are_not_continuations(self):
+        from sre_agent.skill_router import is_continuation
+
+        for q in (
+            "run a security scan on the payments namespace",
+            "forecast capacity for next quarter",
+            "why is checkout-api slow",
+            "build me a dashboard for production",
+        ):
+            assert not is_continuation(q), f"should not be a continuation: {q}"
+
+    def test_a_followup_does_not_switch_specialists(self):
+        """The worst result in the eval suite came from this switching.
+
+        "Scale it back to 3 then, we don't have the capacity" matched
+        capacity_planner's trigger. The turn re-routed to a skill without
+        scale_deployment, which then correctly disowned an action the
+        conversation had taken two turns earlier — reading, to the operator, as
+        the assistant denying its own work.
+        """
+        from sre_agent.evals.replay_config import resolve_mode
+
+        assert resolve_mode("Scale it back to 3 then, we don't have the capacity", last_mode="sre") == "sre"
+
+    def test_a_hard_switch_still_switches(self):
+        # stickiness must not trap a conversation that genuinely changed subject
+        from sre_agent.evals.replay_config import resolve_mode
+
+        assert resolve_mode("check that for rbac issues", last_mode="sre") != "sre"

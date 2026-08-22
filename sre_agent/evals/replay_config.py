@@ -310,6 +310,14 @@ def resolve_mode(query: str, last_mode: str | None = None) -> str:
 
     q_lower = query.lower()
     hard_sre, hard_sec = _hard_switch_keywords()
+    has_hard = any(kw in q_lower for kw in hard_sre) or any(kw in q_lower for kw in hard_sec)
+
+    # Mirrors the endpoint: a follow-up referring back to the conversation stays
+    # with the skill already serving it.
+    from ..skill_router import is_continuation
+
+    if is_continuation(query) and not has_hard:
+        return last_mode
 
     if last_mode == "view_designer":
         try:
@@ -320,7 +328,6 @@ def resolve_mode(query: str, last_mode: str | None = None) -> str:
         except Exception:
             is_conflicting = False
         is_custom_skill = intent not in _BUILTIN_MODES and not is_conflicting
-        has_hard = any(kw in q_lower for kw in hard_sre) or any(kw in q_lower for kw in hard_sec)
         if not has_hard and not is_custom_skill:
             return "view_designer"
         return intent
