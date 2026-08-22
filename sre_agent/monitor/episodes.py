@@ -66,6 +66,10 @@ _ONSET_SPREAD_SECONDS = 2 * 3600
 # problem rather than unrelated events.
 _RECURRENCE_WINDOW_SECONDS = 24 * 3600
 
+# How long an open episode may go without its cause being re-detected before
+# it is treated as over. See close_stale() for why fifteen minutes.
+_STALE_EPISODE_SECONDS = 15 * 60
+
 
 def _now() -> int:
     return int(time.time())
@@ -231,6 +235,42 @@ def close(episode_id: str, reason: str = "cause cleared") -> None:
     repo = _repo()
     repo.close(episode_id, _now())
     logger.info("Episode %s closed: %s", episode_id, reason)
+
+
+def close_stale() -> int:
+    """Close episodes whose cause nobody has re-detected. Returns how many.
+
+    Until this existed, ``close_for_correlation`` was the only way an episode
+    ended, and it fires when a finding *resolves*. A cause that merely stopped
+    being reported — a node that went NotReady and came back, an alert that
+    stopped firing between scans — left its episode open forever.
+
+    Observed live: a master flapped NotReady and recovered. Sixty-eight minutes
+    later the episode was still open and still the headline on the front door,
+    captioned "running 68m", which reads as *broken for 68 minutes* when the
+    truth was *last seen 68 minutes ago and never re-checked*. A monitoring
+    product announcing a resolved incident as live is worse than one that says
+    nothing.
+
+    This is the same rule the findings themselves got: detect slowly, clear
+    quickly. The window has to clear the slowest scanner — those on
+    ``scan_every: 5`` touch their episode only every fifth cycle, roughly five
+    and a half minutes at a 65-second interval. Fifteen minutes leaves room for
+    two and a half of those missed turns, and matches the clearing window used
+    elsewhere in the product.
+    """
+    cutoff = _now() - _STALE_EPISODE_SECONDS
+    try:
+        stale = _repo().list_stale_open(cutoff)
+    except Exception:
+        logger.exception("Could not look for stale episodes — closing none")
+        return 0
+
+    closed = 0
+    for episode in stale:
+        close(episode["id"], reason="cause no longer reported")
+        closed += 1
+    return closed
 
 
 def close_for_correlation(correlation_key: str) -> bool:

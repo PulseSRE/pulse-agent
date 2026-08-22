@@ -129,6 +129,18 @@ class ClusterMonitor:
                 logger.debug("Could not seed known episodes", exc_info=True)
             self._episodes_seeded = True
 
+        # Before opening anything, retire what nobody is re-detecting. Doing it
+        # here rather than on a timer keeps it on the same clock as the touches
+        # it is judging: an episode is stale relative to scans, not to wall time.
+        try:
+            from .episodes import close_stale
+
+            retired = close_stale()
+            if retired:
+                logger.info("Closed %d episode(s) whose cause is no longer reported", retired)
+        except Exception:
+            logger.exception("Stale episode sweep failed")
+
         claimed = symptom_keys_by_episode()
         opened: list[tuple[str, dict]] = []
         for f in sorted(findings, key=_depth):
