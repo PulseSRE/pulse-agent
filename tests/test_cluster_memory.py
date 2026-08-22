@@ -173,6 +173,27 @@ class TestBaselineStorage:
         assert len(memory.list_baselines("prod", "a")) == 2
 
 
+class TestRealDatabaseAccessor:
+    """The 18 tests above inject a fake db, so none of them touch this path.
+
+    ClusterMemory.db imported `get_db`, which does not exist — the accessor is
+    `get_database`. Every call raised ImportError, was swallowed by the caller's
+    own except, and returned False. Feature 3 was inert in production with the
+    tables present and no error anywhere.
+    """
+
+    def test_the_accessor_it_imports_actually_exists(self):
+        import sre_agent.db as db_module
+
+        from sre_agent.memory.environment import ClusterMemory
+
+        source = ClusterMemory.db.fget.__code__.co_names
+        imported = [n for n in source if n.startswith("get_")]
+        assert imported, "db property should import an accessor"
+        for name in imported:
+            assert hasattr(db_module, name), f"sre_agent.db has no {name!r}"
+
+
 class TestReachability:
     def test_memory_tools_are_categorised(self):
         from sre_agent.tool_categories import TOOL_CATEGORIES
