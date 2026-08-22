@@ -151,9 +151,33 @@ async def monitor_capabilities(_auth=Depends(verify_token)):
     """Expose monitor trust/capability limits so UI can align controls."""
     from ..monitor import AUTO_FIX_HANDLERS
 
-    max_trust_level = get_settings().monitor.max_trust_level
+    configured = max(0, min(get_settings().monitor.max_trust_level, 4))
+
+    # Two different numbers, and callers need both. ``max_trust_level`` is the
+    # ceiling a client may select — Mission Control greys out the levels above
+    # it. ``effective_trust_level`` is the level the scan loop is *actually*
+    # running at, which a subscriber may raise above the configured floor.
+    #
+    # The front door was rendering neither: it showed the browser tab's own
+    # persisted preference, a localStorage value that is sent to the server on
+    # connect and never read back. So two operators on one cluster could read
+    # two different trust levels off the same agent, and both could be wrong
+    # about what it would do unattended.
+    effective = configured
+    try:
+        from ..monitor.cluster_monitor import get_cluster_monitor_sync
+
+        monitor = get_cluster_monitor_sync()
+        if monitor is not None:
+            effective = max(0, min(monitor.effective_trust_level, 4))
+    except Exception:
+        # No monitor yet means nothing is scanning, so the configured floor is
+        # the honest answer — not a reason to fail the whole capabilities call.
+        logger.debug("Could not read effective trust level from monitor", exc_info=True)
+
     return {
-        "max_trust_level": max(0, min(max_trust_level, 4)),
+        "max_trust_level": configured,
+        "effective_trust_level": effective,
         "supported_auto_fix_categories": sorted(AUTO_FIX_HANDLERS.keys()),
     }
 
