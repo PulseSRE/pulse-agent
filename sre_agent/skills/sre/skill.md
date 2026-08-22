@@ -45,6 +45,15 @@ trigger_patterns:
   - "pending|unschedulable|insufficient"
   - "hpa.*max|autoscal"
   - "pvc.*bound|volume.*mount"
+  # GitOps lives in this skill's categories and owns get_argo_applications, but
+  # no pattern claimed it — "are our ArgoCD apps in sync" was scoring into
+  # capacity_planner on soft signals alone.
+  - "(argo\\s?cd|argocd|gitops)\\b"
+  - "application.*(sync|drift)|(sync|drift).*application|out.of.sync"
+  # Inbox task creation is an sre tool with no skill of its own, so "remind me
+  # to rotate the certs" was landing in security on the word 'rotate'.
+  - "(add|create|make).{0,12}(a\\s+)?(task|reminder|todo)"
+  - "remind\\s+me"
 tool_sequences:
   crashloop: [list_pods, describe_pod, get_pod_logs, get_events]
   node_issue: [get_node_status, list_pods, get_events, get_prometheus_query]
