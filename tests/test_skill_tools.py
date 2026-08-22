@@ -25,6 +25,21 @@ class TestSkillSearch:
     def test_rejects_a_query_with_no_usable_terms(self):
         assert "Error" in skill_search("a  b")
 
+    def test_reference_names_are_searchable(self):
+        """A skill shipping certificate-expiry.md is the answer for "certificate expiry".
+
+        Scoring only name, keywords and description missed it: the query matched
+        the security skill's description instead, and the skill that actually ships
+        the procedure ranked nowhere. The specific expertise lives in the reference
+        filenames, so they are scored alongside keywords.
+        """
+        out = skill_search("certificate expiry")
+        assert "sre" in out, "the skill shipping certificate-expiry.md should match"
+        assert "certificate-expiry" in out
+
+    def test_node_pressure_reference_is_searchable(self):
+        assert "node-pressure" in skill_search("node pressure eviction")
+
     def test_surfaces_reference_documents(self):
         out = skill_search("sre kubernetes diagnostics")
         assert "references:" in out
