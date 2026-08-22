@@ -321,10 +321,19 @@ def llm_pick_tools(
         return []
 
 
+# What adaptive selection guarantees regardless of what it predicts. This is a
+# deliberately smaller set than skill_loader.ALWAYS_INCLUDE, which only scopes the
+# candidate pool — anything that must survive prediction has to be named here too,
+# or it is filtered straight back out. See test_discovery_tools_survive_selection.
 ALWAYS_INCLUDE_SLIM = {
     "list_pods",
     "get_events",
     "namespace_summary",
+    # The progressive-disclosure index. If the agent is not offered these it
+    # cannot discover that a better-suited skill exists, which is the entire
+    # mechanism — so they are guaranteed rather than predicted.
+    "skill_search",
+    "skill_load",
 }
 
 _MIN_TOOL_SET_SIZE = 8

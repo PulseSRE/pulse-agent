@@ -464,7 +464,17 @@ def build_orchestrated_config(mode: str, query: str = "") -> dict:
         }
     elif mode == "both":
         merged_map = {**SRE_TOOL_MAP, **SEC_TOOL_MAP}
-        merged_defs = SRE_TOOL_DEFS + [d for d in SEC_TOOL_DEFS if d.get("name") not in SRE_TOOL_MAP]
+        # The static maps predate TOOL_REGISTRY, so tools that only auto-register
+        # (skill_search, skill_load) were absent from 'both' while present in
+        # 'sre' — the same registry-versus-module-map split fixed in
+        # build_config_from_skill.
+        from .tool_categories import ALWAYS_INCLUDE
+        from .tool_registry import TOOL_REGISTRY
+
+        for _name in ALWAYS_INCLUDE:
+            if _name not in merged_map and _name in TOOL_REGISTRY:
+                merged_map[_name] = TOOL_REGISTRY[_name]
+        merged_defs = [t.to_dict() for t in merged_map.values()]
         combined_prompt = (
             SRE_PROMPT + "\n\nYou also have security scanning tools available. "
             "After diagnosing operational issues, check for related security concerns."

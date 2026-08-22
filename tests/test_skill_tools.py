@@ -140,6 +140,43 @@ class TestReachability:
         assert "skill_search" in ALWAYS_INCLUDE
         assert "skill_load" in ALWAYS_INCLUDE
 
+    def test_discovery_tools_survive_selection(self):
+        """End-to-end through the real path, because set membership is not enough.
+
+        ALWAYS_INCLUDE only scopes the candidate pool. select_tools_adaptive then
+        narrows it and force-includes ALWAYS_INCLUDE_SLIM — a different, smaller
+        set. skill_search and skill_load sat in the first and not the second, so
+        they were scoped in and filtered straight back out, and progressive
+        disclosure was unreachable on the path production actually uses. A
+        membership assertion passed the entire time.
+        """
+        from sre_agent.evals.replay_config import ensure_tool_registry
+        from sre_agent.skill_loader import build_config_from_skill, get_skill
+
+        ensure_tool_registry()
+        skill = get_skill("sre")
+        assert skill is not None
+
+        # several phrasings, so prediction variance cannot hide a regression
+        for query in (
+            "checkout is slow, investigate",
+            "a cluster node is NotReady",
+            "pods keep crashing with permission denied errors",
+            "the payments namespace looks unhealthy",
+        ):
+            offered = set(build_config_from_skill(skill, query=query)["tool_map"])
+            assert "skill_search" in offered, f"skill_search not offered for: {query}"
+            assert "skill_load" in offered, f"skill_load not offered for: {query}"
+
+    def test_the_two_always_sets_agree_about_discovery(self):
+        from sre_agent.tool_categories import ALWAYS_INCLUDE
+        from sre_agent.tool_predictor import ALWAYS_INCLUDE_SLIM
+
+        # anything the agent must always be able to reach has to be in both
+        for tool in ("skill_search", "skill_load"):
+            assert tool in ALWAYS_INCLUDE, f"{tool} missing from ALWAYS_INCLUDE"
+            assert tool in ALWAYS_INCLUDE_SLIM, f"{tool} missing from ALWAYS_INCLUDE_SLIM"
+
     def test_registered_for_discovery(self):
         from sre_agent.tool_discovery import _TOOL_MODULES
 

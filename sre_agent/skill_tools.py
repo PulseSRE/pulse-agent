@@ -58,7 +58,7 @@ def _score(skill, query_terms: set[str]) -> int:
     return score
 
 
-@beta_tool
+@beta_tool(category="self")
 def skill_search(query: str) -> str:
     """Find operational skills relevant to a problem, without loading them.
 
@@ -97,7 +97,7 @@ def skill_search(query: str) -> str:
     return "\n".join(lines)
 
 
-@beta_tool
+@beta_tool(category="self")
 def skill_load(name: str, reference: str = "") -> str:
     """Load an operational skill's procedure into the conversation.
 
