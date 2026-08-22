@@ -1,7 +1,7 @@
 {
   "generated_from": "run 32557105844 (ee071d4)",
-  "note": "Per-fixture pass/fail. The gate blocks a merge that makes a passing fixture fail; it does not require the suite to be green. Refresh with --save-baseline after a run that legitimately improves things.",
-  "total": 48,
+  "note": "Per-fixture pass/fail. The gate blocks a merge that makes a passing fixture fail; it does not require the suite to be green. Refresh with --save-baseline after a run that legitimately improves things. New fixtures enter as False: they have never passed, so failing is not a regression, and passing later can be recorded deliberately.",
+  "total": 49,
   "passed": 31,
   "fixtures": {
     "autofix_bad_image": false,
@@ -51,6 +51,7 @@
     "view_incident_triage": true,
     "view_investigation_components": false,
     "view_manage_openshiftpulse": true,
-    "view_namespace_dashboard": true
+    "view_namespace_dashboard": true,
+    "baseline_aware_memory_report": false
   }
 }

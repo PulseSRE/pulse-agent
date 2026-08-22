@@ -104,3 +104,40 @@ class TestRetryHint:
 
     def test_satisfied_verdicts_have_no_hint(self):
         assert PhaseVerdict("p", satisfied=True).as_retry_hint() == ""
+
+
+class TestPlanRuntimeIntegration:
+    """Feature 4 lives in plan execution, which no replay fixture reaches.
+
+    Replay fixtures drive run_agent_streaming with a single prompt. The contract
+    judge runs inside PlanRuntime._execute_phase across phases, so a fixture
+    cannot exercise it — testing it there would produce a fixture that passes for
+    a reason unrelated to the feature.
+    """
+
+    def test_execute_phase_judges_and_retries(self):
+        import inspect
+
+        from sre_agent.plan_runtime import PlanRuntime
+
+        src = inspect.getsource(PlanRuntime._execute_phase)
+        assert "judge_phase" in src, "the phase must be judged against its contract"
+        assert "should_retry" in src, "an unmet contract must be retried"
+        assert "_run_phase_once" in src, "retry must re-execute the phase"
+
+    def test_an_unmet_contract_downgrades_status(self):
+        import inspect
+
+        from sre_agent.plan_runtime import PlanRuntime
+
+        src = inspect.getsource(PlanRuntime._execute_phase)
+        assert '"partial"' in src, "a phase that never met its contract must not report complete"
+        assert "open_questions" in src, "the gap must be recorded, not dropped"
+
+    def test_the_retry_carries_the_hint_into_the_prompt(self):
+        import inspect
+
+        from sre_agent.plan_runtime import PlanRuntime
+
+        src = inspect.getsource(PlanRuntime._run_phase_once)
+        assert "retry_hint" in src, "the retry must tell the model what was missing"

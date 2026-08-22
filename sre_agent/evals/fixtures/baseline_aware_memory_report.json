@@ -1,0 +1,27 @@
+{
+    "name": "baseline_aware_memory_report",
+    "prompt": "checkout-api in production is using 1.8GB of memory. Is that a problem? Give me your read and what you'd do about it.",
+    "recorded_responses": {
+        "get_environment_facts": "2 known fact(s) about this cluster:\n\n[cluster]\n  prometheus_retention: 30 days (source: operator)\n\n[production]\n  owner: commerce team (source: operator)",
+        "compare_to_baseline": "production/checkout-api: 1800000000 (memory_bytes) \u2014 3.0x this workload's normal (600000000), above its p95",
+        "get_pod_metrics": "production/checkout-api-7d9f8c-aa11  CPU=340m  Memory=1.72Gi\nproduction/checkout-api-7d9f8c-bb22  CPU=310m  Memory=1.68Gi",
+        "describe_deployment": "{\"name\": \"checkout-api\", \"namespace\": \"production\", \"replicas\": 2, \"containers\": [{\"name\": \"checkout-api\", \"image\": \"quay.io/acme/checkout-api:v3.4.0\", \"resources\": {\"requests\": {\"memory\": \"512Mi\"}, \"limits\": {\"memory\": \"2Gi\"}}}], \"conditions\": [{\"type\": \"Available\", \"status\": \"True\"}]}",
+        "get_recent_changes": "2026-08-22T09:14Z  Deployment/checkout-api  image v3.3.8 -> v3.4.0\n2026-08-21T16:02Z  ConfigMap/checkout-config  data updated"
+    },
+    "expected": {
+        "should_mention": [
+            "3",
+            "normal",
+            "checkout-api"
+        ],
+        "should_use_tools": [
+            "compare_to_baseline"
+        ],
+        "should_not_use_tools": [
+            "delete_pod",
+            "drain_node",
+            "exec_command"
+        ],
+        "max_tool_calls": 12
+    }
+}
