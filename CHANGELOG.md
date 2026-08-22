@@ -4,6 +4,13 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### A queue that never forgets what recovered
+- Resolution rides on `ClusterMonitor._last_findings`: present last scan, gone this scan, raise a resolution event. That dict is **in-memory and starts empty in every process**, so anything that recovered while the agent was restarting was never in it and could never become stale. The item stayed open, critical and wrong until `expire_untouched_items` archived it 48 hours later
+- Measured on the reference cluster: of the open items that could be checked against live state, **seven of seven were already resolved**. A node listed critical/`NotReady` had been `Ready` for six and a half hours; four Deployments listed `degraded (0/1)` were all `1/1`. 27 of 39 open items had not been re-examined in over six hours. An SRE working that queue top-down investigates healthy infrastructure
+- The agent already seeds `_known_episodes` from the database on startup for exactly this reason — "restarting the agent is not news". Findings never got the same treatment. One reconciliation now runs per process, after the first scan settles, resolving open items whose correlation key the cluster is no longer reporting
+- An empty scan resolves nothing. A cycle that reports zero findings is far more likely to be broken than a cluster that became perfect between two scans, and emptying an operator's queue on that reading is the worse failure by a distance
+- Deliberately narrow, matching `expire_untouched_items`: items a person claimed or pinned are theirs, and hand-created items were never tied to a scanner finding. Only work the monitor put there is the monitor's to take back — and it records *why*, since "resolved" with no reason is indistinguishable from somebody closing it
+
 ### The trust ladder described a different agent than the one that ships
 - Level 1 was labelled **"Confirm — every action requires your explicit approval"** for a level that never enters `auto_fix` at all. Nothing is ever proposed, so there is nothing to approve. An operator who wanted supervised remediation read that ladder, chose 1, and got an agent that did nothing — the `total_actions: 0` symptom, sitting in plain sight in the control's own name
 - Level 2, labelled "Batch — low-risk auto-approved", is the level that actually asks: it proposes every fix and waits for a human. The two were the wrong way round

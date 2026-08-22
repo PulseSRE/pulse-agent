@@ -545,6 +545,23 @@ class InboxRepository(BaseRepository):
     def list_mutes(self) -> list[Any]:
         return self.db.fetchall("SELECT * FROM inbox_mutes ORDER BY created_at DESC")
 
+    def fetch_open_machine_items(self) -> list[Any]:
+        """Open, machine-raised items that nobody has taken ownership of.
+
+        Deliberately narrow, matching ``expire_untouched_items``: anything a
+        person claimed or pinned is theirs, and an item somebody created by
+        hand was never tied to a scanner finding in the first place. Only work
+        the monitor put here is the monitor's to take back.
+        """
+        return self.db.fetchall(
+            """SELECT id, correlation_key, title, severity FROM inbox_items
+               WHERE status NOT IN ('resolved', 'archived', 'agent_cleared')
+                 AND correlation_key IS NOT NULL AND correlation_key != ''
+                 AND claimed_by IS NULL
+                 AND pinned_by IS NULL
+                 AND created_by = 'system:monitor'""",
+        )
+
     def fetch_open_items_with_resources(self) -> list[Any]:
         return self.db.fetchall(
             "SELECT id, resources FROM inbox_items WHERE status NOT IN ('resolved', 'archived')",
