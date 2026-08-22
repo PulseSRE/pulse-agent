@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import os
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -217,6 +222,73 @@ class TestScanWarningEvents:
             core.return_value.list_event_for_all_namespaces.return_value = SimpleNamespace(items=events)
             findings = scan_warning_events()
         assert len(findings) == 0
+
+
+class TestCorrelationKeyStability:
+    """The same condition must key the same way after an agent restart.
+
+    resources[0] is what _finding_corr_key builds the key from, and the events
+    scanner used to pick it out of a set. Python randomises string hashing per
+    process, so the set reshuffled on every restart and handed an unchanged
+    condition a brand new key — a fresh inbox item, and a fresh symptom on the
+    episode. Measured on the reference cluster: one episode carrying two
+    symptoms with byte-identical titles and different keys, from two pods in
+    one namespace, and an inbox grown to 507 items.
+
+    Hash randomisation is per-process, so a single-process test cannot see
+    this: within one interpreter the set order never moves. The test has to
+    cross a process boundary with different seeds, which is what makes it bite.
+    """
+
+    SEEDS = ("0", "1", "42", "1000", "31337")
+
+    PROBE = textwrap.dedent(
+        """
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from sre_agent.audit_scanner import scan_warning_events
+        from sre_agent.inbox import _finding_corr_key
+
+        # Names chosen to hash apart: these are the real multicluster-engine
+        # pods whose ordering flipped on the cluster.
+        names = ["infrastructure-operator", "ocm-controller", "klusterlet",
+                 "grc-policy-propagator", "cluster-manager"]
+        events = [
+            SimpleNamespace(
+                metadata=SimpleNamespace(namespace="multicluster-engine"),
+                reason="BackOff", count=25,
+                involved_object=SimpleNamespace(kind="Pod", name=n),
+            )
+            for n in names
+        ]
+        with patch("sre_agent.audit_scanner.get_core_client") as core:
+            core.return_value.list_event_for_all_namespaces.return_value = SimpleNamespace(items=events)
+            findings = scan_warning_events()
+        print(_finding_corr_key(findings[0]))
+        """
+    )
+
+    def _key_under_seed(self, seed: str) -> str:
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        out = subprocess.run(
+            [sys.executable, "-c", self.PROBE],
+            capture_output=True, text=True, env=env, cwd=str(Path(__file__).resolve().parents[1]),
+        )
+        assert out.returncode == 0, out.stderr
+        return out.stdout.strip()
+
+    def test_key_survives_a_restart(self):
+        keys = {seed: self._key_under_seed(seed) for seed in self.SEEDS}
+        assert len(set(keys.values())) == 1, (
+            f"the same condition produced different correlation keys across "
+            f"restarts: {keys}"
+        )
+
+    def test_the_key_is_the_one_we_expect(self):
+        # Pinning the value, not just its stability: a scanner that returned no
+        # resources at all would also be perfectly stable, and would key every
+        # namespace's BackOff onto one item.
+        assert self._key_under_seed("0") == "audit_events:multicluster-engine:Pod/cluster-manager"
 
 
 class TestScanAuthEvents:

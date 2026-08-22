@@ -247,7 +247,11 @@ def scan_recent_deployments() -> list[dict]:
                             # Look up related warning events from batch-fetched data
                             obj_key = f"{ns}/{dep.metadata.name}"
                             dep_events = warning_events_by_obj.get(obj_key, [])
-                            event_reasons = list({e.reason for e in dep_events[:5]})
+                            # sorted for the same reason as the events scanner
+                            # below: this feeds a summary that ends up in a
+                            # finding, and an order that reshuffles per process
+                            # makes the same condition look new.
+                            event_reasons = sorted({e.reason for e in dep_events[:5]})
 
                             finding = _make_finding(
                                 severity=SEVERITY_WARNING if available > 0 else SEVERITY_CRITICAL,
@@ -361,7 +365,15 @@ def scan_warning_events() -> list[dict]:
             ns, reason = key.split(":", 1)
             sample = group[0]
             resource_kind = sample.involved_object.kind if sample.involved_object else "Unknown"
-            resource_names = list({e.involved_object.name for e in group[:5] if e.involved_object})
+            # sorted, never list(set). resources[0] is what _finding_corr_key
+            # keys on, and Python randomises string hashing per process — so a
+            # set's iteration order changes on every agent restart, handing the
+            # same condition a brand new correlation key each time. Measured on
+            # the reference cluster: one episode carrying two symptoms with
+            # identical titles and different keys, and an inbox that had grown
+            # to 507 items. The condition never changed; only which pod
+            # happened to sort first out of a set did.
+            resource_names = sorted({e.involved_object.name for e in group[:5] if e.involved_object})
 
             findings.append(
                 _make_finding(
@@ -472,7 +484,7 @@ def scan_auth_events() -> list[dict]:
                         summary=(
                             f"{len(recent_tokens)} new ServiceAccount token secrets created in the last 24 hours. "
                             f"Review for unexpected token creation. "
-                            f"Namespaces: {', '.join(list({t['namespace'] for t in recent_tokens[:5]}))}."
+                            f"Namespaces: {', '.join(sorted({t['namespace'] for t in recent_tokens[:5]}))}."
                         ),
                         resources=[
                             {
