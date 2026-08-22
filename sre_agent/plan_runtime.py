@@ -279,9 +279,54 @@ class PlanRuntime:
         incident: dict,
         prior_outputs: dict[str, SkillOutput],
     ) -> SkillOutput:
+        """Execute a phase and hold it to its declared `produces` contract.
+
+        A phase that does not produce what it promised is asked again, once, with
+        the missing fields named. Without this the plan advances on a diagnosis
+        that was never made — a diagnose phase declaring `produces: [root_cause]`
+        could return nothing and remediation would run anyway.
+        """
+        from .phase_judge import judge_phase, should_retry
+
+        attempts = 0
+        hint = ""
+        output = await self._run_phase_once(phase, incident, prior_outputs, hint)
+        attempts += 1
+
+        verdict = judge_phase(phase, output)
+        while should_retry(verdict, attempts):
+            logger.info("Phase '%s' incomplete (%s) — retrying with the gap named", phase.id, verdict.reason)
+            hint = verdict.as_retry_hint()
+            output = await self._run_phase_once(phase, incident, prior_outputs, hint)
+            attempts += 1
+            verdict = judge_phase(phase, output)
+
+        if not verdict.satisfied:
+            # Downgrade rather than silently passing an unmet contract downstream.
+            if output.status == "complete":
+                output.status = "partial"
+            note = f"[contract unmet: {verdict.reason}]"
+            output.evidence_summary = f"{output.evidence_summary} {note}".strip()
+            if verdict.missing:
+                output.open_questions = list(output.open_questions) + [
+                    f"phase '{phase.id}' did not produce: {', '.join(verdict.missing)}"
+                ]
+            logger.warning("Phase '%s' finished without meeting its contract: %s", phase.id, verdict.reason)
+
+        return output
+
+    async def _run_phase_once(
+        self,
+        phase,
+        incident: dict,
+        prior_outputs: dict[str, SkillOutput],
+        retry_hint: str = "",
+    ) -> SkillOutput:
         """Execute a single phase — load skill, call agent, parse output."""
         prior_context = self._compress_prior_outputs(prior_outputs)
         prompt = self._build_phase_prompt(phase, incident, prior_context)
+        if retry_hint:
+            prompt = f"{prompt}\n\n{retry_hint}"
 
         logger.info(
             "Executing phase '%s' with skill '%s' (%d prior outputs)",
