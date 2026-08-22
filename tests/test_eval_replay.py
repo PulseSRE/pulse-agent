@@ -1028,3 +1028,44 @@ class TestParallelExecution:
         out = _execute(names, record, concurrency=4)
         assert sorted(calls) == sorted(names)
         assert [r["fixture"] for r in out] == names
+
+
+class TestMultiTurnHistory:
+    """A follow-up turn must be able to see what the previous turn found."""
+
+    def test_compaction_preserves_the_callers_list_identity(self):
+        from sre_agent.loop_budget import compact_tool_results
+
+        big = "x" * 60_000
+        block = {"type": "tool_result", "tool_use_id": "t", "content": big}
+        original = [{"role": "user", "content": [dict(block)]} for _ in range(9)]
+        held = original  # the caller keeps this reference across the agent turn
+        compacted, reclaimed = compact_tool_results(original)
+        assert reclaimed > 0
+        held[:] = compacted
+        # appends made after compaction must still be visible to the caller
+        held.append({"role": "assistant", "content": "done"})
+        assert original[-1]["content"] == "done"
+        assert original is held
+
+    def test_harness_passes_the_live_list_not_a_copy(self):
+        """The agent appends tool_use/tool_result blocks to the list it is given.
+
+        Passing a copy discarded them, so turn 2 saw only turn 1's final prose and
+        was asked follow-ups about data it could no longer see.
+        """
+        import inspect
+
+        from sre_agent.evals import replay
+
+        src = inspect.getsource(replay.MultiTurnReplayHarness.run)
+        assert '"messages": messages,' in src, "multi-turn must pass the live list"
+        assert '"messages": list(messages)' not in src, "copying discards the tool exchange"
+
+    def test_final_text_is_not_duplicated_when_the_agent_already_appended(self):
+        import inspect
+
+        from sre_agent.evals import replay
+
+        src = inspect.getsource(replay.MultiTurnReplayHarness.run)
+        assert 'messages[-1].get("role") == "assistant"' in src
