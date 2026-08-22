@@ -316,3 +316,44 @@ class TestPersistence:
         c = _candidate()
         learner.record(c)
         assert learner.promote(c.key) is not None
+
+
+class TestResolutionOutcomes:
+    """auto-fix and self-healed are not the same evidence."""
+
+    def test_a_fix_that_worked_is_learnable(self):
+        learner = TrajectoryLearner(use_db=False)
+        c = _candidate()
+        learner.record(c)
+        assert learner.promote(c.key) is not None
+
+    def test_self_healing_discards_rather_than_promotes(self):
+        """A finding going away on its own does not validate the diagnosis.
+
+        The agent may have concluded database connection exhaustion while the
+        real cause was a transient network blip that cleared. Promoting on
+        self-heal would teach a wrong root cause as if it were confirmed.
+        """
+        learner = TrajectoryLearner(use_db=False)
+        c = _candidate()
+        learner.record(c)
+        learner.discard(c.key, "finding self-healed — the diagnosis was not what fixed it")
+        assert learner.promote(c.key) is None
+        assert learner.promoted == 0
+        assert learner.discarded == 1
+
+    def test_the_resolution_path_consults_the_gate(self):
+        """Regression guard: resolution used to never touch the learner at all.
+
+        A candidate could sit pending until it expired regardless of what
+        happened to the finding it came from, which on a cluster where actions
+        are proposed and never approved meant nothing was ever learned.
+        """
+        import inspect
+
+        from sre_agent.monitor import cluster_monitor
+
+        src = inspect.getsource(cluster_monitor)
+        marker = src[src.index("# Resolution events") :]
+        assert "get_learner" in marker, "the resolution path must consult the learning gate"
+        assert "self-healed" in marker
