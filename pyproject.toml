@@ -1,6 +1,6 @@
 [project]
 name = "openshift-sre-agent"
-version = "2.17.6"
+version = "2.17.7"
 description = "An AI-powered OpenShift SRE agent using Claude"
 requires-python = ">=3.11"
 dependencies = [
