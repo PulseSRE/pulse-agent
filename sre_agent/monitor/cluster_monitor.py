@@ -930,6 +930,37 @@ class ClusterMonitor:
                     "timestamp": _ts(),
                 }
             )
+            # A resolved finding is the outcome the learning gate has been waiting
+            # for. Until now the gate was only consulted by the verification
+            # pipeline, which needs a pending auto-fix verification — so on a
+            # cluster where actions are proposed and never approved, a candidate
+            # could sit pending until it expired no matter what happened to the
+            # finding it came from.
+            #
+            # auto-fix and self-healed are NOT the same evidence. The agent's fix
+            # working says its diagnosis was right and actionable. A finding going
+            # away on its own says the diagnosis was never needed, and may well
+            # have been wrong — so that discards the candidate rather than
+            # promoting it.
+            try:
+                from ..trajectory import candidate_key, get_learner
+
+                learner = get_learner()
+                ckey = candidate_key(
+                    str(resolved_finding.get("category", "")),
+                    resolved_finding.get("resources", []),
+                )
+                if resolved_by == "auto-fix":
+                    promoted = learner.promote(ckey)
+                    if promoted is not None:
+                        from .verification_pipeline import _scaffold_from_verified
+
+                        await asyncio.to_thread(_scaffold_from_verified, promoted)
+                else:
+                    learner.discard(ckey, "finding self-healed — the diagnosis was not what fixed it")
+            except Exception:
+                logger.debug("Learning gate on resolution failed", exc_info=True)
+
             self._first_seen.pop(key, None)
             asyncio.get_running_loop().run_in_executor(None, _close_episode_for, resolved_finding)
             if finding_id:
