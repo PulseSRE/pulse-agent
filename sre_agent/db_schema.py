@@ -648,3 +648,37 @@ CREATE TABLE IF NOT EXISTS workload_baselines (
 
 CREATE INDEX IF NOT EXISTS idx_workload_baselines_ns ON workload_baselines(namespace, workload);
 """
+
+
+LEARNING_CANDIDATES_SCHEMA = """
+-- Trajectories held between an investigation and the verdict on its fix.
+--
+-- This lived in a dict on a module global, which meant every pod restart wiped
+-- the pending set. The gate records a candidate at investigation time and
+-- promotes it only when verification confirms the fix on a LATER scan cycle, so
+-- an in-memory store could only ever learn from an investigation whose
+-- verification happened to land in the same pod lifetime. In practice it learned
+-- nothing at all.
+--
+-- Rows are kept after resolution rather than deleted: the history is what shows
+-- whether the learning loop is working — how much was promoted versus discarded,
+-- and how that ratio moves.
+CREATE TABLE IF NOT EXISTS learning_candidates (
+    id             SERIAL PRIMARY KEY,
+    candidate_key  TEXT NOT NULL,
+    category       TEXT NOT NULL DEFAULT '',
+    title          TEXT NOT NULL DEFAULT '',
+    root_cause     TEXT NOT NULL DEFAULT '',
+    summary        TEXT NOT NULL DEFAULT '',
+    confidence     REAL NOT NULL DEFAULT 0,
+    evidence_json  TEXT NOT NULL DEFAULT '[]',
+    tools_json     TEXT NOT NULL DEFAULT '[]',
+    status         TEXT NOT NULL DEFAULT 'pending',
+    reason         TEXT NOT NULL DEFAULT '',
+    created_at     BIGINT NOT NULL,
+    resolved_at    BIGINT
+);
+
+CREATE INDEX IF NOT EXISTS idx_learning_candidates_key ON learning_candidates(candidate_key, status);
+CREATE INDEX IF NOT EXISTS idx_learning_candidates_status ON learning_candidates(status);
+"""
