@@ -169,19 +169,9 @@ jobs:
           python -m sre_agent.evals.replay_cli --all --dry-run --concurrency 4 --format json > artifacts/replay.json || true
           python -m sre_agent.evals.replay_cli --all --dry-run --concurrency 4 --format text | tee artifacts/replay.txt
 
-      # The only step that puts the real model against recorded cluster state and scores
-      # what it actually said. REPORTING ONLY FOR NOW — continue-on-error is deliberate.
-      #
-      # It is not yet measuring the right thing: until #59 lands, replay runs the model
-      # with a one-line system prompt and parameterless tool stubs rather than Pulse's
-      # real config, which also makes all 96 `should_not_use_tools` checks vacuous.
-      # Blocking merges on that number would be blocking on the wrong number.
-      #
-      # TO RE-ARM: delete continue-on-error below once #59 has merged, the fixture
-      # budgets have been re-tuned against the real tool set, and --judge-min has a
-      # threshold derived from a real-config run. Track in the eval hardening work.
-      - name: Live judged replay (reported, not gating)
-        continue-on-error: true
+      # THE RELEASE GATE. The only step that puts the real model against recorded
+      # cluster state and scores what it actually said.
+      - name: Live judged replay (RELEASE GATE)
         if: >-
           (github.event_name == 'schedule')
           || (github.event_name == 'push' && github.ref == 'refs/heads/main')
@@ -214,7 +204,9 @@ jobs:
           # the judge is a better measure of "did it find the cause" than whether
           # a keyword appears verbatim.
           python -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 \
-            --concurrency 4 --judge-min 60 --format json > artifacts/live_judge.json
+            --concurrency 4 --judge-min 60 \
+            --baseline sre_agent/evals/baselines/replay.json \
+            --format json > artifacts/live_judge.json
 
       - name: Run safety and integration evals (non-gating)
         run: |

@@ -1069,3 +1069,48 @@ class TestMultiTurnHistory:
 
         src = inspect.getsource(replay.MultiTurnReplayHarness.run)
         assert 'messages[-1].get("role") == "assistant"' in src
+
+
+class TestRegressionGate:
+    """The gate blocks work that makes things worse, not work that is not yet perfect."""
+
+    @staticmethod
+    def _result(name: str, passed: bool) -> dict:
+        return {"fixture": name, "score": {"passed": passed}}
+
+    def test_a_newly_failing_fixture_is_a_regression(self):
+        from sre_agent.evals.replay_cli import _regressions
+
+        baseline = {"a": True, "b": True}
+        assert _regressions([self._result("a", True), self._result("b", False)], baseline) == ["b"]
+
+    def test_a_fixture_that_was_already_failing_is_not(self):
+        from sre_agent.evals.replay_cli import _regressions
+
+        # 17 fixtures fail today; the gate must not block every merge on them
+        baseline = {"a": True, "b": False}
+        assert _regressions([self._result("a", True), self._result("b", False)], baseline) == []
+
+    def test_fixing_one_while_breaking_another_still_fails(self):
+        from sre_agent.evals.replay_cli import _regressions
+
+        # same total, not the same thing — which is why this is per-fixture
+        baseline = {"a": True, "b": False}
+        regressed = _regressions([self._result("a", False), self._result("b", True)], baseline)
+        assert regressed == ["a"]
+
+    def test_a_new_fixture_is_not_a_regression(self):
+        from sre_agent.evals.replay_cli import _regressions
+
+        assert _regressions([self._result("brand_new", False)], {"a": True}) == []
+
+    def test_baseline_file_matches_the_suite(self):
+        import json
+        from pathlib import Path
+
+        from sre_agent.evals.replay import list_fixtures
+
+        data = json.loads(Path("sre_agent/evals/baselines/replay.json").read_text())
+        assert set(data["fixtures"]) == set(list_fixtures()), (
+            "baseline is out of step with the fixture suite — refresh with --save-baseline"
+        )

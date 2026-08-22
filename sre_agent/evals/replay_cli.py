@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import json
 import sys
+from pathlib import Path
 
 from .replay import ReplayHarness, list_fixtures, load_fixture, score_multi_turn, score_replay
 
@@ -80,6 +81,20 @@ def _make_parser() -> argparse.ArgumentParser:
             "bounded by provider rate limits rather than CPU — 4 to 6 is usually the "
             "useful range. Fixture order in the output is preserved either way."
         ),
+    )
+    p.add_argument(
+        "--baseline",
+        metavar="PATH",
+        help=(
+            "Compare against a stored baseline and fail if a fixture that passed there "
+            "does not pass now. Gates on regression rather than on an absolute pass rate, "
+            "so a suite that is not yet fully green can still block work that makes it worse."
+        ),
+    )
+    p.add_argument(
+        "--save-baseline",
+        metavar="PATH",
+        help="Write this run's per-fixture pass/fail to PATH and exit successfully.",
     )
     p.add_argument(
         "--judge-min",
@@ -487,9 +502,72 @@ def main() -> None:
     else:
         print(_format_text(results))
 
-    # Exit non-zero if any fixture failed
+    if args.save_baseline:
+        _write_baseline(results, args.save_baseline)
+        return
+
+    if args.baseline:
+        baseline = _load_baseline(args.baseline)
+        if not baseline:
+            print("Baseline could not be read — refusing to pass silently.", file=sys.stderr)
+            sys.exit(2)
+        regressed = _regressions(results, baseline)
+        passed_now = sum(1 for r in results if r["score"]["passed"])
+        print(
+            f"\nAgainst baseline: {passed_now}/{len(results)} passing "
+            f"(baseline had {sum(1 for v in baseline.values() if v)}); {len(regressed)} regression(s)",
+            file=sys.stderr,
+        )
+        if regressed:
+            print("REGRESSED: " + ", ".join(regressed), file=sys.stderr)
+            sys.exit(1)
+        return
+
+    # No baseline given — every fixture must pass.
     if not all(r["score"]["passed"] for r in results):
         sys.exit(1)
+
+
+def _load_baseline(path: str) -> dict[str, bool]:
+    """Fixture name -> whether it passed, from a stored baseline run."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Could not read baseline {path}: {exc}", file=sys.stderr)
+        return {}
+    if isinstance(data, dict) and "fixtures" in data:
+        return {k: bool(v) for k, v in data["fixtures"].items()}
+    if isinstance(data, list):
+        return {r["fixture"]: bool(r.get("score", {}).get("passed")) for r in data if r.get("fixture")}
+    return {}
+
+
+def _regressions(results: list[dict], baseline: dict[str, bool]) -> list[str]:
+    """Fixtures that passed in the baseline and do not now.
+
+    Deliberately per-fixture rather than an aggregate count: a run that fixes one
+    fixture and breaks another has the same total and is not the same thing.
+    """
+    out: list[str] = []
+    for r in results:
+        name = str(r.get("fixture") or "")
+        if not name:
+            continue
+        if baseline.get(name) and not r.get("score", {}).get("passed"):
+            out.append(name)
+    return sorted(out)
+
+
+def _write_baseline(results: list[dict], path: str) -> None:
+    payload = {
+        "generated_from": "replay_cli",
+        "total": len(results),
+        "passed": sum(1 for r in results if r.get("score", {}).get("passed")),
+        "fixtures": {r["fixture"]: bool(r.get("score", {}).get("passed")) for r in results if r.get("fixture")},
+    }
+    Path(path).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    print(f"Baseline written to {path}: {payload['passed']}/{payload['total']} passing", file=sys.stderr)
 
 
 def _execute(fixtures: list[str], run_one, concurrency: int) -> list[dict]:
