@@ -568,6 +568,24 @@ class TestContinuationStickiness:
 
         assert resolve_mode("Scale it back to 3 then, we don't have the capacity", last_mode="sre") == "sre"
 
+    def test_a_declared_handoff_beats_stickiness(self):
+        """A dashboard request must reach view_designer even mid-conversation.
+
+        My first version of this rule pinned any back-reference to the current
+        skill, so this turn stayed in security — which has no create_dashboard —
+        and the agent called no tools at all. The back-reference is about the
+        data; the request is for a capability the current skill lacks, and the
+        skills already declare that in handoff_to.
+        """
+        from sre_agent.evals.replay_config import resolve_mode
+
+        assert resolve_mode("build me a dashboard of these findings", last_mode="security") != "security"
+
+    def test_a_continuation_without_a_handoff_still_sticks(self):
+        from sre_agent.evals.replay_config import resolve_mode
+
+        assert resolve_mode("Scale it back to 3 then, we don't have the capacity", last_mode="sre") == "sre"
+
     def test_a_hard_switch_still_switches(self):
         # stickiness must not trap a conversation that genuinely changed subject
         from sre_agent.evals.replay_config import resolve_mode

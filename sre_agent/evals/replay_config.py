@@ -312,12 +312,25 @@ def resolve_mode(query: str, last_mode: str | None = None) -> str:
     hard_sre, hard_sec = _hard_switch_keywords()
     has_hard = any(kw in q_lower for kw in hard_sre) or any(kw in q_lower for kw in hard_sec)
 
-    # Mirrors the endpoint: a follow-up referring back to the conversation stays
-    # with the skill already serving it.
+    # Mirrors the endpoint.
     from ..skill_router import is_continuation
 
+    # A continuation keeps the current skill — unless the skill itself declares
+    # a handoff for this query. "build me a dashboard of these findings" refers
+    # back to the conversation AND asks for a capability security does not have;
+    # the back-reference is about the data, not the task. The skills already
+    # declare when to hand off (handoff_to in skill.md), so that declaration wins
+    # over stickiness rather than being bypassed by it.
     if is_continuation(query) and not has_hard:
-        return last_mode
+        try:
+            from ..skill_loader import check_handoff, get_skill
+
+            current = get_skill(last_mode)
+            if current is None or not check_handoff(current, query):
+                return last_mode
+        except Exception:
+            logger.debug("Handoff check during continuation failed", exc_info=True)
+            return last_mode
 
     if last_mode == "view_designer":
         try:
