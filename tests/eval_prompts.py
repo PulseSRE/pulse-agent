@@ -637,6 +637,19 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "sre",
         "List runbooks",
     ),
+    # Progressive skill disclosure — reaching expertise mid-investigation
+    (
+        "is there a skill for diagnosing certificate expiry?",
+        ["skill_search"],
+        "sre",
+        "Find a skill relevant to the problem",
+    ),
+    (
+        "load the certificate expiry procedure",
+        ["skill_load"],
+        "sre",
+        "Load a skill's procedure",
+    ),
     (
         "explain what fields a Deployment has",
         ["explain_resource"],
