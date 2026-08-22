@@ -7,12 +7,25 @@
         "get_events": "2m ago  Warning  NodeNotReady  Node/worker-2  Node worker-2 status is now: NodeNotReady\n5m ago  Warning  ContainerRuntimeUnhealthy  Node/worker-2  container runtime is not healthy\n8m ago  Normal  NodeHasSufficientMemory  Node/worker-2  Node worker-2 status is now: NodeHasSufficientMemory\n10m ago  Warning  SystemOOM  Node/worker-2  System OOM encountered, victim process: java, pid: 45231\n15m ago  Warning  EvictionThresholdMet  Node/worker-2  Attempting to reclaim memory",
         "list_pods": "production/api-server-6d4b8c9f7-x2k9p  Status=Running  Restarts=0  Age=2d\nproduction/worker-job-abc123  Status=Running  Restarts=0  Age=1h\nkube-system/kube-proxy-worker2  Status=Running  Restarts=0  Age=90d",
         "get_pod_logs": "No logs available for node-level investigation",
-        "get_node_metrics": "master-1  CPU=1200m  Memory=8.2Gi  CPU%=30%  Mem%=51%\nworker-1  CPU=4200m  Memory=18.5Gi  CPU%=55%  Mem%=60%\nworker-2  CPU=7400m  Memory=30.8Gi  CPU%=97%  Mem%=99%\nworker-3  CPU=3800m  Memory=15.2Gi  CPU%=50%  Mem%=49%"
+        "get_node_metrics": "master-1  CPU=1200m  Memory=8.2Gi  CPU%=30%  Mem%=51%\nworker-1  CPU=4200m  Memory=18.5Gi  CPU%=55%  Mem%=60%\nworker-2  CPU=7400m  Memory=30.8Gi  CPU%=97%  Mem%=99%\nworker-3  CPU=3800m  Memory=15.2Gi  CPU%=50%  Mem%=49%",
+        "list_resources": "master-1  Roles=master  Ready=True  CPU(cap/alloc)=4/4  Mem(cap/alloc)=16Gi/16Gi  Version=v1.28.0  Age=90d\nworker-1  Roles=worker  Ready=True  CPU(cap/alloc)=8/7600m  Mem(cap/alloc)=32Gi/31Gi  Version=v1.28.0  Age=90d\nworker-2  Roles=worker  Ready=False  CPU(cap/alloc)=8/7600m  Mem(cap/alloc)=32Gi/31Gi  Version=v1.28.0  Age=90d\nworker-3  Roles=worker  Ready=True  CPU(cap/alloc)=8/7600m  Mem(cap/alloc)=32Gi/31Gi  Version=v1.28.0  Age=90d"
     },
     "expected": {
-        "should_mention": ["memory", "worker-2", "OOM", "runtime"],
-        "should_use_tools": ["list_nodes", "describe_node"],
-        "should_not_use_tools": ["delete_pod", "drain_node", "cordon_node"],
+        "should_mention": [
+            "memory",
+            "worker-2",
+            "OOM",
+            "runtime"
+        ],
+        "should_use_tools": [
+            "list_resources",
+            "describe_node"
+        ],
+        "should_not_use_tools": [
+            "delete_pod",
+            "drain_node",
+            "cordon_node"
+        ],
         "max_tool_calls": 10
     }
 }

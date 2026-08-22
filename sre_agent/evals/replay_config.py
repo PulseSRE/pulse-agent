@@ -343,6 +343,43 @@ def _assemble_system_prompt(config: dict, mode: str, query: str, tool_names: lis
     return build_cached_system_prompt(base + (f"\n\n{hint}" if hint else ""), "")
 
 
+_registry_ready = False
+
+
+def ensure_tool_registry() -> int:
+    """Populate TOOL_REGISTRY the way the server does, before selecting tools.
+
+    ``discover_tools()`` is called in the FastAPI lifespan and nowhere else, so the
+    eval process ran with an empty registry. ``build_config_from_skill`` then fell
+    back to the curated static maps in ``agent.py`` — a different, smaller tool
+    universe than production. Replay was measuring an agent with a different set of
+    tools than the one that actually ships, which is exactly what replay exists to
+    rule out.
+
+    Idempotent, and failure is not fatal: an eval that cannot import every tool
+    module is still worth running against whatever registered, but it says so.
+    """
+    global _registry_ready
+    if _registry_ready:
+        from ..tool_registry import TOOL_REGISTRY
+
+        return len(TOOL_REGISTRY)
+
+    try:
+        from ..tool_discovery import discover_tools
+
+        discover_tools()
+        _registry_ready = True
+    except Exception:
+        logger.warning("Tool discovery failed; replay will use the curated static tool maps", exc_info=True)
+
+    from ..tool_registry import TOOL_REGISTRY
+
+    count = len(TOOL_REGISTRY)
+    logger.info("Replay tool registry: %d tools available", count)
+    return count
+
+
 def build_replay_config(
     query: str,
     recorded_responses: dict[str, Any],
@@ -374,6 +411,7 @@ def build_replay_config(
 
         from ..orchestrator import build_orchestrated_config
 
+        ensure_tool_registry()
         config = build_orchestrated_config(resolved, query=query)
         real_map = dict(config.get("tool_map") or {})
         tool_defs = list(config.get("tool_defs") or [])

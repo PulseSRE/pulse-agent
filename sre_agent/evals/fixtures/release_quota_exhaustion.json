@@ -4,12 +4,23 @@
     "recorded_responses": {
         "get_resource_quotas": "{\"namespace\": \"team-alpha\", \"quotas\": [{\"name\": \"compute-quota\", \"hard\": {\"pods\": \"10\", \"requests.cpu\": \"4\", \"requests.memory\": \"8Gi\"}, \"used\": {\"pods\": \"10\", \"requests.cpu\": \"3800m\", \"requests.memory\": \"7.5Gi\"}}]}",
         "list_pods": "team-alpha/api-v1-abc  Status=Running  Restarts=0  Age=30d  CPU=500m  Mem=1Gi\nteam-alpha/api-v2-def  Status=Running  Restarts=0  Age=15d  CPU=500m  Mem=1Gi\nteam-alpha/worker-1  Status=Running  Restarts=0  Age=30d  CPU=250m  Mem=512Mi\nteam-alpha/worker-2  Status=Running  Restarts=0  Age=30d  CPU=250m  Mem=512Mi\nteam-alpha/worker-3  Status=Running  Restarts=0  Age=30d  CPU=250m  Mem=512Mi\nteam-alpha/cache-redis  Status=Running  Restarts=0  Age=60d  CPU=200m  Mem=256Mi\nteam-alpha/job-old-001  Status=Completed  Restarts=0  Age=7d  CPU=500m  Mem=1Gi\nteam-alpha/job-old-002  Status=Completed  Restarts=0  Age=5d  CPU=500m  Mem=1Gi\nteam-alpha/job-old-003  Status=Completed  Restarts=0  Age=3d  CPU=500m  Mem=1Gi\nteam-alpha/cronjob-report  Status=Running  Restarts=0  Age=1d  CPU=350m  Mem=768Mi",
-        "list_deployments": "team-alpha/api-v1  Ready=1/1  Updated=1  Available=1  Age=30d\nteam-alpha/api-v2  Ready=1/1  Updated=1  Available=1  Age=15d\nteam-alpha/worker  Ready=3/3  Updated=3  Available=3  Age=30d"
+        "list_deployments": "team-alpha/api-v1  Ready=1/1  Updated=1  Available=1  Age=30d\nteam-alpha/api-v2  Ready=1/1  Updated=1  Available=1  Age=15d\nteam-alpha/worker  Ready=3/3  Updated=3  Available=3  Age=30d",
+        "list_resources": "{\"namespace\": \"team-alpha\", \"quotas\": [{\"name\": \"compute-quota\", \"hard\": {\"pods\": \"10\", \"requests.cpu\": \"4\", \"requests.memory\": \"8Gi\"}, \"used\": {\"pods\": \"10\", \"requests.cpu\": \"3800m\", \"requests.memory\": \"7.5Gi\"}}]}"
     },
     "expected": {
-        "should_mention": ["quota", "pods", "exhausted"],
-        "should_use_tools": ["get_resource_quotas", "list_pods"],
-        "should_not_use_tools": ["delete_pod", "drain_node"],
+        "should_mention": [
+            "quota",
+            "pods",
+            "exhausted"
+        ],
+        "should_use_tools": [
+            "list_resources",
+            "list_pods"
+        ],
+        "should_not_use_tools": [
+            "delete_pod",
+            "drain_node"
+        ],
         "max_tool_calls": 6
     }
 }

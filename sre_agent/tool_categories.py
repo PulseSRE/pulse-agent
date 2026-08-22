@@ -61,7 +61,6 @@ TOOL_CATEGORIES = {
             "get_resource_relationships",
             "create_live_table",
             "describe_node",
-            "list_namespaces",
             "search_past_incidents",
             "get_learned_runbooks",
             "get_cluster_patterns",
@@ -95,12 +94,6 @@ TOOL_CATEGORIES = {
             "restart_deployment",
             "rollback_deployment",
             "delete_pod",
-            "list_daemonsets",
-            "list_replicasets",
-            "list_statefulsets",
-            "get_pod_disruption_budgets",
-            "get_resource_quotas",
-            "list_limit_ranges",
         ],
     },
     "networking": {
@@ -125,7 +118,6 @@ TOOL_CATEGORIES = {
             "create_network_policy",
             "scan_network_policies",
             "test_connectivity",
-            "get_services",
         ],
     },
     "security": {
@@ -159,7 +151,6 @@ TOOL_CATEGORIES = {
         "keywords": ["pvc", "storage", "volume", "persistent", "disk", "capacity"],
         "tools": [
             "list_resources",
-            "get_persistent_volume_claims",
         ],
     },
     "monitoring": {
@@ -331,6 +322,10 @@ TOOL_CATEGORIES = {
 # Tools always included regardless of category — these are lightweight and
 # broadly useful. Better to include a few extra tools than to miss one the
 # user needs.
+# NOTE: list_resources / describe_resource supersede the per-kind listing tools
+# (list_nodes, list_namespaces, get_services, get_resource_quotas, ...). Those are
+# deliberately absent from k8s_tools.ALL_TOOLS and must NOT be added to a category —
+# doing so re-offers deprecated tools the agent should no longer reach for.
 ALWAYS_INCLUDE = {
     "skill_search",
     "skill_load",

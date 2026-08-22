@@ -316,7 +316,7 @@ class TestFixtureScoring:
             "on the worker nodes. No node has enough resources.",
             "tool_calls": [
                 {"name": "describe_pod", "timestamp": 0},
-                {"name": "list_nodes", "timestamp": 1},
+                {"name": "list_resources", "timestamp": 1},
             ],
             "duration_ms": 800,
         }
@@ -331,7 +331,7 @@ class TestFixtureScoring:
             "response": "worker-2 is NotReady due to memory pressure and OOM. "
             "The container runtime became unhealthy after a system OOM event.",
             "tool_calls": [
-                {"name": "list_nodes", "timestamp": 0},
+                {"name": "list_resources", "timestamp": 0},
                 {"name": "describe_node", "timestamp": 1},
                 {"name": "get_events", "timestamp": 2},
             ],
@@ -879,3 +879,47 @@ class TestMultiTurnRealConfig:
         kwargs = _stream_kwargs(client)[0]
         assert _system_text(kwargs["system"]) == "You are an SRE agent. Diagnose the issue."
         assert kwargs["tools"][0]["description"] == "Recorded stub for list_pods"
+
+
+class TestToolRegistryInReplay:
+    """Replay must select from the same tool universe production does."""
+
+    def test_registry_is_populated(self):
+        from sre_agent.evals.replay_config import ensure_tool_registry
+
+        count = ensure_tool_registry()
+        # The curated static fallback is far smaller than the full registry; if
+        # discovery silently failed we would be measuring a different agent.
+        assert count > 80, f"only {count} tools registered — discovery did not run"
+
+    def test_node_investigation_is_offered_the_tools_it_needs(self):
+        """The union of module maps and registry is what makes plain-decorated
+        tools selectable — TOOL_REGISTRY only holds @beta_tool(category=...) ones."""
+        from sre_agent.evals.replay_config import ensure_tool_registry
+        from sre_agent.skill_loader import build_config_from_skill, get_skill
+
+        ensure_tool_registry()
+        skill = get_skill("sre")
+        assert skill is not None
+        config = build_config_from_skill(skill, query="a cluster node is NotReady, investigate it")
+        offered = set(config["tool_map"])
+
+        # list_resources supersedes the per-kind listing tools, so that is what a
+        # node investigation should be offered — not list_nodes.
+        assert "list_resources" in offered, "the universal listing tool must be offered"
+
+    def test_superseded_tools_are_not_re_offered(self):
+        """list_resources replaced the per-kind listers; they must stay retired."""
+        from sre_agent.tool_categories import TOOL_CATEGORIES
+
+        categorised: set[str] = set()
+        for cat in TOOL_CATEGORIES.values():
+            categorised.update(cat.get("tools", []))
+
+        for tool in ("list_namespaces", "get_services", "list_daemonsets", "get_resource_quotas"):
+            assert tool not in categorised, f"{tool} is superseded by list_resources and must not be categorised"
+
+    def test_is_idempotent(self):
+        from sre_agent.evals.replay_config import ensure_tool_registry
+
+        assert ensure_tool_registry() == ensure_tool_registry()

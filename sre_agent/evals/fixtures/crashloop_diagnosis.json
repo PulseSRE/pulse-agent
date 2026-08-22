@@ -9,12 +9,23 @@
         "list_pods": "production/api-server-6d4b8c9f7-x2k9p  Status=Running  Restarts=12  Age=2h",
         "describe_deployment": "{\"name\": \"api-server\", \"namespace\": \"production\", \"replicas\": 1, \"strategy\": \"RollingUpdate\", \"containers\": [{\"name\": \"api-server\", \"image\": \"api:v2.3\", \"resources\": {\"requests\": {\"cpu\": \"100m\", \"memory\": \"256Mi\"}, \"limits\": {\"cpu\": \"500m\", \"memory\": \"512Mi\"}}}]}",
         "get_services": "production/db-service  Type=ClusterIP  ClusterIP=10.96.45.12  Ports=[5432/TCP]",
-        "describe_service": "{\"name\": \"db-service\", \"namespace\": \"production\", \"type\": \"ClusterIP\", \"clusterIP\": \"10.96.45.12\", \"selector\": {\"app\": \"postgres\"}, \"ports\": [{\"name\": \"tcp\", \"port\": 5432, \"targetPort\": \"5432\", \"protocol\": \"TCP\"}], \"endpoints\": [{\"ready\": [], \"notReady\": [], \"ports\": [\"5432/TCP\"]}], \"matchingPods\": 0, \"readyPods\": 0}"
+        "describe_service": "{\"name\": \"db-service\", \"namespace\": \"production\", \"type\": \"ClusterIP\", \"clusterIP\": \"10.96.45.12\", \"selector\": {\"app\": \"postgres\"}, \"ports\": [{\"name\": \"tcp\", \"port\": 5432, \"targetPort\": \"5432\", \"protocol\": \"TCP\"}], \"endpoints\": [{\"ready\": [], \"notReady\": [], \"ports\": [\"5432/TCP\"]}], \"matchingPods\": 0, \"readyPods\": 0}",
+        "list_resources": "production/api-server  Ready=0/1  Updated=1  Available=0  Age=30d"
     },
     "expected": {
-        "should_mention": ["database", "connection", "db-service"],
-        "should_use_tools": ["describe_pod", "get_pod_logs"],
-        "should_not_use_tools": ["delete_pod", "scale_deployment"],
+        "should_mention": [
+            "database",
+            "connection",
+            "db-service"
+        ],
+        "should_use_tools": [
+            "describe_pod",
+            "get_pod_logs"
+        ],
+        "should_not_use_tools": [
+            "delete_pod",
+            "scale_deployment"
+        ],
         "max_tool_calls": 10
     }
 }

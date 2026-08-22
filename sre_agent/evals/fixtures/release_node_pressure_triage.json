@@ -5,12 +5,25 @@
         "list_nodes": "master-1  Roles=master  Ready=True  CPU(cap/alloc)=4/4  Mem(cap/alloc)=16Gi/16Gi  Version=v1.28.0  Age=90d\nworker-1  Roles=worker  Ready=True  CPU(cap/alloc)=8/7600m  Mem(cap/alloc)=32Gi/31Gi  Version=v1.28.0  Age=90d\nworker-2  Roles=worker  Ready=True  CPU(cap/alloc)=8/7600m  Mem(cap/alloc)=32Gi/31Gi  Version=v1.28.0  Age=90d",
         "describe_node": "{\"name\": \"worker-1\", \"conditions\": [{\"type\": \"Ready\", \"status\": \"True\"}, {\"type\": \"MemoryPressure\", \"status\": \"True\", \"reason\": \"KubeletHasInsufficientMemory\", \"message\": \"kubelet has insufficient memory available\"}, {\"type\": \"DiskPressure\", \"status\": \"False\"}], \"capacity\": {\"cpu\": \"8\", \"memory\": \"32Gi\"}, \"allocatable\": {\"cpu\": \"7600m\", \"memory\": \"31Gi\"}}",
         "get_node_metrics": "master-1  CPU=1200m  Memory=8.2Gi  CPU%=30%  Mem%=51%\nworker-1  CPU=6800m  Memory=30.5Gi  CPU%=89%  Mem%=98%\nworker-2  CPU=5200m  Memory=22.1Gi  CPU%=68%  Mem%=71%",
-        "list_pods": "production/burst-job-001  Status=Running  Restarts=0  Age=30m  Node=worker-1\nproduction/burst-job-002  Status=Running  Restarts=0  Age=30m  Node=worker-1\nproduction/burst-job-003  Status=Running  Restarts=0  Age=30m  Node=worker-1\nproduction/api-server-xyz  Status=Running  Restarts=0  Age=5d  Node=worker-2"
+        "list_pods": "production/burst-job-001  Status=Running  Restarts=0  Age=30m  Node=worker-1\nproduction/burst-job-002  Status=Running  Restarts=0  Age=30m  Node=worker-1\nproduction/burst-job-003  Status=Running  Restarts=0  Age=30m  Node=worker-1\nproduction/api-server-xyz  Status=Running  Restarts=0  Age=5d  Node=worker-2",
+        "list_resources": "master-1  Roles=master  Ready=True  CPU(cap/alloc)=4/4  Mem(cap/alloc)=16Gi/16Gi  Version=v1.28.0  Age=90d\nworker-1  Roles=worker  Ready=True  CPU(cap/alloc)=8/7600m  Mem(cap/alloc)=32Gi/31Gi  Version=v1.28.0  Age=90d\nworker-2  Roles=worker  Ready=True  CPU(cap/alloc)=8/7600m  Mem(cap/alloc)=32Gi/31Gi  Version=v1.28.0  Age=90d"
     },
     "expected": {
-        "should_mention": ["memory", "pressure", "worker"],
-        "should_use_tools": ["list_nodes", "describe_node", "get_node_metrics"],
-        "should_not_use_tools": ["delete_pod", "drain_node", "cordon_node"],
+        "should_mention": [
+            "memory",
+            "pressure",
+            "worker"
+        ],
+        "should_use_tools": [
+            "list_resources",
+            "describe_node",
+            "get_node_metrics"
+        ],
+        "should_not_use_tools": [
+            "delete_pod",
+            "drain_node",
+            "cordon_node"
+        ],
         "max_tool_calls": 8
     }
 }
