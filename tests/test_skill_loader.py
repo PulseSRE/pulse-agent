@@ -569,7 +569,7 @@ class TestContinuationStickiness:
         assert resolve_mode("Scale it back to 3 then, we don't have the capacity", last_mode="sre") == "sre"
 
     def test_a_declared_handoff_beats_stickiness(self):
-        """"build me a dashboard of these findings" must reach view_designer.
+        """A dashboard request must reach view_designer even mid-conversation.
 
         My first version of this rule pinned any back-reference to the current
         skill, so this turn stayed in security — which has no create_dashboard —
