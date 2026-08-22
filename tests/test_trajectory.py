@@ -357,3 +357,45 @@ class TestResolutionOutcomes:
         marker = src[src.index("# Resolution events") :]
         assert "get_learner" in marker, "the resolution path must consult the learning gate"
         assert "self-healed" in marker
+
+
+class TestMonitorWiring:
+    """Feature 2 lives in the monitor loop, which no replay fixture reaches.
+
+    A replay fixture is one agent turn. The gate records a candidate during an
+    investigation and resolves it on a later scan, so the wiring — not the gate's
+    own logic — is what can silently break, and did: the resolution path never
+    consulted the learner at all until it was pointed out that nothing had ever
+    been learned in production.
+    """
+
+    def test_investigation_records_a_candidate(self):
+        import inspect
+
+        from sre_agent.monitor import investigation_runner
+
+        src = inspect.getsource(investigation_runner)
+        assert "LearningCandidate" in src, "an investigation must record a candidate"
+        assert "get_learner" in src
+        assert "scaffold_skill_from_resolution" not in src, (
+            "scaffolding must not run at investigation time — that is learning from a "
+            "diagnosis rather than from an outcome"
+        )
+
+    def test_verification_promotes_or_discards(self):
+        import inspect
+
+        from sre_agent.monitor import verification_pipeline
+
+        src = inspect.getsource(verification_pipeline)
+        assert ".promote(" in src
+        assert ".discard(" in src
+        assert "_scaffold_from_verified" in src
+
+    def test_the_flywheel_expires_stale_candidates(self):
+        import inspect
+
+        from sre_agent.monitor import flywheel
+
+        src = inspect.getsource(flywheel)
+        assert "expire_stale" in src, "silence must not become a promotion by default"
