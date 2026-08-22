@@ -393,7 +393,24 @@ class TestToolCategoryCoverage:
             for match in re.finditer(r"@beta_tool[^\n]*\ndef ([a-z_][a-z0-9_]*)", path.read_text(encoding="utf-8")):
                 defined.add(match.group(1))
 
-        orphaned = defined - categorized
+        # list_resources / describe_resource supersede the per-kind listing tools.
+        # Those remain defined for direct use but are deliberately absent from
+        # ALL_TOOLS and from every category — being unreachable is the intent.
+        superseded = {
+            "list_nodes",
+            "list_namespaces",
+            "list_deployments",
+            "list_statefulsets",
+            "list_daemonsets",
+            "list_replicasets",
+            "list_limit_ranges",
+            "get_services",
+            "get_resource_quotas",
+            "get_persistent_volume_claims",
+            "get_pod_disruption_budgets",
+        }
+
+        orphaned = defined - categorized - superseded
         assert not orphaned, f"tools defined but unreachable (no category, not always-included): {sorted(orphaned)}"
 
     def test_memory_tools_are_reachable(self):

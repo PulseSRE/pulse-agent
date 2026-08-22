@@ -316,7 +316,7 @@ class TestFixtureScoring:
             "on the worker nodes. No node has enough resources.",
             "tool_calls": [
                 {"name": "describe_pod", "timestamp": 0},
-                {"name": "list_nodes", "timestamp": 1},
+                {"name": "list_resources", "timestamp": 1},
             ],
             "duration_ms": 800,
         }
@@ -331,7 +331,7 @@ class TestFixtureScoring:
             "response": "worker-2 is NotReady due to memory pressure and OOM. "
             "The container runtime became unhealthy after a system OOM event.",
             "tool_calls": [
-                {"name": "list_nodes", "timestamp": 0},
+                {"name": "list_resources", "timestamp": 0},
                 {"name": "describe_node", "timestamp": 1},
                 {"name": "get_events", "timestamp": 2},
             ],
