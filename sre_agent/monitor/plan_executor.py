@@ -49,6 +49,12 @@ async def try_plan_execution(monitor: ClusterMonitor, finding: dict) -> bool:
                     p["status"] = out.status
                     p["summary"] = out.evidence_summary[:100] if out.evidence_summary else ""
                     p["confidence"] = out.confidence
+                    # A phase downgraded to 'partial' by the contract judge carries
+                    # what it failed to produce. Surface it rather than showing an
+                    # operator a phase that looks merely less confident.
+                    unmet = [q for q in (out.open_questions or []) if "did not produce" in q]
+                    if unmet:
+                        p["unmetContract"] = unmet
             await monitor._broadcast_raw(
                 {
                     "type": "investigation_progress",
