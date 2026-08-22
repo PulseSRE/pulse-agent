@@ -133,6 +133,7 @@ class ClusterMemory:
                 """,
                 (scope, key, value, source, float(confidence), now, now),
             )
+            self.db.commit()
             return True
         except Exception:
             logger.warning("Failed to record environment fact %s/%s", scope, key, exc_info=True)
@@ -171,6 +172,7 @@ class ClusterMemory:
         """Drop a fact that has stopped being true."""
         try:
             self.db.execute("DELETE FROM environment_facts WHERE scope = ? AND fact_key = ?", (scope, key))
+            self.db.commit()
             return True
         except Exception:
             logger.warning("Failed to forget fact %s/%s", scope, key, exc_info=True)
@@ -205,6 +207,7 @@ class ClusterMemory:
                     now,
                 ),
             )
+            self.db.commit()
             return True
         except Exception:
             logger.warning("Failed to record baseline for %s/%s", baseline.namespace, baseline.workload, exc_info=True)

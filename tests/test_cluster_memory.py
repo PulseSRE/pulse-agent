@@ -19,12 +19,24 @@ class _FakeDB:
     def __init__(self) -> None:
         self.facts: dict[tuple[str, str], dict] = {}
         self.baselines: dict[tuple[str, str, str], dict] = {}
+        # Database.execute() runs with autocommit=False and keeps the connection
+        # checked out until commit(). The original fake persisted immediately, so
+        # a missing commit was invisible — every write "succeeded" and nothing
+        # was durable. Staging mirrors the real semantics.
+        self._pending: list = []
+        self.commits = 0
+
+    def commit(self):
+        for fn in self._pending:
+            fn()
+        self._pending.clear()
+        self.commits += 1
 
     def execute(self, sql: str, params: tuple):
         s = " ".join(sql.split())
         if "INSERT INTO environment_facts" in s:
             scope, key, value, source, conf, _created, updated = params
-            self.facts[(scope, key)] = {
+            row = {
                 "scope": scope,
                 "fact_key": key,
                 "fact_value": value,
@@ -32,11 +44,12 @@ class _FakeDB:
                 "confidence": conf,
                 "updated_at": updated,
             }
+            self._pending.append(lambda: self.facts.__setitem__((scope, key), row))
         elif "DELETE FROM environment_facts" in s:
-            self.facts.pop((params[0], params[1]), None)
+            self._pending.append(lambda: self.facts.pop((params[0], params[1]), None))
         elif "INSERT INTO workload_baselines" in s:
             ns, wl, metric, p50, p95, n, window, updated = params
-            self.baselines[(ns, wl, metric)] = {
+            brow = {
                 "namespace": ns,
                 "workload": wl,
                 "metric": metric,
@@ -46,6 +59,7 @@ class _FakeDB:
                 "window_hours": window,
                 "updated_at": updated,
             }
+            self._pending.append(lambda: self.baselines.__setitem__((ns, wl, metric), brow))
 
     def fetchall(self, sql: str, params: tuple = ()):
         s = " ".join(sql.split())
@@ -207,3 +221,29 @@ class TestReachability:
             "search_conversations",
         ):
             assert tool in categorised, f"{tool} would never be offered"
+
+
+class TestWritesAreCommitted:
+    """Database.execute keeps the connection checked out until commit().
+
+    Without it the write is rolled back when the connection returns to the pool.
+    remember_fact returned True and get_facts returned [] — a write that reports
+    success and does nothing durable.
+    """
+
+    def test_recording_a_fact_commits(self, memory):
+        memory.remember_fact("k", "v")
+        assert memory.db.commits >= 1
+        assert [f.key for f in memory.get_facts()] == ["k"]
+
+    def test_forgetting_a_fact_commits(self, memory):
+        memory.remember_fact("k", "v")
+        before = memory.db.commits
+        memory.forget_fact("k")
+        assert memory.db.commits > before
+        assert memory.get_facts() == []
+
+    def test_recording_a_baseline_commits(self, memory):
+        memory.record_baseline(WorkloadBaseline("prod", "api", "memory_bytes", 1.0, 2.0, 50))
+        assert memory.db.commits >= 1
+        assert memory.get_baseline("prod", "api", "memory_bytes") is not None
