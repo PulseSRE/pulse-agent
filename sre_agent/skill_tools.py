@@ -45,11 +45,20 @@ def list_references(skill_path: Path) -> list[str]:
 
 
 def _score(skill, query_terms: set[str]) -> int:
-    """Rank a skill against the query — name and keywords beat description prose."""
+    """Rank a skill against the query — name and keywords beat description prose.
+
+    Reference filenames count too, and count highly: a skill shipping
+    `certificate-expiry.md` is the right answer for "certificate expiry", and
+    scoring only name/keywords/description missed it in favour of a skill whose
+    description merely mentions security. The specific expertise is in the
+    reference names, so they are weighted alongside keywords.
+    """
     score = 0
+    reference_words = " ".join(list_references(skill.path)).replace("-", " ").replace("_", " ").lower()
     haystacks = (
         (skill.name.replace("_", " ").replace("-", " ").lower(), 4),
         (" ".join(skill.keywords).lower(), 3),
+        (reference_words, 3),
         (skill.description.lower(), 1),
     )
     for text, weight in haystacks:
