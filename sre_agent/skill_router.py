@@ -82,6 +82,24 @@ def _hard_pre_route(query: str):
     return None
 
 
+# A follow-up that refers back to the conversation ("scale it back", "do that
+# again", "try the other one") is a continuation, not a request for a different
+# specialist. Re-routing on an incidental clause produced the worst result in the
+# eval suite: "Scale it back to 3 then, we don't have the capacity" matched the
+# capacity_planner trigger, the turn switched to a skill without scale_deployment,
+# and that skill correctly disowned an action the conversation had taken two turns
+# earlier — reading, to the operator, as the assistant denying its own work.
+_BACK_REFERENCE = re.compile(
+    r"\b(it|its|that|those|them|these|again|back|instead|the same|previous|earlier)\b",
+    re.IGNORECASE,
+)
+
+
+def is_continuation(query: str) -> bool:
+    """Whether a turn reads as a follow-up to the conversation rather than a new task."""
+    return bool(_BACK_REFERENCE.search(query or ""))
+
+
 def classify_query(query: str, *, context: dict | None = None):
     """Route a query to the best matching skill.
 

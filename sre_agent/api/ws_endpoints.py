@@ -64,6 +64,8 @@ _HARD_SWITCH_SRE = {
     "why are",
     "what's wrong",
 }
+from ..skill_router import is_continuation as _is_continuation
+
 _HARD_SWITCH_SEC = {"rbac", "scc", "vulnerability", "compliance", "privilege", "security audit"}
 
 
@@ -433,6 +435,11 @@ async def websocket_auto_agent(websocket: WebSocket):
                     intent, is_strong = classify_intent(content)
 
             q_lower = content.lower()
+            q_lower_all = content.lower()
+            has_hard_switch = any(kw in q_lower_all for kw in _HARD_SWITCH_SRE) or any(
+                kw in q_lower_all for kw in _HARD_SWITCH_SEC
+            )
+
             if last_mode == "view_designer" and intent != "view_designer":
                 # Break out of view_designer for:
                 # 1. Unambiguous SRE/Security keywords
@@ -452,6 +459,12 @@ async def websocket_auto_agent(websocket: WebSocket):
                     intent = "view_designer"
             elif last_mode == "security" and intent == "sre" and not is_strong:
                 pass  # Let it switch to SRE
+            elif last_mode and _is_continuation(content) and not has_hard_switch:
+                # A follow-up referring back to the conversation stays with the
+                # skill already serving it. Switching specialists mid-thread on an
+                # incidental clause leaves the new skill disowning actions the
+                # conversation already took.
+                intent = last_mode
             elif last_mode and last_mode == intent:
                 pass  # Same skill — no switch needed
             elif last_mode and last_mode not in ("sre", "security", "view_designer", "both"):
