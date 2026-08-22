@@ -211,3 +211,41 @@ def test_a_failed_snapshot_still_resets():
 
     assert result["items_archived"] == 1
     assert result["containers_baselined"] == 0
+
+
+# ── an inbox row should say where ─────────────────────────────────────────
+
+
+def test_an_inbox_item_takes_its_namespace_from_its_resource():
+    """Measured on the reference cluster: 0 of 31 open items carried a
+    namespace while the resource underneath plainly did. `_make_finding` never
+    sets a top-level "namespace" — scanners put it in resources[0] — so the
+    inbox row's namespace badge had never once rendered, and four identical
+    "TargetDown" rows sat there with nothing to tell them apart."""
+    from sre_agent.inbox import _primary_namespace
+
+    finding = {
+        "title": "TargetDown",
+        "resources": [{"kind": "Alert", "name": "TargetDown", "namespace": "openshift-lightspeed"}],
+    }
+    assert _primary_namespace(finding) == "openshift-lightspeed"
+
+
+def test_a_cluster_scoped_finding_gets_no_namespace():
+    """A node or an alert with no namespace label has none, and None is the
+    right answer — a row should not invent a location for something that does
+    not have one."""
+    from sre_agent.inbox import _primary_namespace
+
+    assert _primary_namespace({"resources": [{"kind": "Node", "name": "ip-10-0-64-50"}]}) is None
+    assert _primary_namespace({"resources": [{"kind": "Alert", "name": "X", "namespace": ""}]}) is None
+    assert _primary_namespace({"resources": []}) is None
+    assert _primary_namespace({}) is None
+
+
+def test_an_explicit_namespace_still_wins():
+    """The fallback is a fallback. Anything that does set the field keeps it."""
+    from sre_agent.inbox import _primary_namespace
+
+    finding = {"namespace": "explicit", "resources": [{"kind": "Pod", "name": "p", "namespace": "from-resource"}]}
+    assert (finding.get("namespace") or _primary_namespace(finding)) == "explicit"

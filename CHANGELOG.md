@@ -4,6 +4,12 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### An inbox row should say where
+- Inbox items took `namespace` from `finding.get("namespace")`, and `_make_finding` has never set a top-level namespace — every scanner puts it inside `resources[0]`. So the field was always None. Measured on the reference cluster: **0 of 31** open items carried a namespace while the resource underneath plainly did
+- The UI has rendered a namespace badge on every row this whole time and it has never once appeared, which is why four identical `TargetDown` rows sat in the list with nothing to tell them apart
+- Same bug `_finding_corr_key` already had and already documents — two workloads sharing a name in different namespaces collided onto one item. That one was fixed by falling back to the primary resource; this one was not
+- Cluster-scoped findings still get nothing. A node or an alert with no namespace label has none, and a row should not invent a location for something that does not have one
+
 ### An episode nobody re-detects is over
 - `close_for_correlation` was the only way an episode ever ended, and it fires when a finding *resolves*. A cause that merely stopped being reported — a node that went NotReady and came back, an alert that stopped firing between scans — left its episode open indefinitely. `last_seen_at` has been written on every touch since episodes existed and read by nothing
 - Observed live: a master flapped NotReady and recovered. Sixty-eight minutes later the episode was still open and still the headline on the front-door banner, captioned "running 68m" — which reads as *broken for 68 minutes* when the truth was *last seen 68 minutes ago and never re-checked*. A monitoring product announcing a resolved incident as live is worse than one that says nothing

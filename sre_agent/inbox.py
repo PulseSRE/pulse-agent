@@ -1155,6 +1155,19 @@ def _deserialize_row(row: Any) -> dict[str, Any]:
 # -- Monitor integration --
 
 
+def _primary_namespace(finding: dict[str, Any]) -> str | None:
+    """The namespace of the finding's primary resource, if it has one.
+
+    Cluster-scoped findings (a node, an alert with no namespace label) have
+    none, and None is the right answer for those — an inbox row should not
+    invent a location for something that does not have one.
+    """
+    resources = finding.get("resources") or []
+    if not resources:
+        return None
+    return resources[0].get("namespace") or None
+
+
 def _finding_corr_key(finding: dict[str, Any]) -> str:
     """Build a correlation key scoped to category + namespace + primary resource."""
     category = finding.get("category", "unknown")
@@ -1227,7 +1240,15 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
         "severity": finding.get("severity", "warning"),
         "confidence": finding.get("confidence", 0),
         "noise_score": finding.get("noiseScore", 0),
-        "namespace": finding.get("namespace"),
+        # Fall back to the primary resource, exactly as _finding_corr_key does
+        # and for the same reason: _make_finding never sets a top-level
+        # "namespace" — every scanner puts it inside resources[0]. So this was
+        # always None. Measured on the reference cluster: 0 of 31 open items
+        # carried a namespace while the resource underneath plainly did, which
+        # is why the inbox row's namespace badge has never once rendered and
+        # four identical "TargetDown" rows sat there with nothing to tell them
+        # apart.
+        "namespace": finding.get("namespace") or _primary_namespace(finding),
         "resources": finding.get("resources", []),
         "correlation_key": corr_key,
         "created_by": "system:monitor",
