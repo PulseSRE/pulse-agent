@@ -1604,6 +1604,53 @@ def resolve_finding_inbox_item(finding_id: str, finding: dict[str, Any] | None =
     return True
 
 
+def reconcile_open_items(live_keys: set[str]) -> int:
+    """Resolve open items whose condition the cluster is no longer reporting.
+
+    Resolution normally rides on ``ClusterMonitor._last_findings``: a finding
+    that was there last scan and is gone this scan raises a resolution event.
+    But ``_last_findings`` is in-memory and starts empty in every process, so a
+    condition that cleared while the agent was restarting — or at any point
+    before this process existed — produces no resolution event at all. Nothing
+    else ever revisits the item, and it sits in Needs Attention until
+    ``expire_untouched_items`` archives it 48 hours later.
+
+    Measured on the reference cluster: of the open items that could be checked
+    against live state, **seven of seven were already resolved**. A node listed
+    critical/NotReady had been Ready for six and a half hours; four Deployments
+    listed "degraded (0/1)" were all 1/1. Two thirds of the queue had not been
+    re-examined in over six hours. An SRE working that queue top-down
+    investigates healthy infrastructure.
+
+    The agent already seeds ``_known_episodes`` from the database on startup for
+    exactly this reason — "restarting the agent is not news". Findings never got
+    the same treatment.
+
+    An empty ``live_keys`` resolves nothing. A scan that reports no findings at
+    all is far more likely to be broken than a cluster that is suddenly perfect,
+    and mass-resolving a queue on a bad scan is the worse failure by a distance.
+    """
+    if not live_keys:
+        _inbox_logger.warning("Inbox reconcile skipped: the scan reported no findings at all")
+        return 0
+
+    repo = get_inbox_repo()
+    now = int(time.time())
+    resolved = 0
+    for row in repo.fetch_open_machine_items():
+        if row["correlation_key"] in live_keys:
+            continue
+        repo.resolve_item(row["id"], now, {"resolved_reason": "condition no longer reported"})
+        _publish_event("inbox_item_resolved", row["id"], {"resolved_at": now})
+        resolved += 1
+        _inbox_logger.info(
+            "Inbox reconcile: resolved %s (%s) — no longer reported",
+            row["title"][:60],
+            row["severity"],
+        )
+    return resolved
+
+
 _PRUNABLE_KINDS = {"Pod", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet"}
 _prune_counter = 0
 

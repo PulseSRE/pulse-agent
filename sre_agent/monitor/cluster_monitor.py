@@ -87,6 +87,7 @@ class ClusterMonitor:
     # redefinition — 17 errors, none of them about anything real.
     _known_episodes: set[str]
     _episodes_seeded: bool
+    _inbox_reconciled: bool
 
     def _correlate_episodes(self, findings: list[dict]) -> list[tuple[str, dict]]:
         """Open episodes for cause-capable findings and attach what they explain.
@@ -166,6 +167,7 @@ class ClusterMonitor:
         # a restart does not re-announce every open episode on the cluster.
         self._known_episodes = set()
         self._episodes_seeded = False
+        self._inbox_reconciled = False
         self._subscribers_lock = asyncio.Lock()
 
         # Scan state — previously owned by MonitorSession
@@ -933,6 +935,30 @@ class ClusterMonitor:
             if finding_id:
                 asyncio.get_running_loop().run_in_executor(None, mark_finding_actions_resolved, finding_id)
                 asyncio.get_running_loop().run_in_executor(None, _resolve_finding_inbox, finding_id, resolved_finding)
+
+        # One reconciliation per process, after the first scan has settled.
+        #
+        # The resolution events above only fire for findings *this process*
+        # saw, because _last_findings starts empty on every start. Anything
+        # that recovered while the agent was restarting is invisible to them —
+        # it was never in _last_findings, so it can never become stale. The
+        # item stays open, critical, and wrong until it is archived 48 hours
+        # later. Same reasoning as seeding _known_episodes above: restarting
+        # the agent is not news, and it is not amnesia either.
+        if not self._inbox_reconciled:
+            self._inbox_reconciled = True
+            try:
+                from ..inbox import _finding_corr_key, reconcile_open_items
+
+                live_keys = {_finding_corr_key(f) for f in all_findings}
+                reconciled = await asyncio.to_thread(reconcile_open_items, live_keys)
+                if reconciled:
+                    logger.info(
+                        "Inbox reconcile: resolved %d item(s) whose condition is no longer reported",
+                        reconciled,
+                    )
+            except Exception:
+                logger.exception("Inbox reconciliation failed")
 
         # Answer proposals whose condition cleared on its own -- including
         # ones from before this finding's own resolution event, e.g. after an
