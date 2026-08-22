@@ -549,9 +549,11 @@ def _regressions(results: list[dict], baseline: dict[str, bool]) -> list[str]:
     Deliberately per-fixture rather than an aggregate count: a run that fixes one
     fixture and breaks another has the same total and is not the same thing.
     """
-    out = []
+    out: list[str] = []
     for r in results:
-        name = r.get("fixture")
+        name = str(r.get("fixture") or "")
+        if not name:
+            continue
         if baseline.get(name) and not r.get("score", {}).get("passed"):
             out.append(name)
     return sorted(out)
