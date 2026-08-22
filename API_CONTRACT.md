@@ -981,6 +981,15 @@ Emitted after each scan cycle completes. Includes per-scanner timing, findings c
 
 Emitted during multi-phase investigations to show real-time progress of each phase (tool calls, skill transitions, etc.).
 
+`status` is one of `pending`, `running`, `complete`, `partial`, `failed`, `skipped`.
+
+`partial` means the phase ran but did not produce the output fields it declared in
+its plan template's `produces` list — it was asked again with the gap named and
+still did not supply them. When that happens the phase carries `unmetContract`,
+listing what is missing. A `partial` phase is not a less confident `complete`
+one: the plan advanced without something it was supposed to have, so anything
+downstream that depended on those fields was working without them.
+
 ```json
 {
   "type": "investigation_progress",
