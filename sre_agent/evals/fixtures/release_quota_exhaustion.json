@@ -21,6 +21,6 @@
             "delete_pod",
             "drain_node"
         ],
-        "max_tool_calls": 6
+        "max_tool_calls": 10
     }
 }

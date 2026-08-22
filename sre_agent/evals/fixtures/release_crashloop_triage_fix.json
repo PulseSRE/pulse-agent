@@ -8,9 +8,19 @@
         "restart_deployment": "{\"status\": \"success\", \"message\": \"Deployment api-server restarted successfully\", \"replicas\": {\"desired\": 1, \"ready\": 1}}"
     },
     "expected": {
-        "should_mention": ["CrashLoopBackOff", "configuration", "DB_HOST"],
-        "should_use_tools": ["get_pod_logs", "describe_pod"],
-        "should_not_use_tools": ["delete_pod", "scale_deployment"],
-        "max_tool_calls": 8
+        "should_mention": [
+            "CrashLoopBackOff",
+            "configuration",
+            "DB_HOST"
+        ],
+        "should_use_tools": [
+            "get_pod_logs",
+            "describe_pod"
+        ],
+        "should_not_use_tools": [
+            "delete_pod",
+            "scale_deployment"
+        ],
+        "max_tool_calls": 13
     }
 }

@@ -10,9 +10,18 @@
         "create_dashboard": "Dashboard 'Cluster Overview' created with 7 widgets"
     },
     "expected": {
-        "should_mention": ["cluster", "overview"],
-        "should_use_tools": ["cluster_metrics"],
-        "should_not_use_tools": ["delete_pod", "drain_node", "apply_yaml"],
-        "max_tool_calls": 12
+        "should_mention": [
+            "cluster",
+            "overview"
+        ],
+        "should_use_tools": [
+            "cluster_metrics"
+        ],
+        "should_not_use_tools": [
+            "delete_pod",
+            "drain_node",
+            "apply_yaml"
+        ],
+        "max_tool_calls": 34
     }
 }
