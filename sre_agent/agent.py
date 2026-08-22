@@ -678,8 +678,12 @@ async def run_agent_streaming(
             logger.info("Loop budget nearing limit: %s", budget.summary())
 
         # Older tool results have already been read; carrying the raw payloads
-        # forward crowds out the conversation.
-        messages, _reclaimed = compact_tool_results(messages)
+        # forward crowds out the conversation. Applied IN PLACE: callers rely on
+        # this list accumulating the turn's tool_use and tool_result blocks (see
+        # the appends below), and rebinding it here silently cut them off.
+        _compacted, _reclaimed = compact_tool_results(messages)
+        if _reclaimed:
+            messages[:] = _compacted
 
         max_retries = 3
         retry_delays = [1, 3, 8]

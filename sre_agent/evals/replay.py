@@ -277,7 +277,13 @@ class MultiTurnReplayHarness:
             start = time.monotonic()
             kwargs: dict[str, Any] = {
                 "client": client,
-                "messages": list(messages),  # copy to avoid mutation
+                # The live list, not a copy. run_agent_streaming appends this turn's
+                # assistant tool_use and user tool_result blocks to it, and a real
+                # conversation carries those into the next turn. Copying here meant
+                # turn 2 saw only turn 1's final prose — the agent was asked follow-up
+                # questions about data it could no longer see, which is why the
+                # multi-turn fixtures scored so far below the single-turn ones.
+                "messages": messages,
                 "system_prompt": cfg["system_prompt"] if system_prompt is None else system_prompt,
                 "tool_defs": cfg["tool_defs"] if tool_defs is None else tool_defs,
                 "tool_map": effective_map,
@@ -293,8 +299,11 @@ class MultiTurnReplayHarness:
                 response = asyncio.run(run_agent_streaming(**kwargs))
             elapsed_ms = (time.monotonic() - start) * 1000
 
-            # Add assistant response to history for next turn
-            messages.append({"role": "assistant", "content": response})
+            # run_agent_streaming has already appended the assistant turn (including
+            # tool_use blocks) and the tool_result messages. Only append the final
+            # text if it did not, so history is neither lost nor duplicated.
+            if not (messages and messages[-1].get("role") == "assistant"):
+                messages.append({"role": "assistant", "content": response})
 
             self.all_tool_calls.append(turn_tool_calls)
             turn_results.append(
