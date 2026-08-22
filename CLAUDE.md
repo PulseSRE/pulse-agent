@@ -157,7 +157,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - Input validation: replicas 0-100, log lines 1-1000, grace period 1-300s
 - Token forwarding: user OAuth token from `X-Forwarded-Access-Token` forwarded to K8s API calls for per-user RBAC enforcement. Monitor scans use SA. Toggle: `PULSE_AGENT_TOKEN_FORWARDING`
 
-### MCP Server (`chart/templates/mcp-server.yaml`)
+### MCP Server
 - OpenShift MCP server (github.com/openshift/openshift-mcp-server) deployed as sidecar pod
 - Image: `quay.io/amobrem/pulse-agent:mcp-server` (built from openshift fork)
 - SSE transport, auto-discovery, 3-tier rendering
@@ -167,12 +167,8 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - Toggle toolsets from the Toolbox UI
 - CI (`build-push.yml`) builds MCP image on release tags
 
-### Helm Chart (`chart/`)
-- `values.yaml` — requires `vertexAI.projectId` or `anthropicApiKey.existingSecret`
-- WS token and PG password auto-generated with `lookup()` to preserve existing values on upgrade
-- Recreate strategy (old pod terminates before new one starts — required because memory PVC is RWO)
-- `chart/templates/deployment.yaml` — validates credentials at install time via `_helpers.tpl`
-- `chart/templates/postgresql.yaml` — PostgreSQL **StatefulSet** (RHEL 9, runAsNonRoot, NetworkPolicy, headless Service)
+### Deployment
+Deployment is owned by the [Pulse Operator](https://github.com/PulseSRE/pulse-operator), installed via OLM. The agent version it runs is `spec.agent.image` on the `OpenShiftPulse` CR. `oc patch openshiftpulse pulse -n openshiftpulse --type=merge -p '{"spec":{"agent":{"image":"..."}}}'` rolls a new version; patching the Deployment directly is reverted by the operator.
 
 ### Frontend CSS Gotchas
 - **Scrollbar styling**: Uses ONLY `::-webkit-scrollbar` pseudo-elements (in `index.css`). Do NOT add `scrollbar-color` or `scrollbar-width` — Chrome 121+ ignores `::-webkit-scrollbar` when standard scrollbar properties are set (even via inheritance).

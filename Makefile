@@ -1,4 +1,4 @@
-.PHONY: lint format type-check test verify test-all evals eval-gate helm-lint release sync-token clean coverage perf perf-baseline
+.PHONY: lint format type-check test verify test-all evals eval-gate release sync-token clean coverage perf perf-baseline
 
 lint:
 	python3 -m ruff check sre_agent/ tests/
@@ -68,10 +68,6 @@ chaos-test:
 chaos-test-dry:
 	./scripts/chaos-test.sh --dry-run
 
-helm-lint:
-	helm lint chart/
-	helm template test chart/ --set vertexAI.projectId=test --set vertexAI.region=us-central1
-
 sync-token:
 	@echo "Syncing WS auth token..."
 	@# Use oc if available (OpenShift), otherwise kubectl
@@ -97,7 +93,7 @@ sync-token:
 		fi; \
 	else \
 		echo "  ⚠️ Secret $$SECRET_NAME not found in namespace $$NS"; \
-		echo "  Try: helm upgrade ... to recreate the secret"; \
+		echo "  Try: re-apply the OpenShiftPulse CR to recreate the secret"; \
 	fi
 
 clean:
@@ -112,7 +108,7 @@ release:
 	python3 -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 || (echo "Release gate failed — aborting release" && exit 1)
 	./scripts/bump-version.sh $(VERSION)
 	python3 -m sre_agent.evals.cli --suite release --save-baseline
-	git add pyproject.toml chart/Chart.yaml
+	git add pyproject.toml README.md
 	git commit -m "chore: bump version to $(VERSION)"
 	git tag "v$(VERSION)"
 	@echo "Release v$(VERSION) ready. Run 'git push && git push --tags' to trigger build."

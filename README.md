@@ -387,7 +387,6 @@ sre_agent/
   orchestrator.py      Typo correction (~130 K8s misspellings)
   context_bus.py       Cross-agent shared context
 
-chart/                 Helm chart (deployment, RBAC, PostgreSQL StatefulSet, NetworkPolicy)
 ```
 
 ### WebSocket Endpoints

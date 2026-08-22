@@ -82,21 +82,12 @@ jobs:
       - name: Verify version sync
         run: |
           python -c "
-          import tomllib, re
+          import tomllib
           pkg = tomllib.load(open('pyproject.toml','rb'))['project']['version']
-          chart = open('chart/Chart.yaml').read()
-          chart_ver = re.search(r'^version:\s*(.+)$', chart, re.MULTILINE).group(1).strip()
-          app_ver = re.search(r'^appVersion:\s*\"?([^\"]+)\"?$', chart, re.MULTILINE).group(1).strip()
-          assert pkg == chart_ver, f'Version mismatch: pyproject.toml={pkg}, Chart.yaml version={chart_ver}'
-          assert pkg == app_ver, f'appVersion mismatch: pyproject.toml={pkg}, Chart.yaml appVersion={app_ver}'
-          print(f'Version sync OK: {pkg}')
+          readme = open('README.md').read()
+          assert pkg in readme, f'README.md does not mention version {pkg}'
+          print(f'Version OK: {pkg}')
           "
-
-      - name: Helm lint
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          helm lint chart/
-          helm template test chart/ --set vertexAI.projectId=test --set vertexAI.region=us-central1 --set wsAuth.existingSecret=test-token
 
       - name: Verify docs consistency
         run: |
