@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import threading
 from typing import Any
 from unittest.mock import patch
 
@@ -177,6 +178,40 @@ _LLM_PICKER_TARGET: tuple[str, str, Any, bool] = (
 )
 
 
+# Isolation is process-wide because it patches module attributes, so concurrent
+# fixtures must share one set of patches. Refcounted: the first entry applies
+# them, the last exit removes them. Without this, one fixture finishing would
+# restore the live cluster reads underneath every fixture still running.
+_isolation_lock = threading.Lock()
+_isolation_depth = 0
+_isolation_stack: contextlib.ExitStack | None = None
+_isolation_mode: bool | None = None
+
+
+def _apply_isolation(allow_llm_tool_picker: bool) -> contextlib.ExitStack:
+    """Apply every isolation patch, returning the stack that undoes them."""
+    targets = list(_ISOLATION_TARGETS)
+    if not allow_llm_tool_picker:
+        targets.append(_LLM_PICKER_TARGET)
+
+    stack = contextlib.ExitStack()
+    try:
+        for module, attr, replacement, required in targets:
+            try:
+                stack.enter_context(patch(f"{module}.{attr}", replacement))
+            except (AttributeError, ImportError) as exc:
+                if required:
+                    raise RuntimeError(
+                        f"Replay isolation failed: cannot patch {module}.{attr} ({exc}). "
+                        "Replay refuses to run without it — a live cluster read could reach the eval."
+                    ) from exc
+                logger.debug("Replay isolation: could not patch %s.%s", module, attr, exc_info=True)
+    except Exception:
+        stack.close()
+        raise
+    return stack
+
+
 @contextlib.contextmanager
 def offline_context(*, allow_llm_tool_picker: bool = False):
     """Disable every live dependency the real config would otherwise reach.
@@ -202,22 +237,32 @@ def offline_context(*, allow_llm_tool_picker: bool = False):
     isolation because a symbol moved is the one failure this module exists to
     prevent, so it must break the eval rather than leak into it.
     """
-    targets = list(_ISOLATION_TARGETS)
-    if not allow_llm_tool_picker:
-        targets.append(_LLM_PICKER_TARGET)
+    global _isolation_depth, _isolation_stack, _isolation_mode
 
-    with contextlib.ExitStack() as stack:
-        for module, attr, replacement, required in targets:
-            try:
-                stack.enter_context(patch(f"{module}.{attr}", replacement))
-            except (AttributeError, ImportError) as exc:
-                if required:
-                    raise RuntimeError(
-                        f"Replay isolation failed: cannot patch {module}.{attr} ({exc}). "
-                        "Replay refuses to run without it — a live cluster read could reach the eval."
-                    ) from exc
-                logger.debug("Replay isolation: could not patch %s.%s", module, attr, exc_info=True)
+    with _isolation_lock:
+        if _isolation_depth == 0:
+            _isolation_mode = allow_llm_tool_picker
+            _isolation_stack = _apply_isolation(allow_llm_tool_picker)
+        elif _isolation_mode != allow_llm_tool_picker:
+            # Two concurrent entries disagreeing about the picker would leave one
+            # of them running under isolation it did not ask for. Refuse rather
+            # than silently applying the wrong one.
+            raise RuntimeError(
+                "Replay isolation is already active with "
+                f"allow_llm_tool_picker={_isolation_mode!r}; cannot nest a run requesting "
+                f"{allow_llm_tool_picker!r}. Run these separately."
+            )
+        _isolation_depth += 1
+
+    try:
         yield
+    finally:
+        with _isolation_lock:
+            _isolation_depth -= 1
+            if _isolation_depth == 0 and _isolation_stack is not None:
+                _isolation_stack.close()
+                _isolation_stack = None
+                _isolation_mode = None
 
 
 def _hard_switch_keywords() -> tuple[set[str], set[str]]:

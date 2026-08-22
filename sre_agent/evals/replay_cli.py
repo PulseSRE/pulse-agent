@@ -71,6 +71,17 @@ def _make_parser() -> argparse.ArgumentParser:
         help="Force a skill (sre, security, view_designer, ...) instead of routing each prompt.",
     )
     p.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Run N fixtures at once (default 1). The suite is API-bound, so this is "
+            "bounded by provider rate limits rather than CPU — 4 to 6 is usually the "
+            "useful range. Fixture order in the output is preserved either way."
+        ),
+    )
+    p.add_argument(
         "--judge-min",
         type=int,
         default=None,
@@ -429,15 +440,19 @@ def main() -> None:
             print(name)
         return
 
+    if args.concurrency < 1:
+        print("--concurrency must be at least 1.", file=sys.stderr)
+        sys.exit(2)
+
     if args.judge_min is not None and not args.judge:
         print("--judge-min requires --judge (there is no judge score to gate on).", file=sys.stderr)
         sys.exit(2)
 
     fixtures = list_fixtures() if args.all else [args.fixture]
-    results = []
-    for name in fixtures:
+
+    def _run_one(name: str) -> dict:
         try:
-            result = _run_fixture(
+            return _run_fixture(
                 name,
                 use_judge=args.judge,
                 model=args.model,
@@ -446,17 +461,26 @@ def main() -> None:
                 stub_config=args.stub_config,
                 mode=args.mode,
             )
-            results.append(result)
         except Exception as e:
-            results.append(
-                {
-                    "fixture": name,
-                    "error": str(e),
-                    "score": {"passed": False, "score": 0, "checks": [], "tool_calls": []},
-                    "response_preview": "",
-                    "duration_ms": 0,
-                }
-            )
+            return {
+                "fixture": name,
+                "error": str(e),
+                "score": {"passed": False, "score": 0, "checks": [], "tool_calls": []},
+                "response_preview": "",
+                "duration_ms": 0,
+            }
+
+    # Hold isolation open for the whole run. Each fixture still enters it, but
+    # refcounting means the patches are applied once here and removed once at the
+    # end — so no fixture finishing can restore a live cluster read underneath a
+    # fixture still in flight, and there is no unpatched window between fixtures.
+    # False mirrors the harness default; the CLI exposes no way to change it, and
+    # a direct-harness caller that disagrees will fail loudly rather than run
+    # under isolation it did not ask for.
+    from .replay_config import offline_context
+
+    with offline_context(allow_llm_tool_picker=False):
+        results = _execute(fixtures, _run_one, args.concurrency)
 
     if args.format == "json":
         print(json.dumps(results, indent=2, default=str))
@@ -466,6 +490,21 @@ def main() -> None:
     # Exit non-zero if any fixture failed
     if not all(r["score"]["passed"] for r in results):
         sys.exit(1)
+
+
+def _execute(fixtures: list[str], run_one, concurrency: int) -> list[dict]:
+    """Run fixtures, in parallel when asked, preserving their declared order."""
+    if concurrency > 1 and len(fixtures) > 1:
+        # Each fixture runs its own asyncio.run, so threads rather than a shared
+        # loop. The work is API-bound, so the GIL is not the constraint —
+        # provider rate limits are, which is what bounds the worker count.
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            # map preserves input order regardless of completion order, so a run
+            # stays comparable to the one before it.
+            return list(pool.map(run_one, fixtures))
+    return [run_one(name) for name in fixtures]
 
 
 if __name__ == "__main__":
