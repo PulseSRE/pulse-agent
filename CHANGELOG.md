@@ -4,6 +4,13 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### The trust ladder described a different agent than the one that ships
+- Level 1 was labelled **"Confirm — every action requires your explicit approval"** for a level that never enters `auto_fix` at all. Nothing is ever proposed, so there is nothing to approve. An operator who wanted supervised remediation read that ladder, chose 1, and got an agent that did nothing — the `total_actions: 0` symptom, sitting in plain sight in the control's own name
+- Level 2, labelled "Batch — low-risk auto-approved", is the level that actually asks: it proposes every fix and waits for a human. The two were the wrong way round
+- Levels 3 and 4 promised LOW/MEDIUM/HIGH risk tiers. No such tiering exists in the fix path — `risk_level` appears only in LLM investigation output and `auto_fix` never reads it. What separates 3 from 4 is category filtering, nothing else
+- Behaviour is deliberately unchanged. Making level 1 act as its old label promised would start remediation on every cluster currently configured at 1, on upgrade, without anyone asking for it. The names were wrong, not the ladder — it is monotonic and the levels are genuinely distinct
+- The gate is now a named `remediation_enabled` rather than an inline `>= 2`, because a test that restates the threshold keeps passing when the real one moves. `tests/test_trust_ladder.py` pins what each level does by observing whether `execute_fix` is actually called — status strings alone cannot tell "asked and waited" from "ran it"
+
 ### The trust level an operator reads should be the one that governs
 - `/monitor/capabilities` reported `max_trust_level` — the ceiling a client may *select* — and nothing about the level the scan loop is actually running at. Those became different numbers when `effective_trust_level` started reading the server's configured floor instead of whichever browser tabs happened to be open
 - The response now carries `effective_trust_level` alongside the ceiling. A subscriber can still raise the monitor above the floor, so the running level is read from the live monitor rather than re-derived from settings
