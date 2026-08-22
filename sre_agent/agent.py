@@ -585,6 +585,10 @@ async def run_agent_streaming(
     full_text_parts = []
     iterations = 0
 
+    from .loop_budget import LoopBudget, compact_tool_results
+
+    budget = LoopBudget(max_iterations=MAX_ITERATIONS)
+
     settings = get_settings()
     model = settings.agent.model
     max_tokens = settings.agent.max_tokens
@@ -665,6 +669,17 @@ async def run_agent_streaming(
 
     while iterations < MAX_ITERATIONS:
         iterations += 1
+        budget.record_iteration()
+
+        # Tell the model to conclude while it still has a turn to do it in.
+        # Cutting it off mid-gather produces a partial answer with no conclusion.
+        if budget.should_warn():
+            messages.append({"role": "user", "content": budget.wrap_up_notice()})
+            logger.info("Loop budget nearing limit: %s", budget.summary())
+
+        # Older tool results have already been read; carrying the raw payloads
+        # forward crowds out the conversation.
+        messages, _reclaimed = compact_tool_results(messages)
 
         max_retries = 3
         retry_delays = [1, 3, 8]
@@ -904,8 +919,11 @@ async def run_agent_streaming(
         else:
             break
 
-    if iterations >= MAX_ITERATIONS:
-        logger.warning("Agent hit max iteration limit (%d)", MAX_ITERATIONS)
+    limit_hit = budget.exhausted()
+    if limit_hit:
+        # A truncated answer still reads as an answer, so say it was truncated.
+        logger.warning("Agent stopped early — reached %s (%s)", limit_hit, budget.summary())
+        full_text_parts.append(budget.cutoff_notice(limit_hit))
 
     return "".join(full_text_parts)
 

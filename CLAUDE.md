@@ -200,6 +200,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - `tool_predictor.py` — adaptive tool selection engine (TF-IDF prediction, LLM fallback, co-occurrence expansion, real-time learning)
 - `decorators.py` — typed `beta_tool` wrapper with optional `category`/`is_write` kwargs for auto-registration
 - `event_bus.py` — `EventBus` with `from_callbacks()` factory, replaces 7 individual callback params in agent loop
+- `loop_budget.py` — inner-loop bounds and honesty about them. `LoopBudget` tracks iterations, input tokens and wall-clock; warns the model to conclude at 80% of a limit while a turn remains to do it in; and appends a cutoff notice to the *returned text* when a limit ends the turn, so a truncated investigation cannot be mistaken for a complete one. `compact_tool_results()` shrinks tool results older than 6 turns, leaving a note saying how much was dropped rather than shrinking context silently
 - `async_k8s.py` — async K8s client wrappers using `kubernetes_asyncio` (scaffolding, no production consumer yet)
 - `tool_chains.py` — tool chain discovery and next-tool hints (bigram analysis, system prompt injection)
 - `promql_recipes.py` — 83 production-tested PromQL recipes + learned queries DB (sources: OpenShift console, cluster-monitoring-operator, kube-state-metrics, node_exporter, ACM)
