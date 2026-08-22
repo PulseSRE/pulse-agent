@@ -4,6 +4,12 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### Approve buttons for symptoms of a cause we had already named
+- Measured on the reference cluster: the Inbox showed **"4 fixes waiting on you"**, each with an Approve button, targeting exactly the four pods the same screen labelled *"Explained by the cause above — not separate problems"* under an open `HighOverallControlPlaneMemory` episode. Same four pods, same restart counts, one screen
+- Approving any of them restarts a pod whose cause is control-plane memory pressure. It crashloops again while the memory stays high. The causal engine knew that; the action panel said nothing, and put the most actionable-looking control on the page beside it
+- A proposal now carries `explainedBy` — the cause title of the open episode that explains its finding. `symptom_keys_by_episode` already answered *whether* something is explained; `explaining_cause` answers *by what*, which is the part an operator needs before deciding
+- Labelled, not suppressed. Restarting a symptom is sometimes a legitimate stopgap and that is the operator's call; it is only wrong to ask them to make it blind. The same reasoning the webhook already applies when it stays silent for findings an episode explains
+- The label is an enhancement, so losing it must not lose the proposal: a database that will not answer, an episode with no title, and an empty correlation key all yield no label rather than an empty one beside an Approve button
 ### A queue that never forgets what recovered
 - Resolution rides on `ClusterMonitor._last_findings`: present last scan, gone this scan, raise a resolution event. That dict is **in-memory and starts empty in every process**, so anything that recovered while the agent was restarting was never in it and could never become stale. The item stayed open, critical and wrong until `expire_untouched_items` archived it 48 hours later
 - Measured on the reference cluster: of the open items that could be checked against live state, **seven of seven were already resolved**. A node listed critical/`NotReady` had been `Ready` for six and a half hours; four Deployments listed `degraded (0/1)` were all `1/1`. 27 of 39 open items had not been re-examined in over six hours. An SRE working that queue top-down investigates healthy infrastructure
