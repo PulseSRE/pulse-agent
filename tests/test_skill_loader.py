@@ -462,3 +462,42 @@ class TestBudgetRelevance:
 
         tools = [self._tool("a_tool"), self._tool("b_tool")]
         assert [t.name for t in _rank_by_relevance(tools, "")] == ["a_tool", "b_tool"]
+
+
+class TestRoutingPrecision:
+    """Fixtures that were landing in the wrong skill on soft signals alone."""
+
+    @staticmethod
+    def _sre_patterns():
+        import re
+
+        from sre_agent.skill_loader import get_skill
+
+        skill = get_skill("sre")
+        assert skill is not None
+        return [re.compile(p, re.I) for p in skill.trigger_patterns]
+
+    def test_argocd_drift_routes_to_sre(self):
+        # gitops is in the sre skill's categories and it owns get_argo_applications,
+        # but nothing claimed the words — this was scoring into capacity_planner
+        q = "Check if our ArgoCD applications are in sync and report any drift"
+        assert any(p.search(q) for p in self._sre_patterns())
+
+    def test_task_creation_routes_to_sre(self):
+        # create_inbox_task is an sre tool with no skill of its own, so "rotate
+        # the certs" was pulling this into security
+        q = "Add a task to remind me to rotate TLS certificates before Friday"
+        assert any(p.search(q) for p in self._sre_patterns())
+
+    def test_does_not_hijack_other_skills(self):
+        for q in (
+            "run a security scan on the payments namespace",
+            "forecast capacity for the next quarter",
+            "build me a dashboard for production",
+            "create a skill for diagnosing etcd",
+        ):
+            assert not any(p.search(q) for p in self._sre_patterns()), f"sre hijacked: {q}"
+
+    def test_every_trigger_pattern_compiles(self):
+        # a broken regex here silently disables hard pre-routing for the whole skill
+        self._sre_patterns()
