@@ -13,7 +13,6 @@ __pycache__
 tests/
 docs/
 scripts/
-chart/
 
 *.md
 *.png

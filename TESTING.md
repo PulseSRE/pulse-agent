@@ -725,7 +725,7 @@ python -m sre_agent.evals.cli --suite release --save-baseline
 Version mismatch: pyproject.toml=1.16.0, Chart.yaml version=1.15.0
 ```
 
-Run `make release VERSION=<correct>` or manually sync `pyproject.toml` `[project].version` with `chart/Chart.yaml` `version` and `appVersion`.
+Run `make release VERSION=<correct>` or set `[project].version` in `pyproject.toml` directly.
 
 **Docs consistency failure**
 

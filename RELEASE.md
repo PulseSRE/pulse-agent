@@ -64,7 +64,7 @@ Every release updates these files in **both repos**:
 ```bash
 make release VERSION=X.Y.Z
 ```
-Updates: `pyproject.toml`, `chart/Chart.yaml`, umbrella chart subchart, `package.json`
+Updates: `pyproject.toml`, `README.md` release badge
 
 ### Phase 6: Push & Tag
 Both repos get the same `vX.Y.Z` tag. Backend tag triggers CI build-push.
@@ -87,8 +87,6 @@ Auto-generated changelogs for both repos via `gh release create`.
 | File | Field |
 |------|-------|
 | `pyproject.toml` | `[project].version` |
-| `chart/Chart.yaml` | `version` + `appVersion` |
-| `OpenshiftPulse/deploy/helm/pulse/Chart.yaml` | subchart `version` |
 | `OpenshiftPulse/package.json` | `version` |
 
 All synced by `scripts/bump-version.sh`. CI enforces they match.
