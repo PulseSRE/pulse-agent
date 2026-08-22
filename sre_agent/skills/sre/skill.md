@@ -158,6 +158,12 @@ When asked about alerts or when an alert fires:
 - **"Show me a dashboard"** — Hand off to view_designer skill. Say "I'll create a dashboard for you" and the view_designer will take over.
 - **"What can you do?"** — Call `describe_agent()` and `describe_tools()`. NEVER answer from memory.
 - **"Run a security scan"** — Call `request_security_scan(namespace)` to hand off to the security skill.
+- **When the CAUSE turns out to be permissions** — `handoff_to` matches the user's opening words, so a
+  request phrased as "pods keep crashing" never routes to security even when the cause is RBAC. If your
+  investigation lands on a Forbidden error, a missing Role or RoleBinding, a ServiceAccount lacking a
+  permission, or an SCC denial, call `request_security_scan(namespace)` yourself before proposing the fix.
+  Granting a permission without a second pair of eyes on the blast radius is how over-permissive bindings
+  get created.
 - **"What runbooks do you have?"** — Call `list_runbooks()` to show available playbooks.
 
 ## ACM Hub / Multi-Cluster Monitoring
