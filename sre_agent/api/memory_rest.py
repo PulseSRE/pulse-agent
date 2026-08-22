@@ -165,3 +165,95 @@ async def memory_summary(_auth=Depends(verify_token)):
         "eval_accuracy": round(eval_accuracy, 3),
         "top_namespaces": [r["namespace"] for r in (ns_rows or [])],
     }
+
+
+@router.get("/memory/environment")
+async def list_environment_facts(scope: str = Query(default=""), _auth=Depends(verify_token)):
+    """Facts Pulse holds about this cluster — ownership, retention, conventions."""
+    from ..memory.environment import get_cluster_memory
+
+    facts = get_cluster_memory().get_facts(scope)
+    return {
+        "facts": [
+            {
+                "scope": f.scope,
+                "key": f.key,
+                "value": f.value,
+                "source": f.source,
+                "confidence": f.confidence,
+                "updatedAt": f.updated_at,
+            }
+            for f in facts
+        ]
+    }
+
+
+@router.post("/memory/environment")
+async def record_environment_fact(payload: dict, _auth=Depends(verify_token)):
+    """Record or correct a fact. Operators can fix what the agent believes."""
+    from ..memory.environment import CLUSTER_SCOPE, get_cluster_memory
+
+    key = str(payload.get("key", "")).strip()
+    value = str(payload.get("value", "")).strip()
+    if not key or not value:
+        return {"ok": False, "error": "key and value are required"}
+
+    ok = get_cluster_memory().remember_fact(
+        key,
+        value,
+        scope=str(payload.get("scope") or CLUSTER_SCOPE),
+        source=str(payload.get("source") or "operator"),
+        confidence=float(payload.get("confidence") or 0.9),
+    )
+    return {"ok": ok}
+
+
+@router.delete("/memory/environment/{scope}/{key}")
+async def forget_environment_fact(scope: str, key: str, _auth=Depends(verify_token)):
+    """Drop a fact that has stopped being true."""
+    from ..memory.environment import get_cluster_memory
+
+    return {"ok": get_cluster_memory().forget_fact(key, scope)}
+
+
+@router.get("/memory/baselines")
+async def list_baselines(
+    namespace: str = Query(default=""),
+    workload: str = Query(default=""),
+    _auth=Depends(verify_token),
+):
+    """Learned norms per workload, with whether each is backed by enough samples."""
+    from ..memory.environment import get_cluster_memory
+
+    if not namespace:
+        return {"baselines": []}
+
+    rows = get_cluster_memory().list_baselines(namespace, workload)
+    return {
+        "baselines": [
+            {
+                "namespace": b.namespace,
+                "workload": b.workload,
+                "metric": b.metric,
+                "p50": b.p50,
+                "p95": b.p95,
+                "sampleCount": b.sample_count,
+                "windowHours": b.window_hours,
+                "reliable": b.is_reliable,
+                "updatedAt": b.updated_at,
+            }
+            for b in rows
+        ]
+    }
+
+
+@router.get("/memory/learning")
+async def learning_gate_stats(_auth=Depends(verify_token)):
+    """How the verified-trajectory gate is behaving.
+
+    `pending` are diagnoses waiting on a fix outcome; `promoted` became skills
+    because the fix was confirmed; `discarded` were dropped because it was not.
+    """
+    from ..trajectory import get_learner
+
+    return get_learner().stats()
