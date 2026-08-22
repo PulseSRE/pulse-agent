@@ -85,6 +85,19 @@ class EpisodeRepository(BaseRepository):
         )
         self.db.commit()
 
+    def list_stale_open(self, cutoff: int) -> list[dict[str, Any]]:
+        """Open episodes whose cause has not been re-detected since ``cutoff``.
+
+        ``last_seen_at`` has been written on every touch since episodes
+        existed and read by nothing. An episode was only ever closed by its
+        cause firing a resolution event, so a cause that simply stopped being
+        reported left its episode open indefinitely.
+        """
+        return self.db.fetchall(
+            "SELECT id, cause_title, last_seen_at FROM episodes WHERE status = ? AND last_seen_at < ?",
+            (_OPEN, cutoff),
+        )
+
     def dismiss(self, episode_id: str, actor: str, now: int) -> bool:
         """Close an episode because an operator says it is over.
 

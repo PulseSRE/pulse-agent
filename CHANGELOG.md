@@ -2,6 +2,14 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [Unreleased]
+
+### An episode nobody re-detects is over
+- `close_for_correlation` was the only way an episode ever ended, and it fires when a finding *resolves*. A cause that merely stopped being reported — a node that went NotReady and came back, an alert that stopped firing between scans — left its episode open indefinitely. `last_seen_at` has been written on every touch since episodes existed and read by nothing
+- Observed live: a master flapped NotReady and recovered. Sixty-eight minutes later the episode was still open and still the headline on the front-door banner, captioned "running 68m" — which reads as *broken for 68 minutes* when the truth was *last seen 68 minutes ago and never re-checked*. A monitoring product announcing a resolved incident as live is worse than one that says nothing
+- Open episodes whose cause has gone unseen for fifteen minutes now close on the next scan. Same rule the findings themselves got in 2.12.0 — detect slowly, clear quickly — finally applied to the layer above them
+- Fifteen minutes because the slowest scanners run every fifth cycle, roughly five and a half minutes, so the window has to outlast more than one missed turn. A database that will not answer closes nothing: an unreadable table is not evidence that every incident is over
+
 ## [2.16.5] - 2026-08-21
 
 ### A long-running cause is not a magnet

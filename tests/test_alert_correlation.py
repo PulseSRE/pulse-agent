@@ -315,3 +315,57 @@ def test_the_window_is_measured_from_the_cause_not_from_now(repo):
     cause = _alert("HighOverallControlPlaneMemory", hours_firing=50.0)
     together = _alert("CsvAbnormalFailedOver2Min", "openshift-operator-lifecycle-manager", hours_firing=49.5)
     assert ep.attach_symptoms("ep-1", cause, [together], {}) == 1
+
+
+# ── an episode nobody re-detects is over ──────────────────────────────────
+
+
+def test_an_episode_nobody_has_re_detected_is_closed(repo):
+    """Observed live: a master flapped NotReady and recovered. Sixty-eight
+    minutes later the episode was still open and still the headline on the
+    front door, captioned "running 68m" — which reads as broken for 68 minutes
+    when the truth was last seen 68 minutes ago and never re-checked."""
+    stale_at = NOW - 68 * 60
+    repo.list_stale_open.return_value = [{"id": "ep-stale", "cause_title": "Node NotReady", "last_seen_at": stale_at}]
+    assert ep.close_stale() == 1
+    repo.close.assert_called_once()
+    assert repo.close.call_args[0][0] == "ep-stale"
+
+
+def test_the_cutoff_is_exactly_the_stale_window_back(repo):
+    """Pin the cutoff to a value, not to an inequality.
+
+    The first version asserted only that the allowed silence exceeded the
+    slowest scanner's cadence. A mutant that passed `cutoff = 0` satisfied that
+    trivially — the silence it implies is fifty years — and all 34 tests went
+    green. An assertion a nonsense value can satisfy is not an assertion.
+    """
+    repo.list_stale_open.return_value = []
+    before = ep._now()
+    ep.close_stale()
+    after = ep._now()
+    cutoff = repo.list_stale_open.call_args[0][0]
+    assert before - ep._STALE_EPISODE_SECONDS <= cutoff <= after - ep._STALE_EPISODE_SECONDS
+
+
+def test_the_window_outlasts_the_slowest_scanner():
+    """Scanners on scan_every=5 touch their episode only every fifth cycle —
+    roughly five and a half minutes at a 65-second interval. The window must
+    leave room for more than one missed turn, or a slow scan closes a live
+    episode between its own detections."""
+    slowest_cadence = 5.5 * 60
+    assert 2 * slowest_cadence <= ep._STALE_EPISODE_SECONDS
+
+
+def test_an_episode_seen_this_cycle_is_left_alone(repo):
+    repo.list_stale_open.return_value = []
+    assert ep.close_stale() == 0
+    repo.close.assert_not_called()
+
+
+def test_a_failed_sweep_closes_nothing_rather_than_guessing(repo):
+    """A database that will not answer is not evidence that every episode is
+    over. Closing on a read failure would silently retire live incidents."""
+    repo.list_stale_open.side_effect = RuntimeError("db down")
+    assert ep.close_stale() == 0
+    repo.close.assert_not_called()
