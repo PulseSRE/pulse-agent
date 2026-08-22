@@ -223,7 +223,6 @@ class TrajectoryLearner:
             logger.warning("Failed to mark candidate %s as %s", key, status, exc_info=True)
             return False
 
-
     def promote(self, key: str) -> LearningCandidate | None:
         """The fix was verified. Return the candidate if it is worth learning from."""
         with self._lock:
@@ -278,9 +277,7 @@ class TrajectoryLearner:
                     (_now_ms(), int(cutoff * 1000)),
                 )
                 db.commit()
-                row = db.fetchone(
-                    "SELECT COUNT(*) AS c FROM learning_candidates WHERE status = 'expired'"
-                )
+                row = db.fetchone("SELECT COUNT(*) AS c FROM learning_candidates WHERE status = 'expired'")
                 db_expired = int(row["c"]) if row else 0
             except Exception:
                 logger.warning("Failed to expire stale candidates", exc_info=True)
@@ -295,9 +292,7 @@ class TrajectoryLearner:
         db = self.db
         if db is not None:
             try:
-                row = db.fetchone(
-                    "SELECT COUNT(*) AS c FROM learning_candidates WHERE status = 'pending'"
-                )
+                row = db.fetchone("SELECT COUNT(*) AS c FROM learning_candidates WHERE status = 'pending'")
                 if row is not None:
                     return int(row["c"])
             except Exception:
