@@ -501,3 +501,29 @@ class TestRoutingPrecision:
     def test_every_trigger_pattern_compiles(self):
         # a broken regex here silently disables hard pre-routing for the whole skill
         self._sre_patterns()
+
+
+class TestDestructiveGuidance:
+    """The skill must say which tool restarts a workload, or the agent guesses."""
+
+    @staticmethod
+    def _sre_prompt() -> str:
+        from sre_agent.skill_loader import get_skill
+
+        skill = get_skill("sre")
+        assert skill is not None
+        return skill.system_prompt
+
+    def test_restart_is_named_as_the_way_to_pick_up_a_change(self):
+        prompt = self._sre_prompt()
+        assert "restart_deployment" in prompt
+        assert "delete_pod" in prompt
+
+    def test_delete_pod_is_explicitly_ruled_out_for_restarts(self):
+        # the agent had both tools and no guidance, and reached for delete_pod
+        # twice to make pods pick up an RBAC change
+        prompt = self._sre_prompt().lower()
+        assert "never use `delete_pod`" in prompt or "never use delete_pod" in prompt
+
+    def test_scoped_requests_are_respected(self):
+        assert "start with step 1" in self._sre_prompt()

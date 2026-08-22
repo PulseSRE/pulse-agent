@@ -6,7 +6,8 @@
         "get_pod_logs": "2024-01-15T12:00:03Z [ERROR] Failed to read configmap payment-config: forbidden: User \"system:serviceaccount:payments:payment-worker\" cannot get resource \"configmaps\" in API group \"\" in namespace \"payments\"\n2024-01-15T12:00:03Z [FATAL] Cannot load configuration. Exiting.",
         "get_events": "45m ago  Warning  BackOff  Pod/payment-worker-8f4c2d1a-x1y2z  Back-off restarting failed container\n50m ago  Normal  Created  Pod/payment-worker-8f4c2d1a-x1y2z  Created container payment-worker\n1h ago   Warning  Failed   Pod/payment-worker-8f4c2d1a-x1y2z  Error: configmap read forbidden",
         "request_security_scan": "{\"status\": \"completed\", \"namespace\": \"payments\", \"findings\": [{\"severity\": \"critical\", \"type\": \"missing_role_binding\", \"subject\": \"ServiceAccount/payment-worker\", \"description\": \"Role binding 'payment-worker-config-reader' was deleted 1h ago. SA no longer has configmap read access.\", \"recommendation\": \"Restore RoleBinding with least-privilege: get/list on configmaps only\"}], \"summary\": \"RBAC misconfiguration: payment-worker SA lost configmap access after role binding deletion\"}",
-        "apply_yaml": "Applied 2 resource(s) in namespace payments:\n  role.rbac.authorization.k8s.io/payment-config-reader created\n  rolebinding.rbac.authorization.k8s.io/payment-worker-config-reader created"
+        "apply_yaml": "Applied 2 resource(s) in namespace payments:\n  role.rbac.authorization.k8s.io/payment-config-reader created\n  rolebinding.rbac.authorization.k8s.io/payment-worker-config-reader created",
+        "restart_deployment": "Rolling restart triggered for payments/payment-worker."
     },
     "expected": {
         "should_mention": [
@@ -18,7 +19,8 @@
         "should_use_tools": [
             "get_pod_logs",
             "request_security_scan",
-            "apply_yaml"
+            "apply_yaml",
+            "restart_deployment"
         ],
         "should_not_use_tools": [
             "delete_pod",
