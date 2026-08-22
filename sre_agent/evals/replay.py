@@ -340,6 +340,23 @@ _KEYWORD_SYNONYMS: dict[str, list[str]] = {
     "database": ["database", "db", "postgres", "mysql", "sql"],
     "restart": ["restart", "rollout restart", "rolling restart"],
     "connection": ["connection", "connect", "connectivity", "refused", "unreachable"],
+    # Orthography only. "RoleBinding" is the literal Kubernetes API kind and the
+    # more correct spelling, and a fixture demanding "role binding" with a space
+    # failed an answer the judge scored 91. Matching is plain substring, so
+    # "rolebinding" also covers clusterrolebinding — harmless, since every
+    # fixture using the term is about RBAC bindings.
+    "role binding": ["role binding", "rolebinding", "role-binding"],
+    # Restatements of the same term of art, and nothing weaker: "over-privileged"
+    # and "dangerous" are different claims and are deliberately absent, so this
+    # cannot manufacture a pass for an answer that never named the risk.
+    "privilege escalation": [
+        "privilege escalation",
+        "privilege-escalation",
+        "privesc",
+        "escalation of privilege",
+        "escalate privileges",
+        "escalated privileges",
+    ],
 }
 
 

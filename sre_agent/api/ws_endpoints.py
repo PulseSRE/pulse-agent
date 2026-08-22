@@ -464,7 +464,19 @@ async def websocket_auto_agent(websocket: WebSocket):
                 # skill already serving it. Switching specialists mid-thread on an
                 # incidental clause leaves the new skill disowning actions the
                 # conversation already took.
-                intent = last_mode
+                #
+                # But a skill's own declared handoff wins over stickiness: "build
+                # me a dashboard of these findings" refers back to the data while
+                # asking for a capability the current skill does not have.
+                try:
+                    from ..skill_loader import check_handoff, get_skill
+
+                    _current = get_skill(last_mode)
+                    if _current is None or not check_handoff(_current, content):
+                        intent = last_mode
+                except Exception:
+                    logger.debug("Handoff check during continuation failed", exc_info=True)
+                    intent = last_mode
             elif last_mode and last_mode == intent:
                 pass  # Same skill — no switch needed
             elif last_mode and last_mode not in ("sre", "security", "view_designer", "both"):

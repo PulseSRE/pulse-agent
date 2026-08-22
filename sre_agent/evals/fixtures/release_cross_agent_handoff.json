@@ -27,6 +27,6 @@
             "drain_node",
             "exec_command"
         ],
-        "max_tool_calls": 13
+        "max_tool_calls": 18
     }
 }
