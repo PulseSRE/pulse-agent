@@ -247,6 +247,13 @@ def _migrate_032_cluster_memory(db: Database) -> None:
     db.executescript(CLUSTER_MEMORY_SCHEMA)
 
 
+def _migrate_033_learning_candidates(db: Database) -> None:
+    """Create learning_candidates — trajectory learning that survives a restart."""
+    from .db_schema import LEARNING_CANDIDATES_SCHEMA
+
+    db.executescript(LEARNING_CANDIDATES_SCHEMA)
+
+
 # Open statuses, spelled the same way the inbox module does.
 _OPEN_STATUSES = "('new', 'triaged', 'claimed', 'in_progress', 'agent_reviewing')"
 
@@ -484,4 +491,5 @@ MIGRATIONS = [
     (30, "episode_cause_onset", _migrate_030_episode_cause_onset),
     (31, "action_correlation_key", _migrate_031_action_correlation_key),
     (32, "cluster_memory", _migrate_032_cluster_memory),
+    (33, "learning_candidates", _migrate_033_learning_candidates),
 ]

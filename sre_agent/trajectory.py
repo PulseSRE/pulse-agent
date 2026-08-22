@@ -18,6 +18,7 @@ A candidate that is never verified expires rather than being learned by default.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -60,6 +61,10 @@ def candidate_key(category: str, resources: list[dict] | None) -> str:
     return f"{category}:{resource_part}"
 
 
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
 @dataclass
 class LearningCandidate:
     """An investigation held pending the verdict on whether its fix worked."""
@@ -86,18 +91,78 @@ class LearningCandidate:
 
 
 class TrajectoryLearner:
-    """Holds learning candidates between investigation and verification."""
+    """Holds learning candidates between investigation and verification.
 
-    def __init__(self, ttl_seconds: int = CANDIDATE_TTL_SECONDS) -> None:
+    Backed by Postgres. This used to be a dict on a module global, which meant
+    every pod restart wiped the pending set — and since a candidate is recorded
+    at investigation time and promoted only when verification confirms the fix on
+    a LATER scan cycle, an in-memory store could only learn from an investigation
+    whose verification happened to land in the same pod lifetime. In practice it
+    learned nothing.
+
+    Falls back to memory when no database is reachable, so tests and offline runs
+    still work, but a real deployment persists.
+    """
+
+    def __init__(self, ttl_seconds: int = CANDIDATE_TTL_SECONDS, db=None, use_db: bool = True) -> None:
         self._candidates: dict[str, LearningCandidate] = {}
         self._ttl = ttl_seconds
         self._lock = threading.Lock()
+        self._db = db
+        self._use_db = use_db or db is not None
         self.promoted = 0
         self.discarded = 0
         self.expired = 0
 
+    @property
+    def db(self):
+        """The database, or None when unavailable — callers fall back to memory."""
+        if not self._use_db:
+            return None
+        if self._db is None:
+            try:
+                from .db import get_database
+
+                self._db = get_database()
+            except Exception:
+                logger.debug("No database for trajectory learning; using memory", exc_info=True)
+                self._use_db = False
+                return None
+        return self._db
+
     def record(self, candidate: LearningCandidate) -> None:
         """Hold a trajectory pending its outcome. Learns nothing yet."""
+        db = self.db
+        if db is not None:
+            try:
+                # One pending row per key: a re-investigation supersedes the
+                # earlier attempt rather than queueing a second candidate.
+                db.execute(
+                    "DELETE FROM learning_candidates WHERE candidate_key = ? AND status = 'pending'",
+                    (candidate.key,),
+                )
+                db.execute(
+                    """
+                    INSERT INTO learning_candidates
+                        (candidate_key, category, title, root_cause, summary, confidence,
+                         evidence_json, tools_json, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                    """,
+                    (
+                        candidate.key,
+                        candidate.category,
+                        candidate.title,
+                        candidate.root_cause,
+                        candidate.summary,
+                        float(candidate.confidence),
+                        json.dumps(candidate.evidence),
+                        json.dumps(candidate.tools_called),
+                        int(candidate.created_at * 1000),
+                    ),
+                )
+                db.commit()
+            except Exception:
+                logger.warning("Failed to persist learning candidate %s", candidate.key, exc_info=True)
         with self._lock:
             self._candidates[candidate.key] = candidate
         logger.info(
@@ -107,19 +172,75 @@ class TrajectoryLearner:
             len(candidate.evidence),
         )
 
+    def _load_pending(self, key: str) -> LearningCandidate | None:
+        """Rehydrate a candidate recorded before this process started."""
+        db = self.db
+        if db is None:
+            return None
+        try:
+            row = db.fetchone(
+                "SELECT candidate_key, category, title, root_cause, summary, confidence, "
+                "evidence_json, tools_json, created_at FROM learning_candidates "
+                "WHERE candidate_key = ? AND status = 'pending' ORDER BY id DESC LIMIT 1",
+                (key,),
+            )
+        except Exception:
+            logger.debug("Failed to load pending candidate %s", key, exc_info=True)
+            return None
+        if not row:
+            return None
+        try:
+            evidence = json.loads(row["evidence_json"] or "[]")
+            tools = json.loads(row["tools_json"] or "[]")
+        except (TypeError, ValueError):
+            evidence, tools = [], []
+        return LearningCandidate(
+            key=row["candidate_key"],
+            category=row["category"] or "",
+            title=row["title"] or "",
+            root_cause=row["root_cause"] or "",
+            summary=row["summary"] or "",
+            confidence=float(row["confidence"] or 0.0),
+            evidence=evidence,
+            tools_called=tools,
+            created_at=float(row["created_at"] or 0) / 1000.0,
+        )
+
+    def _resolve(self, key: str, status: str, reason: str) -> bool:
+        """Mark the pending row for *key* resolved. Rows are kept as history."""
+        db = self.db
+        if db is None:
+            return False
+        try:
+            db.execute(
+                "UPDATE learning_candidates SET status = ?, reason = ?, resolved_at = ? "
+                "WHERE candidate_key = ? AND status = 'pending'",
+                (status, reason[:500], _now_ms(), key),
+            )
+            db.commit()
+            return True
+        except Exception:
+            logger.warning("Failed to mark candidate %s as %s", key, status, exc_info=True)
+            return False
+
+
     def promote(self, key: str) -> LearningCandidate | None:
         """The fix was verified. Return the candidate if it is worth learning from."""
         with self._lock:
             candidate = self._candidates.pop(key, None)
         if candidate is None:
+            candidate = self._load_pending(key)
+        if candidate is None:
             return None
 
         learnable, reason = candidate.is_learnable()
         if not learnable:
+            self._resolve(key, "discarded", reason)
             self.discarded += 1
             logger.info("Verified trajectory %s not learnable: %s", key, reason)
             return None
 
+        self._resolve(key, "promoted", "")
         self.promoted += 1
         logger.info("Promoting verified trajectory %s: %s", key, candidate.root_cause)
         return candidate
@@ -128,7 +249,8 @@ class TrajectoryLearner:
         """The fix did not resolve the finding. Drop the candidate unlearned."""
         with self._lock:
             candidate = self._candidates.pop(key, None)
-        if candidate is not None:
+        resolved = self._resolve(key, "discarded", reason)
+        if candidate is not None or resolved:
             self.discarded += 1
             logger.info("Discarding unverified trajectory %s: %s", key, reason)
 
@@ -144,19 +266,66 @@ class TrajectoryLearner:
             stale = [k for k, c in self._candidates.items() if c.created_at < cutoff]
             for key in stale:
                 self._candidates.pop(key, None)
-        if stale:
-            self.expired += len(stale)
-            logger.info("Expired %d learning candidate(s) with no verification", len(stale))
-        return len(stale)
+
+        db_expired = 0
+        db = self.db
+        if db is not None:
+            try:
+                db.execute(
+                    "UPDATE learning_candidates SET status = 'expired', "
+                    "reason = 'verification never arrived', resolved_at = ? "
+                    "WHERE status = 'pending' AND created_at < ?",
+                    (_now_ms(), int(cutoff * 1000)),
+                )
+                db.commit()
+                row = db.fetchone(
+                    "SELECT COUNT(*) AS c FROM learning_candidates WHERE status = 'expired'"
+                )
+                db_expired = int(row["c"]) if row else 0
+            except Exception:
+                logger.warning("Failed to expire stale candidates", exc_info=True)
+
+        count = max(len(stale), 0)
+        if count or db_expired:
+            self.expired += count
+            logger.info("Expired %d in-memory candidate(s); %d expired total on record", count, db_expired)
+        return count
 
     def pending_count(self) -> int:
+        db = self.db
+        if db is not None:
+            try:
+                row = db.fetchone(
+                    "SELECT COUNT(*) AS c FROM learning_candidates WHERE status = 'pending'"
+                )
+                if row is not None:
+                    return int(row["c"])
+            except Exception:
+                logger.debug("Failed to count pending candidates", exc_info=True)
         with self._lock:
             return len(self._candidates)
 
     def stats(self) -> dict[str, int]:
-        """Counters for the learning loop — how much was learned versus dropped."""
+        """Counters for the learning loop — how much was learned versus dropped.
+
+        Read from the database when there is one, so the numbers describe the
+        whole history rather than what this process happens to remember.
+        """
+        db = self.db
+        if db is not None:
+            try:
+                rows = db.fetchall("SELECT status, COUNT(*) AS c FROM learning_candidates GROUP BY status")
+                counts = {r["status"]: int(r["c"]) for r in rows}
+                return {
+                    "pending": counts.get("pending", 0),
+                    "promoted": counts.get("promoted", 0),
+                    "discarded": counts.get("discarded", 0),
+                    "expired": counts.get("expired", 0),
+                }
+            except Exception:
+                logger.debug("Failed to read learning stats", exc_info=True)
         return {
-            "pending": self.pending_count(),
+            "pending": len(self._candidates),
             "promoted": self.promoted,
             "discarded": self.discarded,
             "expired": self.expired,
