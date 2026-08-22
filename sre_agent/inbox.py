@@ -8,6 +8,7 @@ import time
 import uuid
 from typing import Any
 
+from .monitor.layers import L_INFRA, L_PLATFORM, L_SIGNAL, L_WORKLOAD, layer_of
 from .repositories.inbox_repo import get_inbox_repo
 
 logger = logging.getLogger("pulse_agent.inbox")
@@ -99,6 +100,26 @@ _CLAIMABLE_STATES = frozenset(s for s, targets in _TRANSITIONS.items() if "claim
 SYSTEM_CREATORS = frozenset(("system:monitor", "system:agent"))
 
 SEVERITY_WEIGHTS = {"critical": 4, "warning": 2, "info": 1}
+
+# How causal a finding is, by the layer its category sits in.
+#
+# Pulse has had a causal layer model since episodes were built —
+# infrastructure explains platform explains workload explains signal — and the
+# inbox ranking never used it. Measured on the reference cluster: four
+# workload-layer pod crashloops outranked an infrastructure-layer node that had
+# gone NotReady, and seven derived `audit_events` rows outranked both. The
+# product knew which of those was the cause and sorted it fourth.
+#
+# A signal is the weakest claim on an operator's attention, not the strongest:
+# it is an observation *about* something else. Weighting it below a workload is
+# the same judgement episodes already make when they rank a symptom underneath
+# its cause.
+#
+# An unrecognised category lands on `layer_of`'s DEFAULT_LAYER, which is
+# workload — weight 1.0, neutral. A category nobody has classified yet is not
+# evidence that the finding is unimportant, and silently demoting it is how a
+# new scanner's output disappears.
+LAYER_WEIGHTS = {L_INFRA: 2.0, L_PLATFORM: 1.4, L_WORKLOAD: 1.0, L_SIGNAL: 0.7}
 AGE_BONUS_CAP = 2.0
 AGE_BONUS_PER_HOUR = 0.1
 
@@ -128,15 +149,37 @@ def _get_cluster_id() -> str | None:
         return None
 
 
+def _item_category(source: dict[str, Any]) -> str:
+    """The finding category an inbox item came from.
+
+    Items carry it in metadata; findings carry it directly. Both paths reach
+    the same ranking, so both have to answer the same question.
+    """
+    direct = source.get("category")
+    if isinstance(direct, str) and direct:
+        return direct
+    metadata = source.get("metadata") or {}
+    value = metadata.get("category") if isinstance(metadata, dict) else None
+    return value if isinstance(value, str) else ""
+
+
 def compute_priority_score(
     severity: str | None,
     confidence: float,
     noise_score: float,
     created_at: int,
     due_date: int | None,
+    category: str | None = None,
 ) -> float:
+    """How far up the queue this belongs.
+
+    ``category`` is optional so existing callers keep working, but omitting it
+    ranks the item as though every finding were equally causal — which is the
+    behaviour this parameter exists to correct.
+    """
     weight = SEVERITY_WEIGHTS.get(severity or "info", 1)
-    base = weight * confidence * (1 - noise_score)
+    layer_weight = LAYER_WEIGHTS[layer_of(category)] if category else LAYER_WEIGHTS[L_WORKLOAD]
+    base = weight * layer_weight * confidence * (1 - noise_score)
 
     age_hours = (time.time() - created_at) / 3600
     age_bonus = min(age_hours * AGE_BONUS_PER_HOUR, AGE_BONUS_CAP)
@@ -164,6 +207,7 @@ def create_inbox_item(item: dict[str, Any]) -> str:
         noise_score=item.get("noise_score", 0),
         created_at=now,
         due_date=item.get("due_date"),
+        category=_item_category(item),
     )
 
     cluster_id = item.get("cluster_id") or _get_cluster_id()
@@ -1019,6 +1063,7 @@ def upsert_inbox_item(item: dict[str, Any]) -> str:
         noise_score=item.get("noise_score", existing.get("noise_score", 0)),
         created_at=existing["created_at"],
         due_date=item.get("due_date", existing.get("due_date")),
+        category=_item_category(item) or _item_category(existing),
     )
 
     # Pass the freshly generated wording through. Without this the item keeps
@@ -1216,6 +1261,7 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
             noise_score=finding.get("noiseScore", 0),
             created_at=existing_item["created_at"],
             due_date=None,
+            category=_item_category(finding),
         )
         repo.update_resources_and_priority(existing_item["id"], merged_resources, priority, now)
         return existing_item["id"]

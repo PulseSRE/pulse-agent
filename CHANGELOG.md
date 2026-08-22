@@ -4,6 +4,14 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### Ranking that ignored its own causal model
+- Pulse has had a causal layer model since episodes were built — infrastructure explains platform explains workload explains signal — and the inbox ranking never used it. Measured on the reference cluster: four workload-layer pod crashloops outranked an infrastructure-layer node that had gone `NotReady`, and derived `audit_events` rows outranked both. The product knew which of those was the cause and sorted it fourth
+- The whole top ten spanned **5.69 to 5.22**. Age contributes up to 3.5 points (`age_bonus` 2.0 + `novelty` 1.5) while the entire severity range contributes at most 3 — so with every item about the same age, time outweighed severity and everything converged. The order was correct and told an operator nothing
+- Severity is now weighted by causal layer: infrastructure ×2.0, platform ×1.4, workload ×1.0, signal ×0.7. A signal is an observation *about* something else and is the weakest claim on attention, not the strongest — the same judgement episodes already make when they rank a symptom underneath its cause
+- Re-scored against the live queue, the `NotReady` node moves from 4th to 2nd, the `BackOff` event rows fall below the workloads they describe, and the spread across the queue widens from **2.61 to 6.65**
+- An unrecognised category weighs 1.0 — neutral, via `layer_of`'s existing workload default. A category nobody has classified yet is not evidence that the finding is unimportant, and silently demoting it is how a new scanner's output disappears from the queue it was written to fill
+- `category` is optional, so a caller that omits it ranks exactly as before rather than shifting underneath itself
+
 ### Approve buttons for symptoms of a cause we had already named
 - Measured on the reference cluster: the Inbox showed **"4 fixes waiting on you"**, each with an Approve button, targeting exactly the four pods the same screen labelled *"Explained by the cause above — not separate problems"* under an open `HighOverallControlPlaneMemory` episode. Same four pods, same restart counts, one screen
 - Approving any of them restarts a pod whose cause is control-plane memory pressure. It crashloops again while the memory stays high. The causal engine knew that; the action panel said nothing, and put the most actionable-looking control on the page beside it
