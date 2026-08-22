@@ -4,6 +4,13 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### Approve buttons for symptoms of a cause we had already named
+- Measured on the reference cluster: the Inbox showed **"4 fixes waiting on you"**, each with an Approve button, targeting exactly the four pods the same screen labelled *"Explained by the cause above — not separate problems"* under an open `HighOverallControlPlaneMemory` episode. Same four pods, same restart counts, one screen
+- Approving any of them restarts a pod whose cause is control-plane memory pressure. It crashloops again while the memory stays high. The causal engine knew that; the action panel said nothing, and put the most actionable-looking control on the page beside it
+- A proposal now carries `explainedBy` — the cause title of the open episode that explains its finding. `symptom_keys_by_episode` already answered *whether* something is explained; `explaining_cause` answers *by what*, which is the part an operator needs before deciding
+- Labelled, not suppressed. Restarting a symptom is sometimes a legitimate stopgap and that is the operator's call; it is only wrong to ask them to make it blind. The same reasoning the webhook already applies when it stays silent for findings an episode explains
+- The label is an enhancement, so losing it must not lose the proposal: a database that will not answer, an episode with no title, and an empty correlation key all yield no label rather than an empty one beside an Approve button
+
 ### The trust ladder described a different agent than the one that ships
 - Level 1 was labelled **"Confirm — every action requires your explicit approval"** for a level that never enters `auto_fix` at all. Nothing is ever proposed, so there is nothing to approve. An operator who wanted supervised remediation read that ladder, chose 1, and got an agent that did nothing — the `total_actions: 0` symptom, sitting in plain sight in the control's own name
 - Level 2, labelled "Batch — low-risk auto-approved", is the level that actually asks: it proposes every fix and waits for a human. The two were the wrong way round

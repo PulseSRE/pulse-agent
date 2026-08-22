@@ -538,6 +538,28 @@ class ClusterMonitor:
                 action_report["causeCategory"] = targeted_plan.cause_category
                 action_report["fixDescription"] = targeted_plan.description
 
+            # If an open episode already explains this finding, say so on the
+            # proposal. Measured on the reference cluster: all four fixes
+            # awaiting approval targeted the exact four pods the same screen
+            # labelled "Explained by the cause above — not separate problems".
+            # Restarting them treats a symptom of control-plane memory
+            # pressure, and they crashloop again while the cause persists.
+            #
+            # Labelled rather than suppressed: restarting a symptom is
+            # sometimes a legitimate stopgap, and that is the operator's call
+            # to make. It is only wrong to ask them to make it blind. Same
+            # reasoning the webhook already applies when it stays silent for
+            # findings an episode explains.
+            try:
+                from ..inbox import _finding_corr_key
+                from .episodes import explaining_cause
+
+                cause_title = await asyncio.to_thread(explaining_cause, _finding_corr_key(finding))
+                if cause_title:
+                    action_report["explainedBy"] = cause_title
+            except Exception:
+                logger.debug("Could not resolve the explaining cause for a proposal", exc_info=True)
+
             # Ask-first mode: broadcast proposal and wait for first approval from ANY subscriber
             if trust_level == 2:
                 async with self._subscribers_lock:

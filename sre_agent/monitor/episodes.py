@@ -323,6 +323,27 @@ def symptom_keys_by_episode() -> dict[str, str]:
         return {}
 
 
+def explaining_cause(correlation_key: str) -> str | None:
+    """The cause title of the open episode that explains this finding, if any.
+
+    ``symptom_keys_by_episode`` answers *whether* something is explained; this
+    answers *by what*, which is the part an operator needs before deciding
+    whether to act on a symptom.
+    """
+    if not correlation_key:
+        return None
+    try:
+        episode_id = _repo().open_symptom_index().get(correlation_key)
+        if not episode_id:
+            return None
+        for episode in _repo().list_open():
+            if episode["id"] == episode_id:
+                return str(episode.get("cause_title") or "") or None
+    except Exception:
+        logger.exception("Could not resolve the explaining cause")
+    return None
+
+
 def recurrence_summary(episode_id: str) -> dict[str, Any]:
     """How often this cause has come back, and whether it is getting worse.
 
