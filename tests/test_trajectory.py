@@ -168,8 +168,18 @@ class TestStats:
         assert learner.stats() == {"pending": 0, "promoted": 1, "discarded": 1, "expired": 0}
 
     def test_learner_is_process_wide(self):
-        get_learner().record(_candidate())
-        assert get_learner().pending_count() == 1
+        """Same instance every call — the property the name is about.
+
+        This used to record a candidate and assert pending_count() == 1. Now that
+        the learner is database-backed and CI runs a real Postgres, that count
+        includes rows other tests left behind, so it asserted a global that no
+        single test controls.
+        """
+        first = get_learner()
+        assert get_learner() is first
+
+        reset_learner()
+        assert get_learner() is not first
 
 
 class _FakeDB:
