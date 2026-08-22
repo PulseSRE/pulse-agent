@@ -184,7 +184,6 @@ class TestRealDatabaseAccessor:
 
     def test_the_accessor_it_imports_actually_exists(self):
         import sre_agent.db as db_module
-
         from sre_agent.memory.environment import ClusterMemory
 
         source = ClusterMemory.db.fget.__code__.co_names
