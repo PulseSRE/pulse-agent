@@ -178,7 +178,6 @@ _LLM_PICKER_TARGET: tuple[str, str, Any, bool] = (
 )
 
 
-
 # Isolation is process-wide because it patches module attributes, so concurrent
 # fixtures must share one set of patches. Refcounted: the first entry applies
 # them, the last exit removes them. Without this, one fixture finishing would
