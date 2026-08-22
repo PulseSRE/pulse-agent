@@ -240,7 +240,38 @@ def execute_fix(plan: FixPlan) -> tuple[str, str, str]:
         plan.cause_category,
         plan.confidence,
     )
-    return executor(plan)
+    result = executor(plan)
+    # The snapshot the executor captured travels with the result via
+    # take_last_snapshot(); callers that persist the action read it there.
+    return result
+
+
+# The snapshot the most recent executor captured. execute_targeted_fix returns a
+# 3-tuple that predates snapshots and is consumed in several places; threading a
+# fourth element through would break every caller, so the executor leaves it here
+# and execute_targeted_fix hands it back alongside.
+_last_snapshot: dict | None = None
+
+
+def take_last_snapshot() -> dict | None:
+    """Return and clear the snapshot the last executor captured."""
+    global _last_snapshot
+    snap, _last_snapshot = _last_snapshot, None
+    return snap
+
+
+def _snapshot_before(kind: str, name: str, namespace: str) -> None:
+    """Capture a restorable copy before a write. Never blocks the fix."""
+    global _last_snapshot
+    try:
+        from ..snapshot import capture
+
+        _last_snapshot = capture(kind, name, namespace)
+        if _last_snapshot is None:
+            logger.warning("No snapshot for %s %s/%s — this fix will not be undoable", kind, namespace, name)
+    except Exception:
+        logger.warning("Snapshot failed for %s %s/%s", kind, namespace, name, exc_info=True)
+        _last_snapshot = None
 
 
 def _get_first_resource(plan: FixPlan) -> tuple[dict, str]:
@@ -288,6 +319,7 @@ def _execute_patch_image(plan: FixPlan) -> tuple[str, str, str]:
 
     dep = apps.read_namespaced_deployment(dep_name, ns)
     revision = (dep.metadata.annotations or {}).get("deployment.kubernetes.io/revision", "0")
+    _snapshot_before("Deployment", dep_name, ns)
     before = f"Deployment {dep_name} in {ns}: image={bad_image}, revision={revision}"
 
     # Find previous revision's ReplicaSet
@@ -366,6 +398,7 @@ def _execute_patch_resources(plan: FixPlan) -> tuple[str, str, str]:
             }
         }
     }
+    _snapshot_before("Deployment", name, ns)
     apps.patch_namespaced_deployment(name, ns, body=body)
 
     return ("patch_resources", before, f"Deployment {name} patched: memory limit {current_limit} -> {new_limit}")
