@@ -272,7 +272,10 @@ class TestCorrelationKeyStability:
         env = {**os.environ, "PYTHONHASHSEED": seed}
         out = subprocess.run(
             [sys.executable, "-c", self.PROBE],
-            capture_output=True, text=True, env=env, cwd=str(Path(__file__).resolve().parents[1]),
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(Path(__file__).resolve().parents[1]),
         )
         assert out.returncode == 0, out.stderr
         return out.stdout.strip()
@@ -280,8 +283,7 @@ class TestCorrelationKeyStability:
     def test_key_survives_a_restart(self):
         keys = {seed: self._key_under_seed(seed) for seed in self.SEEDS}
         assert len(set(keys.values())) == 1, (
-            f"the same condition produced different correlation keys across "
-            f"restarts: {keys}"
+            f"the same condition produced different correlation keys across restarts: {keys}"
         )
 
     def test_the_key_is_the_one_we_expect(self):
