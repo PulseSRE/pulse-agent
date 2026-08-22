@@ -64,6 +64,10 @@ TOOL_CATEGORIES = {
             "search_past_incidents",
             "get_learned_runbooks",
             "get_cluster_patterns",
+            "remember_environment_fact",
+            "get_environment_facts",
+            "compare_to_baseline",
+            "search_conversations",
         ],
     },
     "workloads": {

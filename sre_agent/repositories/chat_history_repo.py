@@ -98,6 +98,26 @@ class ChatHistoryRepository(BaseRepository):
             (session_id, limit, offset),
         )
 
+    def search_messages(self, owner: str, query: str, limit: int = 10) -> list[dict]:
+        """Find past conversation turns mentioning *query*, newest first.
+
+        Hermes calls this session_search: the ability to ask "did we discuss X
+        last week" without carrying every prior conversation in context. Scoped to
+        one owner so a search cannot read another operator's sessions.
+        """
+        pattern = f"%{query.lower()}%"
+        return self.db.fetchall(
+            """
+            SELECT m.session_id, m.role, m.content, m.created_at, s.title
+            FROM chat_messages m
+            JOIN chat_sessions s ON s.id = m.session_id
+            WHERE s.owner = ? AND LOWER(m.content) LIKE ?
+            ORDER BY m.created_at DESC
+            LIMIT ?
+            """,
+            (owner, pattern, limit),
+        )
+
     def commit(self) -> None:
         """Commit the current transaction."""
         self.db.commit()

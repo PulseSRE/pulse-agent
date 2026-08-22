@@ -98,3 +98,109 @@ def get_cluster_patterns() -> str:
 
 
 MEMORY_TOOLS = [search_past_incidents, get_learned_runbooks, get_cluster_patterns]
+
+
+@beta_tool
+def remember_environment_fact(key: str, value: str, scope: str = "cluster", source: str = "") -> str:
+    """Record something true about THIS cluster so it does not have to be re-derived.
+
+    Use for facts that change rarely and that change how you diagnose: who owns a
+    namespace, how long Prometheus retains data, that ArgoCD owns production so
+    manual edits get reverted, local naming conventions. Do not use it for
+    measurements — those are baselines, and they change continuously.
+
+    Args:
+        key: Short identifier, e.g. 'prometheus_retention' or 'payments_owner'.
+        value: The fact itself, in plain language.
+        scope: 'cluster' for cluster-wide, otherwise a namespace name.
+        source: Where this came from — the operator who said it, or the tool that showed it.
+    """
+    from .environment import get_cluster_memory
+
+    if get_cluster_memory().remember_fact(key, value, scope=scope, source=source):
+        return f"Recorded: [{scope}] {key} = {value}"
+    return "Error: could not record that fact (key and value must both be non-empty)."
+
+
+@beta_tool
+def get_environment_facts(scope: str = "") -> str:
+    """Recall what is known about this cluster — ownership, retention, conventions, quirks.
+
+    Call this early in an investigation. It is what stops you giving generic advice
+    that ignores how this particular cluster is run.
+
+    Args:
+        scope: Limit to one scope ('cluster' or a namespace). Empty returns all.
+    """
+    from .environment import get_cluster_memory
+
+    facts = get_cluster_memory().get_facts(scope)
+    if not facts:
+        where = f" for scope '{scope}'" if scope else ""
+        return f"No environment facts recorded{where} yet. Use remember_environment_fact to record one."
+
+    by_scope: dict[str, list[str]] = {}
+    for fact in facts:
+        by_scope.setdefault(fact.scope, []).append(f"  {fact.render()}")
+    lines = [f"{len(facts)} known fact(s) about this cluster:", ""]
+    for scope_name, entries in sorted(by_scope.items()):
+        lines.append(f"[{scope_name}]")
+        lines.extend(entries)
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+@beta_tool
+def compare_to_baseline(namespace: str, workload: str, metric: str, observed: float) -> str:
+    """Say whether an observed value is normal FOR THIS WORKLOAD.
+
+    A number on its own is not a finding. Use this before reporting that something
+    is high or low, so you report '3x this service's normal' rather than a raw
+    figure the operator has to interpret.
+
+    Args:
+        namespace: Kubernetes namespace.
+        workload: Workload name, e.g. 'checkout-api'.
+        metric: Metric name, e.g. 'memory_bytes', 'cpu_cores', 'error_rate'.
+        observed: The value you measured.
+    """
+    from .environment import get_cluster_memory
+
+    baseline = get_cluster_memory().get_baseline(namespace, workload, metric)
+    if baseline is None:
+        return (
+            f"No baseline recorded for {namespace}/{workload} {metric}. "
+            f"Observed {observed:g} — report it as a raw value and say there is no baseline to compare against."
+        )
+    return f"{namespace}/{workload}: {baseline.compare(observed)}"
+
+
+@beta_tool
+def search_conversations(query: str, owner: str = "", limit: int = 5) -> str:
+    """Search past conversations for something discussed before.
+
+    Use when the user refers to earlier work ("the thing we found last week") or
+    when you suspect this problem has come up before. Searches only this user's
+    own sessions.
+
+    Args:
+        query: Phrase to look for.
+        owner: Session owner. Leave empty to use the current user.
+        limit: Maximum results.
+    """
+    from ..chat_history import search_messages
+
+    if len(query.strip()) < 3:
+        return "Error: query must be at least 3 characters."
+
+    rows = search_messages(owner, query, limit)
+    if not rows:
+        return f"Nothing in past conversations matched '{query}'."
+
+    lines = [f"{len(rows)} past mention(s) of '{query}':", ""]
+    for row in rows:
+        content = str(row.get("content", "")).strip().replace("\n", " ")
+        if len(content) > 200:
+            content = content[:200] + "..."
+        lines.append(f"  [{row.get('title', 'untitled')}] {row.get('role', '?')}: {content}")
+    return "\n".join(lines)
