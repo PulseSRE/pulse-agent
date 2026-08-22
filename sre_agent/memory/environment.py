@@ -97,9 +97,9 @@ class ClusterMemory:
     @property
     def db(self):
         if self._db is None:
-            from ..db import get_db
+            from ..db import get_database
 
-            self._db = get_db()
+            self._db = get_database()
         return self._db
 
     # ----- environment facts -----
