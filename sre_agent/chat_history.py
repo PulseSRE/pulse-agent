@@ -117,6 +117,18 @@ def get_messages(session_id: str, owner: str, limit: int = 100, offset: int = 0)
         return {"messages": [], "total": 0}
 
 
+def search_messages(owner: str, query: str, limit: int = 10) -> list[dict]:
+    """Search an owner's past conversations for a phrase."""
+    query = (query or "").strip()
+    if len(query) < 3:
+        return []
+    try:
+        return _repo().search_messages(owner, query, limit)
+    except Exception:
+        logger.debug("Conversation search failed", exc_info=True)
+        return []
+
+
 def delete_session(session_id: str, owner: str) -> bool:
     """Delete a chat session (cascades to messages)."""
     try:

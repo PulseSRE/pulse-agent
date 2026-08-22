@@ -240,6 +240,13 @@ def _migrate_024_inbox_mutes(db: Database) -> None:
     db.executescript(INBOX_MUTES_SCHEMA)
 
 
+def _migrate_026_cluster_memory(db: Database) -> None:
+    """Create environment_facts and workload_baselines — memory about this cluster."""
+    from .db_schema import CLUSTER_MEMORY_SCHEMA
+
+    db.executescript(CLUSTER_MEMORY_SCHEMA)
+
+
 # Open statuses, spelled the same way the inbox module does.
 _OPEN_STATUSES = "('new', 'triaged', 'claimed', 'in_progress', 'agent_reviewing')"
 
@@ -470,6 +477,7 @@ MIGRATIONS = [
     (23, "operational_flags", _migrate_023_operational_flags),
     (24, "inbox_mutes", _migrate_024_inbox_mutes),
     (25, "rekey_inbox_correlation_keys", _migrate_025_rekey_inbox_correlation_keys),
+    (26, "cluster_memory", _migrate_026_cluster_memory),
     (26, "episodes", _migrate_026_episodes),
     (27, "episode_dismissal", _migrate_027_episode_dismissal),
     (28, "inbox_reset_baseline", _migrate_028_inbox_reset_baseline),

@@ -613,3 +613,38 @@ CREATE TABLE IF NOT EXISTS inbox_mutes (
     created_at      BIGINT NOT NULL
 );
 """
+
+
+CLUSTER_MEMORY_SCHEMA = """
+-- What Pulse knows about THIS cluster, as opposed to what it knows about
+-- Kubernetes. Facts an operator states or the agent establishes: ownership,
+-- retention windows, GitOps topology, local conventions.
+CREATE TABLE IF NOT EXISTS environment_facts (
+    scope        TEXT NOT NULL,
+    fact_key     TEXT NOT NULL,
+    fact_value   TEXT NOT NULL,
+    source       TEXT NOT NULL DEFAULT '',
+    confidence   REAL NOT NULL DEFAULT 0.8,
+    created_at   BIGINT NOT NULL,
+    updated_at   BIGINT NOT NULL,
+    PRIMARY KEY (scope, fact_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_environment_facts_scope ON environment_facts(scope);
+
+-- Learned norms per workload, so "600MB" can be reported as "three times this
+-- service's normal" rather than as a number with no reference point.
+CREATE TABLE IF NOT EXISTS workload_baselines (
+    namespace     TEXT NOT NULL,
+    workload      TEXT NOT NULL,
+    metric        TEXT NOT NULL,
+    p50           REAL NOT NULL,
+    p95           REAL NOT NULL,
+    sample_count  INTEGER NOT NULL DEFAULT 0,
+    window_hours  INTEGER NOT NULL DEFAULT 24,
+    updated_at    BIGINT NOT NULL,
+    PRIMARY KEY (namespace, workload, metric)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workload_baselines_ns ON workload_baselines(namespace, workload);
+"""
