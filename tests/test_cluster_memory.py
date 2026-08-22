@@ -129,8 +129,14 @@ class TestBaselineComparison:
         assert "above its p95" in out
 
     def test_elevated_but_within_range_is_distinguished(self):
-        out = self._baseline().compare(780)
+        # needs a workload whose p95 is more than 1.5x its p50, otherwise anything
+        # elevated is already above p95 and this branch cannot be reached
+        out = self._baseline(p95=1200.0).compare(900)
         assert "within its usual range" in out
+        assert "1.5x" in out
+
+    def test_mildly_elevated_still_reads_as_normal(self):
+        assert "normal for this workload" in self._baseline().compare(780)
 
     def test_unusually_low_is_reported(self):
         assert "unusually low" in self._baseline().compare(100)
