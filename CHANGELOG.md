@@ -10,6 +10,12 @@ All notable changes to Pulse Agent are documented in this file.
 - Same bug `_finding_corr_key` already had and already documents — two workloads sharing a name in different namespaces collided onto one item. That one was fixed by falling back to the primary resource; this one was not
 - Cluster-scoped findings still get nothing. A node or an alert with no namespace label has none, and a row should not invent a location for something that does not have one
 
+### A correlation key that changed on every restart
+- The events scanner picked `resources[0]` out of a **set**. Python randomises string hashing per process, so the set's iteration order moved every time the agent restarted — and `resources[0]` is exactly what `_finding_corr_key` builds the key from. An unchanged condition was handed a brand new correlation key on each restart: a new inbox item, a new symptom on the episode, a fresh "is this still happening?" question with no memory of the last answer
+- Found by pulling apart an episode that carried two symptoms with byte-identical titles — `High-frequency 'BackOff' events in multicluster-engine (93x)`, the same count on both — under two different keys, `Pod/infrastructure-operator` and `Pod/ocm-controller`. One finding group, forked in two by nothing more than which pod happened to come out of a set first
+- Four `list(set(...))` sites are now `sorted(...)`; the other three fed summaries and a briefing, where the same reshuffling made identical text read as changed
+- The regression test crosses a process boundary on five `PYTHONHASHSEED` values, because a single-process test cannot see this at all — within one interpreter the order never moves. Reverting the fix makes it produce four different keys from five runs
+
 ### An episode nobody re-detects is over
 - `close_for_correlation` was the only way an episode ever ended, and it fires when a finding *resolves*. A cause that merely stopped being reported — a node that went NotReady and came back, an alert that stopped firing between scans — left its episode open indefinitely. `last_seen_at` has been written on every touch since episodes existed and read by nothing
 - Observed live: a master flapped NotReady and recovered. Sixty-eight minutes later the episode was still open and still the headline on the front-door banner, captioned "running 68m" — which reads as *broken for 68 minutes* when the truth was *last seen 68 minutes ago and never re-checked*. A monitoring product announcing a resolved incident as live is worse than one that says nothing

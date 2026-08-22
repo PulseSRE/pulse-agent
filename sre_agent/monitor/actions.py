@@ -109,7 +109,8 @@ def get_briefing(hours: int = 12) -> dict:
         total_actions = len(actions)
         completed = sum(1 for a in actions if a["status"] == "completed")
         failed = sum(1 for a in actions if a["status"] == "failed")
-        categories_fixed = list({a["category"] for a in actions if a["status"] == "completed"})
+        # sorted so the briefing reads the same way twice in a row
+        categories_fixed = sorted({a["category"] for a in actions if a["status"] == "completed"})
 
         # Recent investigations
         investigations = repo.get_investigations_since(since)
