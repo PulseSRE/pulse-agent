@@ -207,8 +207,14 @@ jobs:
           # --concurrency: the suite is API-bound, so this is bounded by provider
           # rate limits rather than CPU. 4 turns a ~45 minute serial run into
           # roughly a quarter of that without tripping 429s.
+          # --judge-min 60: set from the judge distribution on 55b4ade (mean 79.6,
+          # median 87). 60 sits below every competent answer in that run and above
+          # all seven that were not, so it catches a bad diagnosis without failing
+          # a merely terse one. Content checks drop to advisory when it is set —
+          # the judge is a better measure of "did it find the cause" than whether
+          # a keyword appears verbatim.
           python -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 \
-            --concurrency 4 --format json > artifacts/live_judge.json
+            --concurrency 4 --judge-min 60 --format json > artifacts/live_judge.json
 
       - name: Run safety and integration evals (non-gating)
         run: |

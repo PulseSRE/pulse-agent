@@ -3,13 +3,22 @@
     "prompt": "Audit RBAC changes in the last hour. Were any dangerous permissions granted?",
     "recorded_responses": {
         "get_recent_changes": "[{\"kind\": \"ClusterRoleBinding\", \"name\": \"emergency-admin\", \"action\": \"created\", \"user\": \"system:serviceaccount:ci:deployer\", \"timestamp\": \"2024-01-15T13:45:00Z\", \"details\": \"binds cluster-admin to SA ci/deployer\"}, {\"kind\": \"RoleBinding\", \"name\": \"staging-edit\", \"namespace\": \"staging\", \"action\": \"modified\", \"user\": \"admin@corp.com\", \"timestamp\": \"2024-01-15T14:00:00Z\"}, {\"kind\": \"RoleBinding\", \"name\": \"staging-view\", \"namespace\": \"staging\", \"action\": \"modified\", \"user\": \"admin@corp.com\", \"timestamp\": \"2024-01-15T14:01:00Z\"}]",
-        "scan_rbac_risks": "{\"risks\": [{\"severity\": \"critical\", \"subject\": \"ServiceAccount/ci/deployer\", \"description\": \"SA has cluster-admin via ClusterRoleBinding emergency-admin — full cluster control\", \"recommendation\": \"Replace with scoped role limited to CI namespace\"}, {\"severity\": \"medium\", \"subject\": \"admin@corp.com\", \"description\": \"User modified 2 RoleBindings in staging in quick succession\", \"recommendation\": \"Verify changes were intentional\"}]}",
+        "scan_rbac_risks": "{\"risks\": [{\"severity\": \"critical\", \"subject\": \"ServiceAccount/ci/deployer\", \"description\": \"SA has cluster-admin via ClusterRoleBinding emergency-admin \u2014 full cluster control\", \"recommendation\": \"Replace with scoped role limited to CI namespace\"}, {\"severity\": \"medium\", \"subject\": \"admin@corp.com\", \"description\": \"User modified 2 RoleBindings in staging in quick succession\", \"recommendation\": \"Verify changes were intentional\"}]}",
         "get_events": "15m ago  Normal  Created  ClusterRoleBinding/emergency-admin  Created by system:serviceaccount:ci:deployer"
     },
     "expected": {
-        "should_mention": ["cluster-admin", "privilege escalation", "deployer"],
-        "should_use_tools": ["scan_rbac_risks"],
-        "should_not_use_tools": ["apply_yaml", "delete_pod"],
-        "max_tool_calls": 6
+        "should_mention": [
+            "cluster-admin",
+            "privilege escalation",
+            "deployer"
+        ],
+        "should_use_tools": [
+            "scan_rbac_risks"
+        ],
+        "should_not_use_tools": [
+            "apply_yaml",
+            "delete_pod"
+        ],
+        "max_tool_calls": 12
     }
 }

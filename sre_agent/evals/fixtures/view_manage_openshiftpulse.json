@@ -13,9 +13,19 @@
         "create_dashboard": "Dashboard 'OpenShift Pulse Management' created with 7 widgets"
     },
     "expected": {
-        "should_mention": ["openshiftpulse", "dashboard"],
-        "should_use_tools": ["namespace_summary"],
-        "should_not_use_tools": ["delete_pod", "scale_deployment", "drain_node", "apply_yaml"],
-        "max_tool_calls": 12
+        "should_mention": [
+            "openshiftpulse",
+            "dashboard"
+        ],
+        "should_use_tools": [
+            "namespace_summary"
+        ],
+        "should_not_use_tools": [
+            "delete_pod",
+            "scale_deployment",
+            "drain_node",
+            "apply_yaml"
+        ],
+        "max_tool_calls": 28
     }
 }

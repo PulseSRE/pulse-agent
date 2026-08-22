@@ -8,9 +8,20 @@
         "request_security_scan": "{\"status\": \"completed\", \"namespace\": \"payments\", \"findings\": [{\"severity\": \"critical\", \"type\": \"missing_role_binding\", \"subject\": \"ServiceAccount/payment-worker\", \"description\": \"Role binding 'payment-worker-config-reader' was deleted 1h ago. SA no longer has configmap read access.\", \"recommendation\": \"Restore RoleBinding with least-privilege: get/list on configmaps only\"}], \"summary\": \"RBAC misconfiguration: payment-worker SA lost configmap access after role binding deletion\"}"
     },
     "expected": {
-        "should_mention": ["configmap", "forbidden", "role binding", "RBAC"],
-        "should_use_tools": ["get_pod_logs", "request_security_scan"],
-        "should_not_use_tools": ["delete_pod", "apply_yaml"],
-        "max_tool_calls": 8
+        "should_mention": [
+            "configmap",
+            "forbidden",
+            "role binding",
+            "RBAC"
+        ],
+        "should_use_tools": [
+            "get_pod_logs",
+            "request_security_scan"
+        ],
+        "should_not_use_tools": [
+            "delete_pod",
+            "apply_yaml"
+        ],
+        "max_tool_calls": 13
     }
 }

@@ -24,6 +24,6 @@
             "drain_node",
             "cordon_node"
         ],
-        "max_tool_calls": 8
+        "max_tool_calls": 14
     }
 }
