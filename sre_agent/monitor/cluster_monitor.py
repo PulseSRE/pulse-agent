@@ -259,6 +259,20 @@ class ClusterMonitor:
         return max(configured, max(c.trust_level for c in self._subscribers))
 
     @property
+    def remediation_enabled(self) -> bool:
+        """Whether this trust level remediates at all.
+
+        Levels 0 and 1 do not: ``auto_fix`` is never entered, so nothing is
+        proposed and nothing runs. That is the whole reason the UI could not
+        call level 1 "Confirm" — there is no action to confirm.
+
+        Named rather than inlined because the trust ladder's labels are written
+        against this boundary, and a test that restates ``>= 2`` instead of
+        asking the monitor would not notice the boundary moving.
+        """
+        return self.effective_trust_level >= 2
+
+    @property
     def effective_auto_fix_categories(self) -> set[str]:
         """What may be auto-fixed: everything the server can do, plus subscribers'.
 
@@ -1007,7 +1021,7 @@ class ClusterMonitor:
 
         await self.run_investigations(all_findings)
 
-        if self.effective_trust_level >= 2:
+        if self.remediation_enabled:
             await self.auto_fix(all_findings)
 
         await self.process_verifications(all_findings)
