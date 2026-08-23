@@ -38,7 +38,9 @@ UNVERIFIABLE = "unverifiable"
 
 # Kinds whose readiness we can state as a fact. Anything else is reported
 # UNVERIFIABLE rather than guessed at.
-CHECKABLE_KINDS = ("Deployment", "StatefulSet", "DaemonSet", "Pod")
+# ReplicaSet is here because a Deployment's pods are owned by one, and a
+# deleted pod is verified through its owner.
+CHECKABLE_KINDS = ("Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Pod")
 
 
 @dataclass
@@ -68,6 +70,7 @@ def _check_workload(kind: str, name: str, namespace: str) -> GateResult:
             "Deployment": apps.read_namespaced_deployment,
             "StatefulSet": apps.read_namespaced_stateful_set,
             "DaemonSet": apps.read_namespaced_daemon_set,
+            "ReplicaSet": apps.read_namespaced_replica_set,
         }[kind]
         obj = reader(name, namespace)
     except Exception as e:

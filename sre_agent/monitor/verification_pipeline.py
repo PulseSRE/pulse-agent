@@ -124,7 +124,10 @@ async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -
             # goes away when the scanner failed or the workload was deleted, so
             # confirm the resource is affirmatively healthy before calling this
             # a verified fix. The gate's own reading becomes the evidence.
-            gate_status, gate_evidence = await asyncio.to_thread(health_gate.check_resources, resources)
+            # Prefer the owning workload when the fix deleted a pod: the pod's
+            # own name no longer resolves, but the thing it belonged to does.
+            gate_targets = payload.get("verify_resources") or resources
+            gate_status, gate_evidence = await asyncio.to_thread(health_gate.check_resources, gate_targets)
             if gate_status == health_gate.PASS:
                 status = "verified"
                 evidence = f"No active {category} findings, and health check passed: {gate_evidence}"

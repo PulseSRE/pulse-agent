@@ -141,3 +141,31 @@ class TestAggregate:
         with patch("sre_agent.k8s_client.get_apps_client", return_value=_apps(exc=_ApiError(500))):
             status, _ = health_gate.check_resources([{"kind": "Deployment", "name": "a", "namespace": "p"}])
         assert status == health_gate.UNVERIFIABLE
+
+
+class TestOwnerBasedVerification:
+    """A deleted pod is verified through the workload that replaces it.
+
+    `delete_pod` is Pulse's crashloop fix, and by verification time the pod it
+    deleted is gone by name. Checking the pod would report UNVERIFIABLE for
+    every crashloop fix ever applied, which would starve the learning loop —
+    so the monitor records the pod's owner and the gate checks that instead.
+    """
+
+    def test_replicaset_is_checkable(self):
+        rs = SimpleNamespace(
+            spec=SimpleNamespace(replicas=2),
+            status=SimpleNamespace(ready_replicas=2),
+        )
+        apps = MagicMock()
+        apps.read_namespaced_replica_set.return_value = rs
+        with patch("sre_agent.k8s_client.get_apps_client", return_value=apps):
+            r = health_gate.check_resource("ReplicaSet", "web-abc", "prod")
+        assert r.status == health_gate.PASS
+
+    def test_owner_still_unhealthy_fails(self):
+        """The pod was deleted but its replacement is not coming up."""
+        with patch("sre_agent.k8s_client.get_apps_client", return_value=_apps(_deployment(3, 0))):
+            status, evidence = health_gate.check_resources([{"kind": "Deployment", "name": "web", "namespace": "prod"}])
+        assert status == health_gate.FAIL
+        assert "0/3" in evidence

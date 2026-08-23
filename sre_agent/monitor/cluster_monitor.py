@@ -478,12 +478,27 @@ class ClusterMonitor:
                 )
                 continue
 
+            # Set when the fixed resource is a pod that something else owns, so
+            # verification can check the owner instead of the pod. Deleting a
+            # crashlooping pod is a fix whose success shows up in the workload
+            # that replaces it — the pod's own name is gone by then.
+            verify_resources: list[dict] | None = None
+
             if category == "crashloop" and resources:
                 r = resources[0]
                 if r.get("kind") == "Pod":
                     try:
                         core = get_core_client()
                         pod = core.read_namespaced_pod(r["name"], r.get("namespace", "default"))
+                        owners = pod.metadata.owner_references or []
+                        if owners:
+                            verify_resources = [
+                                {
+                                    "kind": owners[0].kind,
+                                    "name": owners[0].name,
+                                    "namespace": r.get("namespace", "default"),
+                                }
+                            ]
                         if not pod.metadata.owner_references:
                             logger.warning(
                                 "Auto-fix skipped: Pod %s/%s has no ownerReferences (bare pod, won't be recreated)",
@@ -669,6 +684,9 @@ class ClusterMonitor:
                     "finding_id": finding["id"],
                     "category": category,
                     "resources": resources,
+                    # What the health gate reads. Falls back to the fixed
+                    # resource when there is no better target.
+                    "verify_resources": verify_resources or resources,
                     "target_scan": self._scan_counter + 1,
                 }
 

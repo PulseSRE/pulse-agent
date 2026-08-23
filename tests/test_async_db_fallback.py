@@ -176,9 +176,17 @@ class TestVerificationPipelineFallback:
         mock_repo.async_update_action_verification = AsyncMock(side_effect=ConnectionError("refused"))
         mock_repo.async_get_investigation_by_finding_id = AsyncMock(return_value=None)
 
+        # This test is about the DB fallback, not about cluster health. Without
+        # a stub the health gate correctly reports "unverifiable" (there is no
+        # cluster in CI), so pin the gate to a pass and let the test assert the
+        # thing it is named for.
         with (
             patch("sre_agent.monitor.verification_pipeline.get_monitor_repo", return_value=mock_repo),
             patch("sre_agent.monitor.verification_pipeline._sync_update_action_verification") as mock_sync,
+            patch(
+                "sre_agent.monitor.health_gate.check_resources",
+                return_value=("pass", "Deployment prod/web has 1/1 replicas ready"),
+            ),
         ):
             _run(process_verifications(mock_monitor, []))
 
