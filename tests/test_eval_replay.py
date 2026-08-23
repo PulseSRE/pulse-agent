@@ -332,7 +332,10 @@ class TestFixtureScoring:
             "The container runtime became unhealthy after a system OOM event.",
             "tool_calls": [
                 {"name": "list_resources", "timestamp": 0},
-                {"name": "describe_node", "timestamp": 1},
+                # describe_resource, not describe_node: the per-kind describers
+                # were consolidated and the fixture expectations migrated with
+                # them (the agent can no longer call describe_node at all).
+                {"name": "describe_resource", "timestamp": 1},
                 {"name": "get_events", "timestamp": 2},
             ],
             "duration_ms": 900,

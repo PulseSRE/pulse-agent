@@ -48,7 +48,7 @@
       "category": "sre",
       "description": "K8s API returns 503 Service Unavailable; agent should degrade gracefully.",
       "tool_calls": [
-        "list_nodes",
+        "list_resources",
         "get_cluster_operators"
       ],
       "rejected_tools": 0,
@@ -90,7 +90,7 @@
       "description": "Deployment scale fails due to resource quota; agent suggests alternatives.",
       "tool_calls": [
         "scale_deployment",
-        "get_resource_quotas",
+        "list_resources",
         "list_pods",
         "get_pod_metrics"
       ],

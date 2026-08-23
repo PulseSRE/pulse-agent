@@ -24,7 +24,7 @@
       "category": "sre",
       "description": "Handles missing fields and partial payloads gracefully.",
       "tool_calls": [
-        "list_nodes",
+        "list_resources",
         "get_node_metrics"
       ],
       "rejected_tools": 0,
@@ -98,7 +98,7 @@
       "description": "Completed action is verified on the next scan and status is attached to history.",
       "tool_calls": [
         "restart_deployment",
-        "list_deployments"
+        "list_resources"
       ],
       "rejected_tools": 0,
       "duration_seconds": 160,
@@ -115,8 +115,8 @@
       "description": "Detect DaemonSet pods missing from nodes and diagnose scheduling failures.",
       "tool_calls": [
         "list_pods",
-        "list_nodes",
-        "describe_node",
+        "list_resources",
+        "describe_resource",
         "get_events"
       ],
       "rejected_tools": 0,
@@ -226,7 +226,7 @@
       "description": "Create a view that uses every component type available.",
       "tool_calls": [
         "list_pods",
-        "list_nodes",
+        "list_resources",
         "get_node_metrics",
         "get_pod_metrics",
         "get_prometheus_query",

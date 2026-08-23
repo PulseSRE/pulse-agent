@@ -476,29 +476,42 @@ class PlanRuntime:
         results: list[tuple[str, SkillOutput]] = []
         winner_found = False
 
+        # A winner may cancel only OPTIONAL siblings. Racing everything meant a
+        # confident rbac_audit cancelled the *required* security_scan running
+        # beside it in security-incident-v1 — a required security scan skipped
+        # because a sibling was confident about a different question, and the
+        # downstream remediation phase then planned without the vulnerability
+        # findings it declares a dependency on. "First answer wins" is a
+        # semantic for alternative approaches to the same question; required
+        # phases each answer their own and always run to completion.
+        optional_tasks = {p.id: tasks[p.id] for p in phases if not getattr(p, "required", True)}
+
         # Wait for tasks as they complete
         pending = set(tasks.values())
         while pending:
             done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
+                if task.cancelled():
+                    continue
                 phase_id, output = task.result()
                 results.append((phase_id, output))
 
                 # Check if this is a high-confidence winner
                 if output.confidence >= 0.85 and output.status == "complete" and not winner_found:
                     winner_found = True
+                    to_cancel = [t for t in optional_tasks.values() if t in pending]
                     logger.info(
-                        "Parallel winner: phase '%s' (confidence=%.2f) — cancelling %d siblings",
+                        "Parallel winner: phase '%s' (confidence=%.2f) — cancelling %d optional sibling(s)",
                         phase_id,
                         output.confidence,
-                        len(pending),
+                        len(to_cancel),
                     )
-                    # Cancel remaining tasks
-                    for remaining in pending:
+                    for remaining in to_cancel:
                         remaining.cancel()
-                    # Collect cancelled results
+                    pending -= set(to_cancel)
+                    cancelled_ids = {pid for pid, t in optional_tasks.items() if t in to_cancel}
                     for p in phases:
-                        if p.id not in {r[0] for r in results}:
+                        if p.id in cancelled_ids:
                             results.append(
                                 (
                                     p.id,
@@ -511,9 +524,6 @@ class PlanRuntime:
                                     ),
                                 )
                             )
-                    break
-            if winner_found:
-                break
 
         return results
 

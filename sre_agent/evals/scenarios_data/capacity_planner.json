@@ -1,13 +1,13 @@
 {
   "suite_name": "capacity_planner",
-  "description": "Capacity planning scenarios — resource forecasting, right-sizing, HPA tuning",
+  "description": "Capacity planning scenarios \u2014 resource forecasting, right-sizing, HPA tuning",
   "scenarios": [
     {
       "scenario_id": "capacity_forecast_quota_exhaustion",
       "category": "sre",
       "description": "Forecast when namespace quota will be exhausted based on growth trends.",
       "tool_calls": [
-        "get_resource_quotas",
+        "list_resources",
         "forecast_quota_exhaustion",
         "get_prometheus_query"
       ],
@@ -62,7 +62,7 @@
       "category": "sre",
       "description": "Analyze node capacity headroom and identify nodes at risk of pressure.",
       "tool_calls": [
-        "list_nodes",
+        "list_resources",
         "get_node_metrics",
         "get_prometheus_query"
       ],
@@ -81,8 +81,7 @@
       "description": "Compare resource consumption across namespaces for cost attribution.",
       "tool_calls": [
         "get_prometheus_query",
-        "list_namespaces",
-        "get_resource_quotas"
+        "list_resources"
       ],
       "rejected_tools": 0,
       "duration_seconds": 70,
