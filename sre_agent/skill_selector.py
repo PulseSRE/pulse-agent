@@ -713,9 +713,14 @@ class SkillSelector:
             if success_rate is not None:
                 fused[skill_name] *= success_rate**2  # squared for stronger signal
 
-            # 2. review_boost — reviewed skills get a 20% boost over unreviewed
+            # 2. review gate — an unreviewed skill is agent-authored and has never
+            # been read by a person. A 20% penalty still let one win a close race
+            # and silently serve production traffic, so it is excluded from
+            # automatic routing outright. It stays discoverable via skill_search
+            # and loadable by name via skill_load, which do not run select().
             if not skill.reviewed:
-                fused[skill_name] *= 0.8  # 20% penalty for unreviewed AI-generated skills
+                fused[skill_name] = 0.0
+                continue
 
             fused[skill_name] = round(fused[skill_name], 4)
 

@@ -57,13 +57,47 @@ class TestMigration:
         assert row["data_type"] == "jsonb"
 
 
-def _mock_skill(name, categories=None, priority=10, keywords=None):
+def _mock_skill(name, categories=None, priority=10, keywords=None, reviewed=True):
     s = MagicMock()
     s.name = name
     s.categories = categories or []
     s.priority = priority
     s.keywords = keywords or []
+    s.reviewed = reviewed
     return s
+
+
+class TestReviewGate:
+    """An agent-authored skill must not serve traffic before a person reads it."""
+
+    def _selector(self, reviewed: bool):
+        skills = {
+            "sre": _mock_skill("sre", ["diagnostics"], priority=5),
+            "agentmade": _mock_skill("agentmade", ["diagnostics"], priority=10, reviewed=reviewed),
+        }
+        # Only the agent-authored skill matches, so it wins on merit if allowed.
+        index = [("etcdlatency", "agentmade", 5)]
+        return SkillSelector(skills, keyword_index=index)
+
+    def test_reviewed_skill_wins_on_merit(self):
+        fused = self._selector(True)._fuse_scores({"keyword": {"agentmade": 1.0, "sre": 0.1}})
+        assert fused["agentmade"] > fused["sre"]
+
+    def test_unreviewed_skill_is_excluded_not_merely_penalised(self):
+        fused = self._selector(False)._fuse_scores({"keyword": {"agentmade": 1.0, "sre": 0.1}})
+        # A 20% penalty left 0.8 here, which still beat sre and routed traffic
+        # to a skill no person had read.
+        assert fused["agentmade"] == 0.0
+
+    def test_unreviewed_never_selected_even_as_sole_match(self):
+        result = self._selector(False).select("etcdlatency")
+        assert result.skill_name != "agentmade"
+
+    def test_success_rate_cannot_resurrect_an_unreviewed_skill(self):
+        sel = self._selector(False)
+        with patch.object(sel, "_get_skill_success_rate", return_value=1.0):
+            fused = sel._fuse_scores({"keyword": {"agentmade": 1.0}})
+        assert fused["agentmade"] == 0.0
 
 
 class TestSkillSelectorKeywords:
