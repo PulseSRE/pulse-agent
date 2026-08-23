@@ -8,7 +8,7 @@ import time
 import uuid
 from typing import Any
 
-from .monitor.layers import L_INFRA, L_PLATFORM, L_SIGNAL, L_WORKLOAD, layer_of
+from .monitor.layers import L_INFRA, L_PLATFORM, L_SIGNAL, L_WORKLOAD, LAYER_NAMES, layer_of
 from .repositories.inbox_repo import get_inbox_repo
 
 logger = logging.getLogger("pulse_agent.inbox")
@@ -177,8 +177,26 @@ def compute_priority_score(
     ranks the item as though every finding were equally causal — which is the
     behaviour this parameter exists to correct.
     """
+    return explain_priority(severity, confidence, noise_score, created_at, due_date, category)[0]
+
+
+def explain_priority(
+    severity: str | None,
+    confidence: float,
+    noise_score: float,
+    created_at: int,
+    due_date: int | None,
+    category: str | None = None,
+) -> tuple[float, dict[str, Any]]:
+    """The priority score together with the factors that produced it.
+
+    The score alone put items in an order the operator could not interrogate —
+    a ranked queue whose line one cannot explain itself does not get trusted.
+    The factors are stamped into item metadata so the UI can show the math.
+    """
     weight = SEVERITY_WEIGHTS.get(severity or "info", 1)
-    layer_weight = LAYER_WEIGHTS[layer_of(category)] if category else LAYER_WEIGHTS[L_WORKLOAD]
+    layer = layer_of(category) if category else L_WORKLOAD
+    layer_weight = LAYER_WEIGHTS[layer]
     base = weight * layer_weight * confidence * (1 - noise_score)
 
     age_hours = (time.time() - created_at) / 3600
@@ -195,13 +213,64 @@ def compute_priority_score(
         elif hours_until <= 72:
             due_bonus = 1.0
 
-    return base + age_bonus + novelty_bonus + due_bonus
+    total = base + age_bonus + novelty_bonus + due_bonus
+    factors: dict[str, Any] = {
+        "severity": severity or "info",
+        "severity_weight": weight,
+        "layer": LAYER_NAMES.get(layer, str(layer)),
+        "layer_weight": layer_weight,
+        "confidence": round(confidence, 3),
+        "noise_score": round(noise_score, 3),
+        "base": round(base, 3),
+        "age_bonus": round(age_bonus, 3),
+        "novelty_bonus": round(novelty_bonus, 3),
+        "due_bonus": due_bonus,
+        "total": round(total, 3),
+    }
+    return total, factors
+
+
+# SLO definitions change rarely; re-reading them for every created item would
+# hit the database once per finding per scan for data that is stable for hours.
+_slo_defs_cache: tuple[float, list[dict]] = (0.0, [])
+_SLO_CACHE_TTL = 60.0
+
+
+def _slo_impact(namespace: str | None, resources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Registered SLOs this item's resources plausibly back.
+
+    Matching is deliberately conservative — a service name equal to the item's
+    namespace, or prefixing a resource name. A wrong SLO chip teaches the
+    operator to ignore the right ones.
+    """
+    global _slo_defs_cache
+    try:
+        now = time.time()
+        if now - _slo_defs_cache[0] > _SLO_CACHE_TTL:
+            from .slo_registry import list_slo_definitions
+
+            _slo_defs_cache = (now, list_slo_definitions())
+        defs = _slo_defs_cache[1]
+        if not defs:
+            return []
+        names = [str(r.get("name", "")) for r in resources or []]
+        hits = []
+        for d in defs:
+            svc = str(d.get("service_name", ""))
+            if not svc:
+                continue
+            if svc == (namespace or "") or any(n == svc or n.startswith(f"{svc}-") for n in names):
+                hits.append({"service": svc, "slo_type": d.get("slo_type", ""), "target": d.get("target")})
+        return hits
+    except Exception:
+        _inbox_logger.debug("SLO impact matching failed", exc_info=True)
+        return []
 
 
 def create_inbox_item(item: dict[str, Any]) -> str:
     item_id = _gen_id()
     now = int(time.time())
-    priority = compute_priority_score(
+    priority, factors = explain_priority(
         severity=item.get("severity"),
         confidence=item.get("confidence", 0),
         noise_score=item.get("noise_score", 0),
@@ -209,6 +278,27 @@ def create_inbox_item(item: dict[str, Any]) -> str:
         due_date=item.get("due_date"),
         category=_item_category(item),
     )
+
+    metadata = item.setdefault("metadata", {})
+    if isinstance(metadata, dict):
+        # Why this rank — the factors behind the score, for the UI to show.
+        metadata["priority_factors"] = factors
+
+        # Which registered SLOs this item plausibly burns.
+        slo_hits = _slo_impact(item.get("namespace"), item.get("resources") or [])
+        if slo_hits:
+            metadata["slo_impact"] = slo_hits
+
+        # Which visit this is. Episodes already count recurrence for causes;
+        # an ordinary item that came back looked new every time, so a chronic
+        # offender read as a fresh incident on each return.
+        corr_key = item.get("correlation_key")
+        if corr_key:
+            try:
+                prior = get_inbox_repo().count_correlation_history(corr_key, now - 30 * 86400)
+                metadata["recurrence_30d"] = prior + 1
+            except Exception:
+                _inbox_logger.debug("Recurrence count failed for %s", corr_key, exc_info=True)
 
     cluster_id = item.get("cluster_id") or _get_cluster_id()
     get_inbox_repo().insert_item(item_id, item, priority, cluster_id, now)
@@ -1057,7 +1147,7 @@ def upsert_inbox_item(item: dict[str, Any]) -> str:
     merged_resources = _merge_resources(existing.get("resources", []), item.get("resources", []))
 
     now = int(time.time())
-    priority = compute_priority_score(
+    priority, factors = explain_priority(
         severity=item.get("severity", existing.get("severity")),
         confidence=item.get("confidence", existing.get("confidence", 0)),
         noise_score=item.get("noise_score", existing.get("noise_score", 0)),
@@ -1065,6 +1155,16 @@ def upsert_inbox_item(item: dict[str, Any]) -> str:
         due_date=item.get("due_date", existing.get("due_date")),
         category=_item_category(item) or _item_category(existing),
     )
+
+    # The score just moved; the math shown for it must move with it, or the
+    # explainer disproves itself on the first re-scan.
+    existing_md = existing.get("metadata") or {}
+    if isinstance(existing_md, dict):
+        existing_md["priority_factors"] = factors
+        try:
+            repo.update_metadata(existing["id"], existing_md, now)
+        except Exception:
+            _inbox_logger.debug("Failed to refresh priority factors for %s", existing["id"], exc_info=True)
 
     # Pass the freshly generated wording through. Without this the item keeps
     # its original title forever: the prune path re-points `resources` at

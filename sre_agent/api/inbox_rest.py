@@ -326,3 +326,55 @@ async def unmute_condition(correlation_key: str, _owner: str = Depends(get_owner
 
     unmute_correlation_key(correlation_key)
     return {"correlation_key": correlation_key, "muted": False}
+
+
+@router.post("/inbox/{item_id}/runbook")
+async def create_runbook_from_item(item_id: str, actor: str = Depends(require_admin)):
+    """Turn an investigated item into a draft runbook skill.
+
+    The closure path for chronic work: recurrence badges say "this keeps
+    happening", and this is the act that follows — the item's investigation
+    (cause, evidence, plan tools) is folded into the skill lifecycle, where
+    the first case for a category creates a skill and later cases refine it.
+    The draft lands unreviewed, so it enters the same human approval gate as
+    every other agent-authored skill; it changes nothing until a person reads
+    it in Toolbox → Skills and approves it. Admin-gated for the same reason
+    skill mutation is: this authors agent behaviour.
+    """
+    from ..inbox import _item_category, get_inbox_item
+    from ..skill_lifecycle import learn_from_verified
+    from ..trajectory import LearningCandidate
+
+    item = get_inbox_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    md = item.get("metadata") or {}
+    summary = str(md.get("investigation_summary") or "")
+    cause = str(md.get("suspected_cause") or "")
+    if not summary and not cause:
+        raise HTTPException(
+            status_code=409,
+            detail="Nothing to generalise yet — this item has no investigation. Run Investigate first.",
+        )
+
+    plan = md.get("action_plan") or []
+    tools = [str(s.get("tool")) for s in plan if isinstance(s, dict) and s.get("tool")]
+
+    candidate = LearningCandidate(
+        key=f"manual:{item_id}",
+        category=_item_category(item) or item.get("item_type", "task"),
+        title=str(item.get("title", "")),
+        root_cause=cause or str(item.get("title", "")),
+        summary=summary,
+        confidence=float(md.get("investigation_confidence") or 0.7),
+        evidence=[e if isinstance(e, dict) else {"observation": str(e)} for e in (md.get("evidence") or [])],
+        tools_called=tools,
+    )
+    path = learn_from_verified(candidate)
+    if not path:
+        raise HTTPException(status_code=500, detail="Runbook draft could not be written")
+
+    skill_name = path.rsplit("/", 2)[-2] if "/" in path else path
+    logger.info("Runbook skill '%s' drafted from inbox item %s by '%s'", skill_name, item_id, actor)
+    return {"skill": skill_name, "path": path, "reviewed": False}

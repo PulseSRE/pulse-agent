@@ -221,6 +221,18 @@ class InboxRepository(BaseRepository):
         )
         self.db.commit()
 
+    def count_correlation_history(self, correlation_key: str, since: int) -> int:
+        """How many items this condition has raised since *since*, any status.
+
+        Resolved and archived rows count: recurrence is about how often the
+        condition comes back, and every prior visit ended in one of those.
+        """
+        row = self.db.fetchone(
+            "SELECT COUNT(*) AS c FROM inbox_items WHERE correlation_key = ? AND created_at >= ?",
+            (correlation_key, since),
+        )
+        return int(row["c"]) if row else 0
+
     # -- Metadata updates ----------------------------------------------------
 
     def update_metadata(self, item_id: str, metadata: dict[str, Any], now: int) -> None:
