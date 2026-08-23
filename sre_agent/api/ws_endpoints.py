@@ -64,6 +64,7 @@ _HARD_SWITCH_SRE = {
     "why are",
     "what's wrong",
 }
+from ..skill_router import is_authoring_request as _is_authoring_request
 from ..skill_router import is_continuation as _is_continuation
 
 _HARD_SWITCH_SEC = {"rbac", "scc", "vulnerability", "compliance", "privilege", "security audit"}
@@ -436,8 +437,15 @@ async def websocket_auto_agent(websocket: WebSocket):
 
             q_lower = content.lower()
             q_lower_all = content.lower()
-            has_hard_switch = any(kw in q_lower_all for kw in _HARD_SWITCH_SRE) or any(
-                kw in q_lower_all for kw in _HARD_SWITCH_SEC
+            # An explicit authoring imperative counts as a hard switch: "Create
+            # a skill called X ... It should check Y" carries an incidental
+            # "It" that read as a continuation and pinned the turn to whatever
+            # specialist the thread last used — a skill with no create_skill
+            # tool, which then apologised and pasted markdown instead.
+            has_hard_switch = (
+                any(kw in q_lower_all for kw in _HARD_SWITCH_SRE)
+                or any(kw in q_lower_all for kw in _HARD_SWITCH_SEC)
+                or _is_authoring_request(content)
             )
 
             if last_mode == "view_designer" and intent != "view_designer":

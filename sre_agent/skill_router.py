@@ -106,6 +106,26 @@ def is_continuation(query: str) -> bool:
     return bool(_BACK_REFERENCE.search(query or ""))
 
 
+# An explicit authoring imperative — "create a skill", "build me a runbook",
+# "edit the plan" — is a new task by definition, whatever pronouns follow it.
+# "Create a skill called etcd-defrag ... It should check member DB sizes"
+# contains an incidental "It", read as a continuation, and stuck to whatever
+# specialist the thread last used — which then lacked the skill-management
+# tools entirely. This is deliberately narrower than trigger patterns at
+# large: bare topic words like "capacity" must NOT break stickiness, or
+# "Scale it back to 3, we don't have the capacity" re-routes mid-action —
+# the exact regression the continuation guard exists to prevent.
+_AUTHORING_REQUEST = re.compile(
+    r"\b(create|build|make|write|edit|update|delete)\b[^.!?\n]{0,30}\b(skill|runbook|plan\s+template|playbook)\b",
+    re.IGNORECASE,
+)
+
+
+def is_authoring_request(query: str) -> bool:
+    """Whether the turn explicitly asks to author agent behaviour (skill/runbook/plan)."""
+    return bool(_AUTHORING_REQUEST.search(query or ""))
+
+
 def classify_query(query: str, *, context: dict | None = None):
     """Route a query to the best matching skill.
 

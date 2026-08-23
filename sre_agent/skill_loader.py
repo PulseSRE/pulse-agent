@@ -760,6 +760,18 @@ def build_config_from_skill(skill: Skill, query: str = "") -> dict:
         if name in all_tools and name not in tool_map:
             tool_map[name] = all_tools[name]
 
+    # The mode path (select_tools) includes the self-describe tools when the
+    # query asks about capabilities; this skill path — the one the orchestrated
+    # /ws/agent actually uses — did not, so "create a skill ..." routed to any
+    # skill without the 'self' category produced an agent that apologised for
+    # not having create_skill. Read-only self-describe tools are safe for every
+    # skill; the skill-mutation tools stay behind the write gate below, which
+    # strips them from write_tools: false skills as usual.
+    if query and any(kw in query.lower() for kw in _SELF_DESCRIBE_KEYWORDS):
+        for name in _SELF_DESCRIBE_TOOLS:
+            if name in all_tools and name not in tool_map:
+                tool_map[name] = all_tools[name]
+
     if skill.write_tools:
         # Write-enabled skills get ALL write tools from their categories
         for name in allowed_tool_names & WRITE_TOOL_NAMES:
