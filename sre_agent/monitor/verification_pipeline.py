@@ -21,50 +21,18 @@ logger = logging.getLogger("pulse_agent.monitor")
 
 
 def _scaffold_from_verified(candidate) -> None:
-    """Turn a verified trajectory into a skill, plan template and eval scenario.
+    """Turn a verified trajectory into skill knowledge.
 
-    This is the work that used to run at investigation time. It is unchanged apart
-    from when it happens: the trajectory reaching here has had its fix applied and
-    the finding confirmed gone, so what gets generalised is something that worked.
+    The trajectory reaching here has had its fix applied and the finding
+    confirmed gone, so what gets generalised is something that worked. The
+    first verified case for a category creates a skill; every later one
+    refines it in place (``skill_lifecycle.learn_from_verified``) instead of
+    scaffolding a duplicate sibling.
     """
     try:
-        from ..eval_scaffolder import scaffold_eval_from_investigation
-        from ..skill_scaffolder import (
-            save_scaffolded_skill,
-            scaffold_plan_template,
-            scaffold_skill_from_resolution,
-        )
+        from ..skill_lifecycle import learn_from_verified
 
-        skill_content = scaffold_skill_from_resolution(
-            query=candidate.title,
-            tools_called=candidate.tools_called,
-            investigation_summary=candidate.summary,
-            root_cause=candidate.root_cause,
-            confidence=candidate.confidence,
-        )
-        tokens = (candidate.title or "unknown").lower().split()[:3]
-        skill_name = "-".join(t for t in tokens if t.isalnum())[:40] or "auto-skill"
-        save_scaffolded_skill(skill_content, skill_name)
-        scaffold_plan_template(
-            skill_name=skill_name,
-            plan_phases=["triage", "diagnose", "remediate", "verify"],
-            incident_type=candidate.category or "unknown",
-            confidence=candidate.confidence,
-        )
-        logger.info("Scaffolded skill '%s' from a VERIFIED trajectory", skill_name)
-
-        try:
-            scaffold_eval_from_investigation(
-                skill_name=skill_name,
-                finding={"category": candidate.category, "title": candidate.title},
-                investigation_result={
-                    "summary": candidate.summary,
-                    "suspected_cause": candidate.root_cause,
-                    "confidence": candidate.confidence,
-                },
-            )
-        except Exception:
-            logger.debug("Eval scaffolding from verified trajectory failed", exc_info=True)
+        learn_from_verified(candidate)
     except Exception:
         logger.debug("Scaffolding from verified trajectory failed", exc_info=True)
 

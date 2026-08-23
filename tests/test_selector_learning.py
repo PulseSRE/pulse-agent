@@ -67,7 +67,9 @@ class TestPruneLowPerformers:
             {"selected_skill": "bad_skill", "total": 20, "overrides": 10},
         ]
         flagged = prune_low_performers(days=30, min_invocations=10)
-        assert "bad_skill" in flagged
+        assert [f["skill"] for f in flagged] == ["bad_skill"]
+        assert flagged[0]["override_rate"] == 0.5
+        assert flagged[0]["total"] == 20
 
     @patch("sre_agent.db.get_database", side_effect=Exception("DB"))
     def test_no_crash(self, _):

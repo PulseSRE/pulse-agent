@@ -33,11 +33,7 @@ async def run_flywheel(monitor: ClusterMonitor) -> None:
             logger.debug("Trajectory expiry failed", exc_info=True)
 
         try:
-            from ..selector_learning import (
-                identify_skill_gaps,
-                prune_low_performers,
-                recompute_channel_weights,
-            )
+            from ..selector_learning import recompute_channel_weights
 
             new_weights = await asyncio.to_thread(recompute_channel_weights, 7)
             if new_weights:
@@ -46,13 +42,10 @@ async def run_flywheel(monitor: ClusterMonitor) -> None:
                 _get_selector().set_weights(new_weights)
                 logger.info("Daily flywheel: applied learned channel weights: %s", new_weights)
 
-            gaps = await asyncio.to_thread(identify_skill_gaps, 30)
-            if gaps:
-                logger.info("Daily flywheel: %d skill gaps identified", len(gaps))
-
-            flagged = await asyncio.to_thread(prune_low_performers, 30)
-            if flagged:
-                logger.warning("Daily flywheel: flagged low performers: %s", flagged)
+            # Skill gaps and low performers are no longer logged here — the
+            # inbox generators (gen_skill_gaps, gen_skill_low_performers)
+            # surface them as actionable items with auto-resolve, which a log
+            # line never was.
 
         except Exception:
             logger.debug("Daily flywheel failed", exc_info=True)

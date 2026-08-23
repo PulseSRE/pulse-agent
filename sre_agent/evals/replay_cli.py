@@ -83,6 +83,17 @@ def _make_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--confirm-retries",
+        type=int,
+        default=2,
+        metavar="N",
+        help=(
+            "Re-run each suspected regression up to N times before failing the gate. "
+            "The judge is non-deterministic, so a fixture that fails once and passes "
+            "on retry is noise rather than a regression. 0 disables confirmation."
+        ),
+    )
+    p.add_argument(
         "--baseline",
         metavar="PATH",
         help=(
@@ -515,9 +526,28 @@ def main() -> None:
         passed_now = sum(1 for r in results if r["score"]["passed"])
         print(
             f"\nAgainst baseline: {passed_now}/{len(results)} passing "
-            f"(baseline had {sum(1 for v in baseline.values() if v)}); {len(regressed)} regression(s)",
+            f"(baseline had {sum(1 for v in baseline.values() if v)}); {len(regressed)} suspected regression(s)",
             file=sys.stderr,
         )
+
+        # These fixtures are scored by an LLM judge, which is not deterministic.
+        # Four consecutive main commits produced pass counts of 32, 26, 28 and 27
+        # with almost no overlap in *which* fixtures failed — one run even sat
+        # above the baseline and still failed the gate because a single fixture
+        # flipped. Blocking on a first failure therefore blocks on noise, which
+        # made main permanently red and the signal worthless.
+        #
+        # So a suspected regression is re-run before it counts. A fixture that
+        # passes on retry was noise; one that fails every attempt is a real
+        # regression. Retries are per-fixture, so a clean run costs nothing.
+        if regressed and args.confirm_retries > 0:
+            regressed, flaky = _confirm_regressions(regressed, _run_one, args.concurrency, args.confirm_retries)
+            if flaky:
+                print(
+                    f"FLAKY (failed once, passed on retry — not counted): {', '.join(flaky)}",
+                    file=sys.stderr,
+                )
+
         if regressed:
             print("REGRESSED: " + ", ".join(regressed), file=sys.stderr)
             sys.exit(1)
@@ -568,6 +598,32 @@ def _write_baseline(results: list[dict], path: str) -> None:
     }
     Path(path).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     print(f"Baseline written to {path}: {payload['passed']}/{payload['total']} passing", file=sys.stderr)
+
+
+def _confirm_regressions(suspected: list[str], run_one, concurrency: int, retries: int) -> tuple[list[str], list[str]]:
+    """Re-run suspected regressions; keep only those that fail every attempt.
+
+    Returns (confirmed, flaky). A fixture is confirmed only if it fails the
+    original run and all ``retries`` re-runs — with a non-deterministic judge,
+    a single failure is as likely to be noise as signal.
+    """
+    from .replay_config import offline_context
+
+    still_failing = list(suspected)
+    for attempt in range(1, retries + 1):
+        if not still_failing:
+            break
+        print(
+            f"Re-running {len(still_failing)} suspected regression(s), attempt {attempt}/{retries}...",
+            file=sys.stderr,
+        )
+        with offline_context(allow_llm_tool_picker=False):
+            rerun = _execute(still_failing, run_one, concurrency)
+        still_failing = [r["fixture"] for r in rerun if not r["score"]["passed"]]
+
+    confirmed = [name for name in suspected if name in set(still_failing)]
+    flaky = [name for name in suspected if name not in set(still_failing)]
+    return confirmed, flaky
 
 
 def _execute(fixtures: list[str], run_one, concurrency: int) -> list[dict]:

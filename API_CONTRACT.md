@@ -149,6 +149,9 @@ Unified worklist for findings, alerts, and predictions -- replaces the old multi
 | `POST` | `/admin/skills/{name}/clone` | token | Clone a skill with a new name |
 | `GET` | `/admin/skills/{name}/versions` | token | Version history for a skill |
 | `GET` | `/admin/skills/{name}/diff` | token | Diff between two skill versions |
+| `POST` | `/admin/skills/{name}/approve` | admin | Mark an agent-authored skill reviewed, restoring it to automatic routing |
+| `POST` | `/admin/skills/{name}/quarantine` | admin | Pull a skill from automatic routing (ORCA + pre-route); stays loadable by name |
+| `POST` | `/admin/skills/{name}/unquarantine` | admin | Restore a quarantined skill to automatic routing |
 | `GET` | `/prompt/stats` | token | Prompt token cost breakdown |
 | `GET` | `/prompt/versions/{skill}` | token | Prompt version history for a skill |
 | `GET` | `/prompt/log` | token | Prompt audit log (hash, sections, tokens) |

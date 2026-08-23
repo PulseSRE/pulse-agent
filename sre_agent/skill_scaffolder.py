@@ -22,6 +22,7 @@ def scaffold_skill_from_resolution(
     root_cause: str,
     confidence: float,
     plan_phases: list[str] | None = None,
+    incident_type: str = "",
 ) -> str:
     """Auto-draft a skill.md from a novel incident resolution.
 
@@ -61,28 +62,35 @@ def scaffold_skill_from_resolution(
     # These bypass TF-IDF prediction so the skill always has its core tools
     required = tools_called[:8] if tools_called else []
 
+    import yaml
+
+    # yaml.dump, not an f-string: a hand-built template wrote
+    # `description: Auto-generated skill for: <query>` whose second colon is
+    # invalid YAML, so validation rejected every scaffolded skill and the
+    # learning loop's final step silently never happened.
+    meta = {
+        "name": skill_name,
+        "version": 1,
+        "description": f"Auto-generated skill for: {query[:100]}",
+        "keywords": keywords,
+        "categories": sorted(categories),
+        "write_tools": False,
+        "priority": 5,
+        "requires_tools": required,
+        "alert_triggers": [],
+        "cluster_components": [],
+        "examples": [],
+        "success_criteria": "",
+        "risk_level": "low",
+        "conflicts_with": [],
+        "supported_components": [],
+        "generated_by": "auto",
+        "reviewed": False,
+        "incident_type": incident_type,
+    }
+
     content = f"""---
-name: {skill_name}
-version: 1
-description: Auto-generated skill for: {query[:100]}
-keywords:
-{chr(10).join(f"  - {kw}" for kw in keywords)}
-categories:
-{chr(10).join(f"  - {cat}" for cat in sorted(categories))}
-write_tools: false
-priority: 5
-requires_tools:
-{chr(10).join(f"  - {t}" for t in required) if required else "  []"}
-alert_triggers: []
-cluster_components: []
-examples: []
-success_criteria: ""
-risk_level: low
-conflicts_with: []
-supported_components: []
-generated_by: auto
-reviewed: false
----
+{yaml.dump(meta, default_flow_style=False, sort_keys=False)}---
 
 ## {skill_name.replace("-", " ").title()}
 

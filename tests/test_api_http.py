@@ -531,3 +531,27 @@ class TestSkillAdminAuthorization:
         )
         # Past the admin gate: 404 for the missing skill, not 403.
         assert r.status_code == 404, f"allowlisted admin should pass authz, got {r.status_code}"
+
+
+class TestSkillQuarantineEndpoints:
+    """Quarantine pulls a skill from routing; that is an admin act like approval."""
+
+    def test_non_admin_cannot_quarantine(self, api_client, api_headers, monkeypatch):
+        monkeypatch.setenv("PULSE_AGENT_ADMIN_USERS", "alice")
+        monkeypatch.setenv("PULSE_AGENT_DEV_USER", "mallory")
+        from sre_agent.config import _reset_settings
+
+        _reset_settings()
+        r = api_client.post("/admin/skills/sre/quarantine", headers=api_headers)
+        assert r.status_code == 403
+
+    def test_admin_gets_404_for_missing_skill(self, api_client, api_headers, monkeypatch):
+        monkeypatch.setenv("PULSE_AGENT_ADMIN_USERS", "alice")
+        monkeypatch.setenv("PULSE_AGENT_DEV_USER", "alice")
+        from sre_agent.config import _reset_settings
+
+        _reset_settings()
+        r = api_client.post("/admin/skills/does-not-exist/quarantine", headers=api_headers)
+        assert r.status_code == 404
+        r = api_client.post("/admin/skills/does-not-exist/unquarantine", headers=api_headers)
+        assert r.status_code == 404

@@ -246,15 +246,18 @@ jobs:
           live_judge = read_json(artifacts / "live_judge.json")
 
           if live_judge and isinstance(live_judge, list):
-              gate_passed = all(r.get("score", {}).get("passed") for r in live_judge)
               passed_n = sum(1 for r in live_judge if r.get("score", {}).get("passed"))
-              verdict = "PASS" if gate_passed else "FAIL"
+              # The gate is regression-vs-baseline, not all-must-pass. Deriving a
+              # verdict from all() here printed FAIL on runs the gate passed, and
+              # the "does not block merges" note was left over from when this was
+              # advisory. The step's own exit status is the verdict.
               lines.append(
-                  f"- **live judged replay: {verdict}** ({passed_n}/{len(live_judge)} fixtures) "
-                  "— reported only, does not block merges"
+                  f"- **live judged replay: {passed_n}/{len(live_judge)} fixtures passing** "
+                  "— gates on regression against the stored baseline (see the step log "
+                  "for confirmed regressions); this step blocks the build"
               )
           else:
-              lines.append("- **live judged replay: did not run** — reported only, does not block merges")
+              lines.append("- **live judged replay: did not run**")
 
           if release:
               lines.append(
