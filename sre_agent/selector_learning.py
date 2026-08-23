@@ -134,8 +134,13 @@ def identify_skill_gaps(days: int = 30) -> list[dict]:
         return []
 
 
-def prune_low_performers(days: int = 30, min_invocations: int = 10) -> list[str]:
-    """Identify skills with high override rate."""
+def prune_low_performers(days: int = 30, min_invocations: int = 10) -> list[dict]:
+    """Identify skills with high override rate.
+
+    Returns dicts with the evidence (``skill``, ``override_rate``, ``overrides``,
+    ``total``) so the caller can show a person *why* a skill was flagged rather
+    than just its name.
+    """
     try:
         from .repositories.selector_learning_repo import get_selector_learning_repo
 
@@ -145,7 +150,14 @@ def prune_low_performers(days: int = 30, min_invocations: int = 10) -> list[str]
         for row in rows:
             override_rate = row["overrides"] / row["total"] if row["total"] > 0 else 0
             if override_rate > 0.3:
-                flagged.append(row["selected_skill"])
+                flagged.append(
+                    {
+                        "skill": row["selected_skill"],
+                        "override_rate": round(override_rate, 3),
+                        "overrides": row["overrides"],
+                        "total": row["total"],
+                    }
+                )
                 logger.info(
                     "Flagged skill '%s': %.0f%% override rate (%d/%d)",
                     row["selected_skill"],

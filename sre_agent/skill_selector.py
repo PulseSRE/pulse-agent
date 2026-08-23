@@ -722,6 +722,15 @@ class SkillSelector:
                 fused[skill_name] = 0.0
                 continue
 
+            # 3. quarantine gate — a human pulled this skill from routing after
+            # sustained poor performance (high override rate). Like the review
+            # gate it is absolute: a discounted score still wins close races.
+            # The skill stays loadable by name via skill_load for debugging,
+            # and POST /admin/skills/{name}/unquarantine is the way back.
+            if skill.quarantined:
+                fused[skill_name] = 0.0
+                continue
+
             fused[skill_name] = round(fused[skill_name], 4)
 
         return fused

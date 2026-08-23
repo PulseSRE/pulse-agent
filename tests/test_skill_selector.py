@@ -57,13 +57,16 @@ class TestMigration:
         assert row["data_type"] == "jsonb"
 
 
-def _mock_skill(name, categories=None, priority=10, keywords=None, reviewed=True):
+def _mock_skill(name, categories=None, priority=10, keywords=None, reviewed=True, quarantined=False):
     s = MagicMock()
     s.name = name
     s.categories = categories or []
     s.priority = priority
     s.keywords = keywords or []
     s.reviewed = reviewed
+    # MagicMock auto-attributes are truthy; the quarantine gate reads this, so
+    # it must be an explicit bool or every mocked skill looks quarantined.
+    s.quarantined = quarantined
     return s
 
 
@@ -98,6 +101,30 @@ class TestReviewGate:
         with patch.object(sel, "_get_skill_success_rate", return_value=1.0):
             fused = sel._fuse_scores({"keyword": {"agentmade": 1.0}})
         assert fused["agentmade"] == 0.0
+
+
+class TestQuarantineGate:
+    """A skill a person pulled for poor performance must not win a close race."""
+
+    def _selector(self, quarantined: bool):
+        skills = {
+            "sre": _mock_skill("sre", ["diagnostics"], priority=5),
+            "flaky": _mock_skill("flaky", ["diagnostics"], priority=10, quarantined=quarantined),
+        }
+        index = [("etcdlatency", "flaky", 5)]
+        return SkillSelector(skills, keyword_index=index)
+
+    def test_healthy_skill_wins_on_merit(self):
+        fused = self._selector(False)._fuse_scores({"keyword": {"flaky": 1.0, "sre": 0.1}})
+        assert fused["flaky"] > fused["sre"]
+
+    def test_quarantined_skill_is_excluded_outright(self):
+        fused = self._selector(True)._fuse_scores({"keyword": {"flaky": 1.0, "sre": 0.1}})
+        assert fused["flaky"] == 0.0
+
+    def test_quarantined_never_selected_even_as_sole_match(self):
+        result = self._selector(True).select("etcdlatency")
+        assert result.skill_name != "flaky"
 
 
 class TestSkillSelectorKeywords:

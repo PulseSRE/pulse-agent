@@ -1,4 +1,4 @@
-"""13 proactive task generators for the Ops Inbox.
+"""15 proactive task generators for the Ops Inbox.
 
 Each generator is a function returning list[dict] of inbox item dicts.
 Generators are registered in TASK_GENERATORS and called each scan cycle.
@@ -7,6 +7,7 @@ Generators are registered in TASK_GENERATORS and called each scan cycle.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
@@ -538,6 +539,80 @@ def gen_readiness_regressions() -> list[dict[str, Any]]:
     return []
 
 
+def gen_skill_gaps() -> list[dict[str, Any]]:
+    """Recurring queries no skill handles well become proposals, not log lines.
+
+    ``identify_skill_gaps`` used to run in the daily flywheel and log its
+    findings, which meant nobody ever saw them. As an inbox item the gap is
+    visible, deduplicated on its pattern, and auto-resolves once a skill
+    starts covering those queries.
+    """
+    from .selector_learning import identify_skill_gaps
+
+    gaps = identify_skill_gaps(days=30)
+    items: list[dict[str, Any]] = []
+    for gap in gaps[:3]:  # top recurring patterns only — this is a suggestion queue, not a backlog
+        pattern = str(gap.get("pattern", "")).strip()
+        if not pattern:
+            continue
+        count = int(gap.get("occurrences", 0))
+        slug = re.sub(r"[^a-z0-9]+", "-", pattern.lower())[:60].strip("-")
+        items.append(
+            _make_assessment(
+                title=f"No skill covers recurring queries about '{pattern}' ({count}x in 30d)",
+                summary=(
+                    f"Users asked about '{pattern}' {count} times in the last 30 days and "
+                    "routing found no skill with the right tools. Consider drafting a skill "
+                    "for it — ask the agent to create one, or add it in the Toolbox UI. "
+                    "Agent-drafted skills stay out of routing until a person approves them."
+                ),
+                severity="low",
+                urgency_hours=168,
+                generator="skill_gaps",
+                correlation_key=f"skill-gap:{slug}",
+                confidence=0.7,
+            )
+        )
+    return items
+
+
+def gen_skill_low_performers() -> list[dict[str, Any]]:
+    """Skills people keep overriding become quarantine proposals with evidence.
+
+    ``prune_low_performers`` used to log the names and drop them; the skill kept
+    routing. This surfaces each flagged skill with its override rate and points
+    at the quarantine endpoint, which is the human act that actually pulls it.
+    The item auto-resolves if the skill's override rate recovers.
+    """
+    from .selector_learning import prune_low_performers
+
+    flagged = prune_low_performers(days=30)
+    items: list[dict[str, Any]] = []
+    for entry in flagged:
+        skill = str(entry.get("skill", "")).strip()
+        if not skill:
+            continue
+        rate = float(entry.get("override_rate", 0))
+        items.append(
+            _make_assessment(
+                title=f"Skill '{skill}' overridden in {rate:.0%} of routes — consider quarantine",
+                summary=(
+                    f"Routing picked '{skill}' {entry.get('total', 0)} times in the last 30 days "
+                    f"and users overrode it {entry.get('overrides', 0)} times ({rate:.0%}). "
+                    "If the skill is misrouting, quarantine it: "
+                    f"POST /admin/skills/{skill}/quarantine pulls it from automatic routing "
+                    "(reversible via /unquarantine; it stays loadable by name for debugging)."
+                ),
+                severity="low",
+                urgency_hours=168,
+                generator="skill_low_performers",
+                correlation_key=f"skill-quarantine:{skill}",
+                confidence=0.75,
+            )
+        )
+    return items
+
+
 # -- Registry --
 
 TASK_GENERATORS: list[tuple[str, Any]] = [
@@ -554,6 +629,8 @@ TASK_GENERATORS: list[tuple[str, Any]] = [
     ("route_cert_expiry", gen_route_cert_expiry),
     ("service_endpoint_gaps", gen_service_endpoint_gaps),
     ("readiness_regressions", gen_readiness_regressions),
+    ("skill_gaps", gen_skill_gaps),
+    ("skill_low_performers", gen_skill_low_performers),
 ]
 
 
