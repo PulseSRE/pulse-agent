@@ -616,10 +616,18 @@ class ClusterMonitor:
                     for client in self._subscribers:
                         client._pending_action_approvals[action_report["id"]] = approval_future
 
+                # A timeout and a rejection are different facts and must not be
+                # recorded as the same one. A human who looks at a proposed fix
+                # and declines it is a real signal about the proposal; nobody
+                # being at the dashboard is a signal about the operator's day.
+                timed_out = False
                 try:
-                    approved = bool(await asyncio.wait_for(approval_future, timeout=120))
+                    approved = bool(
+                        await asyncio.wait_for(approval_future, timeout=get_settings().monitor.approval_timeout)
+                    )
                 except TimeoutError:
                     approved = False
+                    timed_out = True
                 finally:
                     # Clean up from all subscribers
                     async with self._subscribers_lock:
@@ -627,10 +635,20 @@ class ClusterMonitor:
                             client._pending_action_approvals.pop(action_report["id"], None)
 
                 if not approved:
-                    action_report["status"] = "failed"
-                    action_report["error"] = "Rejected by user or approval timed out"
+                    # "expired" already exists as a status for proposals nobody
+                    # acted on. Filing an unanswered proposal under "failed"
+                    # counts the agent's own idea as having gone wrong, which
+                    # both flatters and slanders it: it never ran.
+                    action_report["status"] = "expired" if timed_out else "failed"
+                    action_report["error"] = (
+                        f"No response within {get_settings().monitor.approval_timeout}s — the fix was never attempted"
+                        if timed_out
+                        else "Rejected by user"
+                    )
                     if _METRICS_AVAILABLE:
-                        AUTOFIX_TOTAL.labels(outcome="skipped").inc()
+                        # Same split as the status: "expired" says no operator
+                        # answered, "rejected" says one did and declined.
+                        AUTOFIX_TOTAL.labels(outcome="expired" if timed_out else "rejected").inc()
                     await self._broadcast_raw(action_report)
                     save_action(
                         action_report,
