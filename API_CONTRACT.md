@@ -130,6 +130,9 @@ Unified worklist for findings, alerts, and predictions -- replaces the old multi
 | `POST` | `/inbox/{item_id}/restore` | token | Restore a dismissed/resolved item |
 | `POST` | `/inbox/{item_id}/step` | token | Append an investigation step |
 | `GET` | `/inbox/{item_id}/investigation` | token | Get the investigation timeline for an item |
+| `POST` | `/inbox/{item_id}/runbook` | admin | Draft a runbook skill from an investigated item via the skill lifecycle; lands unreviewed in the Toolbox approval gate. 409 when the item has no investigation |
+
+Inbox item `metadata` optional keys added for queue explainability: `priority_factors` (the score's inputs — severity/layer weights, confidence, noise, age/novelty/due bonuses, total; refreshed on every re-rank), `slo_impact` (registered SLOs the item's namespace/resources back: `[{service, slo_type, target}]`), `recurrence_30d` (which visit this is for the correlation key in 30 days; 1 = first).
 | `POST` | `/inbox/{item_id}/pin` | token | Pin an item |
 
 #### Skills, Prompts, and MCP Admin (`skill_rest.py`)
