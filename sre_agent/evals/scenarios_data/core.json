@@ -27,7 +27,7 @@
       "tool_calls": [
         "list_pods",
         "describe_pod",
-        "list_nodes",
+        "list_resources",
         "get_node_metrics"
       ],
       "rejected_tools": 0,

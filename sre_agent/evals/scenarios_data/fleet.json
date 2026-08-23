@@ -60,12 +60,11 @@
       "category": "sre",
       "description": "Safe node maintenance sequence: cordon, drain, verify workload redistribution.",
       "tool_calls": [
-        "list_nodes",
-        "describe_node",
+        "list_resources",
+        "describe_resource",
         "cordon_node",
         "drain_node",
-        "list_pods",
-        "get_pod_disruption_budgets"
+        "list_pods"
       ],
       "rejected_tools": 0,
       "duration_seconds": 180,

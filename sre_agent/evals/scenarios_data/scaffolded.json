@@ -1,13 +1,13 @@
 {
   "suite_name": "scaffolded",
-  "description": "Auto-generated eval scenarios from skill scaffolding — informational, never gates releases",
+  "description": "Auto-generated eval scenarios from skill scaffolding \u2014 informational, never gates releases",
   "scenarios": [
     {
       "scenario_id": "scaffolded_pod-crashing_crashloop",
       "category": "sre",
       "description": "Auto-generated: Pod crashing",
       "tool_calls": [
-        "proactive_investigation"
+        "correlate_incident"
       ],
       "rejected_tools": 0,
       "duration_seconds": 30.0,

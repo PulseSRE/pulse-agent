@@ -27,7 +27,7 @@
       "tool_calls": [
         "list_pods",
         "describe_pod",
-        "list_nodes",
+        "list_resources",
         "get_node_metrics"
       ],
       "rejected_tools": 0,
@@ -62,7 +62,7 @@
       "description": "Detect missing namespace policies and suggest safe deny-all baseline.",
       "tool_calls": [
         "scan_network_policies",
-        "list_namespaces"
+        "list_resources"
       ],
       "rejected_tools": 0,
       "duration_seconds": 58,
@@ -78,8 +78,8 @@
       "category": "sre",
       "description": "Recover degraded deployment with restart and verification.",
       "tool_calls": [
-        "list_deployments",
-        "describe_deployment",
+        "list_resources",
+        "describe_resource",
         "restart_deployment"
       ],
       "rejected_tools": 0,
@@ -96,8 +96,8 @@
       "category": "sre",
       "description": "Identify node pressure and provide actionable workload mitigation.",
       "tool_calls": [
-        "list_nodes",
-        "describe_node",
+        "list_resources",
+        "describe_resource",
         "get_node_metrics",
         "list_pods"
       ],
@@ -186,9 +186,8 @@
       "category": "sre",
       "description": "Diagnose quota exhaustion and provide clear recovery plan.",
       "tool_calls": [
-        "get_resource_quotas",
-        "list_pods",
-        "list_deployments"
+        "list_resources",
+        "list_pods"
       ],
       "rejected_tools": 0,
       "duration_seconds": 90,
@@ -226,8 +225,8 @@
       "category": "sre",
       "description": "Rollback a broken deployment to last known good revision with verification.",
       "tool_calls": [
-        "list_deployments",
-        "describe_deployment",
+        "list_resources",
+        "describe_resource",
         "get_pod_logs",
         "rollback_deployment",
         "list_pods"
@@ -284,7 +283,7 @@
       "category": "sre",
       "description": "Clone an existing dashboard and modify it by removing and adding widgets.",
       "tool_calls": [
-        "list_views",
+        "get_view_details",
         "clone_dashboard",
         "remove_widget_from_view",
         "create_dashboard"
@@ -301,9 +300,9 @@
     {
       "scenario_id": "release_multi_turn_rollback_verify",
       "category": "sre",
-      "description": "Multi-turn: diagnose broken deploy, rollback, then verify healthy — tests context retention across turns.",
+      "description": "Multi-turn: diagnose broken deploy, rollback, then verify healthy \u2014 tests context retention across turns.",
       "tool_calls": [
-        "describe_deployment",
+        "describe_resource",
         "get_pod_logs",
         "rollback_deployment",
         "list_pods"

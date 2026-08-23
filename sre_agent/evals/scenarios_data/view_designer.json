@@ -8,7 +8,6 @@
       "tool_calls": [
         "namespace_summary",
         "get_prometheus_query",
-        "get_prometheus_query",
         "plan_dashboard",
         "create_dashboard"
       ],
@@ -27,7 +26,7 @@
       "description": "Build a cluster overview with node health and resource consumption.",
       "tool_calls": [
         "cluster_metrics",
-        "visualize_nodes",
+        "get_topology_graph",
         "get_prometheus_query",
         "plan_dashboard",
         "create_dashboard"
@@ -57,7 +56,7 @@
       "rejected_tools": 0,
       "duration_seconds": 55,
       "user_confirmed_resolution": true,
-      "final_response": "Created 'Incident Triage — api-server' dashboard because the pod is OOM-killed. Shows pod status, restart count, memory trend, log viewer, and events table.",
+      "final_response": "Created 'Incident Triage \u2014 api-server' dashboard because the pod is OOM-killed. Shows pod status, restart count, memory trend, log viewer, and events table.",
       "verification_passed": true,
       "rollback_available": false,
       "retry_attempts": 0,
@@ -90,7 +89,6 @@
         "namespace_summary",
         "list_pods",
         "get_prometheus_query",
-        "get_prometheus_query",
         "plan_dashboard",
         "create_dashboard"
       ],
@@ -112,14 +110,9 @@
         "describe_pod",
         "get_pod_logs",
         "get_events",
-        "list_deployments",
-        "describe_deployment",
+        "list_resources",
+        "describe_resource",
         "get_node_metrics",
-        "list_nodes",
-        "get_prometheus_query",
-        "get_prometheus_query",
-        "get_prometheus_query",
-        "get_prometheus_query",
         "get_prometheus_query",
         "plan_dashboard",
         "create_dashboard"
@@ -231,7 +224,6 @@
       "description": "Create a predictive assessment view for a trending resource pressure issue with Trend/Recommendations/Impact tabs.",
       "tool_calls": [
         "get_prometheus_query",
-        "get_prometheus_query",
         "get_topology_graph",
         "emit_component",
         "create_dashboard"
@@ -246,5 +238,5 @@
       "transient_failures": 0
     }
   ],
-  "description": "Dashboard generation quality — validates component selection, layout, and tool usage for view creation"
+  "description": "Dashboard generation quality \u2014 validates component selection, layout, and tool usage for view creation"
 }

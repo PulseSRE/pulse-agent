@@ -17,6 +17,11 @@ categories:
   - monitoring
   - operations
   - gitops
+  # Multi-cluster is SRE work. The fleet category existed with all seven
+  # fleet_* tools and its routing keywords — and no skill carried it, so the
+  # entire ACM/multi-cluster toolset was reachable by nothing. Found by the
+  # tool-reachability contract eval.
+  - fleet
 write_tools: true
 priority: 10
 requires_tools:

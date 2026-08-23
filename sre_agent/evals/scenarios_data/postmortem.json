@@ -1,6 +1,6 @@
 {
   "suite_name": "postmortem",
-  "description": "Postmortem generation scenarios — timeline reconstruction, root cause analysis, prevention recommendations",
+  "description": "Postmortem generation scenarios \u2014 timeline reconstruction, root cause analysis, prevention recommendations",
   "scenarios": [
     {
       "scenario_id": "postmortem_crashloop_incident",
@@ -10,7 +10,7 @@
         "list_pods",
         "get_pod_logs",
         "get_events",
-        "describe_deployment"
+        "describe_resource"
       ],
       "rejected_tools": 0,
       "duration_seconds": 110,
@@ -45,8 +45,8 @@
       "category": "sre",
       "description": "Generate postmortem from a node failure affecting multiple workloads.",
       "tool_calls": [
-        "list_nodes",
-        "describe_node",
+        "list_resources",
+        "describe_resource",
         "get_events",
         "list_pods",
         "get_firing_alerts"
@@ -65,7 +65,7 @@
       "category": "sre",
       "description": "Generate postmortem from a failed deployment rollout with rollback.",
       "tool_calls": [
-        "describe_deployment",
+        "describe_resource",
         "get_pod_logs",
         "get_events",
         "list_pods"
@@ -88,7 +88,7 @@
         "correlate_incident",
         "get_events",
         "get_pod_logs",
-        "describe_deployment"
+        "describe_resource"
       ],
       "rejected_tools": 0,
       "duration_seconds": 150,

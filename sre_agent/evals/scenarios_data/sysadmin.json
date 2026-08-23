@@ -56,7 +56,7 @@
       "category": "sre",
       "description": "Identify nodes experiencing resource pressure conditions.",
       "tool_calls": [
-        "list_nodes",
+        "list_resources",
         "get_node_metrics"
       ],
       "rejected_tools": 0,
@@ -89,7 +89,7 @@
       "category": "sre",
       "description": "List deployments that are not fully ready or available.",
       "tool_calls": [
-        "list_deployments"
+        "list_resources"
       ],
       "rejected_tools": 0,
       "duration_seconds": 25,
@@ -121,7 +121,7 @@
       "category": "sre",
       "description": "Show resource quotas for the production namespace.",
       "tool_calls": [
-        "get_resource_quotas"
+        "list_resources"
       ],
       "rejected_tools": 0,
       "duration_seconds": 20,
@@ -223,10 +223,9 @@
       "description": "Assess overall cluster readiness for production workloads.",
       "tool_calls": [
         "get_cluster_operators",
-        "list_nodes",
+        "list_resources",
         "get_node_metrics",
-        "get_firing_alerts",
-        "get_resource_quotas"
+        "get_firing_alerts"
       ],
       "rejected_tools": 0,
       "duration_seconds": 120,
@@ -274,7 +273,7 @@
       "category": "sre",
       "description": "Build a node health dashboard by gathering node status and metrics.",
       "tool_calls": [
-        "list_nodes",
+        "list_resources",
         "get_node_metrics",
         "create_dashboard"
       ],
