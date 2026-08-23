@@ -44,7 +44,7 @@ class TestLoadTemplates:
         plan = templates["crashloop"]
         assert plan.id == "crashloop-resolution-v1"
         assert plan.name == "Crashloop Resolution"
-        assert plan.max_total_duration == 900
+        assert plan.max_total_duration == 1200  # raised with the phase budgets (see template comment)
         phase_ids = [p.id for p in plan.phases]
         assert phase_ids == ["triage", "diagnose", "remediate", "verify"]
 
@@ -148,4 +148,6 @@ class TestListTemplates:
         assert crashloop is not None
         assert crashloop["name"] == "Crashloop Resolution"
         assert crashloop["phases"] == 4
-        assert crashloop["max_duration"] == 900
+        # 1200, not 900: phase budgets were raised after 103/203 production runs
+        # aborted on the old 120s triage timeout; their sum (1140s) must fit.
+        assert crashloop["max_duration"] == 1200

@@ -17,8 +17,12 @@ async def try_plan_execution(monitor: ClusterMonitor, finding: dict) -> bool:
     try:
         from ..plan_runtime import PlanRuntime
         from ..plan_templates import match_template
+        from .alert_plans import plan_category_for
 
-        template = match_template(category=finding.get("category", ""))
+        # plan_category_for, not the raw category: alert findings arrive as
+        # category="alerts", which no template matches — so alert-borne
+        # incidents (this cluster's dominant kind) never engaged a plan.
+        template = match_template(category=plan_category_for(finding))
         if not template:
             return False
 
