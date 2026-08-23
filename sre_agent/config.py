@@ -49,6 +49,12 @@ class MonitorConfig(BaseModel):
     investigation_timeout: int = 120
     investigation_cooldown: int = 300
     autofix_enabled: bool = True
+    # How long a proposed fix waits for a human before it is abandoned. This was
+    # hardcoded to 120s, which is a fine window for someone already looking at a
+    # confirmation dialog and a poor one for a background monitor that proposes
+    # fixes unprompted: 281 of the first 368 actions on the dev cluster ended as
+    # "Rejected by user or approval timed out" without anyone rejecting anything.
+    approval_timeout: int = 900
     security_followup: bool = False
     noise_threshold: float = 0.7
     max_trust_level: int = 2
