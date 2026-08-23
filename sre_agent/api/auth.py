@@ -110,7 +110,12 @@ def _get_current_user(
 
         _load_k8s()
         auth_api = k8s_client.AuthenticationV1Api()
-        review = k8s_client.TokenReview(spec=k8s_client.TokenReviewSpec(token=token))
+        # V1TokenReview, not TokenReview: the un-versioned aliases were removed
+        # from the kubernetes client (gone by 36.x), and the AttributeError was
+        # swallowed by this except as "TokenReview API unavailable" — silently
+        # demoting every caller to a token-hash pseudonym that can never match
+        # PULSE_AGENT_ADMIN_USERS.
+        review = k8s_client.V1TokenReview(spec=k8s_client.V1TokenReviewSpec(token=token))
         result = auth_api.create_token_review(review)
         if result.status.authenticated:
             username = result.status.user.username
@@ -122,13 +127,17 @@ def _get_current_user(
             logger.warning("TokenReview API unavailable, extending cached identity '%s'", cached[0])
             _cache_user(token_hash, cached[0])  # refresh timestamp
             return cached[0]
-        logger.warning("TokenReview API unavailable, using token-derived identity")
+        # exc_info, not a bare message: this except once hid an AttributeError
+        # (a removed client alias) for multiple releases because the log line
+        # could not distinguish "API unreachable" from "our call is broken".
+        logger.warning("TokenReview failed, using token-derived identity", exc_info=True)
 
     # Final fallback: stable identity derived from token hash.
     # OpenShift tokens are sha256~ format (not JWTs), so we can't decode them.
-    fallback_user = f"user-{token_hash[:16]}"
-    _cache_user(token_hash, fallback_user)
-    return fallback_user
+    # NOT cached: caching the pseudonym poisoned the cache — once stored, the
+    # exception path above kept "extending" it, so the caller stayed a ghost
+    # even after TokenReview recovered. Recomputing a hash per request is free.
+    return f"user-{token_hash[:16]}"
 
 
 def verify_token(authorization: str | None = Header(None), token: str | None = Query(None)):
