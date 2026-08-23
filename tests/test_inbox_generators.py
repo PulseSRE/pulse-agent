@@ -1,4 +1,4 @@
-"""Tests for the 13 proactive inbox task generators."""
+"""Tests for the 15 proactive inbox task generators."""
 
 import time
 from unittest.mock import patch
@@ -186,10 +186,13 @@ class TestServiceEndpointGapsGenerator:
 
 
 class TestGeneratorRegistration:
-    def test_all_13_registered(self):
+    def test_all_15_registered(self):
         from sre_agent.inbox_generators import TASK_GENERATORS
 
-        assert len(TASK_GENERATORS) == 13
+        assert len(TASK_GENERATORS) == 15
+        names = [n for n, _ in TASK_GENERATORS]
+        assert "skill_gaps" in names
+        assert "skill_low_performers" in names
 
     def test_run_all_generators_returns_list(self):
         from sre_agent.inbox_generators import run_all_generators
@@ -211,3 +214,59 @@ class TestGeneratorRegistration:
             result = run_all_generators()
             assert isinstance(result, list)
             assert len(result) == 0
+
+
+class TestSkillGapGenerator:
+    """Detected skill gaps must become visible proposals, not log lines."""
+
+    @patch("sre_agent.selector_learning.identify_skill_gaps")
+    def test_generates_proposal_per_gap(self, mock_gaps):
+        from sre_agent.inbox_generators import gen_skill_gaps
+
+        mock_gaps.return_value = [
+            {"pattern": "etcd defrag latency", "occurrences": 7},
+            {"pattern": "pvc resize stuck", "occurrences": 4},
+        ]
+        items = gen_skill_gaps()
+        assert len(items) == 2
+        assert items[0]["correlation_key"] == "skill-gap:etcd-defrag-latency"
+        assert "7x" in items[0]["title"]
+        assert items[0]["item_type"] == "task"
+        assert items[0]["metadata"]["generator"] == "skill_gaps"
+
+    @patch("sre_agent.selector_learning.identify_skill_gaps")
+    def test_caps_at_three_proposals(self, mock_gaps):
+        from sre_agent.inbox_generators import gen_skill_gaps
+
+        mock_gaps.return_value = [{"pattern": f"pattern {i}", "occurrences": 3} for i in range(10)]
+        assert len(gen_skill_gaps()) == 3
+
+    @patch("sre_agent.selector_learning.identify_skill_gaps", return_value=[])
+    def test_no_gaps_no_items(self, _):
+        from sre_agent.inbox_generators import gen_skill_gaps
+
+        assert gen_skill_gaps() == []
+
+
+class TestSkillLowPerformerGenerator:
+    """A flagged skill becomes a quarantine proposal carrying its evidence."""
+
+    @patch("sre_agent.selector_learning.prune_low_performers")
+    def test_generates_quarantine_proposal(self, mock_prune):
+        from sre_agent.inbox_generators import gen_skill_low_performers
+
+        mock_prune.return_value = [
+            {"skill": "flaky_skill", "override_rate": 0.45, "overrides": 9, "total": 20},
+        ]
+        items = gen_skill_low_performers()
+        assert len(items) == 1
+        assert items[0]["correlation_key"] == "skill-quarantine:flaky_skill"
+        assert "45%" in items[0]["title"]
+        assert "quarantine" in items[0]["summary"]
+        assert items[0]["metadata"]["generator"] == "skill_low_performers"
+
+    @patch("sre_agent.selector_learning.prune_low_performers", return_value=[])
+    def test_healthy_skills_no_items(self, _):
+        from sre_agent.inbox_generators import gen_skill_low_performers
+
+        assert gen_skill_low_performers() == []

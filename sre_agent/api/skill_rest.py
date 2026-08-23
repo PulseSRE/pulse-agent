@@ -186,13 +186,12 @@ async def update_skill(name: str, body: dict, admin: str = Depends(require_admin
     }
 
 
-@router.post("/admin/skills/{name}/approve")
-async def approve_skill(name: str, admin: str = Depends(require_admin)):
-    """Mark an agent-authored skill as reviewed, making it eligible for routing.
+def _set_skill_frontmatter(name: str, updates: dict):
+    """Rewrite one skill's frontmatter keys on disk and reload the registry.
 
-    Agent-written skills land on disk with `reviewed: false` and are excluded
-    from automatic routing entirely. This is the only way that changes, and it
-    requires a person: the point of the gate is that someone read the skill.
+    Shared by the review and quarantine gates — both are booleans a person
+    flips, and both must survive a pod restart, so they live in skill.md
+    rather than in memory. Returns the reloaded Skill.
     """
     import yaml
 
@@ -219,21 +218,53 @@ async def approve_skill(name: str, admin: str = Depends(require_admin)):
     if not isinstance(meta, dict):
         raise HTTPException(status_code=400, detail="Frontmatter is not a mapping")
 
-    meta["reviewed"] = True
+    meta.update(updates)
     body = "---".join(parts[2:])
     skill_file.write_text(
         f"---\n{yaml.dump(meta, default_flow_style=False, sort_keys=False)}---{body}",
         encoding="utf-8",
     )
 
-    logger.warning("Skill '%s' approved for routing by '%s'", name, admin)
-
     _reload()
     updated = _get(name)
     if not updated:
-        raise HTTPException(status_code=500, detail="Skill failed to reload after approval")
+        raise HTTPException(status_code=500, detail="Skill failed to reload after update")
+    return updated
 
+
+@router.post("/admin/skills/{name}/approve")
+async def approve_skill(name: str, admin: str = Depends(require_admin)):
+    """Mark an agent-authored skill as reviewed, making it eligible for routing.
+
+    Agent-written skills land on disk with `reviewed: false` and are excluded
+    from automatic routing entirely. This is the only way that changes, and it
+    requires a person: the point of the gate is that someone read the skill.
+    """
+    updated = _set_skill_frontmatter(name, {"reviewed": True})
+    logger.warning("Skill '%s' approved for routing by '%s'", name, admin)
     return {"name": name, "reviewed": updated.reviewed}
+
+
+@router.post("/admin/skills/{name}/quarantine")
+async def quarantine_skill(name: str, admin: str = Depends(require_admin)):
+    """Pull a skill from automatic routing without deleting it.
+
+    The flywheel flags skills people keep overriding, but flagging is a
+    proposal — this endpoint is the human act that pulls the skill. It stops
+    serving both ORCA selection and trigger-pattern pre-routes, while staying
+    loadable by name via skill_load so it can be debugged and fixed.
+    """
+    updated = _set_skill_frontmatter(name, {"quarantined": True})
+    logger.warning("Skill '%s' quarantined from routing by '%s'", name, admin)
+    return {"name": name, "quarantined": updated.quarantined}
+
+
+@router.post("/admin/skills/{name}/unquarantine")
+async def unquarantine_skill(name: str, admin: str = Depends(require_admin)):
+    """Restore a quarantined skill to automatic routing."""
+    updated = _set_skill_frontmatter(name, {"quarantined": False})
+    logger.warning("Skill '%s' restored to routing by '%s'", name, admin)
+    return {"name": name, "quarantined": updated.quarantined}
 
 
 @router.delete("/admin/skills/{name}")

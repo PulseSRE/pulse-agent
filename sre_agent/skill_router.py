@@ -56,6 +56,12 @@ def _init_hard_pre_route() -> None:
     skills = sorted(list_skills(), key=lambda s: s.route_priority)
 
     for skill in skills:
+        # Pre-route is automatic routing too. Without this check a skill barred
+        # from ORCA selection (unreviewed or quarantined — both gates zero its
+        # fused score) would still serve traffic through its trigger patterns,
+        # which would make either gate a fiction for any skill that has them.
+        if not skill.reviewed or skill.quarantined:
+            continue
         for pattern in skill.trigger_patterns:
             try:
                 _HARD_PRE_ROUTE.append((re.compile(pattern, re.IGNORECASE), skill.name))

@@ -100,6 +100,8 @@ class Skill:
     supported_components: list[str] = field(default_factory=list)  # UI component types this skill renders
     generated_by: str = ""
     reviewed: bool = True
+    quarantined: bool = False  # pulled from automatic routing for poor performance, reversible
+    incident_type: str = ""  # finding category a scaffolded skill was learned from
 
     def to_dict(self) -> dict:
         """Serialize for API responses."""
@@ -130,6 +132,8 @@ class Skill:
             "supported_components": self.supported_components,
             "generated_by": self.generated_by,
             "reviewed": self.reviewed,
+            "quarantined": self.quarantined,
+            "incident_type": self.incident_type,
         }
 
 
@@ -233,6 +237,8 @@ def _parse_skill_md(path: Path) -> Skill | None:
         supported_components=meta.get("supported_components", []),
         generated_by=meta.get("generated_by", ""),
         reviewed=meta.get("reviewed", True),
+        quarantined=bool(meta.get("quarantined", False)),
+        incident_type=meta.get("incident_type") or "",
     )
 
 
