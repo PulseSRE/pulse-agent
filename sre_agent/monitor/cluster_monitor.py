@@ -48,6 +48,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger("pulse_agent.monitor")
 
 
+def _proposal_outcome(timed_out: bool, timeout_s: int) -> tuple[str, str]:
+    """Status and error for a proposal no one approved.
+
+    A timeout and a rejection are different facts and must not be recorded as
+    the same one: a human who declines a fix is a signal about the proposal;
+    nobody answering is a signal about the operator's day. "expired" already
+    exists as the status for proposals nobody acted on; filing an unanswered
+    proposal under "failed" would count the agent's own idea as having gone
+    wrong when it never ran.
+
+    Module-level and pure so the tests exercise the real decision instead of
+    a hand-copied mirror of it.
+    """
+    if timed_out:
+        return "expired", f"No response within {timeout_s}s — the fix was never attempted"
+    return "failed", "Rejected by user"
+
+
 def _resolve_finding_inbox(finding_id: str, finding: dict | None = None) -> None:
     """Resolve inbox items linked to a resolved finding."""
     try:
@@ -179,6 +197,12 @@ class ClusterMonitor:
         self._investigation_fingerprints: dict[str, str] = {}
         self._scan_counter = 0
         self._pending_verifications: dict[str, dict[str, Any]] = {}
+        # Approval waits run off the scan path (see _await_approval_then_execute).
+        # The set stops a still-firing finding from re-proposing every scan while
+        # its first proposal is still waiting; the task set keeps strong refs so
+        # the event loop cannot garbage-collect an in-flight wait.
+        self._proposals_awaiting_approval: set[str] = set()
+        self._approval_tasks: set[asyncio.Task] = set()
         self._daily_investigation_count = 0
         self._daily_investigation_reset = time.time()
         self._scan_lock = asyncio.Lock()
@@ -425,9 +449,6 @@ class ClusterMonitor:
                 get_investigation_for_finding,
                 plan_fix,
             )
-            from .fix_planner import (
-                execute_fix as execute_targeted_fix,
-            )
 
             investigation = get_investigation_for_finding(finding.get("id", ""))
             targeted_plan = None
@@ -579,9 +600,10 @@ class ClusterMonitor:
 
             # Ask-first mode: broadcast proposal and wait for first approval from ANY subscriber
             if trust_level == 2:
+                corr_key = _finding_corr_key(finding)
                 async with self._subscribers_lock:
                     nobody_to_ask = not self._subscribers
-                if nobody_to_ask and get_monitor_repo().check_pending_proposal(_finding_corr_key(finding)):
+                if nobody_to_ask and get_monitor_repo().check_pending_proposal(corr_key):
                     # Already asked, still unanswered. Asking again every scan
                     # is a flood, not persistence — measured on the reference
                     # cluster, one hour of this produced 701 rows for two
@@ -608,6 +630,13 @@ class ClusterMonitor:
                     )
                     continue
 
+                # An approval for this same finding is already waiting on an
+                # operator from an earlier scan; the finding is still firing,
+                # so without this guard every scan would broadcast a duplicate
+                # proposal on top of the one nobody has answered yet.
+                if corr_key in self._proposals_awaiting_approval:
+                    continue
+
                 await self._broadcast_raw(action_report)
                 loop = asyncio.get_running_loop()
                 approval_future = loop.create_future()
@@ -616,165 +645,240 @@ class ClusterMonitor:
                     for client in self._subscribers:
                         client._pending_action_approvals[action_report["id"]] = approval_future
 
-                # A timeout and a rejection are different facts and must not be
-                # recorded as the same one. A human who looks at a proposed fix
-                # and declines it is a real signal about the proposal; nobody
-                # being at the dashboard is a signal about the operator's day.
-                timed_out = False
-                try:
-                    approved = bool(
-                        await asyncio.wait_for(approval_future, timeout=get_settings().monitor.approval_timeout)
-                    )
-                except TimeoutError:
-                    approved = False
-                    timed_out = True
-                finally:
-                    # Clean up from all subscribers
-                    async with self._subscribers_lock:
-                        for client in self._subscribers:
-                            client._pending_action_approvals.pop(action_report["id"], None)
-
-                if not approved:
-                    # "expired" already exists as a status for proposals nobody
-                    # acted on. Filing an unanswered proposal under "failed"
-                    # counts the agent's own idea as having gone wrong, which
-                    # both flatters and slanders it: it never ran.
-                    action_report["status"] = "expired" if timed_out else "failed"
-                    action_report["error"] = (
-                        f"No response within {get_settings().monitor.approval_timeout}s — the fix was never attempted"
-                        if timed_out
-                        else "Rejected by user"
-                    )
-                    if _METRICS_AVAILABLE:
-                        # Same split as the status: "expired" says no operator
-                        # answered, "rejected" says one did and declined.
-                        AUTOFIX_TOTAL.labels(outcome="expired" if timed_out else "rejected").inc()
-                    await self._broadcast_raw(action_report)
-                    save_action(
-                        action_report,
+                # The wait happens OFF the scan path (see
+                # _await_approval_then_execute). A dispatched proposal still
+                # occupies one of this cycle's fix slots, so trust 2 cannot
+                # fan out more proposals per scan than trust 3 could execute.
+                self._proposals_awaiting_approval.add(corr_key)
+                fixes_this_cycle += 1
+                task = asyncio.create_task(
+                    self._await_approval_then_execute(
+                        approval_future=approval_future,
+                        action_report=action_report,
+                        targeted_plan=targeted_plan,
                         category=category,
                         resources=resources,
+                        resource_key=resource_key,
                         finding=finding,
-                    )
-                    continue
-
-                action_report["status"] = "executing"
-            else:
-                logger.warning(
-                    "Auto-fix executing WITHOUT confirmation gate (trust_level=%d, category=%s, resource=%s). "
-                    "This is by design for autonomous operation.",
-                    trust_level,
-                    category,
-                    resource_key,
-                )
-
-            await self._broadcast_raw(action_report)
-
-            start_ms = _ts()
-            try:
-                tool, before_state, after_state = await asyncio.to_thread(execute_targeted_fix, targeted_plan)
-                # The restorable copy the executor captured. before_state is a
-                # human-readable sentence; this is what an undo actually needs.
-                from .fix_planner import take_last_snapshot
-
-                _snapshot = take_last_snapshot()
-                duration_ms = _ts() - start_ms
-
-                action_report["tool"] = tool
-                action_report["status"] = "completed"
-                action_report["beforeState"] = before_state
-                if _snapshot:
-                    from ..snapshot import to_json
-
-                    action_report["beforeSnapshot"] = to_json(_snapshot)
-                action_report["afterState"] = after_state
-                action_report["durationMs"] = duration_ms
-                if _METRICS_AVAILABLE:
-                    AUTOFIX_TOTAL.labels(outcome="success").inc()
-                fixes_this_cycle += 1
-                self._recent_fix_ids.add(finding["id"])
-
-                if resource_key:
-                    self._recent_fixes[resource_key] = time.time()
-                    self._fix_attempt_counts[resource_key] = self._fix_attempt_counts.get(resource_key, 0) + 1
-                self._pending_verifications[action_report["id"]] = {
-                    "action_id": action_report["id"],
-                    "finding_id": finding["id"],
-                    "category": category,
-                    "resources": resources,
-                    # What the health gate reads. Falls back to the fixed
-                    # resource when there is no better target.
-                    "verify_resources": verify_resources or resources,
-                    "target_scan": self._scan_counter + 1,
-                }
-
-                logger.info(
-                    "Auto-fix completed: category=%s finding=%s tool=%s duration=%dms (%d/%d this cycle)",
-                    category,
-                    finding["id"],
-                    tool,
-                    duration_ms,
-                    fixes_this_cycle,
-                    MAX_FIXES_PER_CYCLE,
-                )
-
-                from ..context_bus import ContextEntry, get_context_bus
-
-                bus = get_context_bus()
-                bus.publish(
-                    ContextEntry(
-                        source="monitor",
-                        category="fix",
-                        summary=f"Auto-fixed {category}: {finding.get('title', '')}",
-                        details={"fix_applied": tool, "before_state": before_state, "after_state": after_state},
-                        namespace=resources[0].get("namespace", "") if resources else "",
-                        resources=resources,
+                        verify_resources=verify_resources,
+                        corr_key=corr_key,
                     )
                 )
-            except Exception as e:
-                duration_ms = _ts() - start_ms
+                self._approval_tasks.add(task)
+                task.add_done_callback(self._approval_tasks.discard)
+                continue
 
-                from kubernetes.client.rest import ApiException as _ApiException
+            logger.warning(
+                "Auto-fix executing WITHOUT confirmation gate (trust_level=%d, category=%s, resource=%s). "
+                "This is by design for autonomous operation.",
+                trust_level,
+                category,
+                resource_key,
+            )
 
-                if isinstance(e, _ApiException) and e.status == 404:
-                    logger.info(
-                        "Auto-fix: resource gone (404) for %s — resolving finding",
-                        finding["id"],
-                    )
-                    action_report["status"] = "completed"
-                    action_report["afterState"] = "Resource no longer exists — resolved"
-                    action_report["durationMs"] = duration_ms
-                    self._recent_fix_ids.add(finding["id"])
-                    _resolve_finding_inbox(finding["id"], finding)
-                    if _METRICS_AVAILABLE:
-                        AUTOFIX_TOTAL.labels(outcome="success").inc()
-                else:
-                    from ..errors import classify_exception
-
-                    # str(e) on a kubernetes ApiException dumps the whole object,
-                    # headers and all — classify_exception extracts the structured
-                    # Status body's message instead, so this stays readable.
-                    action_report["status"] = "failed"
-                    action_report["error"] = str(classify_exception(e, category))[:500]
-                    action_report["durationMs"] = duration_ms
-                    if _METRICS_AVAILABLE:
-                        AUTOFIX_TOTAL.labels(outcome="failure").inc()
-
-                    logger.info(
-                        "Auto-fix failed: category=%s finding=%s error=%s",
-                        category,
-                        finding["id"],
-                        e,
-                    )
-
-            await self._broadcast_raw(action_report)
-
-            save_action(
-                action_report,
+            if await self._execute_fix(
+                action_report=action_report,
+                targeted_plan=targeted_plan,
                 category=category,
                 resources=resources,
+                resource_key=resource_key,
                 finding=finding,
+                verify_resources=verify_resources,
+            ):
+                fixes_this_cycle += 1
+
+    async def _await_approval_then_execute(
+        self,
+        *,
+        approval_future: asyncio.Future,
+        action_report: dict,
+        targeted_plan,
+        category: str,
+        resources: list[dict],
+        resource_key: str,
+        finding: dict,
+        verify_resources: list[dict] | None,
+        corr_key: str,
+    ) -> None:
+        """Wait for the operator's answer without holding up the scan loop.
+
+        This wait used to run inline in ``auto_fix``, which stalled the entire
+        scan pipeline — scanning, fix verification, inbox bridging — for the
+        full approval window whenever a dashboard was connected but nobody was
+        looking at it. The fix-history data says that is the common case: 281
+        of 368 proposals expired unanswered.
+        """
+        timeout_s = int(get_settings().monitor.approval_timeout)
+        timed_out = False
+        try:
+            try:
+                approved = bool(await asyncio.wait_for(approval_future, timeout=timeout_s))
+            except TimeoutError:
+                approved = False
+                timed_out = True
+            finally:
+                # Clean up from all subscribers
+                async with self._subscribers_lock:
+                    for client in self._subscribers:
+                        client._pending_action_approvals.pop(action_report["id"], None)
+
+            if not approved:
+                status, error = _proposal_outcome(timed_out, timeout_s)
+                action_report["status"] = status
+                action_report["error"] = error
+                if _METRICS_AVAILABLE:
+                    # Same split as the status: "expired" says no operator
+                    # answered, "rejected" says one did and declined.
+                    AUTOFIX_TOTAL.labels(outcome="expired" if timed_out else "rejected").inc()
+                await self._broadcast_raw(action_report)
+                save_action(action_report, category=category, resources=resources, finding=finding)
+                return
+
+            action_report["status"] = "executing"
+            await self._execute_fix(
+                action_report=action_report,
+                targeted_plan=targeted_plan,
+                category=category,
+                resources=resources,
+                resource_key=resource_key,
+                finding=finding,
+                verify_resources=verify_resources,
             )
+        except Exception:
+            # A crashed wait must not vanish silently — and must not leave the
+            # corr key stuck in the in-flight set, or the finding could never
+            # be proposed again for the life of the process.
+            logger.exception("Approval wait for action %s crashed", action_report.get("id", ""))
+        finally:
+            self._proposals_awaiting_approval.discard(corr_key)
+
+    async def _execute_fix(
+        self,
+        *,
+        action_report: dict,
+        targeted_plan,
+        category: str,
+        resources: list[dict],
+        resource_key: str,
+        finding: dict,
+        verify_resources: list[dict] | None,
+    ) -> bool:
+        """Execute a planned fix and record the outcome. Returns True on success.
+
+        Shared by the trust>=3 inline path and the trust-2 approval task, so
+        the execution semantics cannot drift between "asked first" and "acted
+        directly".
+        """
+        from .fix_planner import execute_fix as execute_targeted_fix
+
+        succeeded = False
+        await self._broadcast_raw(action_report)
+
+        start_ms = _ts()
+        try:
+            tool, before_state, after_state = await asyncio.to_thread(execute_targeted_fix, targeted_plan)
+            # The restorable copy the executor captured. before_state is a
+            # human-readable sentence; this is what an undo actually needs.
+            from .fix_planner import take_last_snapshot
+
+            _snapshot = take_last_snapshot()
+            duration_ms = _ts() - start_ms
+
+            action_report["tool"] = tool
+            action_report["status"] = "completed"
+            action_report["beforeState"] = before_state
+            if _snapshot:
+                from ..snapshot import to_json
+
+                action_report["beforeSnapshot"] = to_json(_snapshot)
+            action_report["afterState"] = after_state
+            action_report["durationMs"] = duration_ms
+            if _METRICS_AVAILABLE:
+                AUTOFIX_TOTAL.labels(outcome="success").inc()
+            succeeded = True
+            self._recent_fix_ids.add(finding["id"])
+
+            if resource_key:
+                self._recent_fixes[resource_key] = time.time()
+                self._fix_attempt_counts[resource_key] = self._fix_attempt_counts.get(resource_key, 0) + 1
+            self._pending_verifications[action_report["id"]] = {
+                "action_id": action_report["id"],
+                "finding_id": finding["id"],
+                "category": category,
+                "resources": resources,
+                # What the health gate reads. Falls back to the fixed
+                # resource when there is no better target.
+                "verify_resources": verify_resources or resources,
+                "target_scan": self._scan_counter + 1,
+            }
+
+            logger.info(
+                "Auto-fix completed: category=%s finding=%s tool=%s duration=%dms",
+                category,
+                finding["id"],
+                tool,
+                duration_ms,
+            )
+
+            from ..context_bus import ContextEntry, get_context_bus
+
+            bus = get_context_bus()
+            bus.publish(
+                ContextEntry(
+                    source="monitor",
+                    category="fix",
+                    summary=f"Auto-fixed {category}: {finding.get('title', '')}",
+                    details={"fix_applied": tool, "before_state": before_state, "after_state": after_state},
+                    namespace=resources[0].get("namespace", "") if resources else "",
+                    resources=resources,
+                )
+            )
+        except Exception as e:
+            duration_ms = _ts() - start_ms
+
+            from kubernetes.client.rest import ApiException as _ApiException
+
+            if isinstance(e, _ApiException) and e.status == 404:
+                logger.info(
+                    "Auto-fix: resource gone (404) for %s — resolving finding",
+                    finding["id"],
+                )
+                action_report["status"] = "completed"
+                action_report["afterState"] = "Resource no longer exists — resolved"
+                action_report["durationMs"] = duration_ms
+                self._recent_fix_ids.add(finding["id"])
+                _resolve_finding_inbox(finding["id"], finding)
+                if _METRICS_AVAILABLE:
+                    AUTOFIX_TOTAL.labels(outcome="success").inc()
+            else:
+                from ..errors import classify_exception
+
+                # str(e) on a kubernetes ApiException dumps the whole object,
+                # headers and all — classify_exception extracts the structured
+                # Status body's message instead, so this stays readable.
+                action_report["status"] = "failed"
+                action_report["error"] = str(classify_exception(e, category))[:500]
+                action_report["durationMs"] = duration_ms
+                if _METRICS_AVAILABLE:
+                    AUTOFIX_TOTAL.labels(outcome="failure").inc()
+
+                logger.info(
+                    "Auto-fix failed: category=%s finding=%s error=%s",
+                    category,
+                    finding["id"],
+                    e,
+                )
+
+        await self._broadcast_raw(action_report)
+
+        save_action(
+            action_report,
+            category=category,
+            resources=resources,
+            finding=finding,
+        )
+        return succeeded
+
 
     # ── Plan execution ────────────────────────────────────────────────────
 
