@@ -759,9 +759,11 @@ Server acknowledges with an `ack` event.
 
 **Note:** the ID field is `id`, not `actionId`; the tool name field is `tool`, not `action`; there is no `summary` field; `beforeState`/`afterState` are **strings** (human-readable snapshots), not objects. `input` (the tool's input dict), `error` (on failure), `reasoning`, and `durationMs` are also present on the real payload but were previously undocumented.
 
+`status` values: `proposed` (awaiting operator approval), `executing`, `completed`, `failed` (execution failed, or the operator rejected the proposal), `expired` (nobody answered within the approval window — the fix never ran), `rolled_back`.
+
 `action_report` may include optional fields:
 - `confidence`: `number` (0.0–1.0) — agent's confidence that this action will resolve the issue
-- `error`: `string` — present when `status` is a failure
+- `error`: `string` — present when `status` is `failed` or `expired`
 - `verificationStatus`: `"verified"` | `"still_failing"`
 - `verificationEvidence`: `string`
 - `verificationTimestamp`: `number`

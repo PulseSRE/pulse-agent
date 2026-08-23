@@ -152,6 +152,11 @@ class PulseAgentSettings(BaseSettings):
     investigation_timeout: int = 120
     investigation_cooldown: int = 300
     autofix_enabled: bool = True
+    # Flat twin of MonitorConfig.approval_timeout. Without this field AND the
+    # entry in model_post_init below, PULSE_AGENT_APPROVAL_TIMEOUT is silently
+    # ignored — the nested default always wins, which is exactly what happened
+    # when the knob first shipped.
+    approval_timeout: int = 900
     security_followup: bool = False
     noise_threshold: float = 0.7
     max_trust_level: int = 2
@@ -222,6 +227,7 @@ class PulseAgentSettings(BaseSettings):
             investigation_timeout=self.investigation_timeout,
             investigation_cooldown=self.investigation_cooldown,
             autofix_enabled=self.autofix_enabled,
+            approval_timeout=self.approval_timeout,
             security_followup=self.security_followup,
             noise_threshold=self.noise_threshold,
             max_trust_level=self.max_trust_level,
