@@ -640,11 +640,20 @@ class ClusterMonitor:
             start_ms = _ts()
             try:
                 tool, before_state, after_state = await asyncio.to_thread(execute_targeted_fix, targeted_plan)
+                # The restorable copy the executor captured. before_state is a
+                # human-readable sentence; this is what an undo actually needs.
+                from .fix_planner import take_last_snapshot
+
+                _snapshot = take_last_snapshot()
                 duration_ms = _ts() - start_ms
 
                 action_report["tool"] = tool
                 action_report["status"] = "completed"
                 action_report["beforeState"] = before_state
+                if _snapshot:
+                    from ..snapshot import to_json
+
+                    action_report["beforeSnapshot"] = to_json(_snapshot)
                 action_report["afterState"] = after_state
                 action_report["durationMs"] = duration_ms
                 if _METRICS_AVAILABLE:

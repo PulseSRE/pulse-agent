@@ -254,6 +254,11 @@ def _migrate_033_learning_candidates(db: Database) -> None:
     db.executescript(LEARNING_CANDIDATES_SCHEMA)
 
 
+def _migrate_034_action_snapshots(db: Database) -> None:
+    """Add before_snapshot: a restorable copy of the resource, not a description."""
+    db.execute("ALTER TABLE actions ADD COLUMN IF NOT EXISTS before_snapshot TEXT")
+
+
 # Open statuses, spelled the same way the inbox module does.
 _OPEN_STATUSES = "('new', 'triaged', 'claimed', 'in_progress', 'agent_reviewing')"
 
@@ -492,4 +497,5 @@ MIGRATIONS = [
     (31, "action_correlation_key", _migrate_031_action_correlation_key),
     (32, "cluster_memory", _migrate_032_cluster_memory),
     (33, "learning_candidates", _migrate_033_learning_candidates),
+    (34, "action_snapshots", _migrate_034_action_snapshots),
 ]

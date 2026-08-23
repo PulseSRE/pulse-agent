@@ -119,7 +119,17 @@ def _make_action_report(
 
 
 def _make_rollback_info(action: dict, finding: dict | None) -> tuple[int, str]:
-    """Build rollback availability flag and action JSON from finding metadata."""
+    """Build rollback availability flag and action JSON.
+
+    A captured snapshot is the strongest form of undo and is not tied to a
+    particular tool: it restores whatever the resource looked like before the
+    change. It takes precedence over the revision-based path below, which only
+    ever covered the three restart tools.
+    """
+    snapshot_blob = action.get("beforeSnapshot")
+    if snapshot_blob and action.get("status") in ("completed", "applied"):
+        return 1, json.dumps({"tool": "restore_snapshot", "input": {"snapshot": snapshot_blob}})
+
     rollback_meta = (finding or {}).get("_rollback_meta")
     if not rollback_meta or action.get("status") != "completed":
         return 0, ""
