@@ -377,6 +377,11 @@ def create_skill(
         "risk_level": "low",
         "conflicts_with": [],
         "supported_components": [],
+        # Written by the agent, not a person. Skill.reviewed defaults to True, so
+        # omitting this marked an AI-authored skill as human-reviewed and gave it
+        # full routing weight the moment it hit disk.
+        "reviewed": False,
+        "generated_by": "auto",
     }
 
     yaml_str = yaml.dump(frontmatter, default_flow_style=False, sort_keys=False)
@@ -410,27 +415,30 @@ def create_skill(
     if name not in skills:
         return f"Error: skill file parsed OK but not found after reload. Name mismatch? File has name='{parsed.name}', expected '{name}'."
 
-    # Verify routing works — test with skill name and first keyword
+    # Confirm the review gate holds. A newly written skill is unreviewed, so it
+    # must NOT win automatic routing yet — asserting the opposite (as this once
+    # did) reports a correctly-gated skill as a routing failure and invites a
+    # retry loop.
     from .skill_loader import classify_query
 
     test_queries = [f"run {name}", kw_list[0] if kw_list else name]
-    routing_results = []
+    gate_results = []
     for tq in test_queries:
         routed = classify_query(tq)
-        routing_results.append(
-            f"  '{tq}' → {routed.name} {'✓' if routed.name == name else '✗ (routed to wrong skill)'}"
-        )
+        held = routed.name != name
+        gate_results.append(f"  '{tq}' → {routed.name} {'✓ gated' if held else '✗ GATE LEAK'}")
 
     return (
-        f"Skill '{name}' created and active!\n\n"
+        f"Skill '{name}' written to disk. Status: UNREVIEWED.\n\n"
         f"**Details:**\n"
         f"- Keywords: {', '.join(kw_list)}\n"
         f"- Categories: {', '.join(cat_list)}\n"
         f"- Priority: {priority}\n"
         f"- Write tools: {write_tools}\n"
         f"- Location: {skill_file}\n\n"
-        f"**Routing test:**\n" + "\n".join(routing_results) + "\n\n"
-        f"The skill is live. Users can trigger it by mentioning: {', '.join(kw_list[:5])}"
+        f"**Review gate:**\n" + "\n".join(gate_results) + "\n\n"
+        f"It will not serve traffic until a person reviews it in Toolbox > Skills. "
+        f"To exercise it now, load it by name: skill_load('{name}')."
     )
 
 
@@ -625,6 +633,11 @@ def create_skill_from_template(
     meta["description"] = description
     meta["keywords"] = [", ".join(kw_list)]
     meta["version"] = 1
+    # meta is copied wholesale from a human-authored template, which carries that
+    # template's reviewed status. Without this, an agent-authored skill inherits a
+    # person's review of a *different* skill.
+    meta["reviewed"] = False
+    meta["generated_by"] = "auto"
 
     # Keep template's prompt body, categories, handoff rules
     body = parts[2].strip()
@@ -655,7 +668,9 @@ def create_skill_from_template(
             f"- Categories: {', '.join(new_skill.categories)}\n"
             f"- Priority: {new_skill.priority}\n"
             f"- Write tools: {new_skill.write_tools}\n\n"
-            f"The skill is active now. Test it by asking a question with one of the keywords."
+            f"Status: UNREVIEWED. It will not be routed to automatically until a "
+            f"person reviews it in Toolbox > Skills. You can load it by name with "
+            f"skill_load('{name}') to test it now."
         )
 
     return f"Skill file written to {skill_file} but failed to load. Check the logs."

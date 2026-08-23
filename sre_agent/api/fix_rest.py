@@ -38,6 +38,7 @@ def get_fix_history_summary(days: int = 7) -> dict:
         durations: list[int] = []
         resolved = 0
         still_failing = 0
+        unverifiable = 0
         improved = 0
         categories: dict[str, dict[str, Any]] = {}
 
@@ -73,6 +74,8 @@ def get_fix_history_summary(days: int = 7) -> dict:
                 still_failing += 1
             elif vs == "improved":
                 improved += 1
+            elif vs == "unverifiable":
+                unverifiable += 1
 
         success_rate = completed / total_actions if total_actions > 0 else 0.0
         rollback_rate = rolled_back / total_actions if total_actions > 0 else 0.0
@@ -83,7 +86,11 @@ def get_fix_history_summary(days: int = 7) -> dict:
             "resolved": resolved,
             "still_failing": still_failing,
             "improved": improved,
-            "pending": total_actions - resolved - still_failing - improved,
+            # Distinct from pending: the health check ran and could not get a
+            # clear reading. Folding these into "pending" would read as "not
+            # checked yet" and quietly inflate confidence in the fix record.
+            "unverifiable": unverifiable,
+            "pending": total_actions - resolved - still_failing - improved - unverifiable,
             "resolution_rate": round(resolved / total_actions, 2) if total_actions > 0 else 0.0,
         }
 
@@ -128,6 +135,7 @@ def get_fix_history_summary(days: int = 7) -> dict:
                 "resolved": 0,
                 "still_failing": 0,
                 "improved": 0,
+                "unverifiable": 0,
                 "pending": 0,
                 "resolution_rate": 0.0,
             },

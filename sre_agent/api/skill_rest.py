@@ -186,6 +186,56 @@ async def update_skill(name: str, body: dict, admin: str = Depends(require_admin
     }
 
 
+@router.post("/admin/skills/{name}/approve")
+async def approve_skill(name: str, admin: str = Depends(require_admin)):
+    """Mark an agent-authored skill as reviewed, making it eligible for routing.
+
+    Agent-written skills land on disk with `reviewed: false` and are excluded
+    from automatic routing entirely. This is the only way that changes, and it
+    requires a person: the point of the gate is that someone read the skill.
+    """
+    import yaml
+
+    from ..skill_loader import get_skill as _get
+    from ..skill_loader import reload_skills as _reload
+
+    skill = _get(name)
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+
+    skill_file = skill.path / "skill.md"
+    if not skill_file.exists():
+        raise HTTPException(status_code=404, detail="skill.md not found on disk")
+
+    raw = skill_file.read_text(encoding="utf-8")
+    parts = raw.split("---")
+    if len(parts) < 3:
+        raise HTTPException(status_code=400, detail="skill.md has no YAML frontmatter")
+
+    try:
+        meta = yaml.safe_load(parts[1]) or {}
+    except yaml.YAMLError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid frontmatter: {e}") from e
+    if not isinstance(meta, dict):
+        raise HTTPException(status_code=400, detail="Frontmatter is not a mapping")
+
+    meta["reviewed"] = True
+    body = "---".join(parts[2:])
+    skill_file.write_text(
+        f"---\n{yaml.dump(meta, default_flow_style=False, sort_keys=False)}---{body}",
+        encoding="utf-8",
+    )
+
+    logger.warning("Skill '%s' approved for routing by '%s'", name, admin)
+
+    _reload()
+    updated = _get(name)
+    if not updated:
+        raise HTTPException(status_code=500, detail="Skill failed to reload after approval")
+
+    return {"name": name, "reviewed": updated.reviewed}
+
+
 @router.delete("/admin/skills/{name}")
 async def delete_skill_endpoint(name: str, admin: str = Depends(require_admin)):
     """Delete a user-created skill. Built-in skills cannot be deleted."""

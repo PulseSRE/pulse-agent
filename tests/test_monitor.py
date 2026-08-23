@@ -968,13 +968,20 @@ class TestMonitorAutoLearn:
         monitor._pending_verifications[action["id"]] = {
             "category": "crashloop",
             "resources": [{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
+            "verify_resources": [{"kind": "Deployment", "name": "web", "namespace": "prod"}],
             "payload": {"tool": "delete_pod"},
         }
 
-        # Simulate no active finding -> verified
+        # No active finding AND a passing health check -> verified. The absence
+        # alone is no longer enough, and this test is about what auto-learning
+        # does with a verified fix, not about reaching a cluster from CI.
         loop = asyncio.new_event_loop()
         try:
-            loop.run_until_complete(monitor.process_verifications([]))
+            with patch(
+                "sre_agent.monitor.health_gate.check_resources",
+                return_value=("pass", "Deployment prod/web has 1/1 replicas ready"),
+            ):
+                loop.run_until_complete(monitor.process_verifications([]))
         finally:
             loop.close()
 
