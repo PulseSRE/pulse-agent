@@ -101,33 +101,89 @@ class _StubAsyncClient:
         return None
 
 
-def restore_full_schema(db) -> None:
-    """Recreate every table after a test fixture has dropped some of them.
+# The tables the monitor and scanner fixtures reset between tests.
+CORE_TABLES = (
+    "actions",
+    "investigations",
+    "findings",
+    "context_entries",
+    "incidents",
+    "runbooks",
+    "patterns",
+    "metrics",
+)
 
-    Several fixtures drop the tables their module owns (actions,
-    investigations, findings, ...) to get a clean slate, then call a
-    module-local _ensure_tables() that only recreates its own subset. The rest
-    stay dropped for the remainder of the session, and run_migrations() will
-    not bring them back: it skips every migration at or below the version
-    already recorded in schema_migrations, including the 001 baseline that
-    creates them.
 
-    Alphabetical collection order meant test_monitor.py and test_scanners.py
-    ran early and left `investigations` and `actions` missing for everything
-    after them -- 42 of the failures that surfaced once the suite could
-    complete at all.
+@pytest.fixture(scope="session", autouse=True)
+def _pristine_schema():
+    """Start every run from an empty database at the current schema.
 
-    Clearing the ledger and re-running the chain restores the full schema at
-    its current shape (baseline plus every later ALTER), rather than just the
-    baseline's older column set. Every migration is guarded with IF NOT EXISTS
-    or try/except, and 012 (investigations.timestamp -> BIGINT) is a no-op
-    when already applied, so replaying them over surviving tables is safe.
+    The test database is a long-lived local/CI PostgreSQL that nothing reset as
+    a whole, so whatever the previous run left behind was what the next run
+    started from -- and the previous run could end anywhere. Interrupt a run
+    (ctrl-C, a CI cancel, -x on an earlier failure) between a fixture's DROP of
+    `actions` and its rebuild, and the table simply stays missing. The next run
+    reaches the first fixture that creates it on its own terms, and that
+    fixture's idea of the table is the one the whole session then lives with.
+
+    That is how "column category does not exist" reached migration 001:
+    tests/test_eval_outcomes.py used to declare a five-column `actions` of its
+    own, CREATE TABLE IF NOT EXISTS made it a no-op whenever the real table was
+    present, and on the runs where it was not, the baseline's
+    `CREATE INDEX idx_actions_category ON actions(category)` later ran against
+    a table that had no such column. One run in N, and never the same test.
+
+    Dropping the schema outright costs about a second once per session and
+    makes the starting state a fact rather than a leftover.
     """
+    import psycopg2
+
+    from sre_agent.db import Database
     from sre_agent.db_migrations import run_migrations
 
-    db.execute("DELETE FROM schema_migrations")
+    # The swap runs on its own connection, which is then closed: every pooled
+    # connection the run goes on to use is opened after it, so none of them can
+    # be carrying a reference to the schema that was just dropped.
+    conn = psycopg2.connect(_TEST_DB_URL)
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        cur.execute("DROP SCHEMA IF EXISTS public CASCADE")
+        cur.execute("CREATE SCHEMA public")
+    conn.close()
+
+    run_migrations(Database(_TEST_DB_URL))
+    yield
+
+
+def truncate_tables(db, *names: str) -> None:
+    """Empty the named tables in one statement, leaving their shape alone.
+
+    Every fixture that wanted a clean slate used to DROP its tables and replay
+    the migration chain to get them back. That is DDL, and DDL in this suite
+    races: background threads (monitor approvals, the harness view count,
+    WebSocket handlers) call ensure_tables() long after the test that started
+    them returned, and two sessions running CREATE TABLE IF NOT EXISTS at the
+    same moment produce a duplicate key in pg_class_relname_nsp_index rather
+    than the no-op both of them expect. A DROP that cannot take its lock is
+    worse: Database.execute rolls the whole transaction back, so it also undoes
+    the drops before it in the same fixture, and the rebuild then runs against
+    tables it believes are gone.
+
+    Nothing about a clean slate needs the schema to change. TRUNCATE takes
+    every lock at once, and a run that starts from a session-built schema does
+    not need to rebuild anything per test.
+    """
+    db.execute("TRUNCATE " + ", ".join(names) + " RESTART IDENTITY CASCADE")
     db.commit()
-    run_migrations(db)
+
+
+def truncate_core_tables(db) -> None:
+    """Empty the eight tables the monitor and scanner fixtures share.
+
+    Those two fixtures alone used to DROP all eight and replay every migration
+    once per test -- 175 full schema rebuilds a run. See truncate_tables().
+    """
+    truncate_tables(db, *CORE_TABLES)
 
 
 def _has_live_ai_backend() -> bool:

@@ -12,20 +12,15 @@ from sre_agent.chat_history import (
     save_message,
 )
 from sre_agent.db import Database, reset_database, set_database
-from sre_agent.db_migrations import run_migrations
 
-from .conftest import _TEST_DB_URL
+from .conftest import _TEST_DB_URL, truncate_tables
 
 
 def _fresh_db() -> Database:
-    """Create a clean test database with chat tables."""
+    """Empty the chat tables. Their shape comes from the session schema build."""
     db = Database(_TEST_DB_URL)
-    db.execute("DROP TABLE IF EXISTS chat_messages CASCADE")
-    db.execute("DROP TABLE IF EXISTS chat_sessions CASCADE")
-    db.execute("DELETE FROM schema_migrations WHERE version >= 7")
-    db.commit()
+    truncate_tables(db, "chat_messages", "chat_sessions")
     set_database(db)
-    run_migrations(db)
     return db
 
 

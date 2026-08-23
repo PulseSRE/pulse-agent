@@ -16,14 +16,13 @@ from sre_agent.tool_usage import (
     update_turn_feedback,
 )
 
-from .conftest import _TEST_DB_URL
+from .conftest import _TEST_DB_URL, truncate_tables
 
 
 def _make_test_db() -> Database:
+    """An empty tool_usage/tool_turns. The schema itself is built once a session."""
     db = Database(_TEST_DB_URL)
-    db.execute("DROP TABLE IF EXISTS tool_usage CASCADE")
-    db.execute("DROP TABLE IF EXISTS tool_turns CASCADE")
-    db.commit()
+    truncate_tables(db, "tool_usage", "tool_turns")
     return db
 
 
@@ -87,7 +86,12 @@ def _seed_usage(db):
 
 class TestToolUsageTables:
     def test_migration_creates_tables(self):
-        db = _make_test_db()
+        # The one test here that is actually about the migration, so it is the
+        # one place that still drops and replays. Everything else in this file
+        # wants empty tables, which is _make_test_db()'s job.
+        db = Database(_TEST_DB_URL)
+        db.execute("DROP TABLE IF EXISTS tool_usage CASCADE")
+        db.execute("DROP TABLE IF EXISTS tool_turns CASCADE")
         db.execute("DELETE FROM schema_migrations WHERE version >= 2")
         db.commit()
         set_database(db)
@@ -106,10 +110,7 @@ class TestToolUsageTables:
 
     def test_tool_usage_insert(self):
         db = _make_test_db()
-        db.execute("DELETE FROM schema_migrations WHERE version >= 2")
-        db.commit()
         set_database(db)
-        run_migrations(db)
 
         db.execute(
             "INSERT INTO tool_usage (session_id, turn_number, agent_mode, tool_name, tool_category, "
@@ -140,10 +141,7 @@ class TestToolUsageTables:
 
     def test_tool_turns_insert(self):
         db = _make_test_db()
-        db.execute("DELETE FROM schema_migrations WHERE version >= 2")
-        db.commit()
         set_database(db)
-        run_migrations(db)
 
         db.execute(
             "INSERT INTO tool_turns (session_id, turn_number, agent_mode, query_summary, tools_offered, tools_called) "
@@ -160,10 +158,7 @@ class TestToolUsageTables:
 
     def test_tool_turns_unique_constraint(self):
         db = _make_test_db()
-        db.execute("DELETE FROM schema_migrations WHERE version >= 2")
-        db.commit()
         set_database(db)
-        run_migrations(db)
 
         db.execute(
             "INSERT INTO tool_turns (session_id, turn_number, agent_mode, query_summary, tools_offered, tools_called) "
@@ -214,12 +209,7 @@ class TestSanitizeInput:
 class TestRecordToolCall:
     def setup_method(self):
         self.db = _make_test_db()
-        db2 = Database(_TEST_DB_URL)
-        db2.execute("DELETE FROM schema_migrations WHERE version >= 2")
-        db2.commit()
-        db2.close()
         set_database(self.db)
-        run_migrations(self.db)
 
     def teardown_method(self):
         reset_database()
@@ -307,12 +297,7 @@ class TestRecordToolCall:
 class TestRecordTurn:
     def setup_method(self):
         self.db = _make_test_db()
-        db2 = Database(_TEST_DB_URL)
-        db2.execute("DELETE FROM schema_migrations WHERE version >= 2")
-        db2.commit()
-        db2.close()
         set_database(self.db)
-        run_migrations(self.db)
 
     def teardown_method(self):
         reset_database()
@@ -368,12 +353,7 @@ class TestRecordTurn:
 class TestUpdateTurnFeedback:
     def setup_method(self):
         self.db = _make_test_db()
-        db2 = Database(_TEST_DB_URL)
-        db2.execute("DELETE FROM schema_migrations WHERE version >= 2")
-        db2.commit()
-        db2.close()
         set_database(self.db)
-        run_migrations(self.db)
 
     def teardown_method(self):
         reset_database()
@@ -408,12 +388,7 @@ class TestUpdateTurnFeedback:
 class TestQueryUsage:
     def setup_method(self):
         self.db = _make_test_db()
-        db2 = Database(_TEST_DB_URL)
-        db2.execute("DELETE FROM schema_migrations WHERE version >= 2")
-        db2.commit()
-        db2.close()
         set_database(self.db)
-        run_migrations(self.db)
         _seed_usage(self.db)
 
     def teardown_method(self):
@@ -456,10 +431,7 @@ class TestQueryUsage:
 class TestGetUsageStats:
     def setup_method(self):
         self.db = _make_test_db()
-        self.db.execute("DELETE FROM schema_migrations WHERE version >= 2")
-        self.db.commit()
         set_database(self.db)
-        run_migrations(self.db)
         _seed_usage(self.db)
 
     def teardown_method(self):
@@ -531,14 +503,13 @@ class TestLearnedEvalPrompts:
     """Tests for get_learned_eval_prompts — implicit positive feedback detection."""
 
     def _setup_db(self):
+        # This used to drop schema_migrations along with the tool tables, which
+        # sent the next replay anywhere in the suite back through migration 001
+        # -- including, once, into a concurrent CREATE TABLE and a duplicate key
+        # in pg_class_relname_nsp_index.
         db = Database(_TEST_DB_URL)
         set_database(db)
-        # Drop and recreate tool tables for a clean state
-        db.execute("DROP TABLE IF EXISTS tool_usage CASCADE")
-        db.execute("DROP TABLE IF EXISTS tool_turns CASCADE")
-        db.execute("DROP TABLE IF EXISTS schema_migrations CASCADE")
-        db.commit()
-        run_migrations(db)
+        truncate_tables(db, "tool_usage", "tool_turns")
         return db
 
     def _turn(self, sid, num, mode, query, tools_offered, tools_called):
