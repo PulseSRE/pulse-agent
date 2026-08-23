@@ -5,7 +5,7 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/PulseSRE/pulse-agent/releases/tag/v2.20.3"><img src="https://img.shields.io/badge/release-v2.20.3-2563eb?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/PulseSRE/pulse-agent/releases/tag/v2.20.4"><img src="https://img.shields.io/badge/release-v2.20.4-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-154_(118+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
   <img src="https://img.shields.io/badge/scanners-27-10b981?style=for-the-badge" alt="Scanners">
