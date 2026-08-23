@@ -527,15 +527,7 @@ async def get_recommendations(_auth=Depends(verify_token)):
 
 def _compute_recommendations() -> dict:
     recommendations = []
-    # Type 1: Check for disabled scanners
-    # Future: analyze scanner enablement and recommend enabling disabled ones
-    # try:
-    #     from ..monitor.scanners import ALL_SCANNERS
-    #     ...
-    # except Exception:
-    #     pass
-
-    # Type 2: Check for unused tool capabilities
+    # Check for unused tool capabilities
     try:
         from ..repositories import get_analytics_repo
 
