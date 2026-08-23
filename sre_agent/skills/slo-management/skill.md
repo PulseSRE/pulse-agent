@@ -18,7 +18,10 @@ priority: 5
 route_priority: 30
 trigger_patterns:
   - "(slo\\b|service\\s+level|error\\s+budget|burn\\s+rate)"
-  - "set.*slo|define.*slo|create.*slo"
+  # \b after slo, or "create ... slow disk syncs" routes here: the pre-route
+  # matched "Create a skill ... and slo(w)" and hijacked a skill-authoring
+  # request at priority 30, before plan_builder's own create.*skill at 40.
+  - "set.*slo\\b|define.*slo\\b|create.*slo\\b"
   - "availability.*target|reliability.*target"
   - "99\\.9|nines"
 tool_sequences:

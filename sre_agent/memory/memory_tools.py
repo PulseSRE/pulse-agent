@@ -97,9 +97,6 @@ def get_cluster_patterns() -> str:
     return "\n\n".join(lines)
 
 
-MEMORY_TOOLS = [search_past_incidents, get_learned_runbooks, get_cluster_patterns]
-
-
 @beta_tool
 def remember_environment_fact(key: str, value: str, scope: str = "cluster", source: str = "") -> str:
     """Record something true about THIS cluster so it does not have to be re-derived.
@@ -204,3 +201,19 @@ def search_conversations(query: str, owner: str = "", limit: int = 5) -> str:
             content = content[:200] + "..."
         lines.append(f"  [{row.get('title', 'untitled')}] {row.get('role', '?')}: {content}")
     return "\n".join(lines)
+
+
+# NOTE: this list is the agent's ONLY route to these tools — get_extra_tools()
+# returns it verbatim. The four environment tools above were defined (migration
+# 032) but never added here, so "remember that payments is owned by checkout"
+# was silently impossible: the model never saw the tool. Found by the
+# skill/tool/plan contract suite.
+MEMORY_TOOLS = [
+    search_past_incidents,
+    get_learned_runbooks,
+    get_cluster_patterns,
+    remember_environment_fact,
+    get_environment_facts,
+    compare_to_baseline,
+    search_conversations,
+]

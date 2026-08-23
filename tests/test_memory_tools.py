@@ -165,8 +165,16 @@ class TestGetClusterPatterns:
 
 class TestMemoryToolsList:
     def test_all_tools_present(self):
-        assert len(MEMORY_TOOLS) == 3
+        # 7, not 3: the four environment tools (migration 032) were defined but
+        # never added to this list — and this list is the agent's only route to
+        # them, so "remember that payments is owned by checkout" was silently
+        # impossible. This count is the guard against that recurring.
+        assert len(MEMORY_TOOLS) == 7
         names = {t.name for t in MEMORY_TOOLS}
         assert "search_past_incidents" in names
         assert "get_learned_runbooks" in names
         assert "get_cluster_patterns" in names
+        assert "remember_environment_fact" in names
+        assert "get_environment_facts" in names
+        assert "compare_to_baseline" in names
+        assert "search_conversations" in names

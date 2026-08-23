@@ -403,6 +403,15 @@ class TestToolCategoryCoverage:
             "list_statefulsets",
             "list_daemonsets",
             "list_replicasets",
+            # describe_resource supersedes the per-kind describers, and the
+            # node_map/topology views superseded visualize_nodes. These three
+            # sat in TOOL_CATEGORIES for months while absent from every runtime
+            # map — category membership was masking that they were unreachable
+            # anyway (the contract suite now checks categories against the real
+            # tool universe, which is how this was caught).
+            "describe_deployment",
+            "describe_node",
+            "visualize_nodes",
             "list_limit_ranges",
             "get_services",
             "get_resource_quotas",
