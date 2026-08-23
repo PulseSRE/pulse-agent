@@ -879,7 +879,6 @@ class ClusterMonitor:
         )
         return succeeded
 
-
     # ── Plan execution ────────────────────────────────────────────────────
 
     async def _try_plan_execution(self, finding: dict) -> bool:
