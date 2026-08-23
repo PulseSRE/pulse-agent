@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from typing import TYPE_CHECKING
@@ -9,6 +10,7 @@ from typing import TYPE_CHECKING
 from ..async_db import ASYNC_DB_ERRORS as _ASYNC_DB_ERRORS
 from ..config import get_settings
 from ..repositories.monitor_repo import get_monitor_repo
+from . import health_gate
 from .actions import update_action_verification as _sync_update_action_verification
 from .findings import _ts
 
@@ -118,8 +120,20 @@ async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -
             status = "improved"
             evidence = f"Namespace-level improvement in {category} findings: {matched_resource}"
         else:
-            status = "verified"
-            evidence = f"No active {category} findings for affected resources on verification scan"
+            # The finding is gone. That is necessary but not sufficient: it also
+            # goes away when the scanner failed or the workload was deleted, so
+            # confirm the resource is affirmatively healthy before calling this
+            # a verified fix. The gate's own reading becomes the evidence.
+            gate_status, gate_evidence = await asyncio.to_thread(health_gate.check_resources, resources)
+            if gate_status == health_gate.PASS:
+                status = "verified"
+                evidence = f"No active {category} findings, and health check passed: {gate_evidence}"
+            elif gate_status == health_gate.FAIL:
+                status = "still_failing"
+                evidence = f"No active {category} findings, but health check failed: {gate_evidence}"
+            else:
+                status = "unverifiable"
+                evidence = f"No active {category} findings, but health could not be confirmed: {gate_evidence}"
 
         verification_report = {
             "type": "verification_report",
@@ -145,9 +159,14 @@ async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -
                 if inv:
                     if status == "verified":
                         new_conf = min(1.0, (inv["confidence"] or 0.5) + 0.05)
+                    elif status == "unverifiable":
+                        # We could not read the cluster. That is a fact about the
+                        # check, not about the diagnosis, so it moves nothing.
+                        new_conf = None
                     else:
                         new_conf = max(0.0, (inv["confidence"] or 0.5) - 0.1)
-                    await repo.async_update_investigation_confidence(inv["id"], new_conf)
+                    if new_conf is not None:
+                        await repo.async_update_investigation_confidence(inv["id"], new_conf)
         except Exception as e:
             logger.debug("Failed to update investigation confidence: %s", e)
 
@@ -199,6 +218,11 @@ async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -
                 promoted = get_learner().promote(key)
                 if promoted is not None:
                     _scaffold_from_verified(promoted)
+            elif status == "unverifiable":
+                # Neither outcome was demonstrated. Discarding here would record
+                # a judgement the check never made; the candidate is left pending
+                # and expires on its own TTL if no verdict ever arrives.
+                logger.info("Learning candidate %s left pending: %s", key, evidence)
             else:
                 get_learner().discard(key, f"verification {status}")
         except Exception:
