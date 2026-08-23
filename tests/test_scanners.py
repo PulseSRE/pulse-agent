@@ -26,7 +26,7 @@ from sre_agent.monitor import (
     scan_oom_killed_pods,
     scan_pending_pods,
 )
-from tests.conftest import _TEST_DB_URL, restore_full_schema
+from tests.conftest import _TEST_DB_URL, truncate_core_tables
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -35,40 +35,21 @@ from tests.conftest import _TEST_DB_URL, restore_full_schema
 def _use_temp_db(monkeypatch):
     """Use a temp database for each test."""
     import sre_agent.monitor as _mon
-    from sre_agent.repositories.context_bus_repo import ContextBusRepository, get_context_bus_repo
+    from sre_agent.repositories.context_bus_repo import get_context_bus_repo
 
     db = Database(_TEST_DB_URL)
     set_database(db)
-    _mon.findings._tables_ensured = False
-    ContextBusRepository._tables_ensured = False
-    for table in (
-        "actions",
-        "investigations",
-        "findings",
-        "context_entries",
-        "incidents",
-        "runbooks",
-        "patterns",
-        "metrics",
-    ):
-        try:
-            db.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
-        except Exception:
-            pass
-    db.commit()
-    # The DROP above removes tables owned by other modules (investigations,
-    # actions) that the _ensure_tables() calls below do not recreate, and
-    # run_migrations() will not restore them once schema_migrations records a
-    # version. Rebuild the whole schema so later test files still find them.
-    restore_full_schema(db)
-    _mon.findings._tables_ensured = False
-    ContextBusRepository._tables_ensured = False
+    # Empty, not rebuilt. The tables' shape is the session fixture's job; a
+    # per-test DROP + migration replay only ever raced the background threads
+    # that call ensure_tables() while these tests run, and left a core table
+    # missing whenever one of the eight DROPs failed -- Database.execute rolls
+    # the whole transaction back on error, undoing the drops that had already
+    # succeeded, and the except-pass hid it.
+    truncate_core_tables(db)
     _mon._ensure_tables()
     get_context_bus_repo().ensure_tables()
     yield
     reset_database()
-    _mon.findings._tables_ensured = False
-    ContextBusRepository._tables_ensured = False
 
 
 def _list_result(items):

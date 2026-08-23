@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Two mechanical guardrails against bug classes this repo has already hit.
+"""Mechanical guardrails against bug classes this repo has already hit.
 
 Both exist because the same mistake happened more than once and was invisible
 until someone went looking. They are cheap to run and impossible to forget,
@@ -149,6 +149,42 @@ def check_no_silent_scanner_failure() -> list[str]:
     return violations
 
 
+SCHEMA_DECL_RE = re.compile(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
+
+
+def check_no_test_owned_core_schema() -> list[str]:
+    """A test may not declare a table that db_schema.py owns.
+
+    CREATE TABLE IF NOT EXISTS is a no-op whenever the table is already there,
+    so a test's private, narrower copy of a real table looks harmless for as
+    long as the real one survives. On the run where it does not — the suite
+    shares one long-lived PostgreSQL, and an interrupted run can leave a table
+    dropped — the test's version is the one the session gets, and every later
+    statement that touches a column it omits fails somewhere else entirely.
+
+    That is the whole of the intermittent "column category does not exist" at
+    migration 001: a five-column `actions` in tests/test_eval_outcomes.py, and
+    a failure reported against a scanner test in another file.
+
+    Tests populate the schema. db_schema.py defines it.
+    """
+    schema_src = (ROOT / "sre_agent" / "db_schema.py").read_text()
+    owned = set(SCHEMA_DECL_RE.findall(schema_src))
+    violations: list[str] = []
+    for path in sorted((ROOT / "tests").rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            for name in SCHEMA_DECL_RE.findall(line):
+                if name in owned:
+                    violations.append(
+                        f"{rel}:{lineno}: this test declares `{name}`, a table db_schema.py owns. "
+                        f"CREATE TABLE IF NOT EXISTS hides the divergence until a run starts with "
+                        f"the table missing, and then the whole session gets this shape. Import the "
+                        f"schema (db_schema / run_migrations) and TRUNCATE for isolation instead."
+                    )
+    return violations
+
+
 def check_one_unreleased_section() -> list[str]:
     """CHANGELOG.md must have at most one "## [Unreleased]" heading.
 
@@ -179,6 +215,7 @@ def main() -> int:
         ("no-by-value-global-import", check_no_by_value_global_import),
         ("no-silent-scanner-failure", check_no_silent_scanner_failure),
         ("one-unreleased-section", check_one_unreleased_section),
+        ("no-test-owned-core-schema", check_no_test_owned_core_schema),
     ):
         violations = check()
         if violations:

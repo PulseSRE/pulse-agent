@@ -28,56 +28,26 @@ from sre_agent.monitor import (
     update_action_verification,
 )
 from sre_agent.monitor.cluster_monitor import ClusterMonitor, reset_cluster_monitor
-from sre_agent.repositories.monitor_repo import MonitorRepository
-from tests.conftest import _TEST_DB_URL, restore_full_schema
+from tests.conftest import _TEST_DB_URL, truncate_core_tables
 
 
 @pytest.fixture(autouse=True)
 def _use_temp_db(monkeypatch, tmp_path):
     """Use a temp database for each test."""
     import sre_agent.monitor as _mon
-    from sre_agent.repositories.context_bus_repo import ContextBusRepository, get_context_bus_repo
+    from sre_agent.repositories.context_bus_repo import get_context_bus_repo
     from tests.conftest import _TEST_DB_URL
 
     db = Database(_TEST_DB_URL)
     set_database(db)
-    # Reset table-creation flags so each test creates tables fresh
-    _mon.findings._tables_ensured = False
-    MonitorRepository._tables_ensured = False
-    ContextBusRepository._tables_ensured = False
-    # Ensure tables exist then truncate for isolation
-    # Drop and recreate tables to pick up schema changes
-    for table in (
-        "actions",
-        "investigations",
-        "findings",
-        "context_entries",
-        "incidents",
-        "runbooks",
-        "patterns",
-        "metrics",
-    ):
-        try:
-            db.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
-        except Exception:
-            pass
-    db.commit()
-    # The DROP above removes tables owned by other modules (investigations,
-    # actions) that the _ensure_tables() calls below do not recreate, and
-    # run_migrations() will not restore them once schema_migrations records a
-    # version. Rebuild the whole schema so later test files still find them.
-    restore_full_schema(db)
-    _mon.findings._tables_ensured = False
-    MonitorRepository._tables_ensured = False
-    ContextBusRepository._tables_ensured = False
+    # Empty, not rebuilt -- see truncate_core_tables(). The schema is built once
+    # per session, so nothing here needs to drop a table or replay a migration.
+    truncate_core_tables(db)
     _mon._ensure_tables()
     get_context_bus_repo().ensure_tables()
     yield
     reset_database()
     reset_cluster_monitor()
-    _mon.findings._tables_ensured = False
-    MonitorRepository._tables_ensured = False
-    ContextBusRepository._tables_ensured = False
 
 
 class TestMakeHelpers:

@@ -15,20 +15,18 @@ from tests.conftest import _TEST_DB_URL
 
 @pytest.fixture(autouse=True)
 def _setup_actions_table():
-    """Ensure actions table exists and is clean."""
+    """Start each test with an empty `actions`.
+
+    This fixture used to declare its own five-column `actions` under CREATE
+    TABLE IF NOT EXISTS. That is a no-op while the real table is there, so it
+    looked harmless -- but on any run that began with the table missing, this
+    was the definition the whole session got, and the baseline migration's
+    `CREATE INDEX idx_actions_category ON actions(category)` then failed with
+    "column category does not exist" in whatever test next rebuilt the schema.
+    The schema belongs to db_schema.py; tests only decide what is in it.
+    """
     db = Database(_TEST_DB_URL)
     set_database(db)
-    db.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS actions (
-            id TEXT PRIMARY KEY,
-            timestamp BIGINT,
-            status TEXT,
-            duration_ms INTEGER,
-            input TEXT
-        );
-        """
-    )
     db.execute("TRUNCATE actions RESTART IDENTITY CASCADE")
     db.commit()
     yield

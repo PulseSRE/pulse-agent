@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 from sre_agent.db import Database, reset_database, set_database
-from sre_agent.db_migrations import run_migrations
 from sre_agent.tool_usage import record_tool_call
 
-from .conftest import _TEST_DB_URL
+from .conftest import _TEST_DB_URL, truncate_tables
 
 
 def _make_test_db() -> Database:
+    """An empty tool_usage/tool_turns. The schema itself is built once a session."""
     db = Database(_TEST_DB_URL)
-    db.execute("DROP TABLE IF EXISTS tool_usage CASCADE")
-    db.execute("DROP TABLE IF EXISTS tool_turns CASCADE")
-    db.commit()
+    truncate_tables(db, "tool_usage", "tool_turns")
     return db
 
 
@@ -103,12 +101,7 @@ def _seed_chains(db):
 class TestDiscoverChains:
     def setup_method(self):
         self.db = _make_test_db()
-        db2 = Database(_TEST_DB_URL)
-        db2.execute("DELETE FROM schema_migrations WHERE version >= 2")
-        db2.commit()
-        db2.close()
         set_database(self.db)
-        run_migrations(self.db)
         _seed_chains(self.db)
 
     def teardown_method(self):
@@ -157,12 +150,7 @@ class TestDiscoverChains:
 class TestChainHints:
     def setup_method(self):
         self.db = _make_test_db()
-        db2 = Database(_TEST_DB_URL)
-        db2.execute("DELETE FROM schema_migrations WHERE version >= 2")
-        db2.commit()
-        db2.close()
         set_database(self.db)
-        run_migrations(self.db)
         _seed_chains(self.db)
 
     def teardown_method(self):
@@ -204,12 +192,7 @@ class TestChainHints:
 class TestHarnessIntegration:
     def setup_method(self):
         self.db = _make_test_db()
-        db2 = Database(_TEST_DB_URL)
-        db2.execute("DELETE FROM schema_migrations WHERE version >= 2")
-        db2.commit()
-        db2.close()
         set_database(self.db)
-        run_migrations(self.db)
         _seed_chains(self.db)
 
     def teardown_method(self):

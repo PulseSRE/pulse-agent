@@ -8,7 +8,6 @@ import pytest
 
 from sre_agent import db as db_module
 from sre_agent.db import Database, reset_database, set_database
-from sre_agent.db_schema import ALL_SCHEMAS
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -18,14 +17,11 @@ from sre_agent.db_schema import ALL_SCHEMAS
 @pytest.fixture(autouse=True)
 def _view_db():
     """Create a fresh PostgreSQL schema for each test."""
-    from tests.conftest import _TEST_DB_URL
+    from tests.conftest import _TEST_DB_URL, truncate_tables
 
     test_db = Database(_TEST_DB_URL)
     # Drop and recreate all tables for test isolation
-    test_db.execute("DROP TABLE IF EXISTS view_versions CASCADE")
-    test_db.execute("DROP TABLE IF EXISTS views CASCADE")
-    test_db.commit()
-    test_db.executescript(ALL_SCHEMAS)
+    truncate_tables(test_db, "view_versions", "views")
     set_database(test_db)
     yield test_db
     reset_database()
