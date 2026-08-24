@@ -156,6 +156,19 @@ def get_apps_client() -> client.AppsV1Api:
     return _clients["apps"]
 
 
+def get_authorization_client() -> client.AuthorizationV1Api:
+    """SelfSubjectAccessReview client — answers "can *I* do this" for whichever
+    identity is active (forwarded user token, else the service account)."""
+    token = _user_token_var.get()
+    if token:
+        return client.AuthorizationV1Api(api_client=_get_user_api_client(token))
+    _check_user_token_required()
+    _load_k8s()
+    if "authorization" not in _clients:
+        _clients["authorization"] = client.AuthorizationV1Api()
+    return _clients["authorization"]
+
+
 def get_custom_client() -> client.CustomObjectsApi:
     token = _user_token_var.get()
     if token:

@@ -198,3 +198,23 @@ def test_a_forbidden_fix_is_saved_with_a_readable_message_not_a_header_dump(wire
     )
     assert "HTTPHeaderDict" not in report["error"]
     assert "Audit-Id" not in report["error"]
+
+
+def test_an_unexecutable_fix_is_blocked_with_remediation_before_touching_the_cluster(wired):
+    """The agent's ClusterRole is read-only unless allowWriteOperations is on.
+    Approving a fix the SA provably cannot perform must fail fast with the
+    remediation, not run and 403 — and the blocked report still reaches fix
+    history."""
+    remediation = (
+        "The agent's service account cannot delete pods in namespace 'prod' — enable spec.agent.allowWriteOperations."
+    )
+    with patch(
+        "sre_agent.monitor.rbac_preflight.can_execute",
+        return_value=(False, remediation),
+    ):
+        report = approve_fix("a-1", "sre@example.com")
+
+    wired.execute.assert_not_called()
+    assert report["status"] == "failed"
+    assert "allowWriteOperations" in report["error"]
+    assert wired.saved and wired.saved[0]["status"] == "failed"
