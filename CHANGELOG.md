@@ -4,6 +4,11 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### The CR's trust level never reached the agent
+- `spec.agent.trustLevel` has been a no-op on every deployment: the operator injects `PULSE_AGENT_TRUST_LEVEL`, the agent only read `PULSE_AGENT_MAX_TRUST_LEVEL`, and both sides defaulting to 2 kept the mismatch invisible. Measured live on the dev cluster: CR patched to `trustLevel: 3`, new pod running with `PULSE_AGENT_TRUST_LEVEL=3` in its env, agent still gating every fix at trust 2 — which is one reason its `actions` table shows 681 proposals and zero executions
+- `max_trust_level` now accepts both names (`AliasChoices`); the canonical `PULSE_AGENT_MAX_TRUST_LEVEL` wins when both are set. The operator emits both names from the same CR field, so an old agent keeps seeing what it always saw and a fixed agent finally sees the CR's value
+- Same shape as the `PULSE_AGENT_APPROVAL_TIMEOUT` bug already documented in this file: a knob that ships without an end-to-end check that the value it sets is the value something reads
+
 ### Verification contracts for interactive write tools
 - The monitor's auto-fix path earned its trust piecewise — RBAC preflight before proposing, a restorable snapshot before writing (migration 034), an affirmative health gate after — while a write tool called from chat validated its inputs, mutated the cluster, and returned a sentence. The five most-used mutating tools (`restart_deployment`, `scale_deployment`, `delete_pod`, `rollback_deployment`, `cordon_node`) now run under one contract: precondition read → snapshot → action → postcondition probe → restore (`tool_contracts.py`, wrapped around the single tool-execution choke point in `agent.py`, so the chat and view-action paths both get it)
 - The precondition reads the target before writing, under the caller's forwarded token — a missing Deployment or a permission gap refuses the write with a plain reason instead of letting the mutation discover it. This is the same class of failure as the approved fix that 403'd mid-flight; now it surfaces before anything changed

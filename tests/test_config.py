@@ -83,3 +83,30 @@ class TestValidateConfig:
             s = get_settings()
             assert s.max_trust_level == 3
             assert s.monitor.max_trust_level == 3
+
+    def test_trust_level_accepts_operator_env_name(self):
+        """The operator injects PULSE_AGENT_TRUST_LEVEL (from spec.agent.trustLevel).
+
+        Only PULSE_AGENT_MAX_TRUST_LEVEL was read, so the CR knob was silently
+        ignored on every deployment — measured live: trustLevel=3 in the CR,
+        PULSE_AGENT_TRUST_LEVEL=3 in the pod, agent still gating at 2.
+        """
+        from sre_agent.config import get_settings
+
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test", "PULSE_AGENT_TRUST_LEVEL": "3"}, clear=False):
+            _reset_settings()
+            s = get_settings()
+            assert s.max_trust_level == 3
+            assert s.monitor.max_trust_level == 3
+
+    def test_canonical_trust_env_wins_over_operator_alias(self):
+        from sre_agent.config import get_settings
+
+        with patch.dict(
+            os.environ,
+            {"ANTHROPIC_API_KEY": "test", "PULSE_AGENT_TRUST_LEVEL": "3", "PULSE_AGENT_MAX_TRUST_LEVEL": "4"},
+            clear=False,
+        ):
+            _reset_settings()
+            s = get_settings()
+            assert s.max_trust_level == 4

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("pulse_agent")
@@ -159,7 +159,15 @@ class PulseAgentSettings(BaseSettings):
     approval_timeout: int = 900
     security_followup: bool = False
     noise_threshold: float = 0.7
-    max_trust_level: int = 2
+    # The operator has always injected PULSE_AGENT_TRUST_LEVEL (from the CR's
+    # spec.agent.trustLevel) while this field only answered to
+    # PULSE_AGENT_MAX_TRUST_LEVEL — so the CR knob was silently ignored on
+    # every deployment and only the default of 2 ever applied. Both names are
+    # accepted now; MAX_TRUST_LEVEL wins when both are set.
+    max_trust_level: int = Field(
+        default=2,
+        validation_alias=AliasChoices("PULSE_AGENT_MAX_TRUST_LEVEL", "PULSE_AGENT_TRUST_LEVEL"),
+    )
     investigation_categories: str = "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa,stuck,hot_loop,control_plane"
     max_concurrent_investigations: int = 3
 
