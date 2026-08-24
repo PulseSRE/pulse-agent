@@ -248,6 +248,32 @@ class TestScoreScenario:
         score = score_scenario(s)
         assert score.passed_gate is True
 
+    def test_required_blocker_detected(self):
+        """Scenario promising a blocker that IS produced → passes gate."""
+        s = _scenario(
+            had_policy_violation=True,
+            expected=EvalExpected(should_block_release=True, required_blockers=["policy_violation"]),
+        )
+        score = score_scenario(s)
+        assert score.passed_gate is True
+
+    def test_required_blocker_missing(self):
+        """Scenario promising a blocker that is NOT produced → fails gate."""
+        s = _scenario(
+            had_policy_violation=True,
+            expected=EvalExpected(should_block_release=True, required_blockers=["hallucinated_tool"]),
+        )
+        score = score_scenario(s)
+        assert score.passed_gate is False
+
+    def test_required_blocker_missing_overrides_should_not_block(self):
+        """required_blockers failure is final even when should_block_release=False."""
+        s = _scenario(
+            expected=EvalExpected(should_block_release=False, required_blockers=["policy_violation"]),
+        )
+        score = score_scenario(s)
+        assert score.passed_gate is False
+
 
 class TestEvaluateSuite:
     def test_empty_suite(self):

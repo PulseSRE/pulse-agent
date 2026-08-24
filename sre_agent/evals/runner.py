@@ -148,6 +148,9 @@ def score_scenario(s: EvalScenario, rubric: EvalRubric = DEFAULT_RUBRIC) -> Scen
         if s.expected.should_block_release is False:
             # This scenario should never block a release regardless of score
             passed_gate = True
+        if any(b not in blockers for b in s.expected.required_blockers):
+            # A blocker the scenario promised was not detected — fail regardless
+            passed_gate = False
 
     return ScenarioScore(
         scenario_id=s.scenario_id,
