@@ -104,13 +104,13 @@ def candidate_from_chat(session_id: str, messages: list[dict]) -> LearningCandid
         _text_of(m.get("content")) for m in messages if m.get("role") == "assistant" and _text_of(m.get("content"))
     ]
     if not user_texts or not assistant_texts:
-        logger.debug("Chat session %s: no learnable exchange", session_id)
+        logger.info("Chat feedback on session %s taught nothing: no learnable exchange", session_id)
         return None
 
     tools = _tools_called(messages)
     if len(tools) < MIN_TOOL_CALLS:
-        logger.debug(
-            "Chat session %s: only %d tool calls (< %d) — answered from memory, nothing cluster-verified to learn",
+        logger.info(
+            "Chat feedback on session %s taught nothing: only %d tool calls (< %d) — answered from memory, nothing cluster-verified to learn",
             session_id,
             len(tools),
             MIN_TOOL_CALLS,
@@ -119,12 +119,12 @@ def candidate_from_chat(session_id: str, messages: list[dict]) -> LearningCandid
 
     category = infer_category(" ".join(user_texts) + " " + assistant_texts[-1])
     if not category:
-        logger.debug("Chat session %s: no classifiable incident topic", session_id)
+        logger.info("Chat feedback on session %s taught nothing: no classifiable incident topic", session_id)
         return None
 
     conclusion = assistant_texts[-1].strip()
     if len(conclusion) < 80:
-        logger.debug("Chat session %s: conclusion too thin to learn from", session_id)
+        logger.info("Chat feedback on session %s taught nothing: conclusion too thin to learn from", session_id)
         return None
 
     title = user_texts[0].strip()[:120]

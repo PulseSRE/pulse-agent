@@ -114,6 +114,21 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
         "fixDescription": plan.description,
     }
 
+    # Preflight the agent's own RBAC before touching the cluster: approving a
+    # fix the service account provably cannot perform should produce a clear
+    # remediation message, not a raw 403 after the fact. Covers proposals
+    # created before proposal-time preflighting existed.
+    from .rbac_preflight import can_execute
+
+    resources = finding.get("resources") or [{}]
+    namespace = resources[0].get("namespace", "default")
+    allowed, remediation = can_execute(plan.strategy, namespace)
+    if not allowed:
+        report.update(status="failed", error=remediation, durationMs=_ts() - started)
+        logger.warning("Approved fix blocked by RBAC preflight: action=%s — %s", action_id, remediation)
+        save_action(report, category=category, resources=finding.get("resources", []), finding=finding)
+        return report
+
     try:
         tool, before_state, after_state = execute_fix(plan)
         report.update(

@@ -541,6 +541,25 @@ class ClusterMonitor:
 
             confidence = _estimate_auto_fix_confidence(finding, self._recent_fixes)
 
+            # A proposal the agent provably cannot execute is a dead-end
+            # Approve button. On an affirmative RBAC denial, downgrade to a
+            # human-review item carrying the remediation (enable
+            # spec.agent.allowWriteOperations, or fix manually) instead of
+            # inviting an approval that will 403.
+            if targeted_plan and targeted_plan.strategy != "require_human_review":
+                from .rbac_preflight import can_execute
+
+                _fix_ns = (resources[0].get("namespace", "default") if resources else "default") or "default"
+                _allowed, _remediation = can_execute(targeted_plan.strategy, _fix_ns)
+                if not _allowed:
+                    logger.info(
+                        "Auto-fix downgraded to human review (RBAC): strategy=%s for %s",
+                        targeted_plan.strategy,
+                        resource_key,
+                    )
+                    targeted_plan.strategy = "require_human_review"
+                    targeted_plan.description = _remediation
+
             if targeted_plan and targeted_plan.strategy == "require_human_review":
                 try:
                     existing = get_monitor_repo().check_existing_human_review(_finding_corr_key(finding))
