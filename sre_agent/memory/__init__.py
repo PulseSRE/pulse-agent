@@ -91,6 +91,48 @@ class MemoryManager:
                 extract_runbook(self.store, incident_id)
         return incident_id
 
+    def record_fix_regression(
+        self,
+        category: str,
+        tool: str,
+        namespace: str = "",
+        resource_type: str = "",
+        recurrence_minutes: int = 0,
+    ) -> dict:
+        """A verified auto-fix did not hold — retract what was learned from it.
+
+        ``store_incident(confirmed=True)`` recorded the fix as resolved the
+        moment verification passed. A verdict has a time horizon: when the same
+        condition returns inside the recurrence window, this walks that record
+        back — the confirmed incident is demoted to "regressed", any runbook it
+        seeded takes a failure count, and a low-score incident is stored so the
+        anti-pattern surface warns about the fix instead of recommending it.
+        """
+        demoted_id = self.store.mark_recent_autofix_regressed(category, namespace)
+        runbooks_penalized = 0
+        if demoted_id is not None:
+            runbooks_penalized = self.store.record_runbook_failure(demoted_id)
+
+        when = f" {recurrence_minutes} min later" if recurrence_minutes else " shortly after verification"
+        incident_id = self.store.record_incident(
+            query=f"Auto-fix for {category} finding recurred",
+            tool_sequence=[{"name": tool or category}],
+            resolution=(
+                f"Applied {tool or category} — verified healthy, then the same condition "
+                f"returned{when}. This fix treats a symptom; it does not hold for this condition."
+            ),
+            outcome="regressed",
+            namespace=namespace,
+            resource_type=resource_type,
+            error_type=category,
+            score=0.2,
+        )
+        return {
+            "demoted_incident_id": demoted_id,
+            "runbooks_penalized": runbooks_penalized,
+            "regression_incident_id": incident_id,
+        }
+
     def augment_prompt(self, base_prompt: str | list[dict], user_query: str) -> str | list[dict]:
         memory_context = build_memory_context(self.store, user_query)
         if not memory_context:

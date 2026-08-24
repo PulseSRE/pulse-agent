@@ -331,7 +331,10 @@ def update_action_verification(action_id: str, status: str, evidence: str) -> No
 
 # ── Outcome tracking ─────────────────────────────────────────────────────
 
-_VALID_OUTCOMES = frozenset({"resolved", "rolled_back", "escalated", "unknown"})
+# "recurred": the fix verified on the next scan, then the same condition came
+# back inside the recurrence window. It is not "resolved" — counting it as a
+# success would teach calibration exactly the wrong lesson.
+_VALID_OUTCOMES = frozenset({"resolved", "rolled_back", "escalated", "recurred", "unknown"})
 
 
 def update_action_outcome(action_id: str, outcome: str) -> bool:
@@ -368,6 +371,7 @@ def get_fix_success_rate(days: int = 30) -> dict:
             "resolved": resolved,
             "rolled_back": totals.get("rolled_back", 0),
             "escalated": totals.get("escalated", 0),
+            "recurred": totals.get("recurred", 0),
             "success_rate": round(resolved / total, 4) if total > 0 else None,
         }
     except Exception as e:

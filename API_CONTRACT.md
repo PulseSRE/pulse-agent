@@ -767,7 +767,7 @@ Server acknowledges with an `ack` event.
 `action_report` may include optional fields:
 - `confidence`: `number` (0.0–1.0) — agent's confidence that this action will resolve the issue
 - `error`: `string` — present when `status` is `failed` or `expired`
-- `verificationStatus`: `"verified"` | `"still_failing"`
+- `verificationStatus`: `"verified"` | `"still_failing"` | `"improved"` | `"unverifiable"` | `"verified_then_recurred"`
 - `verificationEvidence`: `string`
 - `verificationTimestamp`: `number`
 
@@ -812,6 +812,8 @@ Optional fields (per design): `evidence` (list of facts supporting the diagnosis
   "timestamp": 1711540800
 }
 ```
+
+`status` values: `verified`, `still_failing`, `improved` (namespace-level count dropped), `unverifiable` (the cluster could not be read — a fact about the check, not the fix), and `verified_then_recurred`. The last is emitted retroactively: a verdict of `verified` has a time horizon, and when the same condition (same correlation key) returns as a new finding within the recurrence window (`PULSE_AGENT_RECURRENCE_WINDOW`, default 1800s) after verification, the original action's verdict is downgraded and a fresh `verification_report` with `verified_then_recurred` is broadcast carrying the original `actionId` and the *new* finding's `findingId`. The action row's `outcome` becomes `recurred`, which counts against the fix success rate.
 
 #### `resolution` — Issue resolved (proactive win)
 

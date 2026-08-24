@@ -206,6 +206,48 @@ def _request_rereview(skill_name: str, version: int, candidate) -> None:
         logger.debug("Failed to create re-review inbox item for '%s'", skill_name, exc_info=True)
 
 
+def note_recurrence(category: str, detail: str) -> None:
+    """The lesson learned for this category just failed in the field — say so.
+
+    A skill scaffolded or refined from a verified fix inherits that verdict's
+    time horizon: when the same condition recurs after verification, the case
+    the skill was deepened on is dubious. The skill is not silently quarantined
+    — a recurrence is one data point, and pulling a working skill over it is
+    the operator's call — but the operator cannot make that call unseen, so an
+    inbox item lays out the evidence and the quarantine endpoint.
+    """
+    skill = _find_skill_for_category(category)
+    if skill is None:
+        return
+    try:
+        from .inbox import upsert_inbox_item
+
+        upsert_inbox_item(
+            {
+                "item_type": "task",
+                "title": f"Skill '{skill.name}' learned from a fix that did not hold — review it",
+                "summary": (
+                    f"{detail} Skill '{skill.name}' was created or refined from that "
+                    "verified fix, so its most recent case may teach the wrong lesson. "
+                    f"Review the skill, and quarantine it if the lesson is wrong: "
+                    f"POST /admin/skills/{skill.name}/quarantine, or the Toolbox UI."
+                ),
+                "severity": "low",
+                "confidence": 0.7,
+                "noise_score": 0,
+                "namespace": None,
+                "resources": [],
+                "correlation_key": f"skill-recurrence:{skill.name}",
+                "created_by": "system:skill-lifecycle",
+                # No "generator" key — same reasoning as _request_rereview: the
+                # generator cycle must not auto-resolve an item it did not emit.
+                "metadata": {"source": "skill_lifecycle", "skill": skill.name, "category": category},
+            }
+        )
+    except Exception:
+        logger.debug("Failed to create recurrence inbox item for '%s'", skill.name, exc_info=True)
+
+
 def _scaffold_new(candidate) -> str | None:
     """First verified trajectory for this category: create the skill.
 

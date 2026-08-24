@@ -254,6 +254,42 @@ class MonitorRepository(BaseRepository):
             (correlation_key, "require_human_review", "proposed"),
         )
 
+    def find_recent_verified_actions(self, correlation_key: str, since_ms: int) -> list[dict]:
+        """Actions for this *condition* whose fix was pronounced healthy recently.
+
+        These are the verdicts a recurrence puts in question: keyed on the
+        correlation key (the condition's identity across sightings), verified,
+        and verified recently enough that the return of the same condition is
+        evidence about the fix rather than a fresh incident.
+        """
+        if not correlation_key:
+            return []
+        self.ensure_tables()
+        return self.db.fetchall(
+            "SELECT id, tool, category, verification_evidence, verification_timestamp "
+            "FROM actions WHERE correlation_key = ? AND verification_status = 'verified' "
+            "AND verification_timestamp >= ?",
+            (correlation_key, since_ms),
+        )
+
+    def count_recent_fix_attempts(self, correlation_key: str, since_ms: int) -> int:
+        """Completed fixes for this condition on record, regardless of process.
+
+        The in-memory attempt counter dies with the pod, so alone it lets a
+        restart hand a stuck workload a fresh set of attempts. The actions
+        table is the durable record of what actually ran; counting it makes
+        the cap hold across restarts.
+        """
+        if not correlation_key:
+            return 0
+        self.ensure_tables()
+        row = self.db.fetchone(
+            "SELECT COUNT(*) AS cnt FROM actions WHERE correlation_key = ? "
+            "AND status = 'completed' AND tool != 'require_human_review' AND timestamp >= ?",
+            (correlation_key, since_ms),
+        )
+        return int(row["cnt"]) if row else 0
+
     # ── Briefing queries ─────────────────────────────────────────────────
 
     def get_actions_since(self, since: int) -> list[dict]:

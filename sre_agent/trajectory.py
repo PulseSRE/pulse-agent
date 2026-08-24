@@ -113,6 +113,7 @@ class TrajectoryLearner:
         self.promoted = 0
         self.discarded = 0
         self.expired = 0
+        self.recurred = 0
 
     @property
     def db(self):
@@ -244,6 +245,39 @@ class TrajectoryLearner:
         logger.info("Promoting verified trajectory %s: %s", key, candidate.root_cause)
         return candidate
 
+    def mark_recurred(self, key: str, reason: str) -> bool:
+        """The finding a promoted trajectory explained came back. Demote it.
+
+        A promotion is a verdict with a time horizon: "the fix held as of the
+        next scan". When the same condition returns inside the recurrence
+        window, the lesson already generalised from it is dubious, and history
+        must say so — otherwise stats() keeps counting a fix that did not hold
+        as something the agent learned correctly.
+
+        Only the most recent promoted row for the key is demoted: earlier
+        promotions were separate incidents whose fixes may genuinely have held
+        for months.
+        """
+        db = self.db
+        if db is None:
+            return False
+        try:
+            cur = db.execute(
+                "UPDATE learning_candidates SET status = 'recurred', reason = ?, resolved_at = ? "
+                "WHERE id = (SELECT MAX(id) FROM learning_candidates "
+                "            WHERE candidate_key = ? AND status = 'promoted')",
+                (reason[:500], _now_ms(), key),
+            )
+            db.commit()
+            if getattr(cur, "rowcount", 0) > 0:
+                self.recurred += 1
+                logger.info("Demoting promoted trajectory %s: %s", key, reason)
+                return True
+            return False
+        except Exception:
+            logger.warning("Failed to demote recurred trajectory %s", key, exc_info=True)
+            return False
+
     def discard(self, key: str, reason: str) -> None:
         """The fix did not resolve the finding. Drop the candidate unlearned."""
         with self._lock:
@@ -316,6 +350,7 @@ class TrajectoryLearner:
                     "promoted": counts.get("promoted", 0),
                     "discarded": counts.get("discarded", 0),
                     "expired": counts.get("expired", 0),
+                    "recurred": counts.get("recurred", 0),
                 }
             except Exception:
                 logger.debug("Failed to read learning stats", exc_info=True)
@@ -324,6 +359,7 @@ class TrajectoryLearner:
             "promoted": self.promoted,
             "discarded": self.discarded,
             "expired": self.expired,
+            "recurred": self.recurred,
         }
 
 
