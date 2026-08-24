@@ -16,6 +16,7 @@ from .prompt_log_repo import PromptLogRepository, get_prompt_log_repo
 from .promql_repo import PromQLRepository, get_promql_repo
 from .selector_learning_repo import SelectorLearningRepository, get_selector_learning_repo
 from .skill_analytics_repo import SkillAnalyticsRepository, get_skill_analytics_repo
+from .slo_repo import SLORepository, get_slo_repo
 from .tool_usage_repo import ToolUsageRepository, get_tool_usage_repo
 from .view_repo import ViewRepository, get_view_repo
 
@@ -30,6 +31,7 @@ __all__ = [
     "MonitorRepository",
     "PromQLRepository",
     "PromptLogRepository",
+    "SLORepository",
     "SelectorLearningRepository",
     "SkillAnalyticsRepository",
     "ToolUsageRepository",
@@ -45,6 +47,7 @@ __all__ = [
     "get_promql_repo",
     "get_selector_learning_repo",
     "get_skill_analytics_repo",
+    "get_slo_repo",
     "get_tool_usage_repo",
     "get_view_repo",
 ]

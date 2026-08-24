@@ -40,7 +40,7 @@ class SLORegistry:
     def __init__(self):
         self._slos: dict[str, SLODefinition] = {}
 
-    def register(self, slo: SLODefinition) -> None:
+    def register(self, slo: SLODefinition, persist: bool = True) -> None:
         key = f"{slo.service_name}:{slo.slo_type}"
         self._slos[key] = slo
         logger.info(
@@ -49,9 +49,27 @@ class SLORegistry:
             slo.slo_type,
             slo.target,
         )
+        if persist:
+            # Best-effort: the registry must keep working without a database
+            # (tests, local dev) — but with one, registrations survive pod
+            # restarts. Before this, API-registered SLOs were memory-only and
+            # every restart silently reset the SLO stack to defaults.
+            try:
+                from .repositories import get_slo_repo
 
-    def unregister(self, service_name: str, slo_type: str) -> bool:
+                get_slo_repo().save(slo.service_name, slo.slo_type, slo.target, slo.window_days, slo.description)
+            except Exception:
+                logger.debug("SLO persistence unavailable; registered in memory only", exc_info=True)
+
+    def unregister(self, service_name: str, slo_type: str, persist: bool = True) -> bool:
         key = f"{service_name}:{slo_type}"
+        if persist:
+            try:
+                from .repositories import get_slo_repo
+
+                get_slo_repo().delete(service_name, slo_type)
+            except Exception:
+                logger.debug("SLO persistence unavailable; unregistered in memory only", exc_info=True)
         if key in self._slos:
             del self._slos[key]
             return True
@@ -154,6 +172,14 @@ class SLORegistry:
                 f'{{deployment="{svc}"}}[{window}])'
             )
         if slo.slo_type == "latency":
+            if svc in ("kube-apiserver", "apiserver"):
+                # Real latency SLI: fraction of (non-watch) API requests served
+                # under 1s — a ratio directly comparable to the SLO target,
+                # from metrics every OpenShift cluster already scrapes.
+                return (
+                    f'sum(rate(apiserver_request_duration_seconds_bucket{{le="1",verb!~"WATCH|CONNECT"}}[{window}])) / '
+                    f'sum(rate(apiserver_request_duration_seconds_count{{verb!~"WATCH|CONNECT"}}[{window}]))'
+                )
             # Container restart duration as latency proxy
             return f'rate(kube_pod_container_status_restarts_total{{pod=~"{svc}.*"}}[{window}])'
         if slo.slo_type == "error_rate":
@@ -194,7 +220,27 @@ def get_slo_registry() -> SLORegistry:
     if _registry is None:
         _registry = SLORegistry()
         _register_defaults(_registry)
+        _load_persisted(_registry)
     return _registry
+
+
+def _load_persisted(registry: SLORegistry) -> None:
+    """Reload SLOs from the database (memory-only: they're already persisted).
+
+    Runs after defaults so a persisted definition for the same service:type
+    (e.g. an operator retuned a target through the API) wins over the default.
+    """
+    try:
+        from .repositories import get_slo_repo
+
+        rows = get_slo_repo().fetch_all()
+    except Exception:
+        logger.debug("SLO persistence unavailable; using in-memory defaults only", exc_info=True)
+        return
+    for row in rows:
+        registry.register(SLODefinition(**row), persist=False)
+    if rows:
+        logger.info("Loaded %d persisted SLOs", len(rows))
 
 
 def _register_defaults(registry: SLORegistry) -> None:
@@ -230,7 +276,9 @@ def _register_defaults(registry: SLORegistry) -> None:
         ),
     ]
     for slo in defaults:
-        registry.register(slo)
+        # persist=False: defaults are code, not operator state — writing them
+        # to the DB would resurrect any default an operator later deletes.
+        registry.register(slo, persist=False)
     logger.info("Registered %d default SLOs", len(defaults))
 
 

@@ -1,0 +1,52 @@
+# Control-Plane Pressure Relief Plan Template
+# Handles memory/resource pressure on master nodes — the dominant episode
+# class on the reference cluster (10 recurrences in 2 days), previously
+# investigated freeform every time. Phase structure encodes what those
+# investigations converged on: find the consumers, find what can move,
+# relieve in gated stages, verify.
+#
+# Timeouts sized from the crashloop-resolution lesson: measured skill runs
+# on this cluster take 55-204s and a phase timeout is never retried, so no
+# investigative phase gets less than 300s.
+
+id: control-plane-pressure-v1
+name: Control-Plane Pressure Relief
+incident_type: control_plane
+max_total_duration: 1500  # phase budgets sum to 1440s
+
+phases:
+  # Which components are consuming master-node memory/CPU, and how close to
+  # limits the nodes are. (id 'triage' so the postmortem generator picks it up)
+  - id: triage
+    skill_name: sre
+    required: true
+    timeout_seconds: 300
+    produces: [severity, affected_nodes, top_consumers]
+
+  # What load is movable (non-control-plane pods schedulable elsewhere,
+  # oversized retention/limits, etcd bloat) vs. structural.
+  - id: diagnose
+    skill_name: sre
+    required: true
+    depends_on: [triage]
+    timeout_seconds: 300
+    produces: [root_cause, movable_load, confidence]
+
+  # Staged relief — reschedule movable load, trim oversized config. Touches
+  # cluster state, so it is approval-gated and optional: the plan still
+  # produces a verified diagnosis + proposed relief when nobody approves.
+  - id: relief
+    skill_name: sre
+    required: false
+    depends_on: [diagnose]
+    timeout_seconds: 600
+    approval_required: true
+    produces: [relief_applied, actions]
+
+  - id: verify
+    skill_name: sre
+    required: true
+    depends_on: [relief]
+    timeout_seconds: 240
+    runs: always
+    produces: [node_pressure_state, resolution_confirmed]

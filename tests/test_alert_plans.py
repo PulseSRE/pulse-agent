@@ -21,10 +21,10 @@ class TestPlanCategoryFor:
         f = {"category": "alerts", "title": "KubeNodeNotReady"}
         assert plan_category_for(f) == "nodes"
 
-    def test_control_plane_memory_alert_engages_node_pressure(self):
+    def test_control_plane_memory_alert_engages_its_plan(self):
         """The reference cluster's dominant incident, previously planless."""
         f = {"category": "alerts", "title": "HighOverallControlPlaneMemory"}
-        assert plan_category_for(f) == "nodes"
+        assert plan_category_for(f) == "control_plane"
 
     def test_unknown_alert_falls_through_unchanged(self):
         """Guessing a template for an unclassified alert runs the wrong
@@ -32,9 +32,16 @@ class TestPlanCategoryFor:
         f = {"category": "alerts", "title": "SomeVendorSpecificAlert"}
         assert plan_category_for(f) == "alerts"
 
-    def test_control_plane_category_uses_node_pressure_interim(self):
+    def test_control_plane_category_matches_its_template_directly(self):
+        """control_plane passes through unchanged and control-plane-pressure-v1
+        matches it by incident_type — no mapping entry required."""
         f = {"category": "control_plane", "title": "kube-controller-manager restarts"}
-        assert plan_category_for(f) == "nodes"
+        assert plan_category_for(f) == "control_plane"
+
+        from sre_agent.plan_templates import list_templates, load_templates
+
+        load_templates()
+        assert "control_plane" in {t["incident_type"] for t in list_templates()}
 
     def test_non_alert_categories_pass_through(self):
         assert plan_category_for({"category": "crashloop", "title": "Pod x restarting"}) == "crashloop"

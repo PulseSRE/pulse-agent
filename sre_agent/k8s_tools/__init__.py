@@ -46,6 +46,7 @@ __all__ = [
     "get_cluster_version",
     "get_configmap",
     "get_endpoint_slices",
+    "get_etcd_status",
     "get_events",
     "get_firing_alerts",
     "get_node_metrics",
@@ -154,6 +155,7 @@ from .live_table import create_live_table
 from .monitoring import (
     _metric_names_cache,
     discover_metrics,
+    get_etcd_status,
     get_firing_alerts,
     get_node_metrics,
     get_pod_metrics,
@@ -250,6 +252,7 @@ ALL_TOOLS: list[Any] = [
     discover_metrics,  # Prometheus metric discovery
     verify_query,  # PromQL query validation
     get_prometheus_query,  # PromQL chart generation
+    get_etcd_status,  # etcd health/DB-size/latency snapshot
     # Diagnostics
     describe_service,
     get_endpoint_slices,

@@ -48,6 +48,26 @@ class TestLoadTemplates:
         phase_ids = [p.id for p in plan.phases]
         assert phase_ids == ["triage", "diagnose", "remediate", "verify"]
 
+    def test_control_plane_template_structure(self):
+        """The dominant episode class on the reference cluster gets a phased
+        plan: assess consumers -> identify movable load -> gated relief -> verify."""
+        templates = load_templates()
+        plan = templates["control_plane"]
+        assert plan.id == "control-plane-pressure-v1"
+        phase_ids = [p.id for p in plan.phases]
+        # triage/diagnose ids keep the postmortem generator's phase lookups working
+        assert phase_ids == ["triage", "diagnose", "relief", "verify"]
+        relief = next(p for p in plan.phases if p.id == "relief")
+        assert relief.approval_required, "relief touches cluster state and must be approval-gated"
+        assert not relief.required, "the plan must still complete as diagnosis-only when nobody approves"
+        verify = next(p for p in plan.phases if p.id == "verify")
+        assert verify.runs == "always"
+        # crashloop lesson: phase timeouts are never retried, so investigative
+        # phases get >=300s (measured skill runs take 55-204s)
+        for p in plan.phases:
+            if p.id in ("triage", "diagnose"):
+                assert p.timeout_seconds >= 300
+
     def test_security_template_has_parallel_phases(self):
         templates = load_templates()
         plan = templates["security-incident"]
