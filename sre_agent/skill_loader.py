@@ -102,6 +102,7 @@ class Skill:
     reviewed: bool = True
     quarantined: bool = False  # pulled from automatic routing for poor performance, reversible
     incident_type: str = ""  # finding category a scaffolded skill was learned from
+    pinned: bool = False  # opts an agent-created skill out of curator lifecycle proposals
 
     def to_dict(self) -> dict:
         """Serialize for API responses."""
@@ -134,6 +135,7 @@ class Skill:
             "reviewed": self.reviewed,
             "quarantined": self.quarantined,
             "incident_type": self.incident_type,
+            "pinned": self.pinned,
         }
 
 
@@ -239,6 +241,7 @@ def _parse_skill_md(path: Path) -> Skill | None:
         reviewed=meta.get("reviewed", True),
         quarantined=bool(meta.get("quarantined", False)),
         incident_type=meta.get("incident_type") or "",
+        pinned=bool(meta.get("pinned", False)),
     )
 
 
@@ -385,6 +388,9 @@ def load_skills(skills_dir: Path | None = None) -> dict[str, Skill]:
             continue
 
         for skill_dir in sorted(directory.iterdir()):
+            # Dot-dirs hold retired skills (.archive) — recoverable but never loaded
+            if skill_dir.name.startswith("."):
+                continue
             skill_file = None
             if skill_dir.is_dir():
                 skill_file = skill_dir / "skill.md"

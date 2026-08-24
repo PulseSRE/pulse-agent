@@ -539,6 +539,58 @@ def gen_readiness_regressions() -> list[dict[str, Any]]:
     return []
 
 
+def gen_skill_curation() -> list[dict[str, Any]]:
+    """The forgetting half of skill learning, surfaced as proposals.
+
+    Agent-created skills that never route still cost selector attention and
+    reviewer trust, and near-duplicate lessons split traffic between two
+    half-trained skills. The curator (skill_curator.py) finds both cases; this
+    generator turns them into inbox items pointing at the archive endpoint —
+    the human act. Archiving is recoverable and pinning a skill exempts it.
+    """
+    from .skill_curator import STALE_AFTER_DAYS, find_overlapping_skills, find_stale_skills
+
+    items: list[dict[str, Any]] = []
+    for stale in find_stale_skills()[:3]:
+        name = stale["name"]
+        state = "unreviewed" if not stale["reviewed"] else ("quarantined" if stale["quarantined"] else "active")
+        items.append(
+            _make_assessment(
+                title=f"Agent-created skill '{name}' has not routed in {STALE_AFTER_DAYS} days",
+                summary=(
+                    f"'{name}' ({state}, {stale['age_days']}d old) received no traffic in the last "
+                    f"{STALE_AFTER_DAYS} days. Archive it to keep the portfolio honest — archiving is "
+                    f"recoverable (POST /admin/skills/{name}/archive, restore any time), or pin it "
+                    f"(POST /admin/skills/{name}/pin) if it covers a rare case worth keeping."
+                ),
+                severity="low",
+                urgency_hours=336,
+                generator="skill_curation",
+                correlation_key=f"skill-stale:{name}",
+                confidence=0.8,
+            )
+        )
+    for pair in find_overlapping_skills()[:2]:
+        a, b = pair["names"]
+        items.append(
+            _make_assessment(
+                title=f"Skills '{a}' and '{b}' look like the same lesson learned twice",
+                summary=(
+                    f"Keyword overlap {pair['overlap']:.0%} (shared: {', '.join(pair['shared_keywords'])}). "
+                    "Two near-duplicate skills split routing traffic and neither deepens. Consider merging "
+                    "their distilled cases into one and archiving the other — the agent can draft the merge "
+                    "if you ask it to."
+                ),
+                severity="low",
+                urgency_hours=336,
+                generator="skill_curation",
+                correlation_key=f"skill-overlap:{min(a, b)}:{max(a, b)}",
+                confidence=0.7,
+            )
+        )
+    return items
+
+
 def gen_skill_gaps() -> list[dict[str, Any]]:
     """Recurring queries no skill handles well become proposals, not log lines.
 
@@ -631,6 +683,7 @@ TASK_GENERATORS: list[tuple[str, Any]] = [
     ("readiness_regressions", gen_readiness_regressions),
     ("skill_gaps", gen_skill_gaps),
     ("skill_low_performers", gen_skill_low_performers),
+    ("skill_curation", gen_skill_curation),
 ]
 
 
