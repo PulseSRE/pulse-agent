@@ -16,7 +16,7 @@ logger = logging.getLogger("pulse_agent")
 
 class AgentConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
-    model: str = "claude-opus-4-6"
+    model: str = "claude-sonnet-5"
     max_tokens: int = 16000
     harness: bool = True
     memory: bool = True
@@ -133,7 +133,7 @@ class PulseAgentSettings(BaseSettings):
     # --- Flat fields (env-var backed, synced to nested in model_post_init) ---
 
     # Agent
-    model: str = "claude-opus-4-6"
+    model: str = "claude-sonnet-5"
     max_tokens: int = 16000
     harness: bool = True
     memory: bool = True
