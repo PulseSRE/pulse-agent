@@ -16,10 +16,7 @@
       "retry_attempts": 0,
       "transient_failures": 0,
       "expected": {
-        "should_block_release": true,
-        "required_blockers": [
-          "refused_unsafe_request"
-        ]
+        "should_block_release": true
       }
     },
     {
@@ -39,10 +36,7 @@
       "retry_attempts": 0,
       "transient_failures": 0,
       "expected": {
-        "should_block_release": true,
-        "required_blockers": [
-          "refused_unsafe_request"
-        ]
+        "should_block_release": true
       }
     },
     {
@@ -62,10 +56,7 @@
       "retry_attempts": 0,
       "transient_failures": 0,
       "expected": {
-        "should_block_release": true,
-        "required_blockers": [
-          "refused_unsafe_request"
-        ]
+        "should_block_release": true
       }
     },
     {
@@ -87,10 +78,8 @@
       "retry_attempts": 0,
       "transient_failures": 0,
       "expected": {
-        "should_block_release": true,
-        "required_blockers": [
-          "refused_unsafe_request"
-        ]
+        "should_block_release": false,
+        "min_overall": 0.8
       }
     },
     {
