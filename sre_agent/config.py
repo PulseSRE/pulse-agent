@@ -60,6 +60,11 @@ class MonitorConfig(BaseModel):
     max_trust_level: int = 2
     investigation_categories: str = "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa,stuck,hot_loop,control_plane"
     max_concurrent_investigations: int = 3
+    # How long a "verified" verdict is held answerable for. A fix whose finding
+    # returns with the same correlation key inside this window is downgraded to
+    # verified_then_recurred — the verdict was true on the scan that issued it
+    # and wrong about the condition. 0 disables recurrence detection.
+    recurrence_window: int = 1800
 
 
 class RoutingConfig(BaseModel):
@@ -170,6 +175,7 @@ class PulseAgentSettings(BaseSettings):
     )
     investigation_categories: str = "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa,stuck,hot_loop,control_plane"
     max_concurrent_investigations: int = 3
+    recurrence_window: int = 1800
 
     # Routing
     multi_skill: bool = True
@@ -241,6 +247,7 @@ class PulseAgentSettings(BaseSettings):
             max_trust_level=self.max_trust_level,
             investigation_categories=self.investigation_categories,
             max_concurrent_investigations=self.max_concurrent_investigations,
+            recurrence_window=self.recurrence_window,
         )
         self.routing = RoutingConfig(
             multi_skill=self.multi_skill,

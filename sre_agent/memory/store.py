@@ -197,6 +197,44 @@ class IncidentStore:
         self.db.execute("UPDATE incidents SET outcome = ?, score = ? WHERE id = ?", (outcome, score, incident_id))
         self.db.commit()
 
+    @db_safe(default=None)
+    def mark_recent_autofix_regressed(self, error_type: str, namespace: str = "") -> int | None:
+        """Demote the auto-learned incident whose verified fix did not hold.
+
+        The verification pipeline stores auto-fix incidents as confirmed
+        ("resolved", score 0.8) the moment the health gate passes. When the
+        same condition recurs, that record is teaching the wrong lesson:
+        retrieval ranks by score, so a fix that only held for eight minutes
+        keeps being recommended as the thing that worked. Flip the most recent
+        matching record to "regressed" with a score low enough that
+        search_low_score_incidents surfaces it as an anti-pattern instead.
+
+        Returns the demoted incident id, or None when nothing matched.
+        """
+        row = self.db.fetchone(
+            "SELECT id FROM incidents WHERE query LIKE 'Auto-fix for %' AND error_type = ? "
+            "AND (namespace = ? OR ? = '') AND outcome = 'resolved' ORDER BY id DESC LIMIT 1",
+            (error_type, namespace, namespace),
+        )
+        if not row:
+            return None
+        self.db.execute(
+            "UPDATE incidents SET outcome = 'regressed', score = 0.3 WHERE id = ?",
+            (row["id"],),
+        )
+        self.db.commit()
+        return row["id"]
+
+    @db_safe(default=0)
+    def record_runbook_failure(self, source_incident_id: int) -> int:
+        """Count a failure against the runbook a now-regressed incident produced."""
+        cur = self.db.execute(
+            "UPDATE runbooks SET failure_count = failure_count + 1 WHERE source_incident_id = ?",
+            (source_incident_id,),
+        )
+        self.db.commit()
+        return getattr(cur, "rowcount", 0)
+
     @db_safe(default=[])
     def search_incidents(self, query: str, limit: int = 5) -> list[dict]:
         from .retrieval import _tfidf_similarity
@@ -268,9 +306,12 @@ class IncidentStore:
             return []
         conditions = " OR ".join(["trigger_keywords LIKE ?"] * len(keywords))
         params = [f"%{kw}%" for kw in keywords]
+        # Net score, not gross: a runbook whose fix keeps recurring must sink
+        # below one that has actually held, however many times it "succeeded"
+        # before each recurrence was detected.
         return self.db.fetchall(
             f"""SELECT * FROM runbooks WHERE ({conditions})
-                ORDER BY success_count DESC LIMIT ?""",
+                ORDER BY success_count - failure_count DESC LIMIT ?""",
             tuple(params + [limit]),
         )
 

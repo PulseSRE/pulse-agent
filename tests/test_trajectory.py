@@ -165,7 +165,7 @@ class TestStats:
         learner.record(bad)
         learner.promote(good.key)
         learner.discard(bad.key, "still failing")
-        assert learner.stats() == {"pending": 0, "promoted": 1, "discarded": 1, "expired": 0}
+        assert learner.stats() == {"pending": 0, "promoted": 1, "discarded": 1, "expired": 0, "recurred": 0}
 
     def test_learner_is_process_wide(self):
         """Same instance every call — the property the name is about.

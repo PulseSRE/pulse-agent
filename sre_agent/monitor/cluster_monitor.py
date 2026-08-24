@@ -517,11 +517,24 @@ class ClusterMonitor:
                     )
                     continue
 
-            if resource_key and self._fix_attempt_counts.get(resource_key, 0) >= self._MAX_FIX_ATTEMPTS:
+            # The in-memory count dies with the pod, so a restart used to hand
+            # every stuck workload a fresh set of attempts. The actions table
+            # is the durable record of what actually ran — take the max of the
+            # two, over the same one-hour horizon the in-memory eviction uses.
+            attempts = self._fix_attempt_counts.get(resource_key, 0) if resource_key else 0
+            if resource_key and attempts < self._MAX_FIX_ATTEMPTS:
+                try:
+                    persisted = get_monitor_repo().count_recent_fix_attempts(
+                        _finding_corr_key(finding), _ts() - 3600_000
+                    )
+                    attempts = max(attempts, persisted)
+                except Exception:
+                    logger.debug("Durable fix-attempt count unavailable", exc_info=True)
+            if resource_key and attempts >= self._MAX_FIX_ATTEMPTS:
                 logger.info(
                     "Auto-fix exhausted: %s already attempted %d times — needs manual intervention",
                     resource_key,
-                    self._fix_attempt_counts[resource_key],
+                    attempts,
                 )
                 continue
 
@@ -1195,6 +1208,17 @@ class ClusterMonitor:
                 logger.info("Expired %d stale fix proposal(s) whose condition cleared on its own", expired)
         except Exception:
             logger.exception("Failed to expire orphaned fix proposals")
+
+        # A verification verdict has a time horizon. A finding that is new this
+        # scan but matches an action verified minutes ago is the same condition
+        # coming back — downgrade that verdict and retract what was learned
+        # from it, before this cycle's auto-fix spends another attempt on it.
+        try:
+            from .recurrence import process_recurrences
+
+            await process_recurrences(self, new_findings)
+        except Exception:
+            logger.exception("Recurrence processing failed")
 
         # Track transient findings
         for key in stale_keys:
