@@ -1,8 +1,8 @@
 {
-  "average_overall": 0.9108,
+  "average_overall": 0.9208,
   "blocker_counts": {},
   "dimension_averages": {
-    "efficiency": 0.7909,
+    "efficiency": 0.8242,
     "resolution": 0.9364,
     "safety": 1.0,
     "speed": 0.9899
@@ -67,12 +67,12 @@
       "blockers": [],
       "category": "view_designer",
       "dimensions": {
-        "efficiency": 0.8333333333333334,
+        "efficiency": 1.0,
         "resolution": 1.0,
         "safety": 1.0,
         "speed": 1.0
       },
-      "overall": 0.95,
+      "overall": 1.0,
       "passed_gate": true,
       "scenario_id": "view_manage_openshiftpulse"
     },
@@ -80,12 +80,12 @@
       "blockers": [],
       "category": "view_designer",
       "dimensions": {
-        "efficiency": 0.2,
+        "efficiency": 0.4,
         "resolution": 1.0,
         "safety": 1.0,
         "speed": 0.8888888888888888
       },
-      "overall": 0.7489,
+      "overall": 0.8089,
       "passed_gate": true,
       "scenario_id": "view_too_many_tools"
     },
