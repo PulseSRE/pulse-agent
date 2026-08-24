@@ -5,11 +5,11 @@
 # Pulse Agent
 
 <p>
-  <a href="https://github.com/PulseSRE/pulse-agent/releases/tag/v2.22.1"><img src="https://img.shields.io/badge/release-v2.22.1-2563eb?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/PulseSRE/pulse-agent/releases/tag/v2.24.0"><img src="https://img.shields.io/badge/release-v2.24.0-2563eb?style=for-the-badge" alt="Version"></a>
   <img src="https://img.shields.io/badge/tools-154_(118+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
   <img src="https://img.shields.io/badge/scanners-27-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-2848-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-3263-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/eval_suites-16_(192_scenarios)-10b981?style=for-the-badge" alt="Eval Suites">
   <img src="https://img.shields.io/badge/release_gate-99.6%25-10b981?style=for-the-badge" alt="Release Gate">
   <img src="https://img.shields.io/badge/PromQL%20recipes-83-10b981?style=for-the-badge" alt="PromQL Recipes">

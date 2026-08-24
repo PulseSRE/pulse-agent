@@ -2,7 +2,7 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
-## [Unreleased]
+## v2.24.0 (2026-08-24)
 
 ### The CR's trust level never reached the agent
 - `spec.agent.trustLevel` has been a no-op on every deployment: the operator injects `PULSE_AGENT_TRUST_LEVEL`, the agent only read `PULSE_AGENT_MAX_TRUST_LEVEL`, and both sides defaulting to 2 kept the mismatch invisible. Measured live on the dev cluster: CR patched to `trustLevel: 3`, new pod running with `PULSE_AGENT_TRUST_LEVEL=3` in its env, agent still gating every fix at trust 2 — which is one reason its `actions` table shows 681 proposals and zero executions
