@@ -171,8 +171,12 @@ class TestConfirmationGate:
         mock_tool.call.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_write_tool_allowed_with_confirm(self):
-        """Write tool should execute if on_confirm returns True."""
+    async def test_write_tool_allowed_with_confirm(self, mock_k8s):
+        """Write tool should execute if on_confirm returns True.
+
+        scale_deployment carries a verification contract, so executing it now
+        includes a precondition read of the target — hence mock_k8s.
+        """
         tool_use_response = SimpleNamespace(
             stop_reason="tool_use",
             content=[

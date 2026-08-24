@@ -936,6 +936,10 @@ class TestMonitorAutoLearn:
         )
         save_action(action, category="crashloop", resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}])
         monitor._pending_verifications[action["id"]] = {
+            # Production registration always carries the finding id; the
+            # learning blocks are gated on it so contract probes for
+            # finding-less chat actions never masquerade as auto-fixes.
+            "finding_id": "f-test",
             "category": "crashloop",
             "resources": [{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
             "verify_resources": [{"kind": "Deployment", "name": "web", "namespace": "prod"}],

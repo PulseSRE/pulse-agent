@@ -281,6 +281,24 @@ def execute_rollback(action_id: str) -> dict:
         }
 
     tool = rollback_data.get("tool")
+    if tool == "restore_snapshot":
+        # The strongest undo: put the resource back the way the pre-write
+        # snapshot found it. This branch was persisted by _make_rollback_info
+        # long before anything could execute it — fix history offered a
+        # rollback that this function then refused as "not supported".
+        from ..snapshot import from_json, restore
+
+        blob = rollback_data.get("input", {}).get("snapshot")
+        snap = from_json(blob) if isinstance(blob, str) else (blob if isinstance(blob, dict) else None)
+        if not snap:
+            return {"error": "Rollback failed: the stored snapshot could not be parsed"}
+        try:
+            restored_text = restore(snap)
+        except Exception as e:
+            return {"error": f"Rollback failed: {e}"}
+        get_monitor_repo().update_action_status(action_id, "rolled_back", "rolled_back")
+        return {"status": "rolled_back", "actionId": action_id, "detail": restored_text}
+
     if tool == "rollback_deployment":
         inp = rollback_data.get("input", {})
         try:

@@ -196,6 +196,12 @@ def _apply_isolation(allow_llm_tool_picker: bool) -> contextlib.ExitStack:
 
     stack = contextlib.ExitStack()
     try:
+        # Tool contracts read the target before a write and would fail closed
+        # against a patched-out cluster, replacing the recorded response the
+        # replay exists to score. Suspend them for the run's duration.
+        from ..tool_contracts import suspended as _contracts_suspended
+
+        stack.enter_context(_contracts_suspended())
         for module, attr, replacement, required in targets:
             try:
                 stack.enter_context(patch(f"{module}.{attr}", replacement))

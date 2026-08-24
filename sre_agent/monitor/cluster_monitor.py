@@ -349,6 +349,32 @@ class ClusterMonitor:
 
     # ── Memory stats ──────────────────────────────────────────────────────
 
+    def schedule_contract_verification(
+        self,
+        action_id: str,
+        *,
+        resources: list[dict],
+        probe: dict,
+        grace_scans: int = 3,
+    ) -> None:
+        """Register a tool-contract postcondition probe for the next scan.
+
+        Interactive writes join the same verification pipeline auto-fixes use;
+        the ``probe`` payload makes the check tool-specific (a scale-to-0
+        verifies as 0 ready, not as generic health), and the grace window lets
+        a rollout settle before a FAIL is recorded as the verdict.
+        """
+        self._pending_verifications[action_id] = {
+            "action_id": action_id,
+            "finding_id": "",
+            "category": "chat_action",
+            "resources": resources,
+            "verify_resources": resources,
+            "target_scan": self._scan_counter + 1,
+            "probe": probe,
+            "grace_scans": grace_scans,
+        }
+
     def memory_stats(self) -> dict:
         return {
             "last_findings": len(self._last_findings),

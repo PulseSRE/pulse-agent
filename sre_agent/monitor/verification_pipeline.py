@@ -81,7 +81,32 @@ async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -
                     matched_resource = f"{ns_key} (namespace-level match)"
                 break
 
-        if matches_active:
+        probe = payload.get("probe")
+        if probe:
+            # A tool-contract postcondition: the check is tool-specific (a
+            # scale-to-0 verifies as 0 ready replicas, a rollback verifies the
+            # revision moved), so the generic finding-correlation above does
+            # not apply. Rollouts are not instant — a FAIL inside the grace
+            # window stays pending for another scan instead of becoming the
+            # recorded verdict; PASS and UNVERIFIABLE resolve immediately.
+            from .. import tool_contracts
+
+            gate_status, gate_evidence = await asyncio.to_thread(tool_contracts.run_probe, probe)
+            grace_left = int(payload.get("grace_scans", 0))
+            if gate_status == health_gate.FAIL and grace_left > 0:
+                payload["grace_scans"] = grace_left - 1
+                payload["target_scan"] = monitor._scan_counter + 1
+                continue
+            if gate_status == health_gate.PASS:
+                status = "verified"
+                evidence = f"Postcondition probe passed: {gate_evidence}"
+            elif gate_status == health_gate.FAIL:
+                status = "still_failing"
+                evidence = f"Postcondition probe failed: {gate_evidence}"
+            else:
+                status = "unverifiable"
+                evidence = f"Postcondition could not be confirmed: {gate_evidence}"
+        elif matches_active:
             status = "still_failing"
             evidence = f"Resource still appears in active {category} findings: {matched_resource}"
         elif ns_improved:
@@ -152,6 +177,14 @@ async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -
                 details={"status": status, "evidence": evidence},
             )
         )
+
+        # Contract probes for interactive writes have no finding, no auto-fix
+        # runbook to learn, and no held trajectory — record the verdict above
+        # and stop. Learning from a chat-initiated write would file it under
+        # "Auto-fix", which it was not.
+        if not payload.get("finding_id"):
+            completed_ids.append(action_id)
+            continue
 
         if status == "verified" and get_settings().agent.memory:
             try:

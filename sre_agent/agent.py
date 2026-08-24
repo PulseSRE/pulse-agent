@@ -414,8 +414,12 @@ def _execute_tool(
             return f"Error: unknown tool '{name}'", None, meta
         try:
             from .errors import ToolError
+            from .tool_contracts import execute_with_contract
 
-            result = tool.call(input_data)
+            # Write tools with a verification contract get precondition,
+            # snapshot, and a scheduled postcondition probe around the call;
+            # everything else runs unchanged.
+            result = execute_with_contract(name, input_data, lambda: tool.call(input_data))
             if isinstance(result, tuple) and len(result) == 2:
                 text, component = result
             else:
