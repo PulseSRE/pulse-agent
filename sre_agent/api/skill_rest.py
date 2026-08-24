@@ -267,6 +267,65 @@ async def unquarantine_skill(name: str, admin: str = Depends(require_admin)):
     return {"name": name, "quarantined": updated.quarantined}
 
 
+@router.post("/admin/skills/{name}/pin")
+async def pin_skill(name: str, admin: str = Depends(require_admin)):
+    """Exempt an agent-created skill from curator lifecycle proposals.
+
+    Pinning is the human "leave this alone" — a pinned skill never appears in
+    stale/consolidation proposals and the archive endpoint refuses it.
+    """
+    updated = _set_skill_frontmatter(name, {"pinned": True})
+    logger.warning("Skill '%s' pinned by '%s'", name, admin)
+    return {"name": name, "pinned": updated.pinned}
+
+
+@router.post("/admin/skills/{name}/unpin")
+async def unpin_skill(name: str, admin: str = Depends(require_admin)):
+    """Return a pinned skill to normal curator lifecycle."""
+    updated = _set_skill_frontmatter(name, {"pinned": False})
+    logger.warning("Skill '%s' unpinned by '%s'", name, admin)
+    return {"name": name, "pinned": updated.pinned}
+
+
+@router.post("/admin/skills/{name}/archive")
+async def archive_skill_endpoint(name: str, admin: str = Depends(require_admin)):
+    """Retire an agent-created skill — recoverable, never a delete.
+
+    The curator proposes archiving via inbox items; this endpoint is the human
+    act. The skill directory moves to .archive/ (the loader skips dot-dirs),
+    and /admin/skills/{name}/restore brings it back intact.
+    """
+    from ..skill_curator import archive_skill
+
+    try:
+        dest = archive_skill(name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.warning("Skill '%s' archived by '%s'", name, admin)
+    return {"name": name, "archived": True, "archived_to": str(dest)}
+
+
+@router.post("/admin/skills/{name}/restore")
+async def restore_skill_endpoint(name: str, admin: str = Depends(require_admin)):
+    """Bring an archived skill back into rotation."""
+    from ..skill_curator import restore_skill
+
+    try:
+        restore_skill(name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.warning("Skill '%s' restored from archive by '%s'", name, admin)
+    return {"name": name, "archived": False}
+
+
+@router.get("/admin/skills/archived")
+async def list_archived_skills(admin: str = Depends(require_admin)):
+    """Archived skills available for restore."""
+    from ..skill_curator import list_archived
+
+    return {"archived": list_archived()}
+
+
 @router.delete("/admin/skills/{name}")
 async def delete_skill_endpoint(name: str, admin: str = Depends(require_admin)):
     """Delete a user-created skill. Built-in skills cannot be deleted."""

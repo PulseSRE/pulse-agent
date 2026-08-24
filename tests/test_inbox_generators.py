@@ -186,13 +186,14 @@ class TestServiceEndpointGapsGenerator:
 
 
 class TestGeneratorRegistration:
-    def test_all_15_registered(self):
+    def test_all_16_registered(self):
         from sre_agent.inbox_generators import TASK_GENERATORS
 
-        assert len(TASK_GENERATORS) == 15
+        assert len(TASK_GENERATORS) == 16
         names = [n for n, _ in TASK_GENERATORS]
         assert "skill_gaps" in names
         assert "skill_low_performers" in names
+        assert "skill_curation" in names
 
     def test_run_all_generators_returns_list(self):
         from sre_agent.inbox_generators import run_all_generators

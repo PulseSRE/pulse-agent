@@ -762,6 +762,20 @@ def _make_receive_loop(
                     except Exception:
                         logger.debug("Failed to record turn feedback", exc_info=True)
 
+                    # A human-confirmed resolution is a verified outcome — the
+                    # same signal the monitor's verification pipeline waits
+                    # for. Feed the session through trajectory learning (copy
+                    # of messages: the session keeps mutating them).
+                    if resolved:
+                        try:
+                            from ..chat_learning import learn_from_chat_feedback
+
+                            asyncio.get_running_loop().run_in_executor(
+                                None, learn_from_chat_feedback, session_id, list(messages)
+                            )
+                        except Exception:
+                            logger.debug("Chat learning dispatch failed", exc_info=True)
+
                     continue
 
                 await incoming.put(data)
