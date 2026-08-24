@@ -27,8 +27,9 @@ _ALERT_TEMPLATE: dict[str, str] = {
     "NodeMemoryHighUtilization": "nodes",
     "NodeFilesystemAlmostOutOfSpace": "nodes",
     "NodeFilesystemSpaceFillingUp": "nodes",
-    "HighOverallControlPlaneMemory": "nodes",
-    "ControlPlaneNodeMemoryHigh": "nodes",
+    # Control-plane pressure → control-plane-pressure-v1
+    "HighOverallControlPlaneMemory": "control_plane",
+    "ControlPlaneNodeMemoryHigh": "control_plane",
     # Workload rollout health → deployment-failure-v1
     "KubeDeploymentReplicasMismatch": "workloads",
     "KubeStatefulSetReplicasMismatch": "workloads",
@@ -45,13 +46,11 @@ _ALERT_TEMPLATE: dict[str, str] = {
     "KubeClientCertificateExpiration": "cert_expiry",
 }
 
-# Finding categories that map wholesale onto an existing template. The
-# control-plane liveness scanner reports master-node pressure as its own
-# category; until a dedicated control-plane template exists, node-pressure-v1
-# is the right playbook — control-plane pressure IS node pressure on masters.
-_CATEGORY_TEMPLATE: dict[str, str] = {
-    "control_plane": "nodes",
-}
+# Finding categories that map wholesale onto an existing template. (The
+# control-plane category matches control-plane-pressure-v1 directly by
+# incident_type, so no entry is needed here — the table stays for the next
+# category that arrives without a same-named template.)
+_CATEGORY_TEMPLATE: dict[str, str] = {}
 
 
 def plan_category_for(finding: dict) -> str:

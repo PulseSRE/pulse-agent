@@ -167,6 +167,7 @@ TOOL_CATEGORIES = {
             "discover_metrics",
             "get_prometheus_query",
             "get_firing_alerts",
+            "get_etcd_status",
             "get_node_metrics",
             "get_pod_metrics",
             "forecast_quota_exhaustion",

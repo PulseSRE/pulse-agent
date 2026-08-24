@@ -820,3 +820,83 @@ def get_pod_metrics(namespace: str = "default", sort_by: str = "cpu"):
         else None
     )
     return (text, component)
+
+
+# The instant queries behind get_etcd_status. Kept as data so the tool's
+# coverage is reviewable at a glance; every metric here is already scraped
+# by openshift-monitoring — the tool adds no new collection.
+_ETCD_QUERIES: dict[str, str] = {
+    "has_leader": "max(etcd_server_has_leader)",
+    "leader_changes_1h": "max(increase(etcd_server_leader_changes_seen_total[1h]))",
+    "members": "count(etcd_server_has_leader)",
+    "db_size_mib": "max(etcd_mvcc_db_total_size_in_bytes) / 1024 / 1024",
+    "db_in_use_mib": "max(etcd_mvcc_db_total_size_in_use_in_bytes) / 1024 / 1024",
+    "quota_mib": "max(etcd_server_quota_backend_bytes) / 1024 / 1024",
+    "wal_fsync_p99_s": ("histogram_quantile(0.99, sum(rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m])) by (le))"),
+    "backend_commit_p99_s": (
+        "histogram_quantile(0.99, sum(rate(etcd_disk_backend_commit_duration_seconds_bucket[5m])) by (le))"
+    ),
+    "proposal_failures_1h": "max(increase(etcd_server_proposals_failed_total[1h]))",
+}
+
+
+@beta_tool
+def get_etcd_status():
+    """Get structured etcd health: leader state, member count, DB size vs quota, fsync/commit latency, and recent leader changes. Read-only; use before/after etcd maintenance (defrag) or when investigating control-plane pressure or API slowness."""
+    values: dict[str, float] = {}
+    errors: list[str] = []
+    for name, query in _ETCD_QUERIES.items():
+        try:
+            data = prometheus_request("api/v1/query", params={"query": query}, timeout=15)
+            results = data.get("data", {}).get("result", [])
+            if results and results[0].get("value"):
+                values[name] = float(results[0]["value"][1])
+        except Exception as e:
+            errors.append(f"{name}: {e}")
+
+    if not values:
+        detail = f" ({errors[0]})" if errors else ""
+        return f"Cannot read etcd metrics from Prometheus{detail}. etcd may not be scraped on this cluster."
+
+    lines = ["etcd status:"]
+
+    has_leader = values.get("has_leader")
+    members = values.get("members")
+    if has_leader is not None:
+        state = "elected leader" if has_leader >= 1 else "NO LEADER (quorum at risk)"
+        member_part = f", {int(members)} members reporting" if members else ""
+        lines.append(f"- Leader: {state}{member_part}")
+    changes = values.get("leader_changes_1h")
+    if changes is not None:
+        note = " — frequent elections indicate disk or network pressure" if changes >= 3 else ""
+        lines.append(f"- Leader changes (1h): {int(changes)}{note}")
+
+    db = values.get("db_size_mib")
+    quota = values.get("quota_mib")
+    if db is not None:
+        in_use = values.get("db_in_use_mib")
+        frag = f" ({in_use:.0f} MiB in use — {db - in_use:.0f} MiB reclaimable by defrag)" if in_use else ""
+        if quota:
+            pct = db / quota * 100
+            warn = " ⚠ approaching quota, defrag/compact recommended" if pct >= 80 else ""
+            lines.append(f"- DB size: {db:.0f} MiB of {quota:.0f} MiB quota ({pct:.0f}%){warn}{frag}")
+        else:
+            lines.append(f"- DB size: {db:.0f} MiB{frag}")
+
+    fsync = values.get("wal_fsync_p99_s")
+    if fsync is not None:
+        warn = " ⚠ above 10ms target — slow disk degrades the whole control plane" if fsync > 0.01 else ""
+        lines.append(f"- WAL fsync p99: {fsync * 1000:.1f}ms{warn}")
+    commit = values.get("backend_commit_p99_s")
+    if commit is not None:
+        warn = " ⚠ above 25ms target" if commit > 0.025 else ""
+        lines.append(f"- Backend commit p99: {commit * 1000:.1f}ms{warn}")
+
+    failures = values.get("proposal_failures_1h")
+    if failures is not None and failures >= 1:
+        lines.append(f"- Proposal failures (1h): {int(failures)} ⚠")
+
+    if errors:
+        lines.append(f"(unavailable: {', '.join(e.split(':')[0] for e in errors)})")
+
+    return "\n".join(lines)

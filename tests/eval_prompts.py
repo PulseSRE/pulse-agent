@@ -151,6 +151,18 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
     ),
     # ─── Metrics & Monitoring ─────────────────────────────────────────────
     (
+        "how is etcd doing, is the database getting too big?",
+        ["get_etcd_status"],
+        "sre",
+        "etcd health has a dedicated structured tool",
+    ),
+    (
+        "check etcd health before I run a defrag",
+        ["get_etcd_status"],
+        "sre",
+        "Pre-defrag etcd state check",
+    ),
+    (
         "show me CPU usage across the cluster",
         ["get_prometheus_query"],
         "sre",
