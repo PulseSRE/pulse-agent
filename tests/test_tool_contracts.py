@@ -215,9 +215,7 @@ class TestProbes:
         core = MagicMock()
         core.read_node.return_value = _node(unschedulable=False)
         with patch("sre_agent.k8s_client.get_core_client", return_value=core):
-            status, evidence = tool_contracts.run_probe(
-                {"tool": "cordon_node", "args": {"node_name": "n1"}, "pre": {}}
-            )
+            status, evidence = tool_contracts.run_probe({"tool": "cordon_node", "args": {"node_name": "n1"}, "pre": {}})
         assert status == health_gate.FAIL
         assert "did not hold" in evidence
 

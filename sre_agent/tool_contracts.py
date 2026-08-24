@@ -292,8 +292,10 @@ TOOL_CONTRACTS: dict[str, ToolContract] = {
         precheck=_pre_delete_pod,
         probe=_probe_delete_pod,
         success_prefix="Pod ",
-        verify_target=lambda args, pre: pre.get("owner")
-        or {"kind": "Pod", "name": args.get("pod_name", ""), "namespace": args.get("namespace", "")},
+        verify_target=lambda args, pre: (
+            pre.get("owner")
+            or {"kind": "Pod", "name": args.get("pod_name", ""), "namespace": args.get("namespace", "")}
+        ),
         snapshot_target=lambda args, pre: None,
     ),
     "rollback_deployment": ToolContract(
@@ -440,7 +442,7 @@ def execute_with_contract(name: str, input_data: dict, call: Callable[[], Any]) 
     result = call()
     duration_ms = int((time.monotonic() - start) * 1000)
 
-    text, component = (result if isinstance(result, tuple) and len(result) == 2 else (result, None))
+    text, component = result if isinstance(result, tuple) and len(result) == 2 else (result, None)
     if not isinstance(text, str) or not text.startswith(contract.success_prefix):
         # Validator message, ToolError string, or anything else that is not the
         # tool's own success sentence: pass it through, record nothing.
