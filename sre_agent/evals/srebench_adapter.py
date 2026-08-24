@@ -40,12 +40,21 @@ logger = logging.getLogger(__name__)
 
 
 class _SimBackedTool:
-    """A pulse tool whose implementation is the bench's simulated cluster."""
+    """A pulse tool whose implementation is the bench's simulated cluster.
 
-    def __init__(self, name: str, backend, is_write: bool):
-        self.name = name
+    Implements pulse's full tool protocol (``name``, ``to_dict()``, ``call()``)
+    — parts of the loop (skill routing) rebuild tool defs from the tool map,
+    so the wrapper must carry the original definition, not just the callable.
+    """
+
+    def __init__(self, tool_def: dict, backend, is_write: bool):
+        self.name = tool_def["name"]
+        self._def = tool_def
         self._backend = backend
         self._is_write = is_write
+
+    def to_dict(self) -> dict:
+        return self._def
 
     def call(self, input_data: dict) -> str:
         args = dict(input_data or {})
@@ -72,7 +81,7 @@ class PulseAgentAdapter:
         write_tools = set(config.get("write_tools") or set())
         tool_defs = [d for d in config["tool_defs"] if d.get("name") in CANONICAL_TOOLS]
         offered = {d["name"] for d in tool_defs}
-        tool_map = {name: _SimBackedTool(name, backend, name in write_tools) for name in offered}
+        tool_map = {d["name"]: _SimBackedTool(d, backend, d["name"] in write_tools) for d in tool_defs}
 
         async def on_confirm(tool_name: str, tool_input: dict) -> bool:
             return True
