@@ -9,6 +9,7 @@ Determines which skill should handle a given query using:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import re
@@ -31,6 +32,28 @@ import contextvars
 _last_routing_decision_var: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
     "_last_routing_decision", default=None
 )
+
+
+_LLM_FALLBACK_DISABLED = False
+
+
+@contextlib.contextmanager
+def llm_fallback_disabled():
+    """Route with ORCA only, never reaching the LLM fallback.
+
+    The selector eval measures *routing* latency and asserts a p99 bound. The
+    fallback is a network call, so letting it fire turns that assertion into a
+    measurement of provider latency — which is how a 500ms CI bound recorded
+    5,200ms. Callers that need determinism (evals, latency tests) enter this;
+    production routing is unaffected.
+    """
+    global _LLM_FALLBACK_DISABLED
+    previous = _LLM_FALLBACK_DISABLED
+    _LLM_FALLBACK_DISABLED = True
+    try:
+        yield
+    finally:
+        _LLM_FALLBACK_DISABLED = previous
 
 
 def get_last_routing_decision() -> dict | None:
@@ -172,7 +195,7 @@ def classify_query(query: str, *, context: dict | None = None):
     best_skill = skills.get(result.skill_name)
 
     # If ORCA didn't find a high-confidence match, try LLM fallback
-    if result.source == "fallback" and not best_skill:
+    if result.source == "fallback" and not best_skill and not _LLM_FALLBACK_DISABLED:
         llm_result = _llm_classify(query)
         if llm_result:
             best_skill = llm_result

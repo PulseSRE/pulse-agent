@@ -23,8 +23,14 @@ class SelectorEvalResult:
 
 
 def run_selector_eval(suite_path: str = "selector") -> SelectorEvalResult:
-    """Run the selector eval suite. Deterministic — no LLM calls."""
+    """Run the selector eval suite. Deterministic — no LLM calls.
+
+    The determinism is enforced, not assumed: ``classify_query`` can fall back
+    to an LLM call when ORCA finds no confident match, which would make both
+    the scores and the latency measurement depend on a network round-trip.
+    """
     from ..skill_loader import classify_query, load_skills
+    from ..skill_router import llm_fallback_disabled
 
     # Ensure skills loaded
     load_skills()
@@ -49,7 +55,8 @@ def run_selector_eval(suite_path: str = "selector") -> SelectorEvalResult:
         acceptable = set(scenario.get("acceptable", [expected]))
 
         start = time.monotonic()
-        routed_skill = classify_query(query)
+        with llm_fallback_disabled():
+            routed_skill = classify_query(query)
         elapsed_ms = (time.monotonic() - start) * 1000
         latencies.append(elapsed_ms)
 
