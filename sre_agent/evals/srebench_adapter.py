@@ -77,7 +77,21 @@ class PulseAgentAdapter:
         from sre_agent.agent import create_async_client, run_agent_streaming
         from sre_agent.orchestrator import build_orchestrated_config
 
-        config = build_orchestrated_config("sre", query=task.task)
+        # Route the task through pulse's real skill router, as production does
+        # per-turn — a hardcoded mode starves cross-domain tasks of their tools
+        # (e.g. an RBAC audit never sees scan_rbac_risks outside the security
+        # skill). Fall back to "sre" only if routing itself fails.
+        mode = "sre"
+        try:
+            from sre_agent.skill_router import classify_query
+
+            skill = classify_query(task.task)
+            if skill is not None and getattr(skill, "name", None):
+                mode = skill.name
+        except Exception:
+            logger.warning("skill routing failed for %s; using sre", task.scenario_id, exc_info=True)
+
+        config = build_orchestrated_config(mode, query=task.task)
         write_tools = set(config.get("write_tools") or set())
         tool_defs = [d for d in config["tool_defs"] if d.get("name") in CANONICAL_TOOLS]
         offered = {d["name"] for d in tool_defs}
