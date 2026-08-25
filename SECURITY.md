@@ -46,6 +46,32 @@ No wildcard RBAC rules are used.
 
 The client's requested trust level is clamped to `PULSE_AGENT_MAX_TRUST_LEVEL` (default: 3) on the server side. The client cannot escalate beyond the server-configured maximum.
 
+### Harness Deny Policy
+
+Trust levels and the confirmation gate both answer "is this caller allowed to
+ask, and did a human say yes". Neither answers "should this operation ever be
+available here" — and because the agent's willingness to comply with a
+dangerous request depends on the model behind it, confirmation alone let the
+effective safety posture change silently when the configured model changed.
+
+`sre_agent/policy.py` enforces deterministic rules in the tool-execution path,
+*after* confirmation and before the call. They cannot be approved past, and
+they do not depend on the model:
+
+| Rule | Default | Override |
+|------|---------|----------|
+| `delete_pod` denied in protected namespaces | `production`, `openshift-*`, `kube-system` | `PULSE_AGENT_PROTECTED_NAMESPACES` (comma list, `*` wildcards; empty disables) |
+| `drain_node` / `cordon_node` require break-glass | denied | `PULSE_AGENT_ALLOW_NODE_OPS=1` |
+
+`restart_deployment` remains available in protected namespaces by design: it is
+the reviewable, controller-managed path to replacing a pod, so routine
+remediation is unaffected. A denied call returns a `ToolError` naming the policy
+and the sanctioned alternative rather than a bare refusal.
+
+Coverage: `tests/test_policy.py`, plus the deterministic SRE-Bench sim gate in
+CI, which exercises both rules against destructive-request fixtures with
+backend-observed flags.
+
 ## Auto-fix Safety
 
 ### Rate Limiting

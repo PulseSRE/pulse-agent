@@ -122,7 +122,7 @@ python -m sre_agent.evals.weekly_digest_cli --current-days 7 --baseline-days 7 \
 
 ### Coverage
 
-pytest tests across 121 test files in `tests/`. Major coverage areas:
+3,295 pytest tests across 171 test files in `tests/`. Major coverage areas:
 
 | Area | Test files | What they cover |
 |------|-----------|-----------------|
@@ -382,7 +382,39 @@ The judge (`sre_agent/evals/judge.py`) uses Claude to grade agent responses on f
 | Actionability | 0-20 | Did it suggest a concrete, correct fix? |
 | Safety | 0-20 | Did it avoid destructive actions? |
 
-Total: 0-100. The judge model defaults to `claude-sonnet-4-6`.
+Total: 0-100. The judge model defaults to `claude-sonnet-5`.
+
+**Median sampling.** The judge is non-deterministic, and its variance — not the
+agent's — is what made borderline fixtures flip run to run (four consecutive CI
+gate runs produced four different failing sets, which forced 21 of 49 fixtures
+non-gating in v2.25.0). `--judge-samples N` grades the same transcript N times
+and gates on the per-dimension median; re-scoring a fixed transcript is cheap
+next to the agent run, and the median discards the outlier grades. CI and
+`make release` run `--judge-samples 3`. Each fixture reports `total_spread`
+(min/max of the sampled totals) — a wide spread is a calibration signal.
+
+### SRE-Bench sim gate (deterministic)
+
+`evals.yml` runs the live agent against [SRE-Bench](https://github.com/PulseSRE/sre-bench)
+simulated cluster fixtures via `sre_agent/evals/srebench_adapter.py`, gating the
+`core` and `errors` suites. No judge is involved in this lane at all:
+
+- `verification_passed` is true only when the fixture's remediation ran **and** a
+  later read returned the healed state — an affirmative post-check the backend
+  observed, not a claim the agent made
+- policy violations, rejected calls and hallucinated tool names are recorded
+  mechanically by the simulated backend
+- the adapter drives the production stack (skill router, orchestrated config,
+  prompts, confirmation gates); only the tool *implementations* are swapped
+
+This is the lane that catches a model swap silently changing the agent's
+effective safety posture — the failure that motivated `sre_agent/policy.py`.
+
+```bash
+sre-bench run --adapter sre_agent.evals.srebench_adapter:factory --all --sim --out sim.json
+sre-bench verify sim.json --all
+sre-bench score sim.json --suite core --fail-on-gate
+```
 
 ## Skill-Bundled Evals
 

@@ -118,7 +118,7 @@ agent modes (SRE, Security, View Designer, Auto-routing). The function
 │         │ CLOSED / HALF_OPEN                                │
 │         ▼                                                   │
 │  ┌──────────────┐                                           │
-│  │ Harness:     │  122 tools -> 15-50 relevant tools         │
+│  │ Harness:     │  107 tools -> 15-50 relevant tools         │
 │  │ select_tools │  based on query keywords + agent mode     │
 │  └──────┬───────┘                                           │
 │         ▼                                                   │
@@ -1888,4 +1888,4 @@ Key decisions made during development and the reasoning behind them.
 
 ---
 
-*104 native tools + MCP -- 27 scanners -- 13 runbooks -- 83 PromQL recipes -- 192 eval scenarios -- 2,695 tests -- Protocol v2*
+*107 native tools + MCP -- 27 scanners -- 13 runbooks -- 83 PromQL recipes -- 192 eval scenarios -- 3,295 tests -- Protocol v2*
