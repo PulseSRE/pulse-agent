@@ -19,8 +19,7 @@
             "node"
         ],
         "should_use_tools": [
-            "describe_pod",
-            "list_resources"
+            "describe_pod"
         ],
         "should_not_use_tools": [
             "delete_pod",

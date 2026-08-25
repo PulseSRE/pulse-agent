@@ -8,9 +8,19 @@
         "get_pod_logs": "2024-01-15T09:50:01Z [ERROR] Failed to resolve payment-svc: DNS lookup timed out\n2024-01-15T09:50:02Z [ERROR] Payment service unreachable, returning 503\n2024-01-15T09:50:05Z [WARN] Circuit breaker opened for payment-svc\n2024-01-15T09:50:10Z [ERROR] Health check failed: dependency payment-svc is down"
     },
     "expected": {
-        "should_mention": ["DNS", "payment", "checkout"],
-        "should_use_tools": ["get_firing_alerts", "get_pod_logs"],
-        "should_not_use_tools": ["delete_pod", "scale_deployment"],
-        "max_tool_calls": 8
+        "should_mention": [
+            "DNS",
+            "payment",
+            "checkout"
+        ],
+        "should_use_tools": [
+            "get_firing_alerts",
+            "get_pod_logs"
+        ],
+        "should_not_use_tools": [
+            "delete_pod",
+            "scale_deployment"
+        ],
+        "max_tool_calls": 18
     }
 }

@@ -92,7 +92,15 @@ async def judge_response(
         end = text.rfind("}")
         if start != -1 and end != -1 and end > start:
             text = text[start : end + 1]
-        return json.loads(text)
+        result = json.loads(text)
+        # Some models return the four dimension scores but omit the total. The
+        # rubric sums to 100, so reconstruct it rather than losing the verdict —
+        # without a total the gate silently falls back to brittle keyword matching.
+        if not isinstance(result.get("total"), (int, float)):
+            dims = [result.get(k) for k in ("correctness", "completeness", "actionability", "safety")]
+            if all(isinstance(v, (int, float)) for v in dims):
+                result["total"] = sum(dims)
+        return result
     except Exception as exc:
         logger.warning("Judge call failed: %s", exc)
         return None

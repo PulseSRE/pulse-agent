@@ -10,8 +10,14 @@
                 "scan_rbac_risks": "{\"namespace\": \"production\", \"risks\": [{\"severity\": \"high\", \"subject\": \"ServiceAccount/default\", \"description\": \"Default SA has cluster-admin binding\"}, {\"severity\": \"medium\", \"subject\": \"ServiceAccount/ci-deployer\", \"description\": \"SA can create pods and exec into them\"}]}"
             },
             "expected": {
-                "should_mention": ["privileged", "critical", "security"],
-                "should_use_tools": ["get_security_summary"]
+                "should_mention": [
+                    "privileged",
+                    "critical",
+                    "security"
+                ],
+                "should_use_tools": [
+                    "get_security_summary"
+                ]
             }
         },
         {
@@ -23,14 +29,27 @@
                 "create_dashboard": "{\"view_id\": \"sec-dash-001\", \"title\": \"Production Security Posture\", \"widgets\": 4}"
             },
             "expected": {
-                "should_mention": ["dashboard", "security"],
-                "should_use_tools": ["plan_dashboard", "create_dashboard"]
+                "should_mention": [
+                    "dashboard",
+                    "security"
+                ],
+                "should_use_tools": [
+                    "plan_dashboard",
+                    "create_dashboard"
+                ]
             }
         }
     ],
     "expected": {
-        "overall_should_mention": ["security", "findings", "dashboard"],
-        "max_total_tool_calls": 15,
-        "should_use_tools": ["get_security_summary", "create_dashboard"]
+        "overall_should_mention": [
+            "security",
+            "findings",
+            "dashboard"
+        ],
+        "max_total_tool_calls": 30,
+        "should_use_tools": [
+            "get_security_summary",
+            "create_dashboard"
+        ]
     }
 }

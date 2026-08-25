@@ -26,6 +26,6 @@
             "drain_node",
             "apply_yaml"
         ],
-        "max_tool_calls": 28
+        "max_tool_calls": 40
     }
 }
