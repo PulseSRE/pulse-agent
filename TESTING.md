@@ -122,7 +122,7 @@ python -m sre_agent.evals.weekly_digest_cli --current-days 7 --baseline-days 7 \
 
 ### Coverage
 
-3,295 pytest tests across 171 test files in `tests/`. Major coverage areas:
+3,319 pytest tests across 172 test files in `tests/`. Major coverage areas:
 
 | Area | Test files | What they cover |
 |------|-----------|-----------------|

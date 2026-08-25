@@ -2,6 +2,28 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## v2.27.0 (2026-08-25)
+
+### Nothing the agent wrote at runtime survived a restart
+- Skills created with `create_skill`, scaffolded from a verified trajectory, or refined in place by the learning flywheel were written to `PULSE_AGENT_USER_SKILLS_DIR` (default `/tmp/pulse_agent/skills`) or into the installed package directory. Verified on the live pod: both are the container's overlay filesystem, the only PVC is mounted at `/memory` and sits empty, and no env var points skills anywhere durable. Every restart, deploy and reschedule erased them
+- The same was true of three more things: plan templates (the `PUT /plan-templates` handler rewrites YAML *inside the installed package*, so an operator's edit survived until the next rollout), scaffolded eval scenarios and replay fixtures (losing the eval loses the proof that the skill scaffolded beside it still works), and the `.versions/` directory that was supposed to make a skill edit reversible and was as ephemeral as the skill itself
+- This silently broke half the learning flywheel. `learning_candidates` (migration 033) fixed exactly this bug class for the *input* to learning — the skill it produces was still thrown away. A skill could be scaffolded from a verified trajectory, refined to v2 and v3 by later cases, and vanish on the next rollout with nothing recording that it had existed
+- Migration 036 adds `runtime_artifacts` + `runtime_artifact_versions`. The four are the same shape — a named text document with a version — so they share one table rather than four near-identical ones. `artifact_store` writes through on every change and replays the table onto disk at startup, before the loaders scan. `skill_loader` and `plan_templates` are untouched: the filesystem is still the read path, the table is the durable copy beside it
+- Hydration never clobbers a file already on disk (a bundled skill is the image's to define) and refuses a `rel_path` that escapes its root — the store writes to the filesystem from database content, which is a real injection surface
+
+### Plans can be created, and are versioned like skills
+- Plans could be edited and deleted but never created: a new incident type meant editing repo YAML and cutting a release. `POST /plan-templates` creates one, validating phase ids and skill names, and carrying each phase's `produces` contract so `phase_judge` can check the phase returned what it promised
+- Every write archives the prior body, so a plan edit is reversible for the first time. `GET /plan-templates/{type}/versions` returns the history. `DELETE` drops the durable copy too — otherwise the next boot would faithfully restore what was just deleted, and history is kept so it stays recoverable
+- The UI gains a create form with repeatable phase rows, mirroring the server's `incident_type` validation client-side so the error arrives while typing rather than as a 400, and a History toggle on the plan drawer
+
+### Why a plan phase went partial, not just that it did
+- `phase_judge` computes exactly which declared `produces` fields a phase failed to return, and `plan_runtime` retries with the gap named — then `_record_execution` threw the answer away, persisting `evidence_length` (a character count) and dropping the field names. The Plans tab could render "3 partial" and never answer "partial because diagnose never produced root_cause"
+- `contract_missing` is now carried on `SkillOutput`, persisted per phase, aggregated across the window by `/analytics/plans`, and rendered beneath the phase breakdown next to the `Produces:` declaration it is the counterpart to
+
+### A write that reported success and did nothing
+- `artifact_store.persist` and `forget` never called `db.commit`. `Database.execute` keeps its connection checked out until commit, so every write was silently discarded and the connection leaked — a skill would report as persisted and be gone on the next restart, which is the bug this release exists to fix, reintroduced one layer down
+- The mocked tests could not catch it: they assert the SQL, which is not the same as asserting the effect. Found by running the store against Postgres while verifying the migration path before release, and now covered by tests that use a real database rather than a mock
+
 ## v2.26.1 (2026-08-25)
 
 ### The deny policy did not cover the unattended path

@@ -1888,4 +1888,4 @@ Key decisions made during development and the reasoning behind them.
 
 ---
 
-*107 native tools + MCP -- 27 scanners -- 13 runbooks -- 83 PromQL recipes -- 192 eval scenarios -- 3,295 tests -- Protocol v2*
+*107 native tools + MCP -- 27 scanners -- 13 runbooks -- 83 PromQL recipes -- 192 eval scenarios -- 3,319 tests -- Protocol v2*
