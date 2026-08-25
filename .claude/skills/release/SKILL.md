@@ -1,7 +1,7 @@
 ---
 name: release
 description: |
-  Automate the full Pulse release process across both repos (pulse-agent + OpenshiftPulse).
+  Automate the full Pulse release process across pulse-agent + pulse-ui (and pulse-operator, which versions separately).
   Use this skill when the user says "release", "cut a release", "bump version", "ship it",
   "prepare release", "release v2.x.x", or anything about creating a new version. Also use
   when they ask to "update version numbers", "tag a release", or "publish a new version".
@@ -10,8 +10,9 @@ description: |
 
 # Pulse Release
 
-Coordinates a release across both repos (pulse-agent + OpenshiftPulse) with a single
-version number. Every release must pass all gates before shipping.
+Coordinates a release across pulse-agent + pulse-ui with a single version number.
+pulse-operator versions on its own 0.x line and is released separately — see
+its README section on Versioning for why. Every release must pass all gates before shipping.
 
 **Key rule:** Capture ALL scores and counts into a structured summary. Every phase appends
 to a running report that becomes the GitHub release body.
@@ -46,9 +47,9 @@ mypy sre_agent/ --ignore-missing-imports 2>&1 | tail -1
 python3 -m pytest tests/ --tb=no -q 2>&1 | tail -1
 ```
 
-**Frontend (OpenshiftPulse):**
+**Frontend (pulse-ui):**
 ```bash
-cd /Users/amobrem/ali/OpenshiftPulse
+cd /Users/alimobrem/apps/Pulse/pulse-ui
 npx tsc --noEmit 2>&1 | tail -1
 npx vitest run 2>&1 | grep -E "(Test Files|Tests)" | head -2
 ```
@@ -228,7 +229,7 @@ git log --oneline $LAST_TAG..HEAD --grep="docs:" --format="- %s"
 
 Prepend this to `CHANGELOG.md`.
 
-**Step 4d: Frontend docs (OpenshiftPulse)** -- same process.
+**Step 4d: Frontend docs (pulse-ui)** -- same process.
 
 **Step 4e: Update GitHub Pages** (both repos' `docs/index.html`).
 
@@ -245,8 +246,8 @@ make release VERSION=<version>
 
 **Frontend:**
 ```bash
-cd /Users/amobrem/ali/OpenshiftPulse
-npm version <version> --no-git-tag-version
+cd /Users/alimobrem/apps/Pulse/pulse-ui
+pnpm version <version> --no-git-tag-version
 git add package.json
 git commit -m "chore: bump UI version to <version>"
 ```
@@ -257,7 +258,7 @@ git commit -m "chore: bump UI version to <version>"
 
 ```bash
 git push && git push --tags
-cd /Users/amobrem/ali/OpenshiftPulse && git tag "v<version>" && git push && git push --tags
+cd /Users/alimobrem/apps/Pulse/pulse-ui && git tag "v<version>" && git push && git push --tags
 ```
 
 ---
@@ -281,7 +282,7 @@ else:
 "
 
 # Wait for frontend CI
-cd /Users/amobrem/ali/OpenshiftPulse
+cd /Users/alimobrem/apps/Pulse/pulse-ui
 gh run list --limit 1 --json status,conclusion,name | python3 -c "
 import json, sys
 runs = json.load(sys.stdin)
@@ -345,7 +346,7 @@ Replace ALL placeholders with actual captured values, then create releases:
 
 ```bash
 gh release create "v<version>" --title "Pulse Agent v<version>" --notes-file /tmp/release-notes.md
-cd /Users/amobrem/ali/OpenshiftPulse
+cd /Users/alimobrem/apps/Pulse/pulse-ui
 gh release create "v<version>" --title "OpenShift Pulse v<version>" --notes-file /tmp/release-notes.md
 ```
 
@@ -353,13 +354,24 @@ gh release create "v<version>" --title "OpenShift Pulse v<version>" --notes-file
 
 ### Phase 9: Deploy + E2E
 
+Deployment is owned by the Pulse Operator (installed via OLM). There is no
+deploy.sh any more — the agent version a cluster runs is `spec.agent.image` on
+the OpenShiftPulse CR, and patching the Deployment directly is reverted by the
+operator's reconcile loop.
+
 ```bash
-cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh
+oc patch openshiftpulse pulse -n openshiftpulse --type=merge \
+  -p '{"spec":{"agent":{"image":"quay.io/amobrem/pulse-agent:v<version>"}}}'
+oc rollout status deploy/pulse-openshift-sre-agent -n openshiftpulse --timeout=300s
 ```
 
-Verify agent reports the new version. Run integration tests if available:
+Do not patch before the tag's **Build & Push Images** run has completed — the
+image tag will not exist yet and the rollout will sit in ImagePullBackOff.
+
+Verify the running agent reports the new version:
 ```bash
-cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/integration-test.sh --namespace openshiftpulse
+oc exec -n openshiftpulse deploy/pulse-openshift-sre-agent -- \
+  python3 -c "from importlib.metadata import version; print(version('openshift-sre-agent'))"
 ```
 
 Smoke test: load app, chat response, resource browser, custom views.
