@@ -56,6 +56,11 @@ class SkillOutput:
     open_questions: list[str] = field(default_factory=list)
     risk_flags: list[str] = field(default_factory=list)
     confidence: float = 0.0
+    # Fields the phase declared in `produces` but did not return (phase_judge).
+    # Kept structurally rather than only as a note inside evidence_summary,
+    # because the reason a phase went partial is the part an operator needs and
+    # was the part being dropped at the persistence boundary.
+    contract_missing: list[str] = field(default_factory=list)
 
 
 @dataclass

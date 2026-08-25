@@ -633,6 +633,25 @@ async def delete_plan_template(incident_type: str, _auth=Depends(verify_token)):
     return {"status": "deleted", "incident_type": incident_type}
 
 
+def _as_list(value: object) -> list[str]:
+    """Normalise a jsonb aggregate to a list of strings.
+
+    The driver may hand back jsonb as a decoded list or as raw text depending
+    on how the connection is configured; accept both rather than depend on it.
+    """
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    if isinstance(value, str) and value:
+        import json as _json
+
+        try:
+            parsed = _json.loads(value)
+        except ValueError:
+            return []
+        return [str(v) for v in parsed] if isinstance(parsed, list) else []
+    return []
+
+
 @router.get("/analytics/plans")
 async def plan_analytics(
     days: int = Query(30, ge=1, le=365),
@@ -681,6 +700,10 @@ async def plan_analytics(
                     "status": r["phase_status"],
                     "count": r["count"],
                     "avg_confidence": round(float(r["avg_confidence"] or 0), 2),
+                    # Contract fields this phase declared in `produces` and did
+                    # not return. Empty for healthy phases; the reason a phase
+                    # shows as partial, which until now was never persisted.
+                    "contract_missing": _as_list(r.get("contract_missing")),
                 }
             )
 

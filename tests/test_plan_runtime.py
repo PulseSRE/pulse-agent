@@ -227,3 +227,49 @@ class TestPhasePrompt:
         assert "triage" in prompt
         assert "web-1" in prompt
         assert "Prior" not in prompt
+
+
+class TestContractMissingIsPersisted:
+    """The reason a phase went partial must survive to where it can be seen.
+
+    phase_judge computes exactly which declared `produces` fields a phase
+    failed to return, and plan_runtime notes it and retries with the gap
+    named — but _record_execution used to persist only `evidence_length`, a
+    character count, and drop the field names entirely. The UI could show
+    "3 partial" and never answer "partial because diagnose never produced
+    root_cause".
+    """
+
+    def test_skill_output_carries_missing_fields(self):
+        from sre_agent.skill_plan import SkillOutput
+
+        out = SkillOutput(skill_id="sre", phase_id="diagnose")
+        assert out.contract_missing == []
+        out.contract_missing = ["root_cause", "confidence"]
+        assert out.contract_missing == ["root_cause", "confidence"]
+
+    def test_phase_details_include_the_missed_fields(self):
+        """_record_execution serialises contract_missing alongside status."""
+        import json
+        from unittest.mock import MagicMock, patch
+
+        from sre_agent.plan_runtime import PlanRuntime
+        from sre_agent.skill_plan import PlanResult, SkillOutput, SkillPlan
+
+        partial = SkillOutput(skill_id="sre", phase_id="diagnose", status="partial")
+        partial.contract_missing = ["root_cause"]
+        healthy = SkillOutput(skill_id="sre", phase_id="triage", status="complete")
+
+        result = PlanResult(plan_id="p1", plan_name="Crashloop", status="partial")
+        result.phase_outputs = {"diagnose": partial, "triage": healthy}
+        plan = SkillPlan(id="p1", name="Crashloop", incident_type="crashloop")
+
+        repo = MagicMock()
+        with patch("sre_agent.repositories.get_monitor_repo", return_value=repo):
+            PlanRuntime()._record_execution(plan, result, {"id": "f1"})
+
+        assert repo.record_plan_execution.called
+        details = json.loads(repo.record_plan_execution.call_args.kwargs["phase_details_json"])
+        by_phase = {d["phase_id"]: d for d in details}
+        assert by_phase["diagnose"]["contract_missing"] == ["root_cause"]
+        assert by_phase["triage"]["contract_missing"] == []

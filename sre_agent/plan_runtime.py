@@ -303,6 +303,7 @@ class PlanRuntime:
 
         if not verdict.satisfied:
             # Downgrade rather than silently passing an unmet contract downstream.
+            output.contract_missing = list(verdict.missing)
             if output.status == "complete":
                 output.status = "partial"
             note = f"[contract unmet: {verdict.reason}]"
@@ -578,6 +579,10 @@ class PlanRuntime:
                         "confidence": out.confidence,
                         "tools_used": out.actions_taken[:5],
                         "evidence_length": len(out.evidence_summary) if out.evidence_summary else 0,
+                        # Why the phase went partial, not just that it did. Without
+                        # this the UI can show "3 partial" and never answer "partial
+                        # because the diagnose phase never produced root_cause".
+                        "contract_missing": out.contract_missing,
                     }
                 )
 

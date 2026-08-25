@@ -761,8 +761,15 @@ class MonitorRepository(BaseRepository):
             "phase->>'phase_id' as phase_id, "
             "phase->>'status' as phase_status, "
             "COUNT(*) as count, "
-            "AVG((phase->>'confidence')::float) as avg_confidence "
+            "AVG((phase->>'confidence')::float) as avg_confidence, "
+            # The distinct contract fields this phase failed to produce, across
+            # the window. A phase that goes partial for the same missing field
+            # every time is a broken contract; one that varies is a flaky phase.
+            "COALESCE(jsonb_agg(DISTINCT m.field) FILTER (WHERE m.field IS NOT NULL), '[]'::jsonb) "
+            "  as contract_missing "
             "FROM plan_executions, jsonb_array_elements(phase_details) as phase "
+            "LEFT JOIN LATERAL jsonb_array_elements_text("
+            "  COALESCE(phase->'contract_missing', '[]'::jsonb)) as m(field) ON TRUE "
             "WHERE timestamp > NOW() - INTERVAL '%s days' "
             "GROUP BY template_name, phase->>'phase_id', phase->>'status' "
             "ORDER BY template_name, phase_id",
