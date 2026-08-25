@@ -68,9 +68,19 @@ the reviewable, controller-managed path to replacing a pod, so routine
 remediation is unaffected. A denied call returns a `ToolError` naming the policy
 and the sanctioned alternative rather than a bare refusal.
 
-Coverage: `tests/test_policy.py`, plus the deterministic SRE-Bench sim gate in
-CI, which exercises both rules against destructive-request fixtures with
-backend-observed flags.
+**Both write paths are covered.** Chat and view-action calls are checked in
+`agent._execute_tool`; the monitor's autonomous auto-fix does not go through
+that choke point (it dispatches via `monitor/fix_planner.execute_fix` and calls
+the Kubernetes API directly), so the same policy is applied there against the
+tool each strategy is equivalent to — `restart_controller` deletes a pod, so it
+is evaluated as `delete_pod`. Without that second call site the supervised path
+would have been guarded while the unsupervised one stayed open, which is the
+wrong way round.
+
+Coverage: `tests/test_policy.py` (both paths, and that non-protected namespaces
+still auto-fix), plus the deterministic SRE-Bench sim gate in CI, which
+exercises both rules against destructive-request fixtures with backend-observed
+flags.
 
 ## Auto-fix Safety
 

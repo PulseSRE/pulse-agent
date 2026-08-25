@@ -225,14 +225,46 @@ def default_fix_plan(category: str, finding: dict) -> FixPlan | None:
     )
 
 
+# The tool each mutating strategy is equivalent to, for deny-policy purposes.
+# The auto-fix path does not go through agent._execute_tool — it dispatches
+# here and calls the K8s API directly — so without this mapping the harness
+# deny policy would cover the supervised chat path while leaving the
+# *unsupervised* one wide open, which is the wrong way round.
+_STRATEGY_POLICY_TOOLS: dict[str, str] = {
+    "restart_controller": "delete_pod",
+    "patch_image": "restart_deployment",
+    "patch_resources": "restart_deployment",
+}
+
+
 def execute_fix(plan: FixPlan) -> tuple[str, str, str]:
     """Execute a targeted fix plan. Returns (tool_name, before_state, after_state).
 
-    Raises ValueError for unknown strategies.
+    Raises ValueError for unknown strategies. Returns a ``blocked`` result when
+    the harness deny policy refuses the equivalent tool.
     """
     executor = _EXECUTORS.get(plan.strategy)
     if not executor:
         raise ValueError(f"No executor for strategy: {plan.strategy}")
+
+    policy_tool = _STRATEGY_POLICY_TOOLS.get(plan.strategy)
+    if policy_tool:
+        from ..policy import check_write_policy
+
+        _resource, namespace = _get_first_resource(plan)
+        denied = check_write_policy(policy_tool, {"namespace": namespace, "name": _resource.get("name", "")})
+        if denied is not None:
+            logger.warning(
+                "Auto-fix blocked by deny policy: strategy=%s tool=%s namespace=%s",
+                plan.strategy,
+                policy_tool,
+                namespace,
+            )
+            return (
+                "blocked",
+                f"{policy_tool} in {namespace}",
+                f"Blocked by policy — {denied.message}",
+            )
 
     logger.info(
         "Intelligent fix: strategy=%s cause=%s confidence=%.2f",
