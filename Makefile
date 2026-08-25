@@ -41,7 +41,7 @@ evals:
 # THE RELEASE GATE — runs the real model against recorded cluster state.
 eval-gate:
 	@echo "Running live judged replay (costs API calls)..."
-	python3 -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 --concurrency 4 --judge-min 60 \
+	python3 -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-5 --concurrency 4 --judge-min 60 --judge-samples 3 \
 		--baseline sre_agent/evals/baselines/replay.json
 
 evals-full: evals
@@ -105,7 +105,7 @@ clean:
 release:
 	@test -n "$(VERSION)" || (echo "Usage: make release VERSION=x.y.z" && exit 1)
 	@echo "Running release gate (live judged replay)..."
-	python3 -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 || (echo "Release gate failed — aborting release" && exit 1)
+	python3 -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-5 --judge-samples 3 || (echo "Release gate failed — aborting release" && exit 1)
 	./scripts/bump-version.sh $(VERSION)
 	python3 -m sre_agent.evals.cli --suite release --save-baseline
 	git add pyproject.toml README.md
