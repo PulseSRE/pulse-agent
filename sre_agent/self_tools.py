@@ -392,6 +392,11 @@ def create_skill(
         skill_dir.mkdir(parents=True, exist_ok=True)
         skill_file = skill_dir / "skill.md"
         skill_file.write_text(content, encoding="utf-8")
+        # Write through to the durable store. The filesystem copy is what
+        # skill_loader reads; this is what survives the pod (see skill_store).
+        from .skill_store import persist_skill
+
+        persist_skill(name, content)
     except OSError as e:
         return f"Error: failed to write skill to {skill_dir}: {e}. The filesystem may be read-only."
 
@@ -499,6 +504,11 @@ def edit_skill(name: str, content: str):
 
     # Write new content
     skill_file.write_text(content, encoding="utf-8")
+    # Write through to the durable store. The filesystem copy is what
+    # skill_loader reads; this is what survives the pod (see skill_store).
+    from .skill_store import persist_skill
+
+    persist_skill(name, content)
 
     # Hot-reload
     skills = reload_skills()
@@ -655,6 +665,11 @@ def create_skill_from_template(
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_file = skill_dir / "skill.md"
     skill_file.write_text(content, encoding="utf-8")
+    # Write through to the durable store. The filesystem copy is what
+    # skill_loader reads; this is what survives the pod (see skill_store).
+    from .skill_store import persist_skill
+
+    persist_skill(name, content)
 
     # Hot-reload
     skills = reload_skills()

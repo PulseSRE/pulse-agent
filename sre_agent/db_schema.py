@@ -682,3 +682,35 @@ CREATE TABLE IF NOT EXISTS learning_candidates (
 CREATE INDEX IF NOT EXISTS idx_learning_candidates_key ON learning_candidates(candidate_key, status);
 CREATE INDEX IF NOT EXISTS idx_learning_candidates_status ON learning_candidates(status);
 """
+
+
+USER_SKILLS_SCHEMA = """
+-- Skills created or refined at runtime, so they outlive the pod that made them.
+--
+-- Skill definitions were written only to the filesystem: create_skill/edit_skill
+-- to PULSE_AGENT_USER_SKILLS_DIR (default /tmp/pulse_agent/skills), the
+-- scaffolder into the installed package directory. Both are the container's
+-- overlay filesystem, so every restart, deploy and reschedule erased them.
+--
+-- That silently broke the half of the learning flywheel this table's sibling
+-- already fixed. learning_candidates (migration 033) made the *input* to
+-- learning durable, while the skill it produces was still thrown away. A skill could
+-- be scaffolded from a verified trajectory, refined to v2 and v3 by later
+-- cases, and be gone on the next rollout with nothing recording that it existed.
+--
+-- The filesystem stays the read path — skill_loader scans directories and is
+-- unchanged. This table is the durable copy: written through on every create,
+-- edit and refinement, and replayed into the skills directory at startup.
+CREATE TABLE IF NOT EXISTS user_skills (
+    name          TEXT PRIMARY KEY,
+    dir_name      TEXT NOT NULL,
+    content       TEXT NOT NULL,
+    source        TEXT NOT NULL DEFAULT 'user',
+    version       INTEGER NOT NULL DEFAULT 1,
+    created_by    TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_skills_source ON user_skills(source);
+"""

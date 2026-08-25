@@ -277,6 +277,11 @@ def save_scaffolded_skill(skill_content: str, skill_name: str) -> str | None:
 
         skill_path = skills_dir / "skill.md"
         skill_path.write_text(skill_content, encoding="utf-8")
+        # Scaffolded skills land in the installed package directory, which is
+        # the container image layer — gone on the next rollout without this.
+        from .skill_store import persist_skill
+
+        persist_skill(skill_name, skill_content, source="scaffolded")
 
         logger.info("Scaffolded new skill: %s", skill_path)
         return str(skill_path)

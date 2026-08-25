@@ -103,6 +103,16 @@ async def lifespan(app: FastAPI):
     _mcp_shutdown.clear()
     mcp_task = None
     try:
+        # Replay persisted skills onto disk before loading. Runtime-created and
+        # scaffolded skills live on the container's overlay filesystem, so
+        # without this every restart silently discards them (see skill_store).
+        try:
+            from ..skill_store import hydrate_skills_dir
+
+            hydrate_skills_dir()
+        except Exception:
+            logger.warning("Could not restore persisted skills", exc_info=True)
+
         from ..skill_loader import load_skills
 
         skills = load_skills()

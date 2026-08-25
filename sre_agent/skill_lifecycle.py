@@ -104,10 +104,14 @@ def refine_skill(skill, candidate) -> str | None:
     body = _append_case(body, candidate)
 
     try:
-        skill_file.write_text(
-            f"---\n{yaml.dump(meta, default_flow_style=False, sort_keys=False)}---{body}",
-            encoding="utf-8",
-        )
+        refined = f"---\n{yaml.dump(meta, default_flow_style=False, sort_keys=False)}---{body}"
+        skill_file.write_text(refined, encoding="utf-8")
+        # A refinement is the flywheel's output. Persisting the candidate that
+        # produced it (migration 033) but not the skill itself meant the
+        # learning was erased by the next rollout.
+        from .skill_store import persist_skill
+
+        persist_skill(skill.name, refined, source="refined")
     except Exception:
         logger.warning("Failed to write refined skill '%s'", skill.name, exc_info=True)
         return None

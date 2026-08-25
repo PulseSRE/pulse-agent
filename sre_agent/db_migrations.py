@@ -259,6 +259,13 @@ def _migrate_034_action_snapshots(db: Database) -> None:
     db.execute("ALTER TABLE actions ADD COLUMN IF NOT EXISTS before_snapshot TEXT")
 
 
+def _migrate_035_user_skills(db: Database) -> None:
+    """Create user_skills — runtime-created skills that survive a restart."""
+    from .db_schema import USER_SKILLS_SCHEMA
+
+    db.executescript(USER_SKILLS_SCHEMA)
+
+
 # Open statuses, spelled the same way the inbox module does.
 _OPEN_STATUSES = "('new', 'triaged', 'claimed', 'in_progress', 'agent_reviewing')"
 
@@ -498,4 +505,5 @@ MIGRATIONS = [
     (32, "cluster_memory", _migrate_032_cluster_memory),
     (33, "learning_candidates", _migrate_033_learning_candidates),
     (34, "action_snapshots", _migrate_034_action_snapshots),
+    (35, "user_skills", _migrate_035_user_skills),
 ]
