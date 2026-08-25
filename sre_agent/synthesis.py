@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger("pulse_agent.synthesis")
 
-SYNTHESIS_MODEL = "claude-sonnet-4-6"
+SYNTHESIS_MODEL = "claude-sonnet-5"
 
 
 @dataclass
@@ -145,7 +145,7 @@ async def synthesize_parallel_outputs(
                 system=_SYNTHESIS_SYSTEM,
                 messages=[{"role": "user", "content": user_content}],
             )
-            raw_text = response.content[0].text
+            raw_text = next((b.text for b in response.content if getattr(b, "text", None) is not None), "")
 
         clean_text, conflicts = _parse_conflicts(raw_text)
 

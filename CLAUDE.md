@@ -257,7 +257,7 @@ Deployment is owned by the [Pulse Operator](https://github.com/PulseSRE/pulse-op
 | `ANTHROPIC_VERTEX_PROJECT_ID` | GCP project for Vertex AI | required* |
 | `CLOUD_ML_REGION` | GCP region | required* |
 | `ANTHROPIC_API_KEY` | Direct Anthropic API key | required* |
-| `PULSE_AGENT_MODEL` | Claude model | `claude-opus-4-6` |
+| `PULSE_AGENT_MODEL` | Claude model | `claude-sonnet-5` |
 | `PULSE_AGENT_MULTI_SKILL` | Enable parallel multi-skill routing | `true` |
 | `PULSE_AGENT_MULTI_SKILL_MAX` | Max concurrent skills | `2` |
 | `PULSE_AGENT_MULTI_SKILL_THRESHOLD` | ORCA score gap for multi-skill activation | `0.15` |

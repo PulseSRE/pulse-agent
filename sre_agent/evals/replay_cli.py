@@ -50,8 +50,8 @@ def _make_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--model",
-        default="claude-sonnet-4-6",
-        help="Model for the agent (default: claude-sonnet-4-6).",
+        default="claude-sonnet-5",
+        help="Model for the agent (default: claude-sonnet-5).",
     )
     p.add_argument(
         "--dry-run",
@@ -300,7 +300,7 @@ def _apply_judge_gate(score: dict, judge: dict | None, judge_min: int | None) ->
 def _run_fixture(
     name: str,
     use_judge: bool = False,
-    model: str = "claude-sonnet-4-6",
+    model: str = "claude-sonnet-5",
     dry_run: bool = False,
     judge_min: int | None = None,
     stub_config: bool = False,

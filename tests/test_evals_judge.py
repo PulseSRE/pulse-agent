@@ -133,7 +133,7 @@ class TestJudgeResponse:
 
         await judge_response("q", "a", ["t"], client=client)
         call_kwargs = client.messages.create.call_args[1]
-        assert call_kwargs["model"] == "claude-sonnet-4-6"
+        assert call_kwargs["model"] == "claude-sonnet-5"
 
     @pytest.mark.asyncio
     async def test_custom_model(self):

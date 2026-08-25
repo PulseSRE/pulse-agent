@@ -325,7 +325,7 @@ def _llm_classify(query: str):
         with borrow_client() as client:
             skill_options = "\n".join(f"- {s.name}: {s.description}" for s in skills.values())
             response = client.messages.create(
-                model="claude-sonnet-4-6",
+                model="claude-sonnet-5",
                 max_tokens=20,
                 messages=[
                     {
@@ -340,7 +340,12 @@ def _llm_classify(query: str):
                 ],
             )
 
-        name = response.content[0].text.strip().lower().replace(" ", "_")
+        name = (
+            next((b.text for b in response.content if getattr(b, "text", None) is not None), "")
+            .strip()
+            .lower()
+            .replace(" ", "_")
+        )
         skill = skills.get(name)
         if skill:
             # Cache the result

@@ -301,7 +301,7 @@ def llm_pick_tools(
             tool_list = ", ".join(tool_names)
 
             response = client.messages.create(
-                model="claude-sonnet-4-6",
+                model="claude-sonnet-5",
                 max_tokens=200,
                 messages=[{"role": "user", "content": query}],
                 system=(
@@ -311,7 +311,7 @@ def llm_pick_tools(
                 ),
             )
 
-        raw = response.content[0].text.strip()
+        raw = next((b.text for b in response.content if getattr(b, "text", None) is not None), "").strip()
         valid_set = set(tool_names)
         picked = [t.strip() for t in raw.split(",") if t.strip() in valid_set]
         return picked[:top_k]

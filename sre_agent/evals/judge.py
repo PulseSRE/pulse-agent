@@ -40,7 +40,7 @@ async def judge_response(
     response: str,
     tool_calls: list[str],
     client=None,
-    model: str = "claude-sonnet-4-6",
+    model: str = "claude-sonnet-5",
 ) -> dict | None:
     """Grade an agent response using an LLM judge.
 
@@ -78,15 +78,20 @@ async def judge_response(
     try:
         message = await client.messages.create(
             model=model,
-            max_tokens=1024,
+            max_tokens=2048,
             messages=[{"role": "user", "content": judge_prompt}],
         )
-        text = message.content[0].text.strip()
-        # Strip markdown fences if present
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1]
-            if text.endswith("```"):
-                text = text[: text.rfind("```")]
+        text = next(
+            (b.text for b in message.content if getattr(b, "text", None) is not None),
+            "",
+        ).strip()
+        # Newer models sometimes wrap the JSON in fences or prose. Slice out the
+        # object itself (first "{" to last "}") rather than assuming the whole
+        # reply is bare JSON.
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            text = text[start : end + 1]
         return json.loads(text)
     except Exception as exc:
         logger.warning("Judge call failed: %s", exc)

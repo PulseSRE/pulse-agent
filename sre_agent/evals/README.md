@@ -119,7 +119,7 @@ python -m sre_agent.evals.replay --fixture pod_crashloop   # replay single fixtu
 python -m sre_agent.evals.replay --all                     # replay all fixtures
 python -m sre_agent.evals.replay --all --judge             # replay + LLM judge scoring
 python -m sre_agent.evals.replay --fixture node_pressure --dry-run  # preview without scoring
-python -m sre_agent.evals.replay --model claude-sonnet-4-6     # specify model
+python -m sre_agent.evals.replay --model claude-sonnet-5     # specify model
 ```
 
 ### Weekly Digest

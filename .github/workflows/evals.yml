@@ -194,7 +194,7 @@ jobs:
           # a merely terse one. Content checks drop to advisory when it is set —
           # the judge is a better measure of "did it find the cause" than whether
           # a keyword appears verbatim.
-          python -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-4-6 \
+          python -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-5 \
             --concurrency 4 --judge-min 60 \
             --baseline sre_agent/evals/baselines/replay.json \
             --format json > artifacts/live_judge.json

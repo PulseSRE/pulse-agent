@@ -641,7 +641,7 @@ After writes, call record_audit_entry to log the action.
 
 3. **Run replay fixtures** (needs API key):
    ```bash
-   python -m sre_agent.evals.replay_cli --fixture my_fixture --judge --model claude-sonnet-4-6
+   python -m sre_agent.evals.replay_cli --fixture my_fixture --judge --model claude-sonnet-5
    ```
 
 4. **Test routing** — verify your keywords route correctly:
