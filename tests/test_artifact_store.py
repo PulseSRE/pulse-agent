@@ -105,3 +105,69 @@ class TestKindHelpers:
     def test_source_is_recorded(self, fake_db):
         skill_store.persist_skill("s", "body", source="scaffolded")
         assert fake_db.execute.call_args[0][1][4] == "scaffolded"
+
+
+class TestAgainstARealDatabase:
+    """Exercises the store against Postgres rather than a mock.
+
+    The mocked tests above assert the SQL, which is not the same as asserting
+    the effect. Database.execute keeps its connection checked out until commit,
+    so an uncommitted write is silently discarded — the artifact looks persisted
+    and is gone on the next restart, which is precisely the bug this module
+    exists to fix. Only a real round-trip catches that.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean(self):
+        from sre_agent.db import get_database
+
+        db = get_database()
+        # The pattern goes in a parameter: Database.execute always passes a
+        # params tuple, so a literal % in the SQL is read as a placeholder.
+        db.execute("DELETE FROM runtime_artifacts WHERE name LIKE ?", ("itest\\_%",))
+        db.execute("DELETE FROM runtime_artifact_versions WHERE name LIKE ?", ("itest\\_%",))
+        db.commit()
+        yield
+
+    def test_a_write_is_actually_committed(self):
+        assert artifact_store.persist(KIND_SKILL, "itest_skill", "body", rel_path="itest/skill.md") is True
+        rows = {r["name"]: r for r in artifact_store.list_artifacts(KIND_SKILL)}
+        assert "itest_skill" in rows
+        assert rows["itest_skill"]["content"] == "body"
+        assert rows["itest_skill"]["rel_path"] == "itest/skill.md"
+
+    def test_rewriting_bumps_the_version_and_archives_the_old_body(self):
+        artifact_store.persist(KIND_SKILL, "itest_skill", "v1", rel_path="itest/skill.md")
+        artifact_store.persist(KIND_SKILL, "itest_skill", "v2", rel_path="itest/skill.md")
+        artifact_store.persist(KIND_SKILL, "itest_skill", "v3", rel_path="itest/skill.md")
+
+        current = {r["name"]: r for r in artifact_store.list_artifacts(KIND_SKILL)}["itest_skill"]
+        assert current["version"] == 3
+        assert current["content"] == "v3"
+
+        history = artifact_store.list_versions(KIND_SKILL, "itest_skill")
+        assert [(h["version"], h["content"]) for h in history] == [(2, "v2"), (1, "v1")]
+
+    def test_kinds_do_not_collide_on_the_same_name(self):
+        artifact_store.persist(KIND_SKILL, "itest_shared", "skill body", rel_path="itest/skill.md")
+        artifact_store.persist(KIND_PLAN, "itest_shared", "plan body", rel_path="itest.yaml")
+        skills = {r["name"]: r["content"] for r in artifact_store.list_artifacts(KIND_SKILL)}
+        plans = {r["name"]: r["content"] for r in artifact_store.list_artifacts(KIND_PLAN)}
+        assert skills["itest_shared"] == "skill body"
+        assert plans["itest_shared"] == "plan body"
+
+    def test_retiring_removes_the_current_row_but_keeps_history(self):
+        artifact_store.persist(KIND_SKILL, "itest_gone", "v1", rel_path="itest/skill.md")
+        artifact_store.persist(KIND_SKILL, "itest_gone", "v2", rel_path="itest/skill.md")
+        assert artifact_store.forget(KIND_SKILL, "itest_gone") is True
+
+        names = [r["name"] for r in artifact_store.list_artifacts(KIND_SKILL)]
+        assert "itest_gone" not in names
+        assert artifact_store.list_versions(KIND_SKILL, "itest_gone")
+
+    def test_hydrate_round_trip_restores_what_was_written(self, tmp_path):
+        """The whole point: a write survives into a fresh filesystem."""
+        artifact_store.persist(KIND_SKILL, "itest_round", "restored body", rel_path="itest-round/skill.md")
+        written = artifact_store.hydrate(KIND_SKILL, tmp_path)
+        assert written >= 1
+        assert (tmp_path / "itest-round" / "skill.md").read_text() == "restored body"

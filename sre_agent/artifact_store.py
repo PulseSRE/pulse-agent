@@ -91,6 +91,11 @@ def persist(
             "  updated_at = NOW()",
             (kind, name, rel_path, content, source, created_by),
         )
+        # Database.execute keeps the connection checked out until commit, so
+        # without this the write is discarded and the connection leaks — the
+        # artifact would look persisted and be gone on the next restart, which
+        # is the exact failure this module exists to fix.
+        db.commit()
         return True
     except Exception:
         logger.warning("Failed to persist %s '%s' — it will not survive a restart", kind, name, exc_info=True)
@@ -108,6 +113,7 @@ def forget(kind: str, name: str) -> bool:
         return False
     try:
         db.execute("DELETE FROM runtime_artifacts WHERE kind = ? AND name = ?", (kind, name))
+        db.commit()
         return True
     except Exception:
         logger.warning("Failed to retire %s '%s'", kind, name, exc_info=True)
