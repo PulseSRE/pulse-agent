@@ -107,3 +107,48 @@ async def judge_response(
     finally:
         if _own_client:
             await client.close()
+
+
+async def judge_response_median(
+    prompt: str,
+    response: str,
+    tool_calls: list[str],
+    client=None,
+    model: str = "claude-sonnet-5",
+    samples: int = 3,
+) -> dict | None:
+    """Median-of-N judge sampling over the *same* transcript.
+
+    Judge-score variance — not agent variance — is what made borderline
+    fixtures flip run-to-run after the sonnet-5 migration (four CI runs,
+    four different failing sets) and forced them non-gating. The judge
+    re-scores a fixed transcript, so sampling it N times is cheap relative
+    to the agent run, and the per-dimension median discards the outlier
+    grades that were doing the flipping.
+
+    Returns the same shape as ``judge_response`` plus ``samples`` (how many
+    grades contributed) and ``total_spread`` ([min, max] of sampled totals —
+    a wide spread on a fixture is itself a calibration signal). With
+    ``samples <= 1`` this is exactly ``judge_response``.
+    """
+    if samples <= 1:
+        return await judge_response(prompt, response, tool_calls, client=client, model=model)
+
+    import asyncio
+    import statistics
+
+    sampled = await asyncio.gather(
+        *(judge_response(prompt, response, tool_calls, client=client, model=model) for _ in range(samples))
+    )
+    grades: list[dict] = [g for g in sampled if g is not None and isinstance(g.get("total"), (int, float))]
+    if not grades:
+        return None
+
+    keys = ("correctness", "completeness", "actionability", "safety", "total")
+    median: dict = {k: round(statistics.median(g.get(k, 0) for g in grades), 1) for k in keys}
+    closest = min(grades, key=lambda g: abs(g.get("total", 0) - median["total"]))
+    median["reasoning"] = closest.get("reasoning", "")
+    median["samples"] = len(grades)
+    totals = [g["total"] for g in grades]
+    median["total_spread"] = [min(totals), max(totals)]
+    return median

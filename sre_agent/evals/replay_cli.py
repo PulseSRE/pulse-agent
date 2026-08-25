@@ -117,6 +117,17 @@ def _make_parser() -> argparse.ArgumentParser:
             "Requires --judge. Content checks become advisory; structure checks still gate."
         ),
     )
+    p.add_argument(
+        "--judge-samples",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Sample the judge N times per fixture and gate on the per-dimension median. "
+            "Judge-score variance flips borderline fixtures run-to-run; the median over "
+            "the same transcript is stable and cheap relative to the agent run."
+        ),
+    )
     return p
 
 
@@ -305,13 +316,16 @@ def _run_fixture(
     judge_min: int | None = None,
     stub_config: bool = False,
     mode: str | None = None,
+    judge_samples: int = 1,
 ) -> dict:
     """Run a single fixture (single-turn or multi-turn) and return the scored result."""
     fixture = load_fixture(name)
 
     # Multi-turn fixture
     if fixture.get("multi_turn"):
-        return _run_multi_turn_fixture(name, fixture, use_judge, model, dry_run, judge_min, stub_config, mode)
+        return _run_multi_turn_fixture(
+            name, fixture, use_judge, model, dry_run, judge_min, stub_config, mode, judge_samples
+        )
 
     harness = ReplayHarness(
         fixture["recorded_responses"],
@@ -340,14 +354,15 @@ def _run_fixture(
     }
 
     if use_judge:
-        from .judge import judge_response
+        from .judge import judge_response_median
 
         judge_result = asyncio.run(
-            judge_response(
+            judge_response_median(
                 prompt=fixture["prompt"],
                 response=result["response"],
                 tool_calls=[tc["name"] for tc in result["tool_calls"]],
                 client=client,
+                samples=judge_samples,
             )
         )
         output["judge"] = judge_result
@@ -365,6 +380,7 @@ def _run_multi_turn_fixture(
     judge_min: int | None = None,
     stub_config: bool = False,
     mode: str | None = None,
+    judge_samples: int = 1,
 ) -> dict:
     """Run a multi-turn fixture."""
     from .replay import MultiTurnReplayHarness
@@ -398,18 +414,19 @@ def _run_multi_turn_fixture(
     }
 
     if use_judge and result["turns"]:
-        from .judge import judge_response
+        from .judge import judge_response_median
 
         # Judge the final turn (most comprehensive answer)
         last = result["turns"][-1]
         all_tools = [tc["name"] for t in result["turns"] for tc in t["tool_calls"]]
         full_prompt = " → ".join(t["prompt"] for t in fixture["turns"])
         judge_result = asyncio.run(
-            judge_response(
+            judge_response_median(
                 prompt=full_prompt,
                 response=last["response"],
                 tool_calls=all_tools,
                 client=client if not dry_run else None,
+                samples=judge_samples,
             )
         )
         output["judge"] = judge_result
@@ -486,6 +503,7 @@ def main() -> None:
                 judge_min=args.judge_min,
                 stub_config=args.stub_config,
                 mode=args.mode,
+                judge_samples=args.judge_samples,
             )
         except Exception as e:
             return {

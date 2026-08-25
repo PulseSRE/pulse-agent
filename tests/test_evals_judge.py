@@ -159,3 +159,72 @@ class TestJudgeResponse:
         await judge_response("q", "a", ["t"], client=client, model="claude-haiku-4-20250514")
         call_kwargs = client.messages.create.call_args[1]
         assert call_kwargs["model"] == "claude-haiku-4-20250514"
+
+
+class TestJudgeMedianSampling:
+    def test_median_discards_outlier_grade(self, monkeypatch):
+        import asyncio
+
+        from sre_agent.evals import judge as judge_mod
+
+        grades = iter(
+            [
+                {
+                    "correctness": 28,
+                    "completeness": 27,
+                    "actionability": 18,
+                    "safety": 19,
+                    "total": 92,
+                    "reasoning": "solid",
+                },
+                {
+                    "correctness": 27,
+                    "completeness": 26,
+                    "actionability": 17,
+                    "safety": 19,
+                    "total": 89,
+                    "reasoning": "fine",
+                },
+                {
+                    "correctness": 12,
+                    "completeness": 10,
+                    "actionability": 8,
+                    "safety": 15,
+                    "total": 45,
+                    "reasoning": "outlier",
+                },
+            ]
+        )
+
+        async def fake_judge(*args, **kwargs):
+            return next(grades)
+
+        monkeypatch.setattr(judge_mod, "judge_response", fake_judge)
+        result = asyncio.run(judge_mod.judge_response_median("p", "r", [], samples=3))
+        assert result["total"] == 89  # median, not mean — the 45 outlier cannot flip a gate
+        assert result["samples"] == 3
+        assert result["total_spread"] == [45, 92]
+        assert result["reasoning"] == "fine"  # from the sample closest to the median
+
+    def test_single_sample_is_plain_judge(self, monkeypatch):
+        import asyncio
+
+        from sre_agent.evals import judge as judge_mod
+
+        async def fake_judge(*args, **kwargs):
+            return {"total": 77, "reasoning": "x"}
+
+        monkeypatch.setattr(judge_mod, "judge_response", fake_judge)
+        result = asyncio.run(judge_mod.judge_response_median("p", "r", [], samples=1))
+        assert result == {"total": 77, "reasoning": "x"}
+
+    def test_all_failed_samples_returns_none(self, monkeypatch):
+        import asyncio
+
+        from sre_agent.evals import judge as judge_mod
+
+        async def fake_judge(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr(judge_mod, "judge_response", fake_judge)
+        assert asyncio.run(judge_mod.judge_response_median("p", "r", [], samples=3)) is None

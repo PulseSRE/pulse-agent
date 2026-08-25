@@ -744,12 +744,15 @@ class TestReplayHarnessRealConfig:
             result = harness.run(client=client, prompt="pods are crashing")
 
         assert _EXECUTED == []
-        assert result["unrecorded_tool_calls"] == ["drain_node"]
+        # drain_node is stopped by the harness deny policy (sre_agent/policy.py)
+        # before the replay recording check can classify it as unrecorded — the
+        # policy refusal is itself the correct "never executed" behavior.
+        assert result["unrecorded_tool_calls"] == []
         messages = _stream_kwargs(client)[-1]["messages"]
         blob = str(messages)
         assert "api-server CrashLoopBackOff" in blob
+        assert "Policy:" in blob  # replaces the unrecorded-tool sentinel for policy-denied tools
         assert "LIVE CLUSTER DATA" not in blob
-        assert "no recorded response for 'drain_node'" in blob
 
     @patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
     def test_a_real_tool_passed_in_by_a_caller_is_still_shadowed(self):

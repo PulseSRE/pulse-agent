@@ -414,7 +414,21 @@ def _execute_tool(
             return f"Error: unknown tool '{name}'", None, meta
         try:
             from .errors import ToolError
+            from .policy import check_write_policy
             from .tool_contracts import execute_with_contract
+
+            # Harness-level deny policy runs after confirmation, before the
+            # call: rules that hold regardless of configured model or what a
+            # chat approver clicked (see sre_agent/policy.py).
+            denied = check_write_policy(name, input_data)
+            if denied is not None:
+                meta = {
+                    "status": "error",
+                    "error_message": denied.message,
+                    "error_category": denied.category,
+                    "result_bytes": len(denied.message),
+                }
+                return str(denied), None, meta
 
             # Write tools with a verification contract get precondition,
             # snapshot, and a scheduled postcondition probe around the call;

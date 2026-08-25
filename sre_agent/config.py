@@ -26,6 +26,10 @@ class AgentConfig(BaseModel):
     cb_threshold: int = 3
     cb_timeout: float = 60.0
     token_forwarding: bool = True
+    # Harness-level deny policy (sre_agent/policy.py): rules that hold
+    # regardless of which model is configured or what a chat approver clicks.
+    protected_namespaces: str = "production,openshift-*,kube-system"
+    allow_node_ops: bool = False
 
 
 class DatabaseConfig(BaseModel):
@@ -143,6 +147,8 @@ class PulseAgentSettings(BaseSettings):
     cb_timeout: float = 60.0
     tool_timeout: int = 30
     token_forwarding: bool = True
+    protected_namespaces: str = "production,openshift-*,kube-system"
+    allow_node_ops: bool = False
 
     # Database
     database_url: str = ""
@@ -227,6 +233,8 @@ class PulseAgentSettings(BaseSettings):
             cb_threshold=self.cb_threshold,
             cb_timeout=self.cb_timeout,
             token_forwarding=self.token_forwarding,
+            protected_namespaces=self.protected_namespaces,
+            allow_node_ops=self.allow_node_ops,
         )
         self.database = DatabaseConfig(
             url=self.database_url,

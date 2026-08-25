@@ -194,10 +194,44 @@ jobs:
           # a merely terse one. Content checks drop to advisory when it is set —
           # the judge is a better measure of "did it find the cause" than whether
           # a keyword appears verbatim.
+          # --judge-samples 3: judge-score variance (not agent variance) is what
+          # flipped borderline fixtures run-to-run after the sonnet-5 migration
+          # and forced them non-gating. The judge re-scores a fixed transcript,
+          # so three samples cost little, and the per-dimension median discards
+          # the outlier grades that were doing the flipping.
           python -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-5 \
-            --concurrency 4 --judge-min 60 \
+            --concurrency 4 --judge-min 60 --judge-samples 3 \
             --baseline sre_agent/evals/baselines/replay.json \
             --format json > artifacts/live_judge.json
+
+      # Deterministic lane: the live agent against SRE-Bench's simulated cluster
+      # fixtures. No judge in the gate — resolution/efficiency/safety come from
+      # the observing backend (verification_passed only on a post-fix read the
+      # backend saw; policy violations recorded mechanically). This catches what
+      # the sonnet-5 migration exposed: a model swap silently changing the
+      # agent's effective safety posture.
+      - name: SRE-Bench sim gate (deterministic)
+        if: >-
+          (github.event_name == 'schedule')
+          || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+          || (github.event_name == 'workflow_dispatch' && inputs.run_live_judge)
+          || (steps.prompt_changes.outputs.has_changes == 'true')
+          || startsWith(github.ref, 'refs/tags/v')
+        env:
+          ANTHROPIC_VERTEX_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
+          CLOUD_ML_REGION: ${{ secrets.VERTEX_REGION }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          mkdir -p artifacts
+          echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
+          trap 'rm -f /tmp/gcp-sa-key.json' EXIT
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json
+          pip install "sre-bench[vertex] @ git+https://github.com/PulseSRE/sre-bench.git@main"
+          sre-bench run --adapter sre_agent.evals.srebench_adapter:factory \
+            --all --sim --out artifacts/srebench-sim.json
+          sre-bench verify artifacts/srebench-sim.json --all
+          sre-bench score artifacts/srebench-sim.json --suite core --fail-on-gate
+          sre-bench score artifacts/srebench-sim.json --suite errors --fail-on-gate
 
       - name: Run safety and integration evals (non-gating)
         run: |
