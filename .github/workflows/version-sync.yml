@@ -1,0 +1,74 @@
+name: Version Sync
+
+# pulse-agent and pulse-ui ship as a pair under one version number. Nothing
+# enforced that, so the UI sat at 2.24.0 through the agent's 2.25.0 and only
+# surfaced weeks later when someone read the two version strings side by side.
+#
+# The operator reports the same invariant at runtime (AgentUIVersionsMatch on
+# the OpenShiftPulse CR), but that only fires once skew is already deployed to a
+# cluster. This is the other half: catch it at the moment it is created.
+#
+# Compares the two repositories' latest *releases* rather than the version
+# fields on main, because a release legitimately bumps one repo seconds before
+# the other — comparing main would fail on that ordering window every time.
+
+on:
+  push:
+    tags: ["v*"]
+  schedule:
+    # Daily. A release that forgets its pair is caught within a day rather than
+    # whenever a human happens to compare two version strings.
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version-sync:
+    name: Agent and UI release versions match
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Compare latest releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          latest() {
+            gh release list -R "$1" -L 20 --json tagName,isDraft,isPrerelease \
+              -q '[.[] | select(.isDraft == false and .isPrerelease == false) | .tagName]
+                  | map(select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))) | first // ""'
+          }
+
+          # On a tag push the paired release may be moments behind. Retry before
+          # failing so normal release ordering does not trip the gate; a genuine
+          # mismatch is still red after the window.
+          for attempt in 1 2 3 4 5 6; do
+            AGENT="$(latest PulseSRE/pulse-agent)"
+            UI="$(latest PulseSRE/pulse-ui)"
+            echo "attempt $attempt: agent=${AGENT:-none} ui=${UI:-none}"
+            if [ -n "$AGENT" ] && [ "$AGENT" = "$UI" ]; then
+              echo "Versions match: $AGENT"
+              echo "- Agent and UI both at \`$AGENT\`" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            [ "$attempt" -lt 6 ] && sleep 60
+          done
+
+          echo "::error::Version skew: pulse-agent is at ${AGENT:-none} but pulse-ui is at ${UI:-none}."
+          {
+            echo "### Version skew"
+            echo ""
+            echo "| Repo | Latest release |"
+            echo "|---|---|"
+            echo "| pulse-agent | \`${AGENT:-none}\` |"
+            echo "| pulse-ui | \`${UI:-none}\` |"
+            echo ""
+            echo "The agent and UI ship as a pair under one version number. Release the"
+            echo "missing half, or if this is deliberate, say so in the release notes and"
+            echo "expect the operator's \`AgentUIVersionsMatch\` condition to flag any"
+            echo "cluster running the pair."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1

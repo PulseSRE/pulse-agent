@@ -393,6 +393,24 @@ next to the agent run, and the median discards the outlier grades. CI and
 `make release` run `--judge-samples 3`. Each fixture reports `total_spread`
 (min/max of the sampled totals) — a wide spread is a calibration signal.
 
+### Version sync
+
+`version-sync.yml` compares the latest published releases of pulse-agent and
+pulse-ui and fails when they differ. The two ship as a pair under one version
+number, and nothing enforced it — the UI sat at 2.24.0 through the agent's
+2.25.0, with both surfaces healthy and every pipeline green, until someone read
+the version strings side by side.
+
+It runs on `v*` tag pushes (retrying for a few minutes, since a release
+legitimately tags one repo before the other), daily on a schedule, and on
+demand. It compares *releases* rather than the version fields on main, so
+normal release ordering does not trip it.
+
+This is the create-time half of the invariant. The deploy-time half lives in the
+operator: `AgentUIVersionsMatch` on the OpenShiftPulse CR compares the two image
+tags a cluster is actually running, which also catches a hand-patched or
+half-completed rollout that CI cannot see.
+
 ### SRE-Bench sim gate (deterministic)
 
 `evals.yml` runs the live agent against [SRE-Bench](https://github.com/PulseSRE/sre-bench)
