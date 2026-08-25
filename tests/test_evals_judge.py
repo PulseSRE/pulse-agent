@@ -228,3 +228,52 @@ class TestJudgeMedianSampling:
 
         monkeypatch.setattr(judge_mod, "judge_response", fake_judge)
         assert asyncio.run(judge_mod.judge_response_median("p", "r", [], samples=3)) is None
+
+
+class TestJudgeUnavailableIsLoud:
+    """A missing judge score must not quietly re-gate on keywords.
+
+    integration_incident_correlation scores 96/100 with a [96, 96] spread, yet
+    failed the release gate: every judge sample returned malformed JSON, the
+    median came back None, and the fixture was then graded on a `mentions`
+    substring that the judge makes advisory. The result looked like a
+    regression and was not one.
+    """
+
+    def test_missing_judge_fails_explicitly(self):
+        from sre_agent.evals.replay_cli import _apply_judge_gate
+
+        score = {
+            "passed": True,
+            "checks": [{"check": "mentions 'configuration'", "passed": False, "kind": "content"}],
+        }
+        out = _apply_judge_gate(score, None, judge_min=60)
+        assert out["passed"] is False
+        judge_checks = [c for c in out["checks"] if c.get("kind") == "judge"]
+        assert judge_checks and "unavailable" in judge_checks[0]["check"]
+
+    def test_judge_without_threshold_is_untouched(self):
+        from sre_agent.evals.replay_cli import _apply_judge_gate
+
+        score = {"passed": True, "checks": []}
+        assert _apply_judge_gate(score, None, judge_min=None) == score
+
+    def test_median_retries_once_when_every_sample_fails(self, monkeypatch):
+        import asyncio
+
+        from sre_agent.evals import judge as judge_mod
+
+        calls = {"n": 0}
+
+        async def flaky(*args, **kwargs):
+            calls["n"] += 1
+            # First round (3 samples) all fail; the retry round succeeds.
+            if calls["n"] <= 3:
+                return None
+            return {"total": 91, "correctness": 28, "reasoning": "ok"}
+
+        monkeypatch.setattr(judge_mod, "judge_response", flaky)
+        result = asyncio.run(judge_mod.judge_response_median("p", "r", [], samples=3))
+        assert result is not None
+        assert result["total"] == 91
+        assert calls["n"] == 6  # one failed round, one retry round

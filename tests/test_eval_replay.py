@@ -423,9 +423,16 @@ class TestJudgeGate:
         score = self._score_with_missing_keyword()
         assert _apply_judge_gate(score, {"total": 95}, None) == score
 
-    def test_no_judge_result_leaves_score_untouched(self):
+    def test_no_judge_result_fails_loudly(self):
+        """A requested judge score that never arrived is not a pass or a
+        keyword-graded result — it is an unmeasured fixture, and saying so is
+        the only honest option. This used to return the score untouched, which
+        quietly graded the fixture on the `mentions` substrings that judge
+        gating exists to demote, and failed a fixture scoring 96/100."""
         score = self._score_with_missing_keyword()
-        assert _apply_judge_gate(score, None, 70) == score
+        gated = _apply_judge_gate(score, None, 70)
+        assert gated["passed"] is False
+        assert any(c.get("kind") == "judge" and not c["passed"] for c in gated["checks"])
 
     def test_right_answer_phrased_differently_passes(self):
         score = self._score_with_missing_keyword()
@@ -458,9 +465,12 @@ class TestJudgeGate:
         gated = _apply_judge_gate(score, {"total": 99}, 70)
         assert gated["passed"] is False
 
-    def test_non_numeric_judge_total_is_ignored(self):
+    def test_non_numeric_judge_total_fails_loudly(self):
+        """Same contract as a missing judge: a total we cannot compare against
+        the threshold means the fixture was not graded."""
         score = self._score_with_missing_keyword()
-        assert _apply_judge_gate(score, {"total": "n/a"}, 70) == score
+        gated = _apply_judge_gate(score, {"total": "n/a"}, 70)
+        assert gated["passed"] is False
 
 
 # ---------------------------------------------------------------------------

@@ -282,12 +282,25 @@ def _apply_judge_gate(score: dict, judge: dict | None, judge_min: int | None) ->
     With no threshold or no judge result the score is returned untouched, so
     existing behaviour is unchanged unless ``--judge-min`` is passed.
     """
-    if judge_min is None or not judge:
+    if judge_min is None:
         return score
 
-    total = judge.get("total")
+    total = judge.get("total") if judge else None
     if not isinstance(total, (int, float)):
-        return score
+        # The caller asked for judge gating and there is no judge score. Falling
+        # through to content checks would quietly grade this fixture by a
+        # different, weaker standard than every other fixture in the run, and
+        # report the result as if it were comparable. Say so instead; the
+        # runner's existing regression retry absorbs transient judge failures.
+        checks = list(score.get("checks", []))
+        checks.append(
+            {
+                "check": f"judge score unavailable (judge_min={judge_min} requested)",
+                "passed": False,
+                "kind": "judge",
+            }
+        )
+        return {**score, "checks": checks, "passed": False}
 
     checks = []
     for check in score.get("checks", []):

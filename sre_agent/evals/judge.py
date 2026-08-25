@@ -136,10 +136,20 @@ async def judge_response_median(
     if samples <= 1:
         return await judge_response(prompt, response, tool_calls, client=client, model=model)
 
-    sampled = await asyncio.gather(
-        *(judge_response(prompt, response, tool_calls, client=client, model=model) for _ in range(samples))
-    )
-    grades: list[dict] = [g for g in sampled if g is not None and isinstance(g.get("total"), (int, float))]
+    async def _round(n: int) -> list[dict]:
+        sampled = await asyncio.gather(
+            *(judge_response(prompt, response, tool_calls, client=client, model=model) for _ in range(n))
+        )
+        return [g for g in sampled if g is not None and isinstance(g.get("total"), (int, float))]
+
+    grades: list[dict] = await _round(samples)
+    if not grades:
+        # Every sample failed — a malformed-JSON reply or a transient provider
+        # error, not a verdict. Retry once before giving up: returning None here
+        # silently hands gating back to verbatim keyword matching, which is how
+        # a fixture that scores 96/100 failed the release gate.
+        logger.warning("All %d judge samples failed; retrying once", samples)
+        grades = await _round(samples)
     if not grades:
         return None
 
