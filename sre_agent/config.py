@@ -292,6 +292,9 @@ class PulseAgentSettings(BaseSettings):
     def get_trusted_registries(self) -> list[str]:
         return [s.strip() for s in self.trusted_registries.split(",") if s.strip()]
 
+    def get_protected_namespaces(self) -> list[str]:
+        return [s.strip() for s in self.protected_namespaces.split(",") if s.strip()]
+
     @field_validator("model")
     @classmethod
     def model_must_be_claude(cls, v: str) -> str:

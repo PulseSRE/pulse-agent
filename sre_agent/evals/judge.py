@@ -7,8 +7,10 @@ Use ``score_replay`` from ``replay.py`` for deterministic (no-LLM) scoring.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import statistics
 
 logger = logging.getLogger("pulse_agent.evals.judge")
 
@@ -133,9 +135,6 @@ async def judge_response_median(
     """
     if samples <= 1:
         return await judge_response(prompt, response, tool_calls, client=client, model=model)
-
-    import asyncio
-    import statistics
 
     sampled = await asyncio.gather(
         *(judge_response(prompt, response, tool_calls, client=client, model=model) for _ in range(samples))

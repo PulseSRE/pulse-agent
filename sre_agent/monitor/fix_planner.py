@@ -251,8 +251,8 @@ def execute_fix(plan: FixPlan) -> tuple[str, str, str]:
     if policy_tool:
         from ..policy import check_write_policy
 
-        _resource, namespace = _get_first_resource(plan)
-        denied = check_write_policy(policy_tool, {"namespace": namespace, "name": _resource.get("name", "")})
+        resource, namespace = _get_first_resource(plan)
+        denied = check_write_policy(policy_tool, {"namespace": namespace, "name": resource.get("name", "")})
         if denied is not None:
             logger.warning(
                 "Auto-fix blocked by deny policy: strategy=%s tool=%s namespace=%s",

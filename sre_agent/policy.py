@@ -34,15 +34,11 @@ _NODE_OPS = frozenset({"drain_node", "cordon_node"})
 _NAMESPACE_DENIED_OPS = frozenset({"delete_pod"})
 
 
-def _protected_namespaces() -> list[str]:
+def _is_protected(namespace: str) -> bool:
     from .config import get_settings
 
-    raw = get_settings().agent.protected_namespaces
-    return [p.strip() for p in raw.split(",") if p.strip()]
-
-
-def _is_protected(namespace: str) -> bool:
-    return any(fnmatch(namespace, pattern) for pattern in _protected_namespaces())
+    patterns = get_settings().get_protected_namespaces()
+    return any(fnmatch(namespace, pattern) for pattern in patterns)
 
 
 def check_write_policy(name: str, input_data: dict | None) -> ToolError | None:
