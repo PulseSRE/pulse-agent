@@ -714,3 +714,51 @@ CREATE TABLE IF NOT EXISTS user_skills (
 
 CREATE INDEX IF NOT EXISTS idx_user_skills_source ON user_skills(source);
 """
+
+
+RUNTIME_ARTIFACTS_SCHEMA = """
+-- Everything the agent writes at runtime that must outlive the pod.
+--
+-- Generalises user_skills (migration 035). Four things were being written to
+-- the container's overlay filesystem and erased by every restart, deploy and
+-- reschedule: skills (create/edit/scaffold/refine), plan templates (the PUT
+-- handler rewrites YAML inside the installed package), scaffolded eval
+-- scenarios and fixtures, and the .versions/.archive directories that were
+-- supposed to make a skill edit reversible.
+--
+-- They are the same shape -- a named text document with a version -- so they
+-- share one table rather than four near-identical ones. `kind` distinguishes
+-- them and `rel_path` records where the document belongs on disk, so hydration
+-- can rebuild any of them without the store knowing their layouts.
+CREATE TABLE IF NOT EXISTS runtime_artifacts (
+    kind          TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    rel_path      TEXT NOT NULL,
+    content       TEXT NOT NULL,
+    source        TEXT NOT NULL DEFAULT 'user',
+    version       INTEGER NOT NULL DEFAULT 1,
+    created_by    TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (kind, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_artifacts_kind ON runtime_artifacts(kind);
+
+-- Every prior revision. Replaces the .versions/ directory beside a skill,
+-- which was as ephemeral as the skill it was meant to make recoverable.
+-- Retiring an artifact deletes its row above and leaves this history intact,
+-- so a retired skill stays recoverable rather than merely being unloaded.
+CREATE TABLE IF NOT EXISTS runtime_artifact_versions (
+    id            SERIAL PRIMARY KEY,
+    kind          TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    version       INTEGER NOT NULL,
+    content       TEXT NOT NULL,
+    created_by    TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_artifact_versions_lookup
+    ON runtime_artifact_versions(kind, name, version DESC);
+"""

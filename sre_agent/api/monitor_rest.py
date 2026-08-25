@@ -515,6 +515,96 @@ async def get_plan_template(incident_type: str, _auth=Depends(verify_token)):
     }
 
 
+@router.post("/plan-templates")
+async def create_plan_template(request: Request, _auth=Depends(verify_token)):
+    """Create a new investigation plan template.
+
+    Plans could be edited and deleted but never created — a new incident type
+    meant editing a YAML file in the repo and cutting a release. The body takes
+    the same shape the PUT handler accepts.
+    """
+    import re
+    from pathlib import Path
+
+    import yaml
+
+    from ..plan_store import persist_plan
+    from ..plan_templates import get_template, load_templates
+
+    body = await request.json()
+    incident_type = str(body.get("incident_type") or "").strip()
+
+    if not re.match(r"^[a-z0-9][a-z0-9_-]{0,63}$", incident_type):
+        raise HTTPException(
+            status_code=400,
+            detail="incident_type must be lowercase alphanumeric with - or _, 1-64 chars",
+        )
+    if get_template(incident_type):
+        raise HTTPException(status_code=409, detail=f"Plan template '{incident_type}' already exists")
+
+    phases = body.get("phases") or []
+    if not isinstance(phases, list) or not phases:
+        raise HTTPException(status_code=400, detail="A plan needs at least one phase")
+    for i, ph in enumerate(phases):
+        if not isinstance(ph, dict) or not str(ph.get("id") or "").strip():
+            raise HTTPException(status_code=400, detail=f"Phase {i} needs an id")
+        if not str(ph.get("skill_name") or "").strip():
+            raise HTTPException(status_code=400, detail=f"Phase '{ph.get('id')}' needs a skill_name")
+
+    template = {
+        "id": str(body.get("id") or incident_type),
+        "name": str(body.get("name") or incident_type.replace("-", " ").title()),
+        "incident_type": incident_type,
+        "max_total_duration": int(body.get("max_total_duration") or 1800),
+        "generated_by": "user",
+        "phases": [
+            {
+                "id": str(ph["id"]).strip(),
+                "skill_name": str(ph["skill_name"]).strip(),
+                "required": bool(ph.get("required", True)),
+                "depends_on": list(ph.get("depends_on") or []),
+                "timeout_seconds": int(ph.get("timeout_seconds") or 120),
+                # The phase contract. Declaring it is what lets phase_judge
+                # check the phase did what it promised instead of assuming.
+                "produces": list(ph.get("produces") or []),
+                "approval_required": bool(ph.get("approval_required", False)),
+            }
+            for ph in phases
+        ],
+    }
+
+    rendered = yaml.safe_dump(template, default_flow_style=False, sort_keys=False)
+    target = Path(__file__).parent.parent / "plan_templates" / f"{incident_type}.yaml"
+    try:
+        target.write_text(rendered, encoding="utf-8")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Could not write plan template: {e}") from e
+
+    persist_plan(incident_type, rendered, source="user")
+    load_templates()
+    logger.info("Created plan template: %s", incident_type)
+    return {"status": "created", "incident_type": incident_type}
+
+
+@router.get("/plan-templates/{incident_type}/versions")
+async def plan_template_versions(incident_type: str, _auth=Depends(verify_token)):
+    """Prior revisions of a plan template, newest first."""
+    from ..plan_store import plan_versions
+
+    return {
+        "incident_type": incident_type,
+        "versions": [
+            {
+                "version": v["version"],
+                "created_by": v.get("created_by", ""),
+                "created_at": str(v.get("created_at") or ""),
+                "content": v["content"],
+            }
+            for v in plan_versions(incident_type)
+        ],
+    }
+
+
 @router.put("/plan-templates/{incident_type}")
 async def update_plan_template(incident_type: str, request: Request, _auth=Depends(verify_token)):
     """Update an existing plan template. Rewrites the YAML file and reloads."""
@@ -583,8 +673,16 @@ async def update_plan_template(incident_type: str, request: Request, _auth=Depen
         ),
     }
 
+    rendered = yaml.safe_dump(updated, default_flow_style=False, sort_keys=False)
     with open(target_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(updated, f, default_flow_style=False, sort_keys=False)
+        f.write(rendered)
+
+    # The file above lives inside the installed package, so without this the
+    # edit is undone by the next rollout. Persisting also archives the previous
+    # body, which is what makes a plan edit reversible.
+    from ..plan_store import persist_plan
+
+    persist_plan(incident_type, rendered, source="user")
 
     load_templates()
     logger.info("Updated plan template: %s", incident_type)
@@ -628,6 +726,12 @@ async def delete_plan_template(incident_type: str, _auth=Depends(verify_token)):
         raise HTTPException(status_code=400, detail="Invalid path")
 
     target_path.unlink()
+    # Drop the durable copy too, or the next boot restores what was just deleted.
+    # History is kept, so the template stays recoverable.
+    from ..plan_store import forget_plan
+
+    forget_plan(incident_type)
+
     load_templates()
     logger.info("Deleted plan template: %s", incident_type)
     return {"status": "deleted", "incident_type": incident_type}

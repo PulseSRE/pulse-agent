@@ -76,6 +76,19 @@ def _append_scenario(scenario: dict) -> bool:
                 if _fcntl is not None:
                     _fcntl.flock(fh, _fcntl.LOCK_UN)
 
+        # The suite file lives inside the installed package, so a scaffolded
+        # scenario is erased by the next rollout without this. Losing the eval
+        # loses the proof that the skill scaffolded alongside it still works.
+        from .artifact_store import KIND_EVAL_SCENARIO, persist
+
+        persist(
+            KIND_EVAL_SCENARIO,
+            "scaffolded",
+            json.dumps(suite, indent=2, ensure_ascii=False) + "\n",
+            rel_path="scaffolded.json",
+            source="scaffolded",
+        )
+
         logger.info("Appended eval scenario: %s", scenario["scenario_id"])
         return True
 
@@ -97,6 +110,16 @@ def _write_fixture(scenario_id: str, fixture: dict) -> bool:
         with open(fixture_path, "w", encoding="utf-8") as fh:
             json.dump(fixture, fh, indent=4, ensure_ascii=False)
             fh.write("\n")
+
+        from .artifact_store import KIND_EVAL_FIXTURE, persist
+
+        persist(
+            KIND_EVAL_FIXTURE,
+            scenario_id,
+            json.dumps(fixture, indent=4, ensure_ascii=False) + "\n",
+            rel_path=f"{scenario_id}.json",
+            source="scaffolded",
+        )
 
         logger.info("Wrote eval fixture: %s", fixture_path.name)
         return True

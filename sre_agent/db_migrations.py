@@ -266,6 +266,26 @@ def _migrate_035_user_skills(db: Database) -> None:
     db.executescript(USER_SKILLS_SCHEMA)
 
 
+def _migrate_036_runtime_artifacts(db: Database) -> None:
+    """Generalise user_skills to every runtime-written document.
+
+    Plans, scaffolded evals and version history had the same ephemerality bug
+    as skills, so they share one table rather than three more like it. Any
+    user_skills rows are carried across; that table shipped one release earlier
+    and is dropped once its contents are moved.
+    """
+    from .db_schema import RUNTIME_ARTIFACTS_SCHEMA
+
+    db.executescript(RUNTIME_ARTIFACTS_SCHEMA)
+    db.execute(
+        "INSERT INTO runtime_artifacts (kind, name, rel_path, content, source, version, created_by) "
+        "SELECT 'skill', name, dir_name || '/skill.md', content, source, version, created_by "
+        "FROM user_skills "
+        "ON CONFLICT (kind, name) DO NOTHING"
+    )
+    db.execute("DROP TABLE IF EXISTS user_skills")
+
+
 # Open statuses, spelled the same way the inbox module does.
 _OPEN_STATUSES = "('new', 'triaged', 'claimed', 'in_progress', 'agent_reviewing')"
 
@@ -506,4 +526,5 @@ MIGRATIONS = [
     (33, "learning_candidates", _migrate_033_learning_candidates),
     (34, "action_snapshots", _migrate_034_action_snapshots),
     (35, "user_skills", _migrate_035_user_skills),
+    (36, "runtime_artifacts", _migrate_036_runtime_artifacts),
 ]
