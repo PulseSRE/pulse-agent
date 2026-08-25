@@ -2,6 +2,23 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## v2.26.1 (2026-08-25)
+
+### The deny policy did not cover the unattended path
+- v2.26.0 added a harness deny policy and enforced it in `agent._execute_tool`, which covers chat and view-action calls. The monitor's auto-fix does not go through that choke point: it dispatches via `monitor/fix_planner.execute_fix` and calls the Kubernetes API directly, so `_execute_restart_controller` was deleting production pods with `grace_period_seconds=0` and no policy check at all
+- Asking the agent to delete a production pod was refused; the agent deciding to delete one on its own initiative — unattended, at trust >= 3, which is what the dev cluster runs — was not. The less supervised path had the weaker control, and SECURITY.md described a harness-level guarantee that was only half true
+- `execute_fix` now evaluates each mutating strategy against the tool it is equivalent to (`restart_controller` -> `delete_pod`) and returns a `blocked` result the caller records like any other outcome. A test pins that non-protected namespaces still auto-fix, so the block cannot quietly become unconditional
+
+### A fixture scoring 96/100 was reported as a regression
+- The release gate failed `integration_incident_correlation`. Re-run against the real model it scores 96/100 with a `[96, 96]` spread across three samples, and its only failing check is a `mentions` substring that judge gating demotes to advisory
+- Every judge sample had returned malformed JSON, so `judge_response_median` returned None and `_apply_judge_gate` fell through to `if not judge: return score` — handing grading back to verbatim keyword matching for that one fixture, while every other fixture in the run was judged. The criteria changed silently and the result was reported as a regression
+- The judge now retries one round when every sample fails, and a requested-but-missing judge score appends an explicit failing check instead of falling through. An unmeasured fixture is not a keyword-graded fixture; `--confirm-retries` absorbs transient failures
+
+### Eval determinism and cleanups
+- `run_selector_eval` documented itself as "Deterministic — no LLM calls" while `classify_query` could reach the LLM fallback, making a p99 latency assertion measure a network round-trip; the bound had already been relaxed once (100ms -> 500ms on CI) for what was really this bug. `skill_router.llm_fallback_disabled()` makes the claim enforced
+- The new SRE-Bench sim gate reports scores rather than blocking at 6/6 on the day it landed; its integrity checks (`sre-bench verify`) still gate
+- `policy.py` re-implemented a comma-list split `config.py` already exposes; both list-valued settings now parse in one place
+
 ## v2.26.0 (2026-08-25)
 
 ### A deny policy the model cannot talk its way past
