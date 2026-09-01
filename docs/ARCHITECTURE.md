@@ -76,11 +76,12 @@ React/TypeScript frontend (OpenShift Pulse) providing the user interface.
 
 | Metric           | Value                                                    |
 | ---------------- | -------------------------------------------------------- |
-| Tools            | 154 (118 native + 36 MCP) across 54 modules + MCP servers |
-| Scanners         | 23 (11 reactive + 5 audit + 1 SLO burn + 1 security posture + 5 predictive trend) |
-| Tests            | 2,455                                                    |
+| Tools            | 143 (107 native + 36 MCP) + whatever connected MCP servers add |
+| Scanners         | 27 (5 availability + 5 audit + 5 predictive + 4 liveness + 2 each infrastructure/security/monitoring/resources) |
+| Tests            | 3,319                                                    |
 | PromQL Recipes   | 83 across 16 categories                                  |
-| Eval Prompts     | 192                                                      |
+| Eval Suites      | 16 (192 scenarios)                                       |
+| Schema Version   | 036                                                      |
 | Protocol Version | 2                                                        |
 
 
@@ -310,7 +311,7 @@ User: "Why are pods crashing in staging?"     -> sre (hard switch)
 
 ## 4. Tool System
 
-### 154 Tools Across 54 Modules
+### 143 Tools (107 Native + 36 MCP)
 
 
 | Module   | File                          | Tools | Description                                                             |
@@ -374,13 +375,26 @@ Agent calls write tool (e.g., scale_deployment)
     ├── on_confirm() callback fires
     │   ├── Generate JIT nonce (secrets.token_urlsafe)
     │   ├── Send confirm_request{tool, input, nonce} to UI
-    │   ├── Block agent thread (120s timeout)
+    │   ├── Block agent thread (approval timeout)
     │   └── Wait for confirm_response{approved, nonce}
     │
     ├── Nonce mismatch? -> Reject (replay prevention)
-    ├── Approved=true?  -> Execute tool
-    └── Approved=false? -> Return "Operation denied" to LLM
+    ├── Approved=false? -> Return "Operation denied" to LLM
+    │
+    ├── check_write_policy()            <- policy.py, AFTER confirmation
+    │   └── Protected namespace or node op? -> Deny, naming the sanctioned path
+    │
+    └── execute_with_contract()         <- tool_contracts.py
+        ├── precondition read (caller's token) -> refuse the write if unreadable
+        ├── snapshot.capture()                 -> restorable copy for rollback
+        ├── tool.call(input)                   -> the actual mutation
+        └── schedule postcondition probe       -> verdict on a later scan
 ```
+
+A deny policy that ran *before* confirmation would be a UI concern; running it
+after is deliberate. The rules hold regardless of what a chat approver clicked,
+so a human approving a destructive action in a protected namespace still does
+not get one.
 
 ### Tool Categories
 
@@ -580,13 +594,13 @@ cluster scanning via the `/ws/monitor` WebSocket endpoint. It pushes findings,
 predictions, investigation reports, and action reports to connected UI clients
 in real time.
 
-### 23 Scanners
+### 27 Scanners
 
 
 | Scanner                     | Category           | Severity       | Auto-fixable |
 | --------------------------- | ------------------ | -------------- | ------------ |
 | Crashlooping pods           | `crashloop`        | WARN/CRIT      | Yes          |
-| Pending pods                | `scheduling`       | WARN/CRIT      | No           |
+| Pending pods                | `pending`          | WARN/CRIT      | No           |
 | Failed deployments          | `workloads`        | WARN/CRIT      | Yes          |
 | Node pressure               | `nodes`            | CRITICAL       | No           |
 | Expiring certs              | `cert_expiry`      | WARN/CRIT      | No           |
@@ -607,10 +621,27 @@ in real time.
 | Disk pressure forecast      | `trend_disk`       | WARNING        | No (predictive) |
 | HPA exhaustion trend        | `trend_hpa`        | WARNING        | No (predictive) |
 | Error rate acceleration     | `trend_errors`     | WARNING        | No (predictive) |
+| Trend monitoring degraded   | `trend_degraded`   | WARNING        | No (self-check) |
+| Stuck deletions             | `stuck`            | WARNING        | No (liveness)   |
+| Hot reconcile loops         | `hot_loop`         | WARNING        | No (liveness)   |
+| Control plane stalls        | `control_plane`    | CRITICAL       | No (liveness)   |
+| Pulse self-check            | `degraded`         | WARNING        | No (self-check) |
 
 
 Pod-based scanners (crashloop, oom, image_pull) share a single pod list fetch
 to reduce API calls.
+
+The liveness scanners answer a different question from the reactive ones: not
+"what is broken" but "what is running without making progress" — a namespace
+Terminating for 15 minutes, a controller burning API server capacity on retries,
+etcd leader churn underneath workloads that merely look flaky.
+
+Two scanners watch Pulse itself. `degraded` (Pulse Self-Check) reports Pulse's own
+failing scanners and backends, and `trend_degraded` reports when the Prometheus
+trend queries failed during a scan — both so that an empty findings list is never
+mistaken for a healthy cluster. The same reasoning is enforced in code: a scanner
+that swallows an exception must call `report_failure(e)`, and the
+`no-silent-scanner-failure` discipline rule fails CI otherwise.
 
 ### Finding Lifecycle
 
@@ -656,16 +687,65 @@ to reduce API calls.
 
 
 Trust level is set by the UI via `subscribe_monitor` and clamped server-side to
-`PULSE_AGENT_MAX_TRUST_LEVEL` (default 3).
+`PULSE_AGENT_MAX_TRUST_LEVEL` (default **2** — ask first). The variable also
+accepts `PULSE_AGENT_TRUST_LEVEL`, the name the operator injects from the CR's
+`spec.agent.trustLevel`; the canonical name wins when both are set.
+
+The *effective* level is the configured level raised by any connected
+subscriber, never lowered by their absence. It used to be "max among
+subscribers, or 1 if none" — and subscribers are browser tabs, so a cluster
+with nobody watching silently dropped to trust 1 and remediated nothing it had
+correctly diagnosed. A subscriber may still supervise more closely by
+requesting a higher level; it can no longer disable remediation by closing a tab.
 
 ### Auto-Fix Safety Guardrails
 
 - **Rate limit**: Max 3 auto-fixes per scan cycle
 - **Cooldown**: Skip resources fixed in the last 5 minutes
+- **Attempt cap**: Max 2 fix attempts per resource before it escalates to a human
 - **Bare pod protection**: Never delete pods without ownerReferences
-- **Kill switch**: `POST /monitor/pause` emergency stop
-- **Rollback**: Every fix records `beforeState` snapshot; deployment/statefulset/
-  daemonset restarts are rollbackable via `POST /fix-history/{id}/rollback`
+- **Deny policy**: `policy.py` blocks protected namespaces and node ops on the
+  unattended path too, recording a `blocked` outcome rather than acting
+- **Kill switch**: `POST /monitor/pause`, persisted in `operational_flags` so it
+  survives a pod restart, and read on every `auto_fix()` call. It fails closed:
+  if the flag cannot be read, auto-fix treats itself as paused
+- **Rollback**: `snapshot.py` captures the resource's own spec immediately before
+  the write, so `POST /fix-history/{id}/rollback` restores it rather than
+  describing it. Restart-based fixes additionally roll back by revision
+
+### Post-Fix Verification
+
+Absence of a finding is not evidence of a fix. A finding also disappears when the
+scanner errored, the namespace drained, or the workload was deleted outright — so
+deleting a broken Deployment once scored as a *verified fix*. Verification is now
+an affirmative reading, in three parts:
+
+```
+Fix executes -> action row (status=completed, beforeSnapshot, verification=pending)
+    │
+    └── next scan: monitor/verification_pipeline.py
+        ├── finding still active?     -> still_failing
+        ├── finding gone:
+        │   ├── health_gate.check_resources()   <- reads the LIVE object
+        │   │   ├── PASS          -> verified   (evidence = the reading)
+        │   │   ├── FAIL          -> still_failing
+        │   │   └── UNVERIFIABLE  -> unverifiable, never treated as success
+        │   └── contract probe (interactive writes) -> tool-specific check
+        └── recurrence.py: same condition returns inside
+            PULSE_AGENT_RECURRENCE_WINDOW -> verdict downgraded to
+            verified_then_recurred, outcome recorded as recurred
+```
+
+- **`health_gate.py`** — a workload scaled to 0 is switched off, not healthy; a
+  404 on the workload a fix was meant to repair is a failure, not a pass; a pod
+  that vanished is UNVERIFIABLE, because pods are cattle and say nothing either way
+- **`tool_contracts.py`** — interactive write tools carry tool-specific
+  postconditions: scale-to-0 verifies as 0 ready, a rollback verifies the revision
+  moved, a deleted pod verifies through its owning controller. Probes get a grace
+  window, because a rollout in progress is not a failed rollout
+- **`trajectory.py`** — the verdict gates learning. An investigation becomes a
+  reusable skill only after its fix is confirmed resolved; `unverifiable` leaves
+  the candidate pending rather than recording a judgement the check never made
 
 ### Auto-Fix Handlers
 

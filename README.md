@@ -6,12 +6,12 @@
 
 <p>
   <a href="https://github.com/PulseSRE/pulse-agent/releases/tag/v2.27.0"><img src="https://img.shields.io/badge/release-v2.27.0-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-154_(118+36_MCP)-10b981?style=for-the-badge" alt="Tools">
+  <img src="https://img.shields.io/badge/tools-143_(107+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
   <img src="https://img.shields.io/badge/scanners-27-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-3263-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-3319-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/eval_suites-16_(192_scenarios)-10b981?style=for-the-badge" alt="Eval Suites">
-  <img src="https://img.shields.io/badge/release_gate-99.6%25-10b981?style=for-the-badge" alt="Release Gate">
+  <img src="https://img.shields.io/badge/release_gate-97.5%25-10b981?style=for-the-badge" alt="Release Gate">
   <img src="https://img.shields.io/badge/PromQL%20recipes-83-10b981?style=for-the-badge" alt="PromQL Recipes">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
@@ -122,11 +122,21 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 - **Secret Hygiene** -- Find old unrotated secrets, env-exposed secrets, unused secrets
 
 ### Autonomous Monitor
-- **24 Scanners** -- 13 reactive (crashlooping pods, pending pods, failed deployments, node pressure, certificate expiry, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation, SLO burn rate, security posture) + 5 audit + 4 predictive trend (memory/disk pressure forecast, HPA exhaustion, error rate acceleration) + 2 proactive
-- **Auto-Fix** -- Trust level 3 auto-fixes safe categories (crashloop pod deletion, deployment restarts). Trust level 4 fixes everything automatically with rollback snapshots
+- **27 Scanners** -- 5 availability (crashlooping pods, pending pods, failed workloads, image pull errors, DaemonSet gaps) + 5 audit (config, RBAC, deployments, warning events, auth) + 5 predictive trend (memory/disk pressure forecast, HPA exhaustion, error rate acceleration, operator degradation) + 4 liveness (stuck, hot loop, control plane, degraded) + 2 each for infrastructure, security, monitoring and resources
+- **Auto-Fix** -- Trust level 3 auto-fixes safe categories (crashloop pod deletion, deployment restarts). Trust level 4 fixes everything automatically. Rate-limited to 3 fixes per scan with a per-resource attempt cap, and a database-backed kill switch (`POST /monitor/pause`) that survives pod restarts
 - **Confidence Scores** -- Every finding, investigation, and action includes a 0-100% confidence score
 - **Noise Learning** -- Tracks transient findings and assigns noise scores to suppress flaky alerts
 - **Simulation Preview** -- Predict impact, risk, and duration before executing a fix
+
+### Verified Action
+Nothing is reported as fixed because a symptom stopped appearing. Every mutating path is a contract: check first, capture an undo, then prove the outcome by reading the cluster.
+
+- **Verification Contracts** (`tool_contracts.py`) -- The five most-used write tools (`restart_deployment`, `scale_deployment`, `delete_pod`, `rollback_deployment`, `cordon_node`) run as precondition read -> snapshot -> action -> postcondition probe. A missing target or permission gap refuses the write *before* anything changes, under the caller's own token
+- **Tool-Specific Postconditions** -- A scale-to-0 verifies as 0 ready replicas; a rollback verifies the revision actually moved; a deleted pod verifies through its owning controller. Probes run on the monitor's verification pipeline with a grace window, because a rollout in progress is not a failed rollout
+- **Affirmative Health Gate** (`monitor/health_gate.py`) -- Post-fix verification reads the live object and requires it to look healthy. A gate that cannot get a clear answer returns UNVERIFIABLE, which is never treated as success
+- **Restorable Snapshots** (`snapshot.py`) -- A copy of the resource's own spec captured immediately before the write, so `POST /fix-history/{id}/rollback` can put it back rather than describing what it used to look like
+- **Deny Policy** (`policy.py`) -- Deterministic, config-backed, no model in the loop. Protected namespaces (`PULSE_AGENT_PROTECTED_NAMESPACES`, default `production,openshift-*,kube-system`) and node operations are denied on **both** the chat path and the unattended auto-fix path, which records a `blocked` outcome instead of acting. A denial names the policy and the sanctioned path rather than just refusing
+- **Verified-Trajectory Learning** (`trajectory.py`) -- A diagnosis becomes a reusable skill only after its fix is confirmed resolved. A fix that did not hold drops its candidate unlearned
 
 ### MCP Integration
 - **36 MCP Tools** from the OpenShift MCP server (sidecar pod) across 11 toolsets: core, config, helm, observability, openshift, ossm, netedge, tekton, kiali, kubevirt, kcp
@@ -145,6 +155,9 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 - **Learned Runbooks** -- Confirmed resolutions are extracted as reusable runbooks
 - **Pattern Detection** -- Identifies recurring issues and time-based patterns
 - **Intelligence Loop** -- `intelligence.py` feeds query reliability, error hotspots, dashboard patterns, and token efficiency back into the system prompt
+- **Durable Runtime Artifacts** (`artifact_store.py`, migration 036) -- Skills the agent writes at runtime, plan templates, scaffolded eval scenarios and replay fixtures, and their `.versions/` history are written through to PostgreSQL and replayed onto disk at startup. Before this, everything the agent learned lived on the container's overlay filesystem and was erased by the next restart or rollout
+- **Authored Plans** -- `POST /plan-templates` creates an investigation plan (not just edits one), validating phase ids and skill names and carrying each phase's `produces` contract. Every write archives the prior body, so `GET /plan-templates/{type}/versions` makes a plan edit reversible
+- **Contract-Aware Plan Phases** -- `phase_judge` names which declared `produces` fields a phase failed to return; `contract_missing` is persisted per phase and aggregated by `/analytics/plans`, so "3 partial" becomes "partial because diagnose never produced root_cause"
 
 ## Getting Started
 
@@ -188,7 +201,10 @@ export ANTHROPIC_API_KEY=sk-ant-...
 | `PULSE_AGENT_DATABASE_URL` | PostgreSQL connection URL | required for full features |
 | `PULSE_AGENT_MEMORY` | Enable self-improving memory | `1` (enabled) |
 | `PULSE_AGENT_AUTOFIX_ENABLED` | Enable monitor auto-fix | `true` |
-| `PULSE_AGENT_MAX_TRUST_LEVEL` | Server-side max trust level (0-4) | `3` |
+| `PULSE_AGENT_MAX_TRUST_LEVEL` | Server-side max trust level (0-4). Also accepts `PULSE_AGENT_TRUST_LEVEL`, the name the operator injects from `spec.agent.trustLevel` | `2` (ask first) |
+| `PULSE_AGENT_PROTECTED_NAMESPACES` | Namespaces where destructive actions are denied on both the chat and auto-fix paths (comma list, `*` wildcards) | `production,openshift-*,kube-system` |
+| `PULSE_AGENT_ALLOW_NODE_OPS` | Allow node-level operations (cordon/drain) through chat confirmation | `false` |
+| `PULSE_AGENT_RECURRENCE_WINDOW` | Seconds after a verified fix within which the same problem returning is recorded as a recurrence | `1800` |
 | `PULSE_AGENT_SCAN_INTERVAL` | Monitor scan interval (seconds) | `60` |
 | `PULSE_AGENT_WS_TOKEN` | WebSocket auth token | auto-generated |
 | `PULSE_AGENT_HARNESS` | Enable tool selection optimizations | `1` (enabled) |
