@@ -1,0 +1,74 @@
+name: Release
+
+# Creates the GitHub Release for a version tag, using that version's section of
+# CHANGELOG.md as the notes.
+#
+# This existed as a manual step and was therefore skipped: v2.28.0, v2.29.0 and
+# v2.29.1 were all tagged and shipped with no Release behind them. That is not
+# only a paperwork gap. version-sync.yml compares the two repos' latest
+# *releases* to catch agent/UI skew, so with releases lagging three versions
+# behind the tags, the gate was comparing two stale numbers and reporting green
+# about a pair it was no longer measuring — a check passing on absence rather
+# than on evidence.
+#
+# Making the release a consequence of the tag fixes both: the notes always
+# exist, and the skew gate compares what actually shipped.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to create a release for (e.g. v2.29.1)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Extract this version's changelog section
+        id: notes
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Everything between "## <tag>" and the next "## v" heading.
+          awk -v tag="$TAG" '
+            $0 ~ "^## " tag "( |$)" { found=1; next }
+            found && /^## v/ { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+
+          if [ ! -s notes.md ]; then
+            # A tag with no changelog section still gets a release — a missing
+            # release is what this workflow exists to prevent, and silence here
+            # would recreate it.
+            echo "::warning::No CHANGELOG.md section found for $TAG."
+            echo "See CHANGELOG.md for details of this release." > notes.md
+          fi
+          echo "Release notes for $TAG:"
+          cat notes.md
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file notes.md
+          fi
+          echo "- Released \`$TAG\`" >> "$GITHUB_STEP_SUMMARY"

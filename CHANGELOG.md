@@ -2,6 +2,18 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## v2.30.0 (2026-09-01)
+
+### Durable runs you can see and stop
+- `GET /workflow-runs` lists recent durable runs from Temporal's own visibility store, and `POST /workflow-runs/{id}/cancel` stops one. Cancellation was the largest Temporal capability sitting unused here: a run wedged in an LLM phase was released only by its full timeout, and nothing short of the Temporal CLI could show what was in flight
+- Cancelling an incident run means *undo*, not "stop watching". Cancellation lands as `CancelledError` at whatever await the workflow holds — most often the half-hour recurrence timer, long after the fix mutated the cluster — and letting it propagate would end the run with the cluster changed and no outcome recorded: exactly the vanishing-verdict failure fixed in v2.29.1, arriving through a door we had just built. The workflow now restores the snapshot and records a `cancelled` verdict, under `asyncio.shield` because a cancelled workflow cannot otherwise schedule the activities that do the undoing
+- The test for that was checked by removing the handler: it turns red with `WorkflowFailureError` and no result, which is the symptom itself. `list_runs` is likewise exercised against a real server rather than a mock, since its entire surface is SDK attribute names a mock would confirm and reality would not
+- Runs now carry a memo — finding, strategy, namespace, resource — so a listing reads "restart_controller on web-1 in payments" instead of thirty rows of `incident-<uuid>`. Memo rather than registered search attributes deliberately: memo needs no namespace registration, so this works on any Temporal instead of only after an operator ran a schema command. The cost is that memo is not searchable server-side, which is the next step when the run count makes filtering matter
+
+### Releases are now a consequence of tagging
+- v2.28.0, v2.29.0 and v2.29.1 were tagged and shipped with no GitHub Release behind them, because creating one was a manual step. `version-sync.yml` compares the two repos' latest *releases* to catch agent/UI skew, so it was comparing two stale numbers three versions behind what actually ran and reporting green about a pair it no longer measured — a gate passing on absence rather than evidence, which is a shape this repo keeps rediscovering
+- `release.yml` creates the Release from the tag's own CHANGELOG section on tag push, in both this repo and pulse-ui. The notes now always exist, and the skew gate compares what shipped
+
 ## v2.29.1 (2026-09-01)
 
 ### A failed apply must still produce a verdict
