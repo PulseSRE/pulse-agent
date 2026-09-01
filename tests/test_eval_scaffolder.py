@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -39,18 +38,14 @@ class FakePlanResult:
 
 
 @pytest.fixture()
-def scaffold_dirs(tmp_path: Path):
-    scenarios_dir = tmp_path / "scenarios_data"
-    fixtures_dir = tmp_path / "fixtures"
-    scenarios_dir.mkdir()
-    fixtures_dir.mkdir()
+def scaffold_dirs(tmp_path: Path, monkeypatch):
+    """Point the writable evals dir at tmp_path, exercising the real eval_store path."""
+    from sre_agent.config import _reset_settings
 
-    with (
-        patch("sre_agent.eval_scaffolder._SCENARIOS_DIR", scenarios_dir),
-        patch("sre_agent.eval_scaffolder._FIXTURES_DIR", fixtures_dir),
-        patch("sre_agent.eval_scaffolder._SUITE_FILE", scenarios_dir / "scaffolded.json"),
-    ):
-        yield scenarios_dir, fixtures_dir
+    monkeypatch.setenv("PULSE_AGENT_USER_EVALS_DIR", str(tmp_path))
+    _reset_settings()
+    yield tmp_path / "scenarios_data", tmp_path / "fixtures"
+    _reset_settings()
 
 
 def _make_plan_result(**overrides) -> FakePlanResult:

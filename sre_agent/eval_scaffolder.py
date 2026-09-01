@@ -1,8 +1,11 @@
 """Auto-generate eval scenarios when skills are scaffolded from resolutions.
 
 Called as a side-effect of skill scaffolding (fire-and-forget).
-Writes to sre_agent/evals/scenarios_data/scaffolded.json and
-sre_agent/evals/fixtures/scaffolded_<id>.json.
+Writes to the writable evals directory (``eval_store.scenarios_dir()`` /
+``eval_store.fixtures_dir()``) — NOT the installed package, which is
+read-only under the cluster's arbitrary UID, where the write failed with
+EACCES before the DB persist was ever reached — and persists through to the
+artifact store so the files survive a restart.
 
 All auto-generated scenarios have expected.should_block_release=false
 so they never gate releases.
@@ -24,10 +27,19 @@ except ImportError:
 
 logger = logging.getLogger("pulse_agent.eval_scaffolder")
 
-_SCENARIOS_DIR = Path(__file__).parent / "evals" / "scenarios_data"
-_FIXTURES_DIR = Path(__file__).parent / "evals" / "fixtures"
-_SUITE_FILE = _SCENARIOS_DIR / "scaffolded.json"
 _MAX_EVIDENCE_CHARS = 500
+
+
+def _scenarios_dir() -> Path:
+    from .eval_store import scenarios_dir
+
+    return scenarios_dir()
+
+
+def _fixtures_dir() -> Path:
+    from .eval_store import fixtures_dir
+
+    return fixtures_dir()
 
 
 def _sanitize_id(skill_name: str, category: str) -> str | None:
@@ -48,9 +60,9 @@ def _bootstrap_suite() -> dict:
 
 def _append_scenario(scenario: dict) -> bool:
     try:
-        _SCENARIOS_DIR.mkdir(parents=True, exist_ok=True)
+        suite_file = _scenarios_dir() / "scaffolded.json"
 
-        with open(_SUITE_FILE, "a+", encoding="utf-8") as fh:
+        with open(suite_file, "a+", encoding="utf-8") as fh:
             if _fcntl is not None:
                 _fcntl.flock(fh, _fcntl.LOCK_EX)
             try:
@@ -76,9 +88,10 @@ def _append_scenario(scenario: dict) -> bool:
                 if _fcntl is not None:
                     _fcntl.flock(fh, _fcntl.LOCK_UN)
 
-        # The suite file lives inside the installed package, so a scaffolded
-        # scenario is erased by the next rollout without this. Losing the eval
-        # loses the proof that the skill scaffolded alongside it still works.
+        # The suite file lives on the container's overlay filesystem, so a
+        # scaffolded scenario is erased by the next rollout without this.
+        # Losing the eval loses the proof that the skill scaffolded alongside
+        # it still works.
         from .artifact_store import KIND_EVAL_SCENARIO, persist
 
         persist(
@@ -99,11 +112,11 @@ def _append_scenario(scenario: dict) -> bool:
 
 def _write_fixture(scenario_id: str, fixture: dict) -> bool:
     try:
-        _FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
-        fixture_path = _FIXTURES_DIR / f"{scenario_id}.json"
+        fixtures_dir = _fixtures_dir()
+        fixture_path = fixtures_dir / f"{scenario_id}.json"
 
         resolved = fixture_path.resolve()
-        if not str(resolved).startswith(str(_FIXTURES_DIR.resolve())):
+        if not str(resolved).startswith(str(fixtures_dir.resolve())):
             logger.warning("Path traversal blocked for fixture: %s", scenario_id)
             return False
 

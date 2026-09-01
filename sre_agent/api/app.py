@@ -107,17 +107,16 @@ async def lifespan(app: FastAPI):
         # scaffolded skills live on the container's overlay filesystem, so
         # without this every restart silently discards them (see skill_store).
         try:
-            from pathlib import Path as _Path
-
-            from ..artifact_store import KIND_EVAL_FIXTURE, KIND_EVAL_SCENARIO, hydrate
+            from ..eval_store import hydrate_evals_dirs
             from ..plan_store import hydrate_plans_dir
             from ..skill_store import hydrate_skills_dir
 
             hydrate_skills_dir()
             hydrate_plans_dir()
-            _evals = _Path(__file__).parent.parent / "evals"
-            hydrate(KIND_EVAL_SCENARIO, _evals / "scenarios_data")
-            hydrate(KIND_EVAL_FIXTURE, _evals / "fixtures")
+            # Into the writable evals dir — hydrating into the package dir
+            # fails with EACCES on every boot under the cluster's arbitrary
+            # UID, so nothing persisted was ever restored there.
+            hydrate_evals_dirs()
         except Exception:
             logger.warning("Could not restore persisted artifacts", exc_info=True)
 

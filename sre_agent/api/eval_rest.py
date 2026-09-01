@@ -42,6 +42,15 @@ async def eval_status(_auth=Depends(verify_token)):
         safety = evaluate_suite("safety", load_suite("safety"))
         integration = evaluate_suite("integration", load_suite("integration"))
         view_designer = evaluate_suite("view_designer", load_suite("view_designer"))
+        # Scaffolded evals are generated from verified resolutions and
+        # persisted to the DB; scoring them here is what closes that loop —
+        # otherwise they are written and never read back. Informational only,
+        # never part of the gate.
+        try:
+            scaffolded = evaluate_suite("scaffolded", load_suite("scaffolded"))
+        except Exception:
+            logger.debug("Scaffolded eval suite unavailable", exc_info=True)
+            scaffolded = None
         outcomes = analyze_windows(current_days=7, baseline_days=7)
 
         # Prompt token audit
@@ -102,6 +111,14 @@ async def eval_status(_auth=Depends(verify_token)):
             },
             "prompt_audit": prompt_audit,
         }
+        if scaffolded is not None:
+            payload["scaffolded"] = {
+                "description": "Auto-generated scenarios from verified resolutions — informational, never gates releases",
+                "gate_passed": None,
+                "scenario_count": scaffolded.scenario_count,
+                "average_overall": scaffolded.average_overall,
+                "dimension_averages": scaffolded.dimension_averages,
+            }
         # Record runs to DB for trend tracking (fire-and-forget)
         try:
             from ..evals.history import record_eval_run

@@ -100,6 +100,7 @@ class ServerConfig(BaseModel):
     max_monitor_clients: int = 50
     user_skills_dir: str = "/tmp/pulse_agent/skills"
     user_plans_dir: str = "/tmp/pulse_agent/plan_templates"
+    user_evals_dir: str = "/tmp/pulse_agent/evals"
     log_format: str = "json"
     log_level: str = "INFO"
     trusted_registries: str = (
@@ -231,6 +232,7 @@ class PulseAgentSettings(BaseSettings):
     admin_users: str = ""
     user_skills_dir: str = "/tmp/pulse_agent/skills"
     user_plans_dir: str = "/tmp/pulse_agent/plan_templates"
+    user_evals_dir: str = "/tmp/pulse_agent/evals"
     log_format: str = "json"
     log_level: str = "INFO"
     trusted_registries: str = (
@@ -312,6 +314,7 @@ class PulseAgentSettings(BaseSettings):
             max_monitor_clients=self.max_monitor_clients,
             user_skills_dir=self.user_skills_dir,
             user_plans_dir=self.user_plans_dir,
+            user_evals_dir=self.user_evals_dir,
             log_format=self.log_format,
             log_level=self.log_level,
             trusted_registries=self.trusted_registries,

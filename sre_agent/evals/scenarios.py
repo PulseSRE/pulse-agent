@@ -1,4 +1,12 @@
-"""Scenario loading for deterministic eval suites."""
+"""Scenario loading for deterministic eval suites.
+
+Suites are read from two places and merged: the JSON bundled inside the
+package (read-only on the cluster) and the writable evals directory, where
+runtime-scaffolded scenarios land and DB-persisted ones are hydrated at boot
+(see ``eval_store``). Without the second source, every eval scenario the
+agent scaffolded from a verified resolution was persisted and then never
+read back — the suite scored only what shipped in the image.
+"""
 
 from __future__ import annotations
 
@@ -19,12 +27,49 @@ def _expected_from_raw(raw: dict) -> EvalExpected | None:
     )
 
 
-def load_suite(suite_name: str) -> list[EvalScenario]:
-    """Load eval scenarios from packaged JSON fixtures."""
+def _packaged_payload(suite_name: str) -> dict | None:
     package = "sre_agent.evals.scenarios_data"
     file_name = f"{suite_name}.json"
-    with resources.files(package).joinpath(file_name).open("r", encoding="utf-8") as fh:
-        payload = json.load(fh)
+    source = resources.files(package).joinpath(file_name)
+    if not source.is_file():
+        return None
+    with source.open("r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _runtime_payload(suite_name: str) -> dict | None:
+    from ..eval_store import scenarios_dir
+
+    path = scenarios_dir() / f"{suite_name}.json"
+    if not path.is_file():
+        return None
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def load_raw_suite(suite_name: str) -> dict:
+    """Merged raw suite payload: packaged scenarios plus runtime-written ones.
+
+    On a scenario_id collision the runtime copy wins — it is the version that
+    kept evolving after the image was built.
+    """
+    packaged = _packaged_payload(suite_name)
+    runtime = _runtime_payload(suite_name)
+    if packaged is None and runtime is None:
+        raise FileNotFoundError(f"Eval suite not found in package or runtime dir: {suite_name}.json")
+
+    merged = dict(packaged or runtime or {})
+    by_id: dict[str, dict] = {}
+    for payload in (packaged, runtime):
+        for raw in (payload or {}).get("scenarios", []):
+            by_id[raw["scenario_id"]] = raw
+    merged["scenarios"] = list(by_id.values())
+    return merged
+
+
+def load_suite(suite_name: str) -> list[EvalScenario]:
+    """Load eval scenarios from packaged JSON fixtures and the writable evals dir."""
+    payload = load_raw_suite(suite_name)
 
     scenarios: list[EvalScenario] = []
     for raw in payload.get("scenarios", []):

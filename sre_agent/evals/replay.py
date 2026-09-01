@@ -32,18 +32,37 @@ from .replay_config import build_replay_config, offline_context, shadow_tool_map
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
+def _fixture_dirs() -> list[Path]:
+    """Bundled fixtures first, then the writable dir runtime scaffolds land in.
+
+    The writable dir (see ``eval_store``) holds fixtures scaffolded at runtime
+    and hydrated from the DB at boot; without it those fixtures were persisted
+    and never replayable. Bundled first: a fixture shipped in the image is the
+    image's to define.
+    """
+    dirs = [_FIXTURES_DIR]
+    try:
+        from ..eval_store import fixtures_dir
+
+        dirs.append(fixtures_dir())
+    except Exception:
+        pass
+    return dirs
+
+
 def list_fixtures() -> list[str]:
     """Return names of available fixture files (without .json extension)."""
-    return sorted(p.stem for p in _FIXTURES_DIR.glob("*.json"))
+    return sorted({p.stem for d in _fixture_dirs() for p in d.glob("*.json")})
 
 
 def load_fixture(name: str) -> dict:
     """Load a fixture JSON file by name."""
-    path = _FIXTURES_DIR / f"{name}.json"
-    if not path.exists():
-        raise FileNotFoundError(f"Fixture not found: {path}")
-    with open(path, encoding="utf-8") as fh:
-        return json.load(fh)
+    for directory in _fixture_dirs():
+        path = directory / f"{name}.json"
+        if path.exists():
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh)
+    raise FileNotFoundError(f"Fixture not found: {_FIXTURES_DIR / (name + '.json')}")
 
 
 # ---------------------------------------------------------------------------
