@@ -2,6 +2,15 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## v2.29.0 (2026-09-01)
+
+### The fix lifecycle, durably — the system now uses Temporal rather than offering it
+- `IncidentWorkflow` expresses Pulse's fix lifecycle as one durable workflow. Every mechanism it needs already existed, hand-rolled: the approval wait was a future with a DB-polled timeout (281 of 368 actions on dev05 expired unseen), the snapshot was captured and usually used, verification was probed on later scan cycles, the grace window was "3 scans" lost on restart, and the recurrence window was a 1800s database re-read. They become a signal, the saga's compensation, a retry policy, its backoff, and a durable timer
+- The interesting property is not that each piece works — they did — but that the *sequence* becomes atomic. A restart between "applied the fix" and "verified it" loses the verification entirely, leaving a mutation nobody confirmed. The agent pod rolled five times during one working day of releases
+- A failed verification now *restores the pre-write snapshot* rather than merely reporting failure — saga compensation using `snapshot.py`, which already existed for exactly this and had no orchestration to trigger it
+- `PULSE_AGENT_DURABLE_AUTOFIX` (off by default, `spec.agent.durableAutoFix` on the CR) routes the monitor's auto-fix through it. Approval is already settled when `_execute_fix` runs, so the workflow does not re-ask and the WebSocket approval UI is untouched. The action records as `dispatched`; the verdict arrives from the workflow once verification and the recurrence window have actually run
+- Fallback is the load-bearing behaviour: flag off, no Temporal host, unreachable server or dispatch error all run inline exactly as before. Losing durability is worse than the inline path; dropping an approved fix is worse than both
+
 ## v2.28.0 (2026-09-01)
 
 ### Plan runs that survive the pod, and approvals that actually wait
