@@ -810,6 +810,65 @@ class ClusterMonitor:
         finally:
             self._proposals_awaiting_approval.discard(corr_key)
 
+    async def _dispatch_durable_fix(
+        self,
+        *,
+        action_report: dict,
+        targeted_plan,
+        resources: list[dict],
+        finding: dict,
+        category: str,
+    ) -> bool:
+        """Start the durable fix workflow. False means "run inline instead".
+
+        Falls back on *any* problem — flag off, Temporal not configured, server
+        unreachable, dispatch error. A fix that was approved must still happen;
+        losing durability is worse than the inline path, but dropping the fix
+        entirely is worse than both.
+        """
+        from ..config import get_settings
+
+        settings = get_settings()
+        if not settings.monitor.durable_autofix or not settings.temporal.host:
+            return False
+
+        try:
+            from ..temporal.client import start_incident_run
+
+            resource = dict(resources[0]) if resources else {}
+            started = await start_incident_run(
+                finding_id=str(finding.get("id", "")),
+                resource=resource,
+                fix_plan={
+                    "strategy": targeted_plan.strategy,
+                    "cause_category": targeted_plan.cause_category,
+                    "confidence": targeted_plan.confidence,
+                    "description": targeted_plan.description,
+                    "params": targeted_plan.params,
+                },
+                require_approval=False,
+                recurrence_window_seconds=int(settings.monitor.recurrence_window),
+            )
+        except Exception:
+            logger.warning(
+                "Durable auto-fix dispatch failed for %s; running inline instead",
+                finding.get("id"),
+                exc_info=True,
+            )
+            return False
+
+        # Recorded as dispatched, not completed: the verdict arrives from the
+        # workflow's record_outcome activity once verification and the
+        # recurrence window have actually run.
+        action_report["status"] = "dispatched"
+        action_report["workflowId"] = started["workflow_id"]
+        action_report["fixStrategy"] = targeted_plan.strategy
+        await self._broadcast_raw(action_report)
+        save_action(action_report, category=category, resources=resources, finding=finding)
+        self._recent_fix_ids.add(finding["id"])
+        logger.info("Auto-fix dispatched durably: %s", started["workflow_id"])
+        return True
+
     async def _execute_fix(
         self,
         *,
@@ -828,6 +887,22 @@ class ClusterMonitor:
         directly".
         """
         from .fix_planner import execute_fix as execute_targeted_fix
+
+        # Durable path (opt-in, PULSE_AGENT_DURABLE_AUTOFIX). Hands the
+        # post-approval sequence — snapshot, apply, verify, settle, recheck —
+        # to a Temporal workflow instead of running it inline. That sequence is
+        # exactly what a pod restart loses today: a mutation applied with its
+        # verification never recorded. Approval is already settled by the time
+        # we get here (trust 2 came through the approval task, trust 3+ acts
+        # directly), so the workflow does not re-ask.
+        if await self._dispatch_durable_fix(
+            action_report=action_report,
+            targeted_plan=targeted_plan,
+            resources=resources,
+            finding=finding,
+            category=category,
+        ):
+            return True
 
         succeeded = False
         await self._broadcast_raw(action_report)

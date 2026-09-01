@@ -452,3 +452,109 @@ class TestIncidentWorkflow:
         )
         assert calls == []
         assert result["verdict"] == "expired"
+
+
+class TestDurableAutofixSeam:
+    """Routing the monitor's auto-fix through Temporal — and never dropping a fix.
+
+    This is the change that makes the system actually *use* durable execution
+    rather than merely offer it, so the fallback behaviour matters more than
+    the happy path: a fix that was approved must still happen even when
+    Temporal is misconfigured, unreachable, or the dispatch errors.
+    """
+
+    def _monitor(self):
+        from unittest.mock import AsyncMock
+
+        from sre_agent.monitor.cluster_monitor import ClusterMonitor
+
+        m = ClusterMonitor.__new__(ClusterMonitor)
+        m._broadcast_raw = AsyncMock()
+        m._recent_fix_ids = set()
+        return m
+
+    def _plan(self):
+        from sre_agent.monitor.fix_planner import FixPlan
+
+        return FixPlan(
+            strategy="restart_controller",
+            cause_category="crashloop",
+            confidence=0.9,
+            description="restart",
+            params={"resources": [{"name": "p1", "namespace": "dev"}]},
+        )
+
+    def _args(self):
+        return {
+            "action_report": {},
+            "targeted_plan": self._plan(),
+            "resources": [{"name": "p1", "namespace": "dev"}],
+            "finding": {"id": "f1"},
+            "category": "crashloop",
+        }
+
+    def test_disabled_by_default_runs_inline(self, monkeypatch):
+        import asyncio as aio
+
+        from sre_agent import config as config_mod
+
+        config_mod._reset_settings()
+        monkeypatch.setenv("PULSE_AGENT_TEMPORAL_HOST", "temporal:7233")
+        # durable_autofix unset => False
+        assert aio.run(self._monitor()._dispatch_durable_fix(**self._args())) is False
+        config_mod._reset_settings()
+
+    def test_enabled_without_a_temporal_host_runs_inline(self, monkeypatch):
+        import asyncio as aio
+
+        from sre_agent import config as config_mod
+
+        config_mod._reset_settings()
+        monkeypatch.setenv("PULSE_AGENT_DURABLE_AUTOFIX", "true")
+        monkeypatch.delenv("PULSE_AGENT_TEMPORAL_HOST", raising=False)
+        assert aio.run(self._monitor()._dispatch_durable_fix(**self._args())) is False
+        config_mod._reset_settings()
+
+    def test_dispatch_failure_falls_back_rather_than_dropping_the_fix(self, monkeypatch):
+        """An unreachable Temporal must not mean the approved fix vanishes."""
+        import asyncio as aio
+
+        from sre_agent import config as config_mod
+        from sre_agent.temporal import client as tclient
+
+        config_mod._reset_settings()
+        monkeypatch.setenv("PULSE_AGENT_DURABLE_AUTOFIX", "true")
+        monkeypatch.setenv("PULSE_AGENT_TEMPORAL_HOST", "temporal:7233")
+
+        async def boom(*a, **k):
+            raise ConnectionError("temporal frontend unreachable")
+
+        monkeypatch.setattr(tclient, "start_incident_run", boom)
+        assert aio.run(self._monitor()._dispatch_durable_fix(**self._args())) is False
+        config_mod._reset_settings()
+
+    def test_successful_dispatch_records_dispatched_not_completed(self, monkeypatch):
+        """The verdict is not known yet — it arrives from the workflow later."""
+        import asyncio as aio
+
+        from sre_agent import config as config_mod
+        from sre_agent.monitor import cluster_monitor as cm
+        from sre_agent.temporal import client as tclient
+
+        config_mod._reset_settings()
+        monkeypatch.setenv("PULSE_AGENT_DURABLE_AUTOFIX", "true")
+        monkeypatch.setenv("PULSE_AGENT_TEMPORAL_HOST", "temporal:7233")
+
+        async def ok(**kwargs):
+            return {"workflow_id": "incident-f1", "run_id": "r1"}
+
+        monkeypatch.setattr(tclient, "start_incident_run", ok)
+        monkeypatch.setattr(cm, "save_action", lambda *a, **k: None)
+
+        mon = self._monitor()
+        args = self._args()
+        assert aio.run(mon._dispatch_durable_fix(**args)) is True
+        assert args["action_report"]["status"] == "dispatched"
+        assert args["action_report"]["workflowId"] == "incident-f1"
+        assert "f1" in mon._recent_fix_ids
+        config_mod._reset_settings()

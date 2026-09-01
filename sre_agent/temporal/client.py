@@ -88,3 +88,40 @@ async def approve_plan_phase(workflow_id: str, phase_id: str, approved: bool) ->
     client = await _connect()
     handle = client.get_workflow_handle(workflow_id)
     await handle.signal("approve_phase", args=[phase_id, approved])
+
+
+async def start_incident_run(
+    finding_id: str,
+    resource: dict,
+    fix_plan: dict,
+    *,
+    require_approval: bool = False,
+    recurrence_window_seconds: int = 1800,
+) -> dict:
+    """Start the durable fix lifecycle for one finding.
+
+    The workflow id is derived from the finding so a duplicate dispatch for the
+    same finding is rejected by Temporal rather than by application bookkeeping
+    — the monitor's own dedup (``_recent_fixes``, cooldowns) stays, but this
+    makes "one fix workflow per finding" a platform guarantee.
+    """
+    from .incident_workflow import IncidentInput, IncidentWorkflow
+
+    cfg = _settings()
+    client = await _connect()
+    workflow_id = f"incident-{finding_id}"
+    handle = await client.start_workflow(
+        IncidentWorkflow.run,
+        IncidentInput(
+            finding_id=finding_id,
+            resource=resource,
+            fix_plan=fix_plan,
+            require_approval=require_approval,
+            approval_timeout_seconds=cfg.approval_timeout,
+            recurrence_window_seconds=recurrence_window_seconds,
+        ),
+        id=workflow_id,
+        task_queue=cfg.task_queue,
+    )
+    logger.info("Started durable incident run %s", workflow_id)
+    return {"workflow_id": workflow_id, "run_id": handle.result_run_id}

@@ -62,6 +62,11 @@ class MonitorConfig(BaseModel):
     security_followup: bool = False
     noise_threshold: float = 0.7
     max_trust_level: int = 2
+    # Route auto-fix execution through the durable IncidentWorkflow instead of
+    # running it inline. Off by default: this changes what the monitor does on
+    # a live cluster, and it requires PULSE_AGENT_TEMPORAL_HOST — with neither
+    # set, or Temporal unreachable, the inline path runs exactly as before.
+    durable_autofix: bool = False
     investigation_categories: str = "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa,stuck,hot_loop,control_plane"
     max_concurrent_investigations: int = 3
     # How long a "verified" verdict is held answerable for. A fix whose finding
@@ -198,6 +203,7 @@ class PulseAgentSettings(BaseSettings):
         default=2,
         validation_alias=AliasChoices("PULSE_AGENT_MAX_TRUST_LEVEL", "PULSE_AGENT_TRUST_LEVEL"),
     )
+    durable_autofix: bool = False
     investigation_categories: str = "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa,stuck,hot_loop,control_plane"
     max_concurrent_investigations: int = 3
     recurrence_window: int = 1800
@@ -278,6 +284,7 @@ class PulseAgentSettings(BaseSettings):
             security_followup=self.security_followup,
             noise_threshold=self.noise_threshold,
             max_trust_level=self.max_trust_level,
+            durable_autofix=self.durable_autofix,
             investigation_categories=self.investigation_categories,
             max_concurrent_investigations=self.max_concurrent_investigations,
             recurrence_window=self.recurrence_window,
