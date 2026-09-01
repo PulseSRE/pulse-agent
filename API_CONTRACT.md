@@ -74,6 +74,13 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/analytics/learning` | token | Agent learning feed: weight updates, scaffolded skills, routing decisions (query: `days` 1-365) |
 | `PUT` | `/plan-templates/{type}` | token | Update plan template phases/timeouts |
 | `DELETE` | `/plan-templates/{type}` | token | Delete auto-generated plan templates |
+| `POST` | `/plan-templates` | token | Create a new plan template (versioned; see runtime artifacts) |
+| `GET` | `/plan-templates/{type}/versions` | token | Version history for one plan template |
+| `POST` | `/plan-templates/{type}/run` | token | Start a durable run of this plan on Temporal. 503 with the reason when durable execution is not configured |
+| `GET` | `/workflow-runs` | token | Recent durable runs from Temporal's visibility store (query: `limit` 1-100). Each row carries a `memo` labelling what the run is acting on |
+| `GET` | `/workflow-runs/{workflow_id}` | token | Status plus live progress for one run, queried from the workflow itself |
+| `POST` | `/workflow-runs/{workflow_id}/approve` | token | Deliver a human verdict to a run waiting on approval (body: `phase_id`, `approved`) |
+| `POST` | `/workflow-runs/{workflow_id}/cancel` | token | Stop a running workflow (body: optional `reason`). Cooperative: for an incident run this rolls the fix back from its snapshot and records a `cancelled` verdict rather than merely stopping |
 | `GET` | `/metrics/fix-success-rate` | token | Auto-fix outcome success rate (query: `period` 1-365 days) |
 | `GET` | `/metrics/response-latency` | token | Agent response p50/p95/p99 latency from tool_usage (query: `period` 1-365 days) |
 | `GET` | `/metrics/eval-trend` | token | Eval score trend with sparkline (query: `suite`, `releases` 1-50) |

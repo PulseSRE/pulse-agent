@@ -91,18 +91,41 @@ jobs:
 
       - name: Verify docs consistency
         run: |
-          python -c "
+          python - <<'PY'
+          import re
           from importlib.metadata import version
+
           v = version('openshift-sre-agent')
-          # Check README mentions correct version
           readme = open('README.md').read()
           assert v in readme, f'README.md does not mention version {v}'
-          # Check API_CONTRACT has all REST endpoints from api.py
+
           contract = open('API_CONTRACT.md').read()
-          for endpoint in ['/healthz', '/version', '/health', '/tools', '/fix-history', '/eval/status', '/monitor/capabilities', '/monitor/pause', '/monitor/resume', '/memory/export', '/memory/import']:
-              assert endpoint in contract, f'API_CONTRACT.md missing endpoint {endpoint}'
-          print(f'Docs consistency check passed (v{v})')
-          "
+
+          # Derived from the router, not from a hardcoded list.
+          #
+          # This gate used to check that eleven named endpoints appeared in
+          # API_CONTRACT.md. Since the list never changed, every endpoint added
+          # after it was written went undocumented with the gate still green —
+          # seven of them had accumulated by v2.30.2. A check that can only
+          # pass is not a check.
+          #
+          # Path parameter *names* are normalised away: the router says
+          # {incident_type} where the doc says {type}, and that difference is
+          # not what this is protecting.
+          def shape(path: str) -> str:
+              return re.sub(r'\{[^}]*\}', '{}', path)
+
+          from sre_agent.api.monitor_rest import router
+
+          documented = {shape(m) for m in re.findall(r'`(/[^`]*)`', contract)}
+          missing = sorted({shape(r.path) for r in router.routes} - documented)
+          assert not missing, (
+              'API_CONTRACT.md does not document these endpoints: '
+              + ', '.join(missing)
+              + '. Add a row to the REST Endpoints table.'
+          )
+          print(f'Docs consistency check passed (v{v}, {len(documented)} documented paths)')
+          PY
 
       - name: Detect prompt changes
         id: prompt_changes

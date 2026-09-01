@@ -2,6 +2,14 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## v2.30.3 (2026-09-01)
+
+### A docs gate that could only pass
+- The evals workflow checked that eleven *named* endpoints appeared in `API_CONTRACT.md`. The list was written once and never changed, so every endpoint added afterwards went undocumented with the gate still green — seven had accumulated by v2.30.2, all of them this migration's own plan-run and workflow-run endpoints
+- The check now derives the endpoint set from the router, so a new endpoint is documented or CI says which one is not. Path parameter names are normalised (`{incident_type}` vs `{type}`) because that difference is not what the gate protects
+- `API_CONTRACT.md` gains the seven missing rows, including that cancelling an incident run rolls the fix back rather than merely stopping it
+- Third time this session that a check was passing on absence rather than evidence. A check that cannot fail is not a check
+
 ## v2.30.2 (2026-09-01)
 
 ### Temporal tests that can actually run in CI
