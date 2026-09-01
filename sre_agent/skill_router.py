@@ -34,26 +34,40 @@ _last_routing_decision_var: contextvars.ContextVar[dict | None] = contextvars.Co
 )
 
 
-_LLM_FALLBACK_DISABLED = False
+_ROUTING_OFFLINE = False
+
+
+def routing_is_offline() -> bool:
+    """Whether routing has been asked to make no network calls."""
+    return _ROUTING_OFFLINE
 
 
 @contextlib.contextmanager
-def llm_fallback_disabled():
-    """Route with ORCA only, never reaching the LLM fallback.
+def offline_routing():
+    """Route with ORCA only, making no network call of any kind.
 
-    The selector eval measures *routing* latency and asserts a p99 bound. The
-    fallback is a network call, so letting it fire turns that assertion into a
-    measurement of provider latency — which is how a 500ms CI bound recorded
-    5,200ms. Callers that need determinism (evals, latency tests) enter this;
-    production routing is unaffected.
+    The selector eval measures *routing* latency and asserts a p99 bound, so
+    any network call inside routing turns that assertion into a measurement of
+    somebody else's availability.
+
+    This was originally `llm_fallback_disabled`, which closed exactly one of
+    the two doors: the LLM fallback. The other was the selector's SLO context
+    lookup, which queries Prometheus — and on a CI runner with no Prometheus it
+    stalled one scenario for five seconds, blowing the same 500ms bound the
+    first fix was meant to protect. Naming the guard after the property
+    (offline) rather than one mechanism (the fallback) is the point: the next
+    network call added to routing has an obvious place to be excluded, instead
+    of quietly reopening the measurement.
+
+    Production routing is unaffected.
     """
-    global _LLM_FALLBACK_DISABLED
-    previous = _LLM_FALLBACK_DISABLED
-    _LLM_FALLBACK_DISABLED = True
+    global _ROUTING_OFFLINE
+    previous = _ROUTING_OFFLINE
+    _ROUTING_OFFLINE = True
     try:
         yield
     finally:
-        _LLM_FALLBACK_DISABLED = previous
+        _ROUTING_OFFLINE = previous
 
 
 def get_last_routing_decision() -> dict | None:
@@ -195,7 +209,7 @@ def classify_query(query: str, *, context: dict | None = None):
     best_skill = skills.get(result.skill_name)
 
     # If ORCA didn't find a high-confidence match, try LLM fallback
-    if result.source == "fallback" and not best_skill and not _LLM_FALLBACK_DISABLED:
+    if result.source == "fallback" and not best_skill and not _ROUTING_OFFLINE:
         llm_result = _llm_classify(query)
         if llm_result:
             best_skill = llm_result

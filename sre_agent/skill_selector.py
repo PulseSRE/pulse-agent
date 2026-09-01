@@ -51,6 +51,20 @@ _last_selection_result_var: contextvars.ContextVar[SelectionResult | None] = con
 )
 
 
+def _routing_is_offline() -> bool:
+    """Whether a caller has asked routing to make no network calls.
+
+    Late import: skill_router imports this module, so a module-level import
+    would be circular.
+    """
+    try:
+        from .skill_router import routing_is_offline
+
+        return routing_is_offline()
+    except Exception:  # pragma: no cover - import guard
+        return False
+
+
 def get_last_selection_result() -> SelectionResult | None:
     """Return the most recent ORCA selection result for the current context."""
     return _last_selection_result_var.get()
@@ -311,15 +325,23 @@ class SkillSelector:
         # Channel 6: Semantic embedding
         channel_scores["semantic"] = self._score_semantic_embedding(query)
 
-        # Inject SLO context if available
-        try:
-            from .slo_registry import get_slo_registry
+        # Inject SLO context if available.
+        #
+        # Only when there is a context to inject into. get_context_for_selector
+        # queries Prometheus, and the result was previously fetched and then
+        # dropped on the floor whenever context was None — which is most
+        # routing calls, including every one the selector eval makes. On a
+        # runner with no reachable Prometheus that discarded round-trip is a
+        # multi-second stall attributed to routing.
+        if context is not None and not _routing_is_offline():
+            try:
+                from .slo_registry import get_slo_registry
 
-            slo_context = get_slo_registry().get_context_for_selector()
-            if slo_context and context is not None:
-                context["slo_alerts"] = slo_context
-        except Exception:
-            logger.debug("Suppressed exception", exc_info=True)
+                slo_context = get_slo_registry().get_context_for_selector()
+                if slo_context:
+                    context["slo_alerts"] = slo_context
+            except Exception:
+                logger.debug("Suppressed exception", exc_info=True)
 
         # Fuse scores
         fused = self._fuse_scores(channel_scores)

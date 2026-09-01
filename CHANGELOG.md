@@ -2,6 +2,14 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## v2.30.1 (2026-09-01)
+
+### Routing made a Prometheus call it threw away
+- The selector eval's latency gate failed CI at 5,171ms against a 500ms bound — the same assertion an earlier fix was supposed to have protected by disabling the LLM fallback. That fix closed one of two doors. The other was `SkillSelector.select`, which calls `get_context_for_selector()` to fetch SLO status from Prometheus; on a runner with no Prometheus, one scenario stalled for five seconds
+- The call was also pointless in most cases: the result is only used `if context is not None`, so every routing call without a context — including every one the eval makes, and a large share of production routing — paid for a round-trip whose answer was discarded. It is now skipped when there is nowhere to put it, which is why recall is unchanged at 0.9831 with p99 down from 559ms to 6.6ms locally
+- `llm_fallback_disabled` becomes `offline_routing`, named for the property rather than the one mechanism it originally covered. New tests assert *that nothing reaches out* under it, so a third network path added to routing fails with an explanation instead of as an unexplained p99 regression
+- Assert the property, not the number: the latency bound could only say something was slow, and it took two rounds to find out what
+
 ## v2.30.0 (2026-09-01)
 
 ### Durable runs you can see and stop

@@ -25,12 +25,14 @@ class SelectorEvalResult:
 def run_selector_eval(suite_path: str = "selector") -> SelectorEvalResult:
     """Run the selector eval suite. Deterministic — no LLM calls.
 
-    The determinism is enforced, not assumed: ``classify_query`` can fall back
-    to an LLM call when ORCA finds no confident match, which would make both
-    the scores and the latency measurement depend on a network round-trip.
+    The determinism is enforced, not assumed. ``classify_query`` reaches the
+    network by two routes — an LLM fallback when ORCA finds no confident match,
+    and the selector's SLO context lookup, which queries Prometheus — and
+    either would make the scores and the latency measurement depend on somebody
+    else's availability. ``offline_routing`` closes both.
     """
     from ..skill_loader import classify_query, load_skills
-    from ..skill_router import llm_fallback_disabled
+    from ..skill_router import offline_routing
 
     # Ensure skills loaded
     load_skills()
@@ -55,7 +57,7 @@ def run_selector_eval(suite_path: str = "selector") -> SelectorEvalResult:
         acceptable = set(scenario.get("acceptable", [expected]))
 
         start = time.monotonic()
-        with llm_fallback_disabled():
+        with offline_routing():
             routed_skill = classify_query(query)
         elapsed_ms = (time.monotonic() - start) * 1000
         latencies.append(elapsed_ms)
