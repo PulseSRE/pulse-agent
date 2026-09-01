@@ -17,6 +17,23 @@ What Temporal buys over the in-process engine, concretely:
 Determinism rules: no IO here, no settings reads, no clocks but Temporal's.
 All decisions are the pure functions in ``sequencing``; everything else is an
 activity.
+
+**Changing this file is a versioned operation.** A running workflow replays its
+history against whatever code the worker has now, and approval waits are meant
+to last days — so an edit that changes the *sequence of commands* (which
+activities run, in what order, which timers or waits exist) will break replay
+for every in-flight run. Two mechanisms, both already wired:
+
+- ``workflow.patched("some-change-id")`` guards a behaviour change so old
+  histories take the old branch and new ones take the new branch. Use it for
+  any change to command sequence; ``workflow.deprecate_patch`` retires the
+  guard once no old runs remain.
+- The worker stamps a ``build_id`` derived from the agent version
+  (``temporal/worker.py``), so which build produced a history is answerable,
+  and Temporal's worker versioning can pin old runs to old workers.
+
+Edits that are always safe without a patch: comments, logging, renaming locals,
+and anything inside an *activity* (activities are re-executed, not replayed).
 """
 
 from __future__ import annotations

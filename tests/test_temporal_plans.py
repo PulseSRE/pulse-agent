@@ -237,3 +237,38 @@ class TestRunEndpoints:
         with pytest.raises(HTTPException) as exc:
             aio.run(monitor_rest.approve_workflow_phase("wf-1", FakeReq(), _auth=None))
         assert exc.value.status_code == 400
+
+
+class TestVersioningSafety:
+    """Guards for the one correctness gap that bites *after* rollout.
+
+    A running workflow replays its history against current code, and approval
+    waits are meant to last days — so the seams that make a logic change safe
+    have to exist before anything depends on them, not after the first
+    nondeterminism error in production.
+    """
+
+    def test_worker_stamps_a_build_id(self):
+        """Which build produced a history must be answerable."""
+        import inspect
+
+        from sre_agent.temporal import worker
+
+        src = inspect.getsource(worker.run_worker)
+        assert "build_id=" in src, "worker must stamp a build id for worker versioning"
+        assert "openshift-sre-agent" in src, "build id should derive from the agent version"
+
+    def test_workflow_documents_the_patch_discipline(self):
+        """The rule lives where the change happens, not only in a doc."""
+        from sre_agent.temporal import plan_workflow
+
+        doc = plan_workflow.__doc__ or ""
+        assert "workflow.patched" in doc
+        assert "build_id" in doc
+
+    def test_patched_is_available_from_the_sdk(self):
+        """The mechanism the discipline depends on actually exists here."""
+        from temporalio import workflow
+
+        assert hasattr(workflow, "patched")
+        assert hasattr(workflow, "deprecate_patch")

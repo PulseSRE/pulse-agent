@@ -36,11 +36,24 @@ async def run_worker(shutdown: asyncio.Event) -> None:
         )
         return
 
+    # A build id stamps every task this worker completes, so a code change that
+    # alters workflow logic can be rolled out under a new id without old
+    # in-flight histories replaying against new code (Temporal worker
+    # versioning). Derived from the agent version — the same string the CR
+    # pins — so "which build ran this" is answerable from the workflow history.
+    try:
+        from importlib.metadata import version as _pkg_version
+
+        _pulse_version = _pkg_version("openshift-sre-agent")
+    except Exception:
+        _pulse_version = "unknown"
+
     worker = Worker(
         client,
         task_queue=cfg.task_queue,
         workflows=[PlanWorkflow],
         activities=ALL_ACTIVITIES,
+        build_id=f"pulse-{_pulse_version}",
     )
     logger.info("Temporal worker polling %s (queue=%s)", cfg.host, cfg.task_queue)
     async with worker:
