@@ -2,6 +2,22 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## v2.28.0 (2026-09-01)
+
+### Plan runs that survive the pod, and approvals that actually wait
+- The in-process engine runs a plan as an asyncio task inside the agent: `_record_execution` writes only at the end, so a restart mid-plan loses the run entirely. The agent pod was rolled five times in a single working day of releases and every in-flight plan died unrecorded. Same ephemerality bug as migration 036, one level up — definitions became durable, executions had not
+- `approval_required` phases were marked `needs_escalation` and skipped, because an in-process engine cannot afford to block for hours. Human-in-the-loop plans were structurally impossible
+- `temporal/` adds a durable path on Temporal. One interpreter workflow executes *any* plan definition by walking its phase graph, so a plan created in the UI runs durably with no deploy — a new workflow is data, not code. Decisions are pure functions in `sequencing.py`; activities reuse `PlanRuntime._execute_phase` wholesale, so the `produces`-contract check and retry-with-the-gap-named behave identically on both paths
+- Approval is a signal the workflow waits on for `PULSE_AGENT_TEMPORAL_APPROVAL_TIMEOUT` (default 24h); denial or timeout records `needs_escalation` — exactly today's behaviour, so ignoring a request regresses nothing. Progress is a workflow query the UI polls
+- The plan definition is pinned at workflow start: editing a plan changes the *next* run, never one in flight, mirroring what version history gives edits at rest
+- Routing is deliberately narrow: the monitor's automatic execution is untouched, only `POST /plan-templates/{type}/run` goes durable, and plans using `branch_on`/`parallel_with` are refused by name rather than run half-faithfully
+
+### Workflow changes are a versioned operation
+- A running workflow replays its history against whatever code the worker has now, and approval waits are meant to last days — so a logic change would break every in-flight run. Closed before rollout rather than after the first nondeterminism error: the worker stamps `build_id=pulse-{version}`, and the patch discipline (`workflow.patched` for command-sequence changes; comments, logging and activity bodies never need it) is documented in the workflow's own docstring, with tests asserting the seams exist
+
+### Everything is inert until configured
+- No host configured means no worker starts and the run endpoints answer 503 naming the variable to set. The operator's `spec.temporal` (v0.6.1) provisions the server and injects the host
+
 ## v2.27.0 (2026-08-25)
 
 ### Nothing the agent wrote at runtime survived a restart
