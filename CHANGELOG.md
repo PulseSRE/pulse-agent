@@ -2,6 +2,13 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## v2.29.1 (2026-09-01)
+
+### A failed apply must still produce a verdict
+- Found by running `IncidentWorkflow` against the live Temporal server rather than only the test environment: snapshot completed, `apply_fix` failed on a missing pod, and the workflow died with `WorkflowExecutionFailed` having recorded no outcome at all. The dispatched action would sit with no verdict forever — strictly worse than the inline path it replaces, which records a failure. It is also the verdict-from-nothing shape this repo has been bitten by before
+- The apply failure now compensates defensively (the failure may follow a partial mutation; restore is a no-op when there is nothing to undo), records a `failed` verdict with the cause, and skips verification — there is nothing to verify when the fix never applied
+- The time-skipping tests, mypy and 3,342 unit tests all passed while this bug existed. Same species as the missing `db.commit()` and the optional-SDK import earlier in the day: local green is not the same as working
+
 ## v2.29.0 (2026-09-01)
 
 ### The fix lifecycle, durably — the system now uses Temporal rather than offering it
