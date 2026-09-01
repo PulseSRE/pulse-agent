@@ -42,6 +42,7 @@ def load_templates() -> dict[str, SkillPlan]:
                         branch_on=p.get("branch_on"),
                         branches=p.get("branches", {}),
                         parallel_with=p.get("parallel_with"),
+                        subplan=p.get("subplan"),
                         approval_required=p.get("approval_required", False),
                         runs=p.get("runs", "on_success"),
                         success_condition=p.get("success_condition", ""),

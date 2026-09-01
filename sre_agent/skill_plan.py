@@ -23,6 +23,7 @@ class SkillPhase:
     branch_on: str | None = None  # field from prior output to branch on
     branches: dict[str, list[str]] = field(default_factory=dict)  # branch_value -> skill_names
     parallel_with: list[str] | None = None  # phase IDs to run concurrently
+    subplan: str | None = None  # incident_type of a whole plan to run as this phase
     approval_required: bool = False  # human gate before execution
     runs: str = "on_success"  # "on_success" | "always"
     success_condition: str = ""  # PromQL or check expression for verify phases

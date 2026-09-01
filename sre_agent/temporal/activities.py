@@ -43,6 +43,7 @@ def plan_to_dict(plan) -> dict:
                 "branch_on": p.branch_on,
                 "branches": dict(p.branches),
                 "parallel_with": list(p.parallel_with) if p.parallel_with else None,
+                "subplan": p.subplan,
                 "retry_limit": p.retry_limit,
             }
             for p in plan.phases
@@ -89,13 +90,23 @@ async def load_plan(incident_type: str) -> dict:
 
 
 @activity.defn(name="pulse.run_plan_phase")
-async def run_plan_phase(plan: dict, phase_id: str, incident: dict, prior_outputs: dict) -> dict:
-    """One phase, held to its contract, exactly as the in-process engine runs it."""
+async def run_plan_phase(
+    plan: dict, phase_id: str, incident: dict, prior_outputs: dict, skill_override: str | None = None
+) -> dict:
+    """One phase, held to its contract, exactly as the in-process engine runs it.
+
+    ``skill_override`` is the workflow's resolved ``branch_on`` target: the
+    branch decision is made in the workflow (deterministically, from recorded
+    outputs) and only the *result* crosses the activity boundary, so a replay
+    can never re-decide a branch differently from what actually ran.
+    """
     from ..agent import create_async_client
     from ..plan_runtime import PlanRuntime
 
     phase_dict = next(p for p in plan["phases"] if p["id"] == phase_id)
     phase = _phase_from_dict(phase_dict)
+    if skill_override:
+        phase.skill_name = skill_override
     priors = {pid: _output_from_dict(od) for pid, od in prior_outputs.items()}
 
     client = create_async_client()

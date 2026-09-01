@@ -568,6 +568,18 @@ async def create_plan_template(request: Request, _auth=Depends(verify_token)):
                 # check the phase did what it promised instead of assuming.
                 "produces": list(ph.get("produces") or []),
                 "approval_required": bool(ph.get("approval_required", False)),
+                # Graph features: branch_on picks the skill from a
+                # dependency's findings, parallel_with is advisory (the engine
+                # already runs a whole ready wave concurrently), subplan runs
+                # another plan as this phase. depends_on is above.
+                **({"branch_on": str(ph["branch_on"])} if ph.get("branch_on") else {}),
+                **(
+                    {"branches": {str(k): [str(s) for s in v] for k, v in ph["branches"].items()}}
+                    if isinstance(ph.get("branches"), dict) and ph.get("branches")
+                    else {}
+                ),
+                **({"parallel_with": [str(x) for x in ph["parallel_with"]]} if ph.get("parallel_with") else {}),
+                **({"subplan": str(ph["subplan"])} if ph.get("subplan") else {}),
             }
             for ph in phases
         ],

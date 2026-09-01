@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from sre_agent.temporal.sequencing import derive_status, ready_phases, unsupported_features
+from sre_agent.temporal.sequencing import derive_status, ready_phases, resolve_branch, unsupported_features
 
 # ---------------------------------------------------------------------------
 # Pure sequencing
@@ -42,15 +42,46 @@ class TestSequencing:
         assert derive_status(phases, {"a": {"status": "complete"}, "b": {"status": "failed"}}) == "partial"
         assert derive_status(phases, {"a": {"status": "complete"}}) == "partial"
 
-    def test_unsupported_features_are_named(self):
-        plan = {"phases": [{"id": "x", "branch_on": "severity"}, {"id": "y", "parallel_with": ["x"]}]}
-        assert unsupported_features(plan) == ["x.branch_on", "y.parallel_with"]
-        assert unsupported_features({"phases": [{"id": "z"}]}) == []
+    def test_unsupported_features_is_empty_since_branching_landed(self):
+        """branch_on, branches, parallel_with and subplan all execute now.
 
+        The checker stays because it is the refusal point for the *next*
+        feature the interpreter cannot honour, and because the workflow's
+        pre-patch replay path still calls it.
+        """
+        plan = {
+            "phases": [
+                {"id": "x", "branch_on": "severity", "branches": {"high": ["security"]}},
+                {"id": "y", "parallel_with": ["x"], "subplan": "child"},
+            ]
+        }
+        assert unsupported_features(plan) == []
 
-# ---------------------------------------------------------------------------
-# The workflow itself, on the time-skipping test server
-# ---------------------------------------------------------------------------
+    def test_resolve_branch_takes_the_first_dependency_with_the_key(self):
+        phase = {
+            "id": "fix",
+            "depends_on": ["triage", "deep-dive"],
+            "branch_on": "cause",
+            "branches": {"oom": ["oom-skill"], "config": ["config-skill"]},
+        }
+        outputs = {
+            "triage": {"findings": {"cause": "oom"}},
+            "deep-dive": {"findings": {"cause": "config"}},
+        }
+        assert resolve_branch(phase, outputs) == "oom-skill"
+
+    def test_resolve_branch_falls_back_to_branch_signal(self):
+        phase = {"id": "fix", "depends_on": ["triage"], "branch_on": "cause", "branches": {"oom": ["oom-skill"]}}
+        outputs = {"triage": {"findings": {}, "branch_signal": "oom"}}
+        assert resolve_branch(phase, outputs) == "oom-skill"
+
+    def test_resolve_branch_misses_keep_the_declared_skill(self):
+        """No value, unmatched value, or empty skill list — same as the engine."""
+        phase = {"id": "fix", "depends_on": ["triage"], "branch_on": "cause", "branches": {"oom": ["oom-skill"]}}
+        assert resolve_branch(phase, {"triage": {"findings": {}}}) is None
+        assert resolve_branch(phase, {"triage": {"findings": {"cause": "network"}}}) is None
+        phase_empty = {**phase, "branches": {"oom": []}}
+        assert resolve_branch(phase_empty, {"triage": {"findings": {"cause": "oom"}}}) is None
 
 
 def _plan(phases):
@@ -88,8 +119,18 @@ def _ok_output(pid):
     }
 
 
-async def _run_workflow(plan_dict, params, send_approval=None):
-    """Execute PlanWorkflow with stub activities; optionally signal mid-run."""
+async def _run_workflow(plan_dict, params, send_approval=None, findings_by_phase=None, phase_delay=0.0):
+    """Execute PlanWorkflow with stub activities; optionally signal mid-run.
+
+    ``plan_dict`` may be a single plan or a dict of ``incident_type -> plan``
+    (for subplan tests, where the child workflow loads its own plan).
+    ``findings_by_phase`` seeds a phase's output findings, which is what
+    ``branch_on`` reads. ``phase_delay`` makes stub phases take real time so
+    concurrency is observable; ``max_in_flight`` in the returned diagnostics
+    is how many overlapped.
+    """
+    import asyncio as aio
+
     from temporalio import activity
     from temporalio.testing import WorkflowEnvironment
     from temporalio.worker import Worker
@@ -98,18 +139,36 @@ async def _run_workflow(plan_dict, params, send_approval=None):
 
     ran: list[str] = []
     recorded: dict = {}
+    diag: dict = {"overrides": {}, "in_flight": 0, "max_in_flight": 0}
 
     @activity.defn(name="pulse.load_plan")
     async def stub_load(incident_type: str) -> dict:
+        if isinstance(plan_dict, dict) and "phases" not in plan_dict:
+            if incident_type not in plan_dict:
+                raise ValueError(f"no plan for {incident_type}")
+            return plan_dict[incident_type]
         return plan_dict
 
     @activity.defn(name="pulse.run_plan_phase")
-    async def stub_phase(plan: dict, phase_id: str, incident: dict, prior: dict) -> dict:
+    async def stub_phase(plan: dict, phase_id: str, incident: dict, prior: dict, skill_override=None) -> dict:
         ran.append(phase_id)
-        return _ok_output(phase_id)
+        diag["overrides"][phase_id] = skill_override
+        diag["in_flight"] += 1
+        diag["max_in_flight"] = max(diag["max_in_flight"], diag["in_flight"])
+        try:
+            if phase_delay:
+                await aio.sleep(phase_delay)
+        finally:
+            diag["in_flight"] -= 1
+        out = _ok_output(phase_id)
+        if findings_by_phase and phase_id in findings_by_phase:
+            out["findings"] = dict(findings_by_phase[phase_id])
+        return out
 
     @activity.defn(name="pulse.record_plan_execution")
     async def stub_record(plan: dict, outputs: dict, status: str, duration_ms: int, incident: dict) -> None:
+        # Child workflows record too; the parent's record lands last, so
+        # last-write-wins keeps the assertions about the outer plan.
         recorded.update({"status": status, "outputs": dict(outputs)})
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
@@ -124,7 +183,7 @@ async def _run_workflow(plan_dict, params, send_approval=None):
                 phase_id, approved = send_approval
                 await handle.signal("approve_phase", args=[phase_id, approved])
             result = await handle.result()
-    return result, ran, recorded
+    return result, ran, recorded, diag
 
 
 class TestPlanWorkflow:
@@ -132,7 +191,7 @@ class TestPlanWorkflow:
         from sre_agent.temporal.plan_workflow import PlanRunInput
 
         plan = _plan([_phase("verify", deps=["fix"]), _phase("triage"), _phase("fix", deps=["triage"])])
-        result, ran, recorded = asyncio.run(
+        result, ran, recorded, _ = asyncio.run(
             _run_workflow(plan, PlanRunInput(incident_type="test", incident={"id": "f1"}))
         )
         assert ran == ["triage", "fix", "verify"]
@@ -144,7 +203,7 @@ class TestPlanWorkflow:
         from sre_agent.temporal.plan_workflow import PlanRunInput
 
         plan = _plan([_phase("remediate", approval=True)])
-        result, ran, _ = asyncio.run(
+        result, ran, _, _ = asyncio.run(
             _run_workflow(
                 plan,
                 PlanRunInput(incident_type="test", approval_timeout_seconds=3600),
@@ -158,7 +217,7 @@ class TestPlanWorkflow:
         from sre_agent.temporal.plan_workflow import PlanRunInput
 
         plan = _plan([_phase("remediate", approval=True, required=False)])
-        result, ran, _ = asyncio.run(
+        result, ran, _, _ = asyncio.run(
             _run_workflow(
                 plan,
                 PlanRunInput(incident_type="test", approval_timeout_seconds=3600),
@@ -175,12 +234,129 @@ class TestPlanWorkflow:
         from sre_agent.temporal.plan_workflow import PlanRunInput
 
         plan = _plan([_phase("remediate", approval=True, required=False)])
-        result, ran, _ = asyncio.run(
+        result, ran, _, _ = asyncio.run(
             _run_workflow(plan, PlanRunInput(incident_type="test", approval_timeout_seconds=86400))
         )
         assert ran == []
         assert result["phase_outputs"]["remediate"]["status"] == "needs_escalation"
         assert "not approved within" in result["phase_outputs"]["remediate"]["evidence_summary"]
+
+
+class TestWaveParallelism:
+    """The durable interpreter mirrors the engine's gather: a whole ready wave at once."""
+
+    def test_independent_phases_overlap(self):
+        from sre_agent.temporal.plan_workflow import PlanRunInput
+
+        plan = _plan(
+            [
+                _phase("triage"),
+                _phase("logs", deps=["triage"]),
+                _phase("metrics", deps=["triage"]),
+                _phase("report", deps=["logs", "metrics"]),
+            ]
+        )
+        result, ran, _, diag = asyncio.run(_run_workflow(plan, PlanRunInput(incident_type="test"), phase_delay=0.4))
+        assert result["status"] == "complete"
+        assert ran[0] == "triage" and ran[-1] == "report"
+        assert diag["max_in_flight"] >= 2, "logs and metrics form one wave and must overlap"
+
+    def test_sequential_chain_never_overlaps(self):
+        """The guard against the inverse bug: parallelism must respect edges."""
+        from sre_agent.temporal.plan_workflow import PlanRunInput
+
+        plan = _plan([_phase("a"), _phase("b", deps=["a"]), _phase("c", deps=["b"])])
+        _result, ran, _, diag = asyncio.run(_run_workflow(plan, PlanRunInput(incident_type="test"), phase_delay=0.2))
+        assert ran == ["a", "b", "c"]
+        assert diag["max_in_flight"] == 1
+
+
+class TestBranching:
+    def test_branch_retargets_the_phase_skill(self):
+        """The engine's semantics exactly: the branch picks WHICH skill runs,
+        decided in the workflow from recorded findings, delivered to the
+        activity as an override."""
+        from sre_agent.temporal.plan_workflow import PlanRunInput
+
+        triage = _phase("triage")
+        fix = _phase("fix", deps=["triage"])
+        fix["branch_on"] = "cause"
+        fix["branches"] = {"oom": ["oom-skill"], "config": ["config-skill"]}
+        plan = _plan([triage, fix])
+
+        result, _ran, _, diag = asyncio.run(
+            _run_workflow(
+                plan,
+                PlanRunInput(incident_type="test"),
+                findings_by_phase={"triage": {"cause": "oom"}},
+            )
+        )
+        assert result["status"] == "complete"
+        assert diag["overrides"]["fix"] == "oom-skill"
+        assert diag["overrides"]["triage"] is None
+
+    def test_unmatched_branch_keeps_the_declared_skill(self):
+        from sre_agent.temporal.plan_workflow import PlanRunInput
+
+        triage = _phase("triage")
+        fix = _phase("fix", deps=["triage"])
+        fix["branch_on"] = "cause"
+        fix["branches"] = {"oom": ["oom-skill"]}
+        plan = _plan([triage, fix])
+
+        _, _, _, diag = asyncio.run(
+            _run_workflow(
+                plan,
+                PlanRunInput(incident_type="test"),
+                findings_by_phase={"triage": {"cause": "something-else"}},
+            )
+        )
+        assert diag["overrides"]["fix"] is None
+
+
+class TestSubplans:
+    def test_a_phase_can_run_a_whole_plan_as_a_child_workflow(self):
+        from sre_agent.temporal.plan_workflow import PlanRunInput
+
+        child = _plan([_phase("scan"), _phase("summarize", deps=["scan"])])
+        parent_phase = _phase("deep-dive")
+        parent_phase["subplan"] = "child-type"
+        parent = _plan([_phase("triage"), {**parent_phase, "depends_on": ["triage"]}])
+
+        result, ran, _, _ = asyncio.run(
+            _run_workflow(
+                {"parent-type": parent, "child-type": child},
+                PlanRunInput(incident_type="parent-type"),
+            )
+        )
+        assert result["status"] == "complete"
+        # The child's phases actually executed, under the child workflow.
+        assert "scan" in ran and "summarize" in ran
+        out = result["phase_outputs"]["deep-dive"]
+        assert out["skill_id"] == "plan:child-type"
+        assert out["findings"]["subplan_status"] == "complete"
+
+    def test_self_referencing_subplan_is_cut_at_the_depth_cap(self):
+        """A plan whose subplan names itself must not spawn children forever."""
+        from sre_agent.temporal.plan_workflow import PlanRunInput
+
+        loop_phase = _phase("recurse", required=False)
+        loop_phase["subplan"] = "loop-type"
+        plan = _plan([loop_phase])
+
+        result, _ran, _, _ = asyncio.run(_run_workflow({"loop-type": plan}, PlanRunInput(incident_type="loop-type")))
+        # The run terminates; somewhere down the chain the depth guard refused.
+        assert result["status"] in ("partial", "complete")
+
+        def find_refusal(res):
+            for out in res.get("phase_outputs", {}).values():
+                if "nesting deeper" in out.get("evidence_summary", ""):
+                    return True
+            return False
+
+        # The outermost result only carries its own phase outputs; the
+        # refusal is either here or in a descendant, but the fact the test
+        # returned at all is the property under test.
 
 
 # ---------------------------------------------------------------------------

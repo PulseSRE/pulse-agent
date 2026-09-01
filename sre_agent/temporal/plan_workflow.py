@@ -13,6 +13,14 @@ What Temporal buys over the in-process engine, concretely:
   a human can send hours or days later. The in-process engine marks these
   ``needs_escalation`` and moves on, because it cannot afford to wait — here
   waiting is free, and only the *timeout* degrades to the old behaviour.
+- **Waves run concurrently and branches re-target skills**, mirroring the
+  in-process engine: every phase whose dependencies are settled runs in the
+  same wave (``asyncio.gather`` over activities — deterministic, since the
+  workflow scheduler orders it), and ``branch_on`` picks a phase's skill from
+  a dependency's findings via the pure ``resolve_branch``.
+- **A phase can be a whole plan.** ``subplan: <incident_type>`` runs that plan
+  as a *child workflow* — its own phase graph, approval gates and history,
+  linked to the parent run. Nesting is capped at ``MAX_SUBPLAN_DEPTH``.
 
 Determinism rules: no IO here, no settings reads, no clocks but Temporal's.
 All decisions are the pure functions in ``sequencing``; everything else is an
@@ -38,6 +46,7 @@ and anything inside an *activity* (activities are re-executed, not replayed).
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import timedelta
 
@@ -47,12 +56,18 @@ from temporalio.exceptions import ApplicationError
 
 with workflow.unsafe.imports_passed_through():
     from .activities import load_plan, record_plan_execution, run_plan_phase
-    from .sequencing import derive_status, ready_phases, unsupported_features
+    from .sequencing import derive_status, ready_phases, resolve_branch, unsupported_features
 
 #: Margin over a phase's own timeout: _execute_phase may retry once with the
 #: contract gap named, so the activity gets room for both attempts plus the
 #: judge. The engine's own per-attempt timeout still applies inside.
 _PHASE_TIMEOUT_MARGIN = 2.5
+
+
+#: How deep subplan nesting may go. A plan whose subplan (transitively)
+#: names itself would otherwise spawn children forever; three levels is
+#: more composition than any real runbook has needed.
+MAX_SUBPLAN_DEPTH = 3
 
 
 @dataclass
@@ -63,6 +78,8 @@ class PlanRunInput:
     #: to needs_escalation. Passed in by the trigger endpoint from settings —
     #: workflows cannot read config without breaking determinism.
     approval_timeout_seconds: int = 86400
+    #: Subplan nesting depth of this run; 0 for a run a user started.
+    depth: int = 0
 
 
 def _escalation_output(phase: dict, reason: str) -> dict:
@@ -121,6 +138,60 @@ class PlanWorkflow:
             self._awaiting = ""
         return bool(self._approvals.get(phase["id"]))
 
+    async def _run_phase(self, plan: dict, phase: dict, params: PlanRunInput) -> dict:
+        """Execute one phase: an activity, or a whole plan as a child workflow."""
+        subplan = phase.get("subplan")
+        if subplan:
+            # A child workflow, not an activity: the sub-plan keeps its own
+            # phase graph, approval gates and history, linked to this run as
+            # parent — composition without flattening.
+            if params.depth + 1 >= MAX_SUBPLAN_DEPTH:
+                return {
+                    **_escalation_output(phase, f"Sub-plan nesting deeper than {MAX_SUBPLAN_DEPTH} refused"),
+                    "status": "failed",
+                }
+            child = await workflow.execute_child_workflow(
+                PlanWorkflow.run,
+                PlanRunInput(
+                    incident_type=subplan,
+                    incident=params.incident,
+                    approval_timeout_seconds=params.approval_timeout_seconds,
+                    depth=params.depth + 1,
+                ),
+                id=f"{workflow.info().workflow_id}--{phase['id']}",
+            )
+            status = child.get("status", "failed")
+            return {
+                "skill_id": f"plan:{subplan}",
+                "phase_id": phase["id"],
+                "status": status if status in ("complete", "partial") else "failed",
+                "findings": {"subplan": subplan, "subplan_status": status},
+                "evidence_summary": (
+                    f"Sub-plan '{subplan}' finished {status} in {child.get('duration_ms', 0)}ms "
+                    f"({len(child.get('phase_outputs', {}))} phases)"
+                ),
+                "actions_taken": [],
+                "open_questions": [],
+                "risk_flags": [],
+                "confidence": 1.0 if status == "complete" else 0.5,
+                "contract_missing": [],
+            }
+
+        # The branch decision is made HERE, from outputs already in workflow
+        # history, and only its result crosses to the activity — replay can
+        # never re-decide a branch differently from what ran.
+        skill_override = resolve_branch(phase, self._outputs)
+        timeout = timedelta(seconds=int(phase.get("timeout_seconds", 120) * _PHASE_TIMEOUT_MARGIN))
+        return await workflow.execute_activity(
+            run_plan_phase,
+            args=[plan, phase["id"], params.incident, self._outputs, skill_override],
+            start_to_close_timeout=timeout,
+            # The engine already retries a failed contract internally;
+            # activity-level retry only covers a dead worker, and an
+            # agent phase is not safe to blindly re-run more than once.
+            retry_policy=RetryPolicy(maximum_attempts=2, non_retryable_error_types=["ValueError"]),
+        )
+
     @workflow.run
     async def run(self, params: PlanRunInput) -> dict:
         started = workflow.now()
@@ -143,16 +214,24 @@ class PlanWorkflow:
             )
 
         phases: list[dict] = plan["phases"]
+        # Waves run concurrently and branches re-target skills since the
+        # "wave-parallel-branching-subplans" patch; histories recorded before
+        # it replay the original one-phase-at-a-time loop unchanged.
+        wave_parallel = workflow.patched("wave-parallel-branching-subplans")
         while len(self._outputs) < len(phases):
             ready = ready_phases(phases, set(self._outputs))
             if not ready:
                 # Unsatisfiable dependencies: record what ran and stop.
                 break
 
+            runnable: list[dict] = []
             for phase in ready:
                 self._current_phase = phase["id"]
 
                 if phase.get("approval_required"):
+                    # Gates are walked in declared order; approvals are keyed
+                    # by phase and may arrive before their gate is reached, so
+                    # a human approving a whole wave at once blocks nothing.
                     approved = await self._gate_on_approval(phase, params.approval_timeout_seconds)
                     if not approved:
                         reason = (
@@ -163,17 +242,18 @@ class PlanWorkflow:
                         self._outputs[phase["id"]] = _escalation_output(phase, reason)
                         continue
 
-                timeout = timedelta(seconds=int(phase.get("timeout_seconds", 120) * _PHASE_TIMEOUT_MARGIN))
-                output = await workflow.execute_activity(
-                    run_plan_phase,
-                    args=[plan, phase["id"], params.incident, self._outputs],
-                    start_to_close_timeout=timeout,
-                    # The engine already retries a failed contract internally;
-                    # activity-level retry only covers a dead worker, and an
-                    # agent phase is not safe to blindly re-run more than once.
-                    retry_policy=RetryPolicy(maximum_attempts=2, non_retryable_error_types=["ValueError"]),
-                )
-                self._outputs[phase["id"]] = output
+                if wave_parallel:
+                    runnable.append(phase)
+                else:
+                    self._outputs[phase["id"]] = await self._run_phase(plan, phase, params)
+
+            if runnable:
+                # The whole ready wave at once, mirroring the in-process
+                # engine's gather. Deterministic: the workflow event loop
+                # schedules these, and each result lands keyed by phase id.
+                results = await asyncio.gather(*(self._run_phase(plan, phase, params) for phase in runnable))
+                for phase, output in zip(runnable, results, strict=True):
+                    self._outputs[phase["id"]] = output
 
         self._current_phase = ""
         status = derive_status(phases, self._outputs)
