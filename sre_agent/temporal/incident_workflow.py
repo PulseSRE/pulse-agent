@@ -22,14 +22,15 @@ confirmed. Here the workflow resumes at the next step.
 Temporal features this exercises, all in one coherent business process:
 durable execution, signals (approval), queries (live status), durable timers
 (the recurrence window), saga compensation (snapshot restore on failed
-verification), activity heartbeats (long fixes), and retry-with-backoff as a
-grace window.
+verification *or* on cancellation), activity heartbeats (long fixes), and
+retry-with-backoff as a grace window.
 
 Determinism: see plan_workflow's docstring — the same patch discipline applies.
 """
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import timedelta
 
@@ -140,6 +141,14 @@ class IncidentWorkflow:
             )
             return {"verdict": "failed", "evidence": reason, "compensated": True}
 
+        # From here the cluster is already mutated, so every exit — including a
+        # human hitting cancel — has to leave a verdict behind. See _run_post_apply.
+        try:
+            return await self._run_post_apply(params, snapshot, applied)
+        except asyncio.CancelledError:
+            return await self._cancel_after_apply(params, snapshot)
+
+    async def _run_post_apply(self, params: IncidentInput, snapshot: dict, applied: dict) -> dict:
         # ── 4. Verify, with backoff as the rollout grace window ───────────────
         self._stage = "verifying"
         try:
@@ -202,3 +211,44 @@ class IncidentWorkflow:
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
         return {"verdict": verdict, "evidence": evidence, "applied": applied, "compensated": False}
+
+    async def _cancel_after_apply(self, params: IncidentInput, snapshot: dict) -> dict:
+        """Undo and record when a human cancels a fix that already landed.
+
+        Cancellation arrives as CancelledError at whatever await the workflow is
+        sitting on — most often the recurrence timer, which it holds for half an
+        hour. Letting it propagate would end the workflow with the cluster still
+        mutated and no outcome written anywhere: the same vanishing-verdict
+        failure that an uncaught apply error caused, arriving through a button
+        we deliberately added. Cancel has to mean "undo it", not "stop looking".
+
+        asyncio.shield is what makes the cleanup possible: without it the two
+        activities below are cancelled the instant they are scheduled, because
+        the workflow is already in a cancelled state. Shielding is exactly the
+        Python SDK's supported way to run compensation past that point.
+        """
+        self._stage = "cancelling"
+        restored = await asyncio.shield(
+            workflow.execute_activity(
+                restore_snapshot,
+                snapshot,
+                start_to_close_timeout=timedelta(seconds=120),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
+        )
+        self._compensated = True
+        self._stage = "cancelled"
+        evidence = f"cancelled by request after the fix was applied; {restored}"
+        await asyncio.shield(
+            workflow.execute_activity(
+                record_outcome,
+                args=[params.finding_id, "cancelled", evidence],
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
+        )
+        # Returning rather than re-raising completes the workflow instead of
+        # marking it Cancelled. That is the intent: the terminal state should
+        # carry the verdict, and "Cancelled with no result" is what we are
+        # avoiding. The verdict field says what happened.
+        return {"verdict": "cancelled", "evidence": evidence, "compensated": True}

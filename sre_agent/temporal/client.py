@@ -125,3 +125,43 @@ async def start_incident_run(
     )
     logger.info("Started durable incident run %s", workflow_id)
     return {"workflow_id": workflow_id, "run_id": handle.result_run_id}
+
+async def cancel_run(workflow_id: str, reason: str = "") -> None:
+    """Ask a running workflow to stop.
+
+    Cancellation is cooperative: Temporal delivers it at the next await point,
+    so an in-flight activity finishes rather than being severed mid-write. For
+    a workflow that mutates a cluster that is the behaviour you want — a fix
+    interrupted between apply and verify is exactly the state this whole
+    migration exists to avoid.
+    """
+    client = await _connect()
+    handle = client.get_workflow_handle(workflow_id)
+    await handle.cancel()
+    logger.info("Cancellation requested for %s%s", workflow_id, f": {reason}" if reason else "")
+
+
+async def list_runs(limit: int = 25) -> list[dict]:
+    """Recent workflow runs, newest first — what the UI lists.
+
+    Uses Temporal's own visibility store rather than a Pulse table: the
+    platform already records every run, and a second source of truth would be
+    one more thing to drift.
+    """
+    client = await _connect()
+    out: list[dict] = []
+    async for wf in client.list_workflows(page_size=limit):
+        out.append(
+            {
+                "workflow_id": wf.id,
+                "run_id": wf.run_id,
+                "type": wf.workflow_type,
+                "status": wf.status.name if wf.status else "UNKNOWN",
+                "started_at": wf.start_time.isoformat() if wf.start_time else "",
+                "closed_at": wf.close_time.isoformat() if wf.close_time else "",
+            }
+        )
+        if len(out) >= limit:
+            break
+    return out
+

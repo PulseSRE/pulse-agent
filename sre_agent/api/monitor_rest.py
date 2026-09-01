@@ -639,6 +639,42 @@ async def get_workflow_run(workflow_id: str, _auth=Depends(verify_token)):
         raise HTTPException(status_code=404, detail=f"Unknown workflow run: {e}") from e
 
 
+@router.get("/workflow-runs")
+async def list_workflow_runs(limit: int = Query(25, ge=1, le=100), _auth=Depends(verify_token)):
+    """Recent durable runs, from Temporal's own visibility store."""
+    from ..temporal.client import TemporalDisabledError, list_runs
+
+    try:
+        return {"runs": await list_runs(limit)}
+    except TemporalDisabledError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+
+@router.post("/workflow-runs/{workflow_id}/cancel")
+async def cancel_workflow_run(workflow_id: str, request: Request, _auth=Depends(verify_token)):
+    """Stop a running workflow.
+
+    Cooperative: an in-flight activity finishes rather than being severed
+    mid-write, so a fix is never interrupted between applying and verifying.
+
+    For an incident run this means "undo it", not "stop watching". If the fix
+    already landed, cancelling restores the snapshot and records a `cancelled`
+    verdict before the workflow ends — the cluster is not left mutated with no
+    outcome. Returns as soon as the request is delivered; poll the run to see
+    the compensation finish.
+    """
+    from ..temporal.client import TemporalDisabledError, cancel_run
+
+    body = await request.json() if (request.headers.get("content-length") or "0") != "0" else {}
+    try:
+        await cancel_run(workflow_id, str(body.get("reason") or ""))
+    except TemporalDisabledError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Unknown workflow run: {e}") from e
+    return {"status": "cancellation_requested", "workflow_id": workflow_id}
+
+
 @router.post("/workflow-runs/{workflow_id}/approve")
 async def approve_workflow_phase(workflow_id: str, request: Request, _auth=Depends(verify_token)):
     """Deliver a human verdict to a run waiting on approval."""

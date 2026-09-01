@@ -7,6 +7,7 @@ temporalio on first use).
 """
 
 import asyncio
+from typing import ClassVar
 from unittest.mock import patch
 
 import pytest
@@ -222,6 +223,70 @@ class TestRunEndpoints:
                 aio.run(monitor_rest.run_plan_template("crashloop", req, _auth=None))
             assert exc.value.status_code == 503
             assert "PULSE_AGENT_TEMPORAL_HOST" in exc.value.detail
+
+    def test_cancel_without_temporal_is_503_with_the_reason(self):
+        """Same contract as the other run endpoints: say what to configure."""
+        import asyncio as aio
+
+        from fastapi import HTTPException
+
+        from sre_agent.api import monitor_rest
+        from sre_agent.temporal.client import TemporalDisabledError
+
+        class FakeReq:
+            headers: ClassVar[dict] = {"content-length": "0"}
+
+            async def json(self):
+                return {}
+
+        async def boom(workflow_id, reason=""):
+            raise TemporalDisabledError()
+
+        with patch("sre_agent.temporal.client.cancel_run", side_effect=boom):
+            with pytest.raises(HTTPException) as exc:
+                aio.run(monitor_rest.cancel_workflow_run("wf-1", FakeReq(), _auth=None))
+        assert exc.value.status_code == 503
+        assert "PULSE_AGENT_TEMPORAL_HOST" in exc.value.detail
+
+    def test_cancel_passes_the_reason_through(self):
+        """The reason is the audit trail for why a human stopped a fix."""
+        import asyncio as aio
+
+        from sre_agent.api import monitor_rest
+
+        seen = {}
+
+        class FakeReq:
+            headers: ClassVar[dict] = {"content-length": "42"}
+
+            async def json(self):
+                return {"reason": "wrong pod"}
+
+        async def spy(workflow_id, reason=""):
+            seen["workflow_id"] = workflow_id
+            seen["reason"] = reason
+
+        with patch("sre_agent.temporal.client.cancel_run", side_effect=spy):
+            out = aio.run(monitor_rest.cancel_workflow_run("wf-7", FakeReq(), _auth=None))
+
+        assert seen == {"workflow_id": "wf-7", "reason": "wrong pod"}
+        assert out["status"] == "cancellation_requested"
+
+    def test_list_runs_without_temporal_is_503(self):
+        import asyncio as aio
+
+        from fastapi import HTTPException
+
+        from sre_agent.api import monitor_rest
+        from sre_agent.temporal.client import TemporalDisabledError
+
+        async def boom(limit=25):
+            raise TemporalDisabledError()
+
+        with patch("sre_agent.temporal.client.list_runs", side_effect=boom):
+            with pytest.raises(HTTPException) as exc:
+                aio.run(monitor_rest.list_workflow_runs(limit=25, _auth=None))
+        assert exc.value.status_code == 503
 
     def test_approve_requires_phase_id(self):
         import asyncio as aio
@@ -633,3 +698,235 @@ class TestIncidentApplyFailure:
         assert "record:failed" in calls, "the outcome must reach fix history"
         assert "compensate" in calls, "undo defensively — the failure may follow a partial mutation"
         assert "verify" not in calls, "nothing to verify when the fix never applied"
+
+
+class TestIncidentCancellation:
+    """Cancel must mean "undo it", not "stop looking".
+
+    Adding a cancel button to a workflow that mutates a cluster reintroduces
+    the vanishing-verdict failure by a different door: cancellation lands as
+    CancelledError at whatever await the workflow is holding — usually the
+    half-hour recurrence timer, long after the fix was applied — and if it
+    propagates, the workflow ends with the cluster changed and no outcome
+    written. These tests pin the compensating behaviour.
+    """
+
+    @staticmethod
+    def _run(cancel_at: str):
+        """Start the workflow, cancel once it reaches `cancel_at`, return (result, calls)."""
+        import asyncio as aio
+
+        from temporalio import activity
+        from temporalio.testing import WorkflowEnvironment
+        from temporalio.worker import Worker
+
+        from sre_agent.temporal.incident_workflow import IncidentInput, IncidentWorkflow
+
+        calls: list[str] = []
+
+        @activity.defn(name="pulse.incident.snapshot")
+        async def snap(resource: dict) -> dict:
+            calls.append("snapshot")
+            return {"kind": "Pod", "name": "web-1"}
+
+        @activity.defn(name="pulse.incident.apply_fix")
+        async def apply(plan: dict) -> dict:
+            calls.append("apply")
+            return {"tool": "delete_pod", "after": "recreated"}
+
+        @activity.defn(name="pulse.incident.verify")
+        async def verify(resource: dict) -> dict:
+            calls.append("verify")
+            return {"healthy": True, "evidence": "pod Running"}
+
+        @activity.defn(name="pulse.incident.compensate")
+        async def comp(snapshot: dict | None) -> str:
+            calls.append("compensate")
+            return "restored from snapshot"
+
+        @activity.defn(name="pulse.incident.check_recurrence")
+        async def recheck(resource: dict) -> dict:
+            calls.append("recheck")
+            return {"recurred": False, "evidence": "phase=Running"}
+
+        @activity.defn(name="pulse.incident.record_outcome")
+        async def rec(finding_id: str, verdict: str, evidence: str) -> None:
+            calls.append(f"record:{verdict}")
+
+        async def go():
+            # A real server, not time-skipping: skipping would race past the
+            # recurrence timer before the cancel could land on it.
+            async with await WorkflowEnvironment.start_local() as env:
+                async with Worker(
+                    env.client,
+                    task_queue="tq-cancel",
+                    workflows=[IncidentWorkflow],
+                    activities=[snap, apply, verify, comp, recheck, rec],
+                ):
+                    handle = await env.client.start_workflow(
+                        IncidentWorkflow.run,
+                        IncidentInput(
+                            finding_id="f-cancel",
+                            resource={"name": "web-1", "namespace": "dev"},
+                            fix_plan={"strategy": "restart_controller"},
+                            require_approval=False,
+                            recurrence_window_seconds=3600,
+                        ),
+                        id=f"wf-cancel-{cancel_at}",
+                        task_queue="tq-cancel",
+                    )
+                    # Wait for the workflow to actually reach the stage we mean
+                    # to interrupt — cancelling before it gets there would test
+                    # a different path than the one described.
+                    for _ in range(200):
+                        stage = (await handle.query("status"))["stage"]
+                        if stage == cancel_at:
+                            break
+                        await aio.sleep(0.05)
+                    else:
+                        raise AssertionError(f"workflow never reached {cancel_at}")
+                    await handle.cancel()
+                    return await handle.result()
+
+        return aio.run(go()), calls
+
+    def test_cancel_during_the_recurrence_timer_undoes_and_records(self):
+        """The common case: someone cancels while the fix is settling."""
+        result, calls = self._run("settling")
+
+        assert result["verdict"] == "cancelled", "cancel must still produce a verdict"
+        assert result["compensated"] is True
+        assert "compensate" in calls, "the cluster was mutated; cancel has to undo it"
+        assert "record:cancelled" in calls, "the outcome must reach fix history"
+        assert "recheck" not in calls, "cancel means stop, not finish the timer"
+
+    def test_uncancelled_run_does_not_compensate(self):
+        """Guard against the compensation path firing on the happy path."""
+        import asyncio as aio
+
+        from temporalio import activity
+        from temporalio.testing import WorkflowEnvironment
+        from temporalio.worker import Worker
+
+        from sre_agent.temporal.incident_workflow import IncidentInput, IncidentWorkflow
+
+        calls: list[str] = []
+
+        @activity.defn(name="pulse.incident.snapshot")
+        async def snap(resource: dict) -> dict:
+            return {"kind": "Pod"}
+
+        @activity.defn(name="pulse.incident.apply_fix")
+        async def apply(plan: dict) -> dict:
+            return {"tool": "delete_pod"}
+
+        @activity.defn(name="pulse.incident.verify")
+        async def verify(resource: dict) -> dict:
+            return {"healthy": True, "evidence": "ok"}
+
+        @activity.defn(name="pulse.incident.compensate")
+        async def comp(snapshot: dict | None) -> str:
+            calls.append("compensate")
+            return "restored"
+
+        @activity.defn(name="pulse.incident.check_recurrence")
+        async def recheck(resource: dict) -> dict:
+            return {"recurred": False, "evidence": "ok"}
+
+        @activity.defn(name="pulse.incident.record_outcome")
+        async def rec(finding_id: str, verdict: str, evidence: str) -> None:
+            calls.append(f"record:{verdict}")
+
+        async def go():
+            async with await WorkflowEnvironment.start_time_skipping() as env:
+                async with Worker(
+                    env.client,
+                    task_queue="tq-nocancel",
+                    workflows=[IncidentWorkflow],
+                    activities=[snap, apply, verify, comp, recheck, rec],
+                ):
+                    return await env.client.execute_workflow(
+                        IncidentWorkflow.run,
+                        IncidentInput(finding_id="f-ok", require_approval=False),
+                        id="wf-nocancel",
+                        task_queue="tq-nocancel",
+                    )
+
+        result = aio.run(go())
+        assert result["verdict"] == "verified"
+        assert result["compensated"] is False
+        assert "compensate" not in calls, "the happy path must not roll back"
+        assert "record:verified" in calls
+
+
+class TestListRuns:
+    """list_runs reads Temporal's visibility store rather than a Pulse table.
+
+    That means its correctness is entirely in the SDK attribute names it
+    reaches for — the kind of thing a mock would happily confirm while the
+    real call raises AttributeError. So this runs against a real server.
+    """
+
+    def test_returns_the_fields_the_ui_renders(self):
+        import asyncio as aio
+
+        from temporalio import activity
+        from temporalio.testing import WorkflowEnvironment
+        from temporalio.worker import Worker
+
+        from sre_agent.temporal import client as tclient
+        from sre_agent.temporal.incident_workflow import IncidentInput, IncidentWorkflow
+
+        @activity.defn(name="pulse.incident.snapshot")
+        async def snap(resource: dict) -> dict:
+            return {"kind": "Pod"}
+
+        @activity.defn(name="pulse.incident.apply_fix")
+        async def apply(plan: dict) -> dict:
+            return {"tool": "delete_pod"}
+
+        @activity.defn(name="pulse.incident.verify")
+        async def verify(resource: dict) -> dict:
+            return {"healthy": True, "evidence": "ok"}
+
+        @activity.defn(name="pulse.incident.compensate")
+        async def comp(snapshot: dict | None) -> str:
+            return "restored"
+
+        @activity.defn(name="pulse.incident.check_recurrence")
+        async def recheck(resource: dict) -> dict:
+            return {"recurred": False, "evidence": "ok"}
+
+        @activity.defn(name="pulse.incident.record_outcome")
+        async def rec(finding_id: str, verdict: str, evidence: str) -> None:
+            return None
+
+        async def go():
+            async with await WorkflowEnvironment.start_local() as env:
+                async with Worker(
+                    env.client,
+                    task_queue="tq-list",
+                    workflows=[IncidentWorkflow],
+                    activities=[snap, apply, verify, comp, recheck, rec],
+                ):
+                    await env.client.execute_workflow(
+                        IncidentWorkflow.run,
+                        IncidentInput(
+                            finding_id="f-list",
+                            require_approval=False,
+                            recurrence_window_seconds=0,
+                        ),
+                        id="wf-listed",
+                        task_queue="tq-list",
+                    )
+                    # Exercise the real function, against the real server.
+                    with patch.object(tclient, "_connect", return_value=env.client):
+                        return await tclient.list_runs(limit=10)
+
+        runs = aio.run(go())
+        listed = [r for r in runs if r["workflow_id"] == "wf-listed"]
+        assert listed, "a completed run must appear in the listing"
+        run = listed[0]
+        assert run["type"] == "PulseIncidentWorkflow"
+        assert run["status"] == "COMPLETED"
+        assert run["run_id"] and run["started_at"] and run["closed_at"]
