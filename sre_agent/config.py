@@ -115,6 +115,24 @@ class PrometheusConfig(BaseModel):
     insecure: bool = False
 
 
+class TemporalConfig(BaseModel):
+    """Durable plan execution via Temporal (sre_agent/temporal/).
+
+    Disabled unless ``host`` is set — the in-process plan engine remains the
+    default and the only path the monitor uses. An empty host means no worker
+    starts and the run endpoints answer 503 with the reason.
+    """
+
+    model_config = ConfigDict(frozen=True)
+    host: str = ""  # e.g. "temporal-frontend.temporal.svc:7233"; empty disables
+    namespace: str = "default"
+    task_queue: str = "pulse-plans"
+    # How long an approval_required phase waits for a human before it degrades
+    # to needs_escalation — the same outcome the in-process engine records
+    # immediately. Durability is what makes a long wait affordable at all.
+    approval_timeout: int = 86400
+
+
 # --- Main settings class ---
 
 
@@ -133,6 +151,7 @@ class PulseAgentSettings(BaseSettings):
     routing: RoutingConfig = RoutingConfig()
     server: ServerConfig = ServerConfig()
     prometheus: PrometheusConfig = PrometheusConfig()
+    temporal: TemporalConfig = TemporalConfig()
 
     # --- Flat fields (env-var backed, synced to nested in model_post_init) ---
 
@@ -220,6 +239,12 @@ class PulseAgentSettings(BaseSettings):
     acm_thanos_enabled: bool | None = None
     prometheus_insecure: bool = False
 
+    # Temporal
+    temporal_host: str = ""
+    temporal_namespace: str = "default"
+    temporal_task_queue: str = "pulse-plans"
+    temporal_approval_timeout: int = 86400
+
     def model_post_init(self, __context: object) -> None:
         """Sync flat env-parsed fields into nested sub-models."""
         self.agent = AgentConfig(
@@ -287,6 +312,12 @@ class PulseAgentSettings(BaseSettings):
             acm_thanos_url=self.acm_thanos_url,
             acm_thanos_enabled=self.acm_thanos_enabled,
             insecure=self.prometheus_insecure,
+        )
+        self.temporal = TemporalConfig(
+            host=self.temporal_host,
+            namespace=self.temporal_namespace,
+            task_queue=self.temporal_task_queue,
+            approval_timeout=self.temporal_approval_timeout,
         )
 
     def get_trusted_registries(self) -> list[str]:

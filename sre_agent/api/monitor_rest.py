@@ -586,6 +586,77 @@ async def create_plan_template(request: Request, _auth=Depends(verify_token)):
     return {"status": "created", "incident_type": incident_type}
 
 
+@router.post("/plan-templates/{incident_type}/run")
+async def run_plan_template(incident_type: str, request: Request, _auth=Depends(verify_token)):
+    """Start a durable, user-triggered run of a plan on Temporal.
+
+    Distinct from the monitor's automatic in-process execution: this run
+    survives pod restarts, and its approval_required phases genuinely wait
+    for a human instead of being skipped as needs_escalation.
+    """
+    from ..plan_templates import get_template
+    from ..temporal.client import TemporalDisabledError, start_plan_run
+    from ..temporal.sequencing import unsupported_features
+
+    template = get_template(incident_type)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    from ..temporal.activities import plan_to_dict
+
+    blockers = unsupported_features(plan_to_dict(template))
+    if blockers:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This plan uses features the durable interpreter does not support yet "
+                f"({', '.join(blockers)}); it runs via the monitor's in-process engine instead."
+            ),
+        )
+
+    body = await request.json() if (request.headers.get("content-length") or "0") != "0" else {}
+    incident = body.get("incident") or {}
+    if not isinstance(incident, dict):
+        raise HTTPException(status_code=400, detail="incident must be an object")
+
+    try:
+        started = await start_plan_run(incident_type, incident)
+    except TemporalDisabledError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    return {"status": "started", **started}
+
+
+@router.get("/workflow-runs/{workflow_id}")
+async def get_workflow_run(workflow_id: str, _auth=Depends(verify_token)):
+    """Status and live progress of a durable plan run."""
+    from ..temporal.client import TemporalDisabledError, describe_plan_run
+
+    try:
+        return await describe_plan_run(workflow_id)
+    except TemporalDisabledError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Unknown workflow run: {e}") from e
+
+
+@router.post("/workflow-runs/{workflow_id}/approve")
+async def approve_workflow_phase(workflow_id: str, request: Request, _auth=Depends(verify_token)):
+    """Deliver a human verdict to a run waiting on approval."""
+    from ..temporal.client import TemporalDisabledError, approve_plan_phase
+
+    body = await request.json()
+    phase_id = str(body.get("phase_id") or "").strip()
+    if not phase_id:
+        raise HTTPException(status_code=400, detail="phase_id is required")
+    approved = bool(body.get("approved", True))
+
+    try:
+        await approve_plan_phase(workflow_id, phase_id, approved)
+    except TemporalDisabledError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    return {"status": "signalled", "phase_id": phase_id, "approved": approved}
+
+
 @router.get("/plan-templates/{incident_type}/versions")
 async def plan_template_versions(incident_type: str, _auth=Depends(verify_token)):
     """Prior revisions of a plan template, newest first."""

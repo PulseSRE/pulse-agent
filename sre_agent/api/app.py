@@ -126,6 +126,15 @@ async def lifespan(app: FastAPI):
         skills = load_skills()
         logger.info("Loaded %d skill packages", len(skills))
 
+        # Durable plan execution worker — inert without a configured host.
+        temporal_shutdown = None
+        temporal_task = None
+        if get_settings().temporal.host:
+            from ..temporal.worker import run_worker
+
+            temporal_shutdown = asyncio.Event()
+            temporal_task = asyncio.create_task(run_worker(temporal_shutdown))
+
         # Connect MCP servers in background (non-blocking — sidecar may take 15-30s)
         async def _connect_mcp_background():
             from ..mcp_client import connect_skill_mcp
@@ -213,6 +222,11 @@ async def lifespan(app: FastAPI):
         monitor_task.cancel()
 
     # Signal MCP background loop to stop, then disconnect, then cancel the task
+    if temporal_shutdown is not None:
+        temporal_shutdown.set()
+    if temporal_task is not None:
+        temporal_task.cancel()
+
     _mcp_shutdown.set()
     try:
         from ..mcp_client import disconnect_all
