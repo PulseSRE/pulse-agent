@@ -22,6 +22,8 @@ async def run_worker(shutdown: asyncio.Event) -> None:
 
     from ..config import get_settings
     from .activities import ALL_ACTIVITIES
+    from .incident_activities import INCIDENT_ACTIVITIES
+    from .incident_workflow import IncidentWorkflow
     from .plan_workflow import PlanWorkflow
 
     cfg = get_settings().temporal
@@ -51,8 +53,8 @@ async def run_worker(shutdown: asyncio.Event) -> None:
     worker = Worker(
         client,
         task_queue=cfg.task_queue,
-        workflows=[PlanWorkflow],
-        activities=ALL_ACTIVITIES,
+        workflows=[PlanWorkflow, IncidentWorkflow],
+        activities=[*ALL_ACTIVITIES, *INCIDENT_ACTIVITIES],
         build_id=f"pulse-{_pulse_version}",
     )
     logger.info("Temporal worker polling %s (queue=%s)", cfg.host, cfg.task_queue)

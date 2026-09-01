@@ -272,3 +272,183 @@ class TestVersioningSafety:
 
         assert hasattr(workflow, "patched")
         assert hasattr(workflow, "deprecate_patch")
+
+
+# ---------------------------------------------------------------------------
+# The incident lifecycle workflow — Pulse's showcase Temporal use
+# ---------------------------------------------------------------------------
+
+
+async def _run_incident(params, *, verify_fails=False, send_approval=None):
+    """Run IncidentWorkflow with stub activities on the time-skipping server."""
+    from temporalio import activity
+    from temporalio.testing import WorkflowEnvironment
+    from temporalio.worker import Worker
+
+    from sre_agent.temporal.incident_workflow import IncidentWorkflow
+
+    calls: list[str] = []
+
+    @activity.defn(name="pulse.incident.snapshot")
+    async def stub_snapshot(resource: dict) -> dict:
+        calls.append("snapshot")
+        return {"kind": "Pod", "name": resource.get("name", "x")}
+
+    @activity.defn(name="pulse.incident.apply_fix")
+    async def stub_apply(plan: dict) -> dict:
+        calls.append("apply")
+        return {"tool": "delete_pod", "before": "crashloop", "after": "recreated"}
+
+    @activity.defn(name="pulse.incident.verify")
+    async def stub_verify(resource: dict) -> dict:
+        calls.append("verify")
+        if verify_fails:
+            raise RuntimeError("pod is CrashLoopBackOff, not Running yet")
+        return {"healthy": True, "evidence": "pod Running"}
+
+    @activity.defn(name="pulse.incident.compensate")
+    async def stub_compensate(snapshot: dict | None) -> str:
+        calls.append("compensate")
+        return "restored from snapshot"
+
+    @activity.defn(name="pulse.incident.check_recurrence")
+    async def stub_recheck(resource: dict) -> dict:
+        calls.append("recheck")
+        return {"recurred": bool(resource.get("_recurs")), "evidence": "phase=Running"}
+
+    @activity.defn(name="pulse.incident.record_outcome")
+    async def stub_record(finding_id: str, verdict: str, evidence: str) -> None:
+        calls.append(f"record:{verdict}")
+
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        async with Worker(
+            env.client,
+            task_queue="test-incidents",
+            workflows=[IncidentWorkflow],
+            activities=[stub_snapshot, stub_apply, stub_verify, stub_compensate, stub_recheck, stub_record],
+        ):
+            handle = await env.client.start_workflow(
+                IncidentWorkflow.run, params, id="wf-incident", task_queue="test-incidents"
+            )
+            if send_approval is not None:
+                await handle.signal("approve", send_approval)
+            result = await handle.result()
+    return result, calls
+
+
+class TestIncidentWorkflow:
+    """The lifecycle guarantees the in-process monitor cannot make."""
+
+    def test_happy_path_snapshots_applies_verifies_then_settles(self):
+        from sre_agent.temporal.incident_workflow import IncidentInput
+
+        result, calls = asyncio.run(
+            _run_incident(
+                IncidentInput(
+                    finding_id="f1",
+                    resource={"name": "api-1", "namespace": "dev"},
+                    fix_plan={"strategy": "restart_controller"},
+                    require_approval=False,
+                    recurrence_window_seconds=1800,
+                ),
+            )
+        )
+        # The snapshot precedes the mutation — without that ordering there is
+        # nothing to compensate with.
+        assert calls == ["snapshot", "apply", "verify", "recheck", "record:verified"]
+        assert result["verdict"] == "verified"
+        assert result["compensated"] is False
+
+    def test_failed_verification_rolls_the_fix_back(self):
+        """The saga: a fix that does not hold is undone, not just reported."""
+        from sre_agent.temporal.incident_workflow import IncidentInput
+
+        result, calls = asyncio.run(
+            _run_incident(
+                IncidentInput(
+                    finding_id="f2",
+                    resource={"name": "api-2", "namespace": "dev"},
+                    fix_plan={"strategy": "restart_controller"},
+                    require_approval=False,
+                ),
+                verify_fails=True,
+            )
+        )
+        assert "compensate" in calls, "a failed verification must restore the snapshot"
+        assert calls[-1] == "record:rolled_back"
+        assert result["verdict"] == "rolled_back"
+        assert result["compensated"] is True
+
+    def test_recurrence_after_the_durable_timer_downgrades_the_verdict(self):
+        """A 'verified' verdict has a time horizon; time-skipping makes the
+        30-minute settling window instant."""
+        from sre_agent.temporal.incident_workflow import IncidentInput
+
+        result, calls = asyncio.run(
+            _run_incident(
+                IncidentInput(
+                    finding_id="f3",
+                    resource={"name": "api-3", "namespace": "dev", "_recurs": True},
+                    fix_plan={"strategy": "restart_controller"},
+                    require_approval=False,
+                    recurrence_window_seconds=1800,
+                ),
+            )
+        )
+        assert result["verdict"] == "verified_then_recurred"
+        assert "record:verified_then_recurred" in calls
+
+    def test_approval_gate_waits_and_proceeds_on_yes(self):
+        from sre_agent.temporal.incident_workflow import IncidentInput
+
+        result, calls = asyncio.run(
+            _run_incident(
+                IncidentInput(
+                    finding_id="f4",
+                    resource={"name": "api-4", "namespace": "prod"},
+                    fix_plan={"strategy": "restart_controller"},
+                    require_approval=True,
+                    approval_timeout_seconds=3600,
+                ),
+                send_approval=True,
+            )
+        )
+        assert calls[0] == "snapshot"
+        assert result["verdict"] == "verified"
+
+    def test_denied_fix_never_touches_the_cluster(self):
+        from sre_agent.temporal.incident_workflow import IncidentInput
+
+        result, calls = asyncio.run(
+            _run_incident(
+                IncidentInput(
+                    finding_id="f5",
+                    resource={"name": "api-5", "namespace": "prod"},
+                    fix_plan={"strategy": "restart_controller"},
+                    require_approval=True,
+                    approval_timeout_seconds=3600,
+                ),
+                send_approval=False,
+            )
+        )
+        assert calls == [], "a denied fix must not snapshot or apply anything"
+        assert result["verdict"] == "denied"
+
+    def test_unanswered_approval_expires_without_acting(self):
+        """dev05's real failure mode: 281 of 368 actions expired unseen. Here
+        that is an explicit verdict after a durable 24h wait, not a lost future."""
+        from sre_agent.temporal.incident_workflow import IncidentInput
+
+        result, calls = asyncio.run(
+            _run_incident(
+                IncidentInput(
+                    finding_id="f6",
+                    resource={"name": "api-6", "namespace": "prod"},
+                    fix_plan={"strategy": "restart_controller"},
+                    require_approval=True,
+                    approval_timeout_seconds=86400,
+                ),
+            )
+        )
+        assert calls == []
+        assert result["verdict"] == "expired"
