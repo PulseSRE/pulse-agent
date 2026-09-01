@@ -1550,12 +1550,51 @@ triage → diagnose → [branch: db/pod/network] → remediate → verify → po
 1. Topological sort phases by dependencies
 2. Group phases with same dependencies → run in parallel via `asyncio.gather()`
 3. Apply branch conditions (e.g., branch_on="source" → db/pod/network)
-4. Check approval gates (approval_required → mark `needs_escalation`, skip execution)
+4. Check approval gates (approval_required → mark `needs_escalation`, skip execution — the in-process engine cannot block for hours; see the Temporal path below, where the workflow genuinely waits)
 5. Progressive context compression between phases (~120-180 tokens per SkillOutput)
 6. "Always" phases (postmortem) run even after failure
 7. Async callbacks (`on_phase_start`, `on_phase_complete`) — support both sync and async
 
 **Live WebSocket updates:** During plan execution, `investigation_progress` events emitted per phase via monitor WebSocket. UI shows inline phase progress on active findings (triage ✓ → diagnose ● → remediate ○).
+
+### Durable Plan Execution (`temporal/`, optional)
+
+Full design in [TEMPORAL.md](TEMPORAL.md). Distinct from ORCA's *Temporal
+channel* above — same word, unrelated: that one scores recent-change keywords,
+this one is the workflow engine.
+
+The in-process engine above runs a plan as an asyncio task inside the agent pod,
+with two structural consequences both observed on dev05: an execution **dies with
+the pod** (`_record_execution` writes only at the end, and the pod was rolled five
+times in one day of releases, silently losing every in-flight plan), and an
+**approval cannot wait**, which is why step 4 skips rather than blocks. Migration
+036 made plan *definitions* durable; this makes *executions* durable.
+
+```
+POST /plan-templates/{type}/run ──► start_workflow(PlanRunInput)
+                                         │
+                    ┌────────────────────┴───────────────────┐
+                    │ PulsePlanWorkflow (deterministic)      │
+                    │  load_plan ─ pins the definition       │
+                    │  loop: ready_phases → run_plan_phase   │
+                    │  approval_required → wait for signal   │
+                    │  record_plan_execution                 │
+                    └────────────────────┬───────────────────┘
+                                activities (all IO)
+                        run_plan_phase → PlanRuntime._execute_phase
+                        (contract check + retry-with-gap, unchanged)
+```
+
+One **interpreter workflow** executes *any* plan definition by walking its phase
+graph, including plans authored in the UI at runtime — a new plan is data, not a
+deploy. Sequencing decisions live in `temporal/sequencing.py` as pure functions:
+testable without a Temporal server and incapable of IO. Phase execution still
+goes through `PlanRuntime._execute_phase`, so the contract check and
+retry-with-the-gap-named behaviour is the same on both paths.
+
+Inert until configured: `PULSE_AGENT_TEMPORAL_HOST` (plus `_NAMESPACE`,
+`_TASK_QUEUE`, `_APPROVAL_TIMEOUT`). The operator provisions a server with
+`spec.temporal.enabled` and injects the host.
 
 **Plan Templates (`plan_templates/*.yaml`):**
 6 pre-defined + auto-generated. Loaded at startup, hot-reloaded on change.

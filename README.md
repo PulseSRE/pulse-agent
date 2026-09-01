@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/tools-143_(107+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
   <img src="https://img.shields.io/badge/scanners-27-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-3319-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-3338-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/eval_suites-16_(192_scenarios)-10b981?style=for-the-badge" alt="Eval Suites">
   <img src="https://img.shields.io/badge/release_gate-97.5%25-10b981?style=for-the-badge" alt="Release Gate">
   <img src="https://img.shields.io/badge/PromQL%20recipes-83-10b981?style=for-the-badge" alt="PromQL Recipes">
@@ -127,6 +127,14 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 - **Confidence Scores** -- Every finding, investigation, and action includes a 0-100% confidence score
 - **Noise Learning** -- Tracks transient findings and assigns noise scores to suppress flaky alerts
 - **Simulation Preview** -- Predict impact, risk, and duration before executing a fix
+
+### Durable Plan Execution (Temporal)
+Optional and inert until configured — see [docs/TEMPORAL.md](docs/TEMPORAL.md). Not to be confused with ORCA's *temporal channel* above, which scores recent-change keywords.
+
+- **Executions survive the pod** -- The in-process engine ran a plan as an asyncio task and wrote its record only at the end, so a rollout mid-plan lost the run entirely, with no record and no resume. Definitions became durable with migration 036; this makes executions durable too
+- **Approvals can actually wait** -- `approval_required` phases were marked `needs_escalation` and skipped, because an in-process engine cannot block for hours. On Temporal the workflow waits for a signal, so human-in-the-loop plans are possible rather than structurally impossible
+- **One interpreter workflow** -- `PulsePlanWorkflow` executes *any* plan definition by walking its phase graph, including plans authored in the UI at runtime. A new plan is data, not a deploy. Sequencing decisions are pure functions (`temporal/sequencing.py`), testable without a Temporal server and incapable of IO; all IO lives in activities, and phase execution still goes through `PlanRuntime._execute_phase` with the same contract check and retry-with-gap
+- **Configure with** `PULSE_AGENT_TEMPORAL_HOST` (plus `_NAMESPACE`, `_TASK_QUEUE`, `_APPROVAL_TIMEOUT`). The [operator](https://github.com/PulseSRE/pulse-operator) provisions a server with `spec.temporal.enabled` and injects the host
 
 ### Verified Action
 Nothing is reported as fixed because a symptom stopped appearing. Every mutating path is a contract: check first, capture an undo, then prove the outcome by reading the cluster.
