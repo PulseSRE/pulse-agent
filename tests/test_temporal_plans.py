@@ -930,3 +930,66 @@ class TestListRuns:
         assert run["type"] == "PulseIncidentWorkflow"
         assert run["status"] == "COMPLETED"
         assert run["run_id"] and run["started_at"] and run["closed_at"]
+
+    def test_memo_labels_the_run_with_what_it_is_fixing(self):
+        """A list of `incident-<uuid>` rows tells a reader nothing."""
+        import asyncio as aio
+
+        from temporalio import activity
+        from temporalio.testing import WorkflowEnvironment
+        from temporalio.worker import Worker
+
+        from sre_agent.temporal import client as tclient
+        from sre_agent.temporal.incident_workflow import IncidentWorkflow
+
+        @activity.defn(name="pulse.incident.snapshot")
+        async def snap(resource: dict) -> dict:
+            return {"kind": "Pod"}
+
+        @activity.defn(name="pulse.incident.apply_fix")
+        async def apply(plan: dict) -> dict:
+            return {"tool": "delete_pod"}
+
+        @activity.defn(name="pulse.incident.verify")
+        async def verify(resource: dict) -> dict:
+            return {"healthy": True, "evidence": "ok"}
+
+        @activity.defn(name="pulse.incident.compensate")
+        async def comp(snapshot: dict | None) -> str:
+            return "restored"
+
+        @activity.defn(name="pulse.incident.check_recurrence")
+        async def recheck(resource: dict) -> dict:
+            return {"recurred": False, "evidence": "ok"}
+
+        @activity.defn(name="pulse.incident.record_outcome")
+        async def rec(finding_id: str, verdict: str, evidence: str) -> None:
+            return None
+
+        async def go():
+            async with await WorkflowEnvironment.start_local() as env:
+                async with Worker(
+                    env.client,
+                    task_queue="pulse-plans",
+                    workflows=[IncidentWorkflow],
+                    activities=[snap, apply, verify, comp, recheck, rec],
+                ):
+                    # Drive the real start path so the memo it attaches is the
+                    # one under test, not one the test made up.
+                    with patch.object(tclient, "_connect", return_value=env.client):
+                        started = await tclient.start_incident_run(
+                            "f-memo",
+                            {"kind": "Pod", "name": "web-1", "namespace": "dev"},
+                            {"strategy": "restart_controller"},
+                            recurrence_window_seconds=0,
+                        )
+                        await env.client.get_workflow_handle(started["workflow_id"]).result()
+                        return await tclient.list_runs(limit=10)
+
+        runs = aio.run(go())
+        memo = next(r["memo"] for r in runs if r["workflow_id"] == "incident-f-memo")
+        assert memo["kind"] == "incident"
+        assert memo["finding_id"] == "f-memo"
+        assert memo["strategy"] == "restart_controller"
+        assert memo["resource_name"] == "web-1"
+        assert memo["resource_namespace"] == "dev"

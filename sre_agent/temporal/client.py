@@ -31,6 +31,31 @@ def _settings():
     return get_settings().temporal
 
 
+def _memo_for(kind: str, *, resource: dict | None = None, **extra) -> dict:
+    """What a run should say about itself in a listing.
+
+    Temporal identifies runs by workflow id, which here is `incident-<uuid>` —
+    unreadable in a list of thirty. Memo travels with the execution and comes
+    back from the visibility store, so the listing can say "restart_controller
+    on web-1 in dev" without Pulse keeping its own parallel table of run
+    metadata that would then need to be kept in sync.
+
+    Memo rather than custom search attributes: memo needs no registration
+    against the namespace, which is the whole difference between working on any
+    Temporal and working only after an operator ran a schema command. The cost
+    is that memo is not *searchable* server-side — filtering by namespace across
+    thousands of runs would want real search attributes, and that is the next
+    step when the run count justifies registering them.
+    """
+    memo = {"kind": kind, **{k: v for k, v in extra.items() if v}}
+    if resource:
+        for field in ("namespace", "name", "kind"):
+            value = resource.get(field)
+            if value:
+                memo[f"resource_{field}"] = str(value)
+    return memo
+
+
 async def _connect():
     cfg = _settings()
     if not cfg.host:
@@ -56,6 +81,7 @@ async def start_plan_run(incident_type: str, incident: dict) -> dict:
         ),
         id=workflow_id,
         task_queue=cfg.task_queue,
+        memo=_memo_for("plan", resource=incident.get("resource"), incident_type=incident_type),
     )
     logger.info("Started durable plan run %s (%s)", workflow_id, incident_type)
     return {"workflow_id": workflow_id, "run_id": handle.result_run_id}
@@ -122,9 +148,16 @@ async def start_incident_run(
         ),
         id=workflow_id,
         task_queue=cfg.task_queue,
+        memo=_memo_for(
+            "incident",
+            resource=resource,
+            finding_id=finding_id,
+            strategy=str(fix_plan.get("strategy") or ""),
+        ),
     )
     logger.info("Started durable incident run %s", workflow_id)
     return {"workflow_id": workflow_id, "run_id": handle.result_run_id}
+
 
 async def cancel_run(workflow_id: str, reason: str = "") -> None:
     """Ask a running workflow to stop.
@@ -151,6 +184,14 @@ async def list_runs(limit: int = 25) -> list[dict]:
     client = await _connect()
     out: list[dict] = []
     async for wf in client.list_workflows(page_size=limit):
+        try:
+            memo = await wf.memo()
+        except Exception:
+            # A run started before memo was attached, or one whose payload
+            # cannot be decoded, should still appear in the list. Losing its
+            # label is a worse listing; losing the row is a missing run.
+            logger.debug("could not decode memo for %s", wf.id, exc_info=True)
+            memo = {}
         out.append(
             {
                 "workflow_id": wf.id,
@@ -159,9 +200,9 @@ async def list_runs(limit: int = 25) -> list[dict]:
                 "status": wf.status.name if wf.status else "UNKNOWN",
                 "started_at": wf.start_time.isoformat() if wf.start_time else "",
                 "closed_at": wf.close_time.isoformat() if wf.close_time else "",
+                "memo": {str(k): v for k, v in (memo or {}).items()},
             }
         )
         if len(out) >= limit:
             break
     return out
-
