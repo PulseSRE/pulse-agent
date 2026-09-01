@@ -558,3 +558,78 @@ class TestDurableAutofixSeam:
         assert args["action_report"]["workflowId"] == "incident-f1"
         assert "f1" in mon._recent_fix_ids
         config_mod._reset_settings()
+
+
+class TestIncidentApplyFailure:
+    """An apply that fails must still produce a verdict.
+
+    Found by running the workflow against the live Temporal server on dev05:
+    snapshot completed, apply_fix failed, and the workflow died with no
+    outcome recorded — leaving the dispatched action with no verdict forever,
+    strictly worse than the inline path it replaced.
+    """
+
+    def test_failed_apply_records_a_verdict_and_compensates(self):
+        import asyncio as aio
+
+        from temporalio import activity
+        from temporalio.testing import WorkflowEnvironment
+        from temporalio.worker import Worker
+
+        from sre_agent.temporal.incident_workflow import IncidentInput, IncidentWorkflow
+
+        calls: list[str] = []
+
+        @activity.defn(name="pulse.incident.snapshot")
+        async def snap(resource: dict) -> dict:
+            calls.append("snapshot")
+            return {"kind": "Pod", "name": "x"}
+
+        @activity.defn(name="pulse.incident.apply_fix")
+        async def apply_boom(plan: dict) -> dict:
+            calls.append("apply")
+            raise RuntimeError("pod not found")
+
+        @activity.defn(name="pulse.incident.compensate")
+        async def comp(snapshot: dict | None) -> str:
+            calls.append("compensate")
+            return "nothing to restore"
+
+        @activity.defn(name="pulse.incident.record_outcome")
+        async def rec(finding_id: str, verdict: str, evidence: str) -> None:
+            calls.append(f"record:{verdict}")
+
+        @activity.defn(name="pulse.incident.verify")
+        async def verify(resource: dict) -> dict:
+            calls.append("verify")
+            return {"healthy": True}
+
+        @activity.defn(name="pulse.incident.check_recurrence")
+        async def recheck(resource: dict) -> dict:
+            return {"recurred": False}
+
+        async def go():
+            async with await WorkflowEnvironment.start_time_skipping() as env:
+                async with Worker(
+                    env.client,
+                    task_queue="tq-applyfail",
+                    workflows=[IncidentWorkflow],
+                    activities=[snap, apply_boom, comp, rec, verify, recheck],
+                ):
+                    return await env.client.execute_workflow(
+                        IncidentWorkflow.run,
+                        IncidentInput(
+                            finding_id="f-fail",
+                            resource={"name": "gone", "namespace": "dev"},
+                            fix_plan={"strategy": "restart_controller"},
+                            require_approval=False,
+                        ),
+                        id="wf-applyfail",
+                        task_queue="tq-applyfail",
+                    )
+
+        result = aio.run(go())
+        assert result["verdict"] == "failed", "an apply failure must produce a verdict, not vanish"
+        assert "record:failed" in calls, "the outcome must reach fix history"
+        assert "compensate" in calls, "undo defensively — the failure may follow a partial mutation"
+        assert "verify" not in calls, "nothing to verify when the fix never applied"

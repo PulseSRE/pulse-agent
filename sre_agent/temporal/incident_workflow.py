@@ -106,15 +106,39 @@ class IncidentWorkflow:
 
         # ── 3. Apply ─────────────────────────────────────────────────────────
         self._stage = "applying"
-        applied = await workflow.execute_activity(
-            apply_fix,
-            params.fix_plan,
-            start_to_close_timeout=timedelta(minutes=5),
-            heartbeat_timeout=timedelta(seconds=30),
-            # A fix that mutates the cluster is not safe to retry blindly; one
-            # attempt, and a failure goes straight to compensation.
-            retry_policy=RetryPolicy(maximum_attempts=1),
-        )
+        try:
+            applied = await workflow.execute_activity(
+                apply_fix,
+                params.fix_plan,
+                start_to_close_timeout=timedelta(minutes=5),
+                heartbeat_timeout=timedelta(seconds=30),
+                # A fix that mutates the cluster is not safe to retry blindly;
+                # one attempt, and a failure is handled below.
+                retry_policy=RetryPolicy(maximum_attempts=1),
+            )
+        except ActivityError as exc:
+            # An apply that fails must still produce a verdict. Letting the
+            # workflow die here leaves the dispatched action with no outcome
+            # forever — strictly worse than the inline path, which records a
+            # failure. Found by running this against the live server.
+            self._stage = "apply_failed"
+            # The failure may have landed after a partial mutation, so undo
+            # defensively; restore is a no-op when there is nothing to undo.
+            restored = await workflow.execute_activity(
+                restore_snapshot,
+                snapshot,
+                start_to_close_timeout=timedelta(seconds=120),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
+            self._compensated = True
+            reason = f"fix could not be applied: {exc.cause or exc}"
+            await workflow.execute_activity(
+                record_outcome,
+                args=[params.finding_id, "failed", f"{reason}; {restored}"],
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
+            return {"verdict": "failed", "evidence": reason, "compensated": True}
 
         # ── 4. Verify, with backoff as the rollout grace window ───────────────
         self._stage = "verifying"
