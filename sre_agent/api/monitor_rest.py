@@ -524,7 +524,6 @@ async def create_plan_template(request: Request, _auth=Depends(verify_token)):
     the same shape the PUT handler accepts.
     """
     import re
-    from pathlib import Path
 
     import yaml
 
@@ -586,7 +585,12 @@ async def create_plan_template(request: Request, _auth=Depends(verify_token)):
     }
 
     rendered = yaml.safe_dump(template, default_flow_style=False, sort_keys=False)
-    target = Path(__file__).parent.parent / "plan_templates" / f"{incident_type}.yaml"
+    # The writable runtime dir, never the package dir: site-packages is
+    # read-only under OpenShift's arbitrary UID, and this exact write
+    # returned 500 on the cluster until the sre-bench durable probe hit it.
+    from ..plan_store import plans_dir
+
+    target = plans_dir() / f"{incident_type}.yaml"
     try:
         target.write_text(rendered, encoding="utf-8")
     except OSError as e:
@@ -728,7 +732,6 @@ async def plan_template_versions(incident_type: str, _auth=Depends(verify_token)
 async def update_plan_template(incident_type: str, request: Request, _auth=Depends(verify_token)):
     """Update an existing plan template. Rewrites the YAML file and reloads."""
     import re
-    from pathlib import Path
 
     import yaml
 
@@ -744,26 +747,13 @@ async def update_plan_template(incident_type: str, request: Request, _auth=Depen
     if not re.match(r"^[a-z0-9][a-z0-9_-]{0,63}$", incident_type):
         raise HTTPException(status_code=400, detail="Invalid incident type")
 
-    templates_dir = Path(__file__).parent.parent / "plan_templates"
-    # Find the YAML file for this template
-    target_path = None
-    for path in templates_dir.glob("*.yaml"):
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-            if data.get("incident_type") == incident_type or data.get("id") == template.id:
-                target_path = path
-                break
-        except Exception as e:
-            logger.warning("Failed to parse plan template %s: %s", path, e)
-            continue
+    # Edits always land in the writable runtime dir — a bundled template is
+    # never rewritten in place (the package dir is read-only in the container
+    # anyway); the loader gives the user-dir copy precedence, so the edit
+    # overrides the seed without destroying it.
+    from ..plan_store import plans_dir
 
-    if not target_path:
-        raise HTTPException(status_code=404, detail="Template file not found")
-
-    # Verify resolved path stays within templates directory
-    if not str(target_path.resolve()).startswith(str(templates_dir.resolve())):
-        raise HTTPException(status_code=400, detail="Invalid path")
+    target_path = plans_dir() / f"{incident_type}.yaml"
 
     # Build updated YAML
     updated = {
@@ -793,12 +783,14 @@ async def update_plan_template(incident_type: str, request: Request, _auth=Depen
     }
 
     rendered = yaml.safe_dump(updated, default_flow_style=False, sort_keys=False)
-    with open(target_path, "w", encoding="utf-8") as f:
-        f.write(rendered)
+    try:
+        target_path.write_text(rendered, encoding="utf-8")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Could not write plan template: {e}") from e
 
-    # The file above lives inside the installed package, so without this the
-    # edit is undone by the next rollout. Persisting also archives the previous
-    # body, which is what makes a plan edit reversible.
+    # The file is a cache; the database is the durable copy that survives the
+    # next rollout. Persisting also archives the previous body, which is what
+    # makes a plan edit reversible.
     from ..plan_store import persist_plan
 
     persist_plan(incident_type, rendered, source="user")
@@ -810,9 +802,7 @@ async def update_plan_template(incident_type: str, request: Request, _auth=Depen
 
 @router.delete("/plan-templates/{incident_type}")
 async def delete_plan_template(incident_type: str, _auth=Depends(verify_token)):
-    """Delete a plan template. Only auto-generated templates can be deleted."""
-    from pathlib import Path
-
+    """Delete a runtime-created plan template. Bundled templates are protected."""
     import yaml
 
     from ..plan_templates import get_template, load_templates
@@ -821,13 +811,16 @@ async def delete_plan_template(incident_type: str, _auth=Depends(verify_token)):
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
 
-    # Only allow deleting auto-generated templates
-    if not template.id.startswith("auto-"):
-        raise HTTPException(status_code=403, detail="Cannot delete built-in templates")
+    # Deletable = lives in the writable runtime dir, i.e. was created or
+    # edited at runtime (auto-scaffolded or user-made). Bundled seeds have no
+    # file there and stay protected — the old rule keyed on an `auto-` id
+    # prefix, which also blocked users from deleting plans they had just
+    # created themselves.
+    from ..plan_store import plans_dir
 
-    templates_dir = Path(__file__).parent.parent / "plan_templates"
+    user_dir = plans_dir()
     target_path = None
-    for path in templates_dir.glob("*.yaml"):
+    for path in user_dir.glob("*.yaml"):
         try:
             with open(path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
@@ -839,9 +832,9 @@ async def delete_plan_template(incident_type: str, _auth=Depends(verify_token)):
             continue
 
     if not target_path:
-        raise HTTPException(status_code=404, detail="Template file not found")
+        raise HTTPException(status_code=403, detail="Cannot delete built-in templates")
 
-    if not str(target_path.resolve()).startswith(str(templates_dir.resolve())):
+    if not str(target_path.resolve()).startswith(str(user_dir.resolve())):
         raise HTTPException(status_code=400, detail="Invalid path")
 
     target_path.unlink()

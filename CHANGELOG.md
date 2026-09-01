@@ -2,6 +2,21 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## v2.31.0 (2026-09-01)
+
+### The interpreter executes the whole plan language
+- Waves run concurrently: every phase whose dependencies are settled executes in one `asyncio.gather`, mirroring the in-process engine — `parallel_with` was always advisory there too, the dependency graph is the truth. `branch_on` re-targets a phase's skill from a dependency's findings via the pure `resolve_branch`; the decision is made in the workflow from recorded outputs and only the result crosses the activity boundary, so replay can never re-decide a branch. Both guarded by `workflow.patched` for in-flight histories
+- A phase can be a whole plan: `subplan: <incident_type>` runs it as a child workflow with its own phase graph, approval gates and history, capped at three levels so a self-referencing plan terminates (tested by running one)
+- The create endpoint and the UI dialog now speak the full graph — `depends_on`, `branch_on`/`branches`, `subplan` — instead of silently dropping them
+
+### The flywheel on Temporal Schedules
+- The daily/weekly maintenance cadence lived in in-memory timestamps reset on every pod boot, checked only when the scan loop ran. It becomes two Temporal Schedules (SKIP overlap, 1h catchup): fires whether or not the pod was up, every run in the visibility store. Registration is idempotent; on failure the inline path keeps the cadence, and once schedules exist the inline scheduler stands down so the work never runs twice
+
+### Plan writes go to a writable directory — found by the new probes
+- `sre-bench durable` (new in sre-bench) probed the live agent and its first check crashed: `POST /plan-templates` wrote YAML into site-packages, read-only under OpenShift's arbitrary UID. Creating a plan from the UI had been returning 500 on the cluster while every local test passed — the fourth local-green-cluster-red find of this migration
+- Runtime plan writes (create, edit, delete, scaffolder, boot hydration) now target `PULSE_AGENT_USER_PLANS_DIR` (default `/tmp/pulse_agent/plan_templates`), the same pattern user skills have used all along. Bundled templates stay as read-only seeds; the loader reads both with the runtime copy winning, so editing a bundled plan overrides it without touching the package
+- Deletability is now "lives in the writable dir", not an `auto-` id prefix — the old rule blocked users from deleting plans they had just created
+
 ## v2.30.3 (2026-09-01)
 
 ### A docs gate that could only pass

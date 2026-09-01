@@ -16,6 +16,7 @@ from pathlib import Path
 from .artifact_store import KIND_PLAN, forget, get_version, hydrate, list_artifacts, list_versions, persist
 
 __all__ = [
+    "bundled_plans_dir",
     "forget_plan",
     "hydrate_plans_dir",
     "list_stored_plans",
@@ -27,7 +28,25 @@ __all__ = [
 
 
 def plans_dir() -> Path:
-    """Where plan template YAML lives on disk."""
+    """The writable directory runtime-created plan YAML lives in.
+
+    NOT the package directory. The container image's site-packages is
+    read-only under OpenShift's arbitrary UID, so every write that targeted
+    the package dir — create, edit, delete, boot-time hydration — failed
+    there with EACCES; the sre-bench durable probe found create returning
+    500 on its first live run. Bundled templates stay in the package dir as
+    read-only seeds; this dir (DB-hydrated at boot, same as user skills)
+    holds everything created or edited at runtime.
+    """
+    from .config import get_settings
+
+    directory = Path(get_settings().server.user_plans_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def bundled_plans_dir() -> Path:
+    """The read-only templates shipped inside the package."""
     return Path(__file__).parent / "plan_templates"
 
 

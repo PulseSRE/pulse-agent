@@ -73,8 +73,8 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/analytics/fix-strategies` | token | Fix strategy effectiveness per category+tool (query: `days` 1-365) |
 | `GET` | `/analytics/learning` | token | Agent learning feed: weight updates, scaffolded skills, routing decisions (query: `days` 1-365) |
 | `PUT` | `/plan-templates/{type}` | token | Update plan template phases/timeouts |
-| `DELETE` | `/plan-templates/{type}` | token | Delete auto-generated plan templates |
-| `POST` | `/plan-templates` | token | Create a new plan template (versioned; see runtime artifacts) |
+| `DELETE` | `/plan-templates/{type}` | token | Delete a runtime-created plan template (bundled templates are protected) |
+| `POST` | `/plan-templates` | token | Create a new plan template (versioned; phases accept depends_on, branch_on/branches, parallel_with, subplan) |
 | `GET` | `/plan-templates/{type}/versions` | token | Version history for one plan template |
 | `POST` | `/plan-templates/{type}/run` | token | Start a durable run of this plan on Temporal. 503 with the reason when durable execution is not configured |
 | `GET` | `/workflow-runs` | token | Recent durable runs from Temporal's visibility store (query: `limit` 1-100). Each row carries a `memo` labelling what the run is acting on |

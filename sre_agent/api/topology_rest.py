@@ -462,7 +462,13 @@ async def get_finding_learning(
         try:
             import yaml
 
-            plan_path = base_dir / "plan_templates" / f"{cat}.yaml"
+            from ..plan_store import plans_dir
+
+            # Scaffolded plans land in the writable runtime dir now; fall
+            # back to the bundled dir for anything written before that.
+            plan_path = plans_dir() / f"{cat}.yaml"
+            if not plan_path.exists():
+                plan_path = base_dir / "plan_templates" / f"{cat}.yaml"
             if plan_path.exists():
                 data = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
                 if data:

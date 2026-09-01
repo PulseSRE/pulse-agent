@@ -131,8 +131,6 @@ def scaffold_plan_template(
         return None
 
     try:
-        from pathlib import Path
-
         import yaml
 
         from .plan_templates import get_template
@@ -142,10 +140,9 @@ def scaffold_plan_template(
             logger.info("Plan template already exists for '%s', skipping scaffold", incident_type)
             return None
 
-        templates_dir = Path(__file__).parent / "plan_templates"
-        if not templates_dir.exists():
-            logger.warning("Plan templates directory not found")
-            return None
+        from .plan_store import plans_dir
+
+        templates_dir = plans_dir()
 
         # Verify resolved path stays within templates directory
         template_path = (templates_dir / f"{skill_name}.yaml").resolve()

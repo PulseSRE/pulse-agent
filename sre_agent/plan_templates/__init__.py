@@ -20,11 +20,26 @@ def load_templates() -> dict[str, SkillPlan]:
     global _templates
     _templates.clear()
 
-    if not _TEMPLATES_DIR.exists():
+    # Bundled seeds first, then the writable runtime dir. Later files win on
+    # incident_type collision (subject to the auto-vs-builtin guard below),
+    # so a user's edit of a bundled plan overrides it without touching the
+    # read-only package directory.
+    from ..plan_store import plans_dir
+
+    search_dirs = [_TEMPLATES_DIR]
+    try:
+        user_dir = plans_dir()
+        if user_dir != _TEMPLATES_DIR:
+            search_dirs.append(user_dir)
+    except Exception:
+        logger.debug("User plans dir unavailable", exc_info=True)
+
+    paths = [p for d in search_dirs if d.exists() for p in sorted(d.glob("*.yaml"))]
+    if not paths and not _TEMPLATES_DIR.exists():
         logger.warning("Plan templates directory not found: %s", _TEMPLATES_DIR)
         return _templates
 
-    for path in sorted(_TEMPLATES_DIR.glob("*.yaml")):
+    for path in paths:
         try:
             with open(path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
