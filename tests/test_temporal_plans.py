@@ -754,9 +754,11 @@ class TestIncidentCancellation:
             calls.append(f"record:{verdict}")
 
         async def go():
-            # A real server, not time-skipping: skipping would race past the
-            # recurrence timer before the cancel could land on it.
-            async with await WorkflowEnvironment.start_local() as env:
+            # Time-skipping only advances the clock while a client awaits a
+            # workflow result. This test polls a query instead, so the hour-long
+            # recurrence timer stays put and the cancel lands on it — and the
+            # suite needs no Temporal CLI download, which CI cannot do.
+            async with await WorkflowEnvironment.start_time_skipping() as env:
                 async with Worker(
                     env.client,
                     task_queue="tq-cancel",
@@ -862,134 +864,97 @@ class TestIncidentCancellation:
 class TestListRuns:
     """list_runs reads Temporal's visibility store rather than a Pulse table.
 
-    That means its correctness is entirely in the SDK attribute names it
-    reaches for — the kind of thing a mock would happily confirm while the
-    real call raises AttributeError. So this runs against a real server.
+    That means its correctness lives entirely in the SDK attribute names it
+    reaches for — the kind of thing a hand-rolled mock would happily confirm
+    while the real call raises AttributeError. So the rows here are built the
+    way the SDK builds them, from a real WorkflowExecutionInfo protobuf through
+    the SDK's own constructor, rather than from a dict shaped the way the
+    function happens to want.
+
+    A live server would be better still, but neither test environment can
+    provide one: the time-skipping server does not implement
+    ListWorkflowExecutions, and CI cannot download the CLI that start_local
+    needs. The end-to-end path is covered on the cluster instead.
     """
 
-    def test_returns_the_fields_the_ui_renders(self):
+    @staticmethod
+    def _execution(memo: dict | None = None):
+        from datetime import UTC, datetime
+
+        import temporalio.api.common.v1 as common
+        import temporalio.api.enums.v1 as enums
+        import temporalio.api.workflow.v1 as wf_api
+        from google.protobuf.timestamp_pb2 import Timestamp
+        from temporalio.client import WorkflowExecution
+        from temporalio.converter import DataConverter
+
+        converter = DataConverter.default
+        start = Timestamp()
+        start.FromDatetime(datetime(2026, 9, 1, 10, 0, tzinfo=UTC))
+        close = Timestamp()
+        close.FromDatetime(datetime(2026, 9, 1, 10, 5, tzinfo=UTC))
+
+        info = wf_api.WorkflowExecutionInfo(
+            execution=common.WorkflowExecution(workflow_id="incident-f-memo", run_id="run-1"),
+            type=common.WorkflowType(name="PulseIncidentWorkflow"),
+            start_time=start,
+            close_time=close,
+            status=enums.WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_COMPLETED,
+        )
+        if memo:
+            for key, value in memo.items():
+                info.memo.fields[key].CopyFrom(converter.payload_converter.to_payload(value))
+        return WorkflowExecution._from_raw_info(info, "default", converter)
+
+    def _list(self, executions):
         import asyncio as aio
 
-        from temporalio import activity
-        from temporalio.testing import WorkflowEnvironment
-        from temporalio.worker import Worker
-
         from sre_agent.temporal import client as tclient
-        from sre_agent.temporal.incident_workflow import IncidentInput, IncidentWorkflow
 
-        @activity.defn(name="pulse.incident.snapshot")
-        async def snap(resource: dict) -> dict:
-            return {"kind": "Pod"}
+        class FakeClient:
+            def list_workflows(self, **_kwargs):
+                async def gen():
+                    for e in executions:
+                        yield e
 
-        @activity.defn(name="pulse.incident.apply_fix")
-        async def apply(plan: dict) -> dict:
-            return {"tool": "delete_pod"}
+                return gen()
 
-        @activity.defn(name="pulse.incident.verify")
-        async def verify(resource: dict) -> dict:
-            return {"healthy": True, "evidence": "ok"}
+        with patch.object(tclient, "_connect", return_value=FakeClient()):
+            return aio.run(tclient.list_runs(limit=10))
 
-        @activity.defn(name="pulse.incident.compensate")
-        async def comp(snapshot: dict | None) -> str:
-            return "restored"
-
-        @activity.defn(name="pulse.incident.check_recurrence")
-        async def recheck(resource: dict) -> dict:
-            return {"recurred": False, "evidence": "ok"}
-
-        @activity.defn(name="pulse.incident.record_outcome")
-        async def rec(finding_id: str, verdict: str, evidence: str) -> None:
-            return None
-
-        async def go():
-            async with await WorkflowEnvironment.start_local() as env:
-                async with Worker(
-                    env.client,
-                    task_queue="tq-list",
-                    workflows=[IncidentWorkflow],
-                    activities=[snap, apply, verify, comp, recheck, rec],
-                ):
-                    await env.client.execute_workflow(
-                        IncidentWorkflow.run,
-                        IncidentInput(
-                            finding_id="f-list",
-                            require_approval=False,
-                            recurrence_window_seconds=0,
-                        ),
-                        id="wf-listed",
-                        task_queue="tq-list",
-                    )
-                    # Exercise the real function, against the real server.
-                    with patch.object(tclient, "_connect", return_value=env.client):
-                        return await tclient.list_runs(limit=10)
-
-        runs = aio.run(go())
-        listed = [r for r in runs if r["workflow_id"] == "wf-listed"]
-        assert listed, "a completed run must appear in the listing"
-        run = listed[0]
+    def test_returns_the_fields_the_ui_renders(self):
+        runs = self._list([self._execution()])
+        assert len(runs) == 1
+        run = runs[0]
+        assert run["workflow_id"] == "incident-f-memo"
+        assert run["run_id"] == "run-1"
         assert run["type"] == "PulseIncidentWorkflow"
         assert run["status"] == "COMPLETED"
-        assert run["run_id"] and run["started_at"] and run["closed_at"]
+        assert run["started_at"].startswith("2026-09-01T10:00")
+        assert run["closed_at"].startswith("2026-09-01T10:05")
 
     def test_memo_labels_the_run_with_what_it_is_fixing(self):
         """A list of `incident-<uuid>` rows tells a reader nothing."""
-        import asyncio as aio
-
-        from temporalio import activity
-        from temporalio.testing import WorkflowEnvironment
-        from temporalio.worker import Worker
-
-        from sre_agent.temporal import client as tclient
-        from sre_agent.temporal.incident_workflow import IncidentWorkflow
-
-        @activity.defn(name="pulse.incident.snapshot")
-        async def snap(resource: dict) -> dict:
-            return {"kind": "Pod"}
-
-        @activity.defn(name="pulse.incident.apply_fix")
-        async def apply(plan: dict) -> dict:
-            return {"tool": "delete_pod"}
-
-        @activity.defn(name="pulse.incident.verify")
-        async def verify(resource: dict) -> dict:
-            return {"healthy": True, "evidence": "ok"}
-
-        @activity.defn(name="pulse.incident.compensate")
-        async def comp(snapshot: dict | None) -> str:
-            return "restored"
-
-        @activity.defn(name="pulse.incident.check_recurrence")
-        async def recheck(resource: dict) -> dict:
-            return {"recurred": False, "evidence": "ok"}
-
-        @activity.defn(name="pulse.incident.record_outcome")
-        async def rec(finding_id: str, verdict: str, evidence: str) -> None:
-            return None
-
-        async def go():
-            async with await WorkflowEnvironment.start_local() as env:
-                async with Worker(
-                    env.client,
-                    task_queue="pulse-plans",
-                    workflows=[IncidentWorkflow],
-                    activities=[snap, apply, verify, comp, recheck, rec],
-                ):
-                    # Drive the real start path so the memo it attaches is the
-                    # one under test, not one the test made up.
-                    with patch.object(tclient, "_connect", return_value=env.client):
-                        started = await tclient.start_incident_run(
-                            "f-memo",
-                            {"kind": "Pod", "name": "web-1", "namespace": "dev"},
-                            {"strategy": "restart_controller"},
-                            recurrence_window_seconds=0,
-                        )
-                        await env.client.get_workflow_handle(started["workflow_id"]).result()
-                        return await tclient.list_runs(limit=10)
-
-        runs = aio.run(go())
-        memo = next(r["memo"] for r in runs if r["workflow_id"] == "incident-f-memo")
+        runs = self._list(
+            [
+                self._execution(
+                    {
+                        "kind": "incident",
+                        "finding_id": "f-memo",
+                        "strategy": "restart_controller",
+                        "resource_name": "web-1",
+                        "resource_namespace": "dev",
+                    }
+                )
+            ]
+        )
+        memo = runs[0]["memo"]
         assert memo["kind"] == "incident"
-        assert memo["finding_id"] == "f-memo"
         assert memo["strategy"] == "restart_controller"
         assert memo["resource_name"] == "web-1"
         assert memo["resource_namespace"] == "dev"
+
+    def test_a_run_with_no_memo_still_lists(self):
+        """Runs started before memo existed must not vanish from the listing."""
+        runs = self._list([self._execution()])
+        assert runs[0]["memo"] == {}

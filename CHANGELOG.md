@@ -2,6 +2,13 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## v2.30.2 (2026-09-01)
+
+### Temporal tests that can actually run in CI
+- The cancellation and run-listing tests added in v2.30.0 used `WorkflowEnvironment.start_local()`, which downloads the Temporal CLI. CI cannot, so they failed with "error decoding response body" — green locally, red where it counts, for the third time in this stretch of work
+- The cancellation test moved to the time-skipping server, which turns out to be the right environment anyway: time-skipping only advances the clock while a client awaits a *result*, and the test polls a query instead, so the hour-long recurrence timer stays put and the cancel lands on it
+- `list_runs` cannot use that server at all — it does not implement `ListWorkflowExecutions`. Its tests now build rows the way the SDK does, from a real `WorkflowExecutionInfo` protobuf through the SDK's own constructor and payload converter, so the attribute names and memo decoding are still checked against real types rather than a dict shaped to match the function. The end-to-end path is verified on the cluster
+
 ## v2.30.1 (2026-09-01)
 
 ### Routing made a Prometheus call it threw away
