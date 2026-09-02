@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/tools-143_(107+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
   <img src="https://img.shields.io/badge/scanners-27-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-3338-10b981?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-3389-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/eval_suites-16_(192_scenarios)-10b981?style=for-the-badge" alt="Eval Suites">
   <img src="https://img.shields.io/badge/release_gate-97.5%25-10b981?style=for-the-badge" alt="Release Gate">
   <img src="https://img.shields.io/badge/PromQL%20recipes-83-10b981?style=for-the-badge" alt="PromQL Recipes">
