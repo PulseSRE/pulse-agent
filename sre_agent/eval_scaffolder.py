@@ -87,7 +87,12 @@ def _scaffold_draft(skill_name: str, finding: dict, *, source_kind: str, tools_r
             stream.write(rendered)
         return persist(KIND_EVAL_DRAFT, name, rendered, rel_path=f"{name}.json", source="scaffolded_draft")
     except FileExistsError:
-        return False  # Never overwrite a draft someone may already be reviewing.
+        # A previous persistence failure may have left only the overlay copy.
+        # Retry durability only when the content is still our identical draft;
+        # never overwrite or persist somebody's in-progress review as generated.
+        if path.read_text(encoding="utf-8") == rendered:
+            return persist(KIND_EVAL_DRAFT, name, rendered, rel_path=f"{name}.json", source="scaffolded_draft")
+        return False
     except Exception:
         logger.warning("Could not create review-only eval draft", exc_info=True)
         return False

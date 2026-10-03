@@ -731,7 +731,7 @@ class TestDurableAutofixSeam:
 
     def _args(self):
         return {
-            "action_report": {},
+            "action_report": {"id": "a1"},
             "targeted_plan": self._plan(),
             "resources": [{"name": "p1", "namespace": "dev"}],
             "finding": {"id": "f1"},
@@ -790,11 +790,15 @@ class TestDurableAutofixSeam:
         monkeypatch.setenv("PULSE_AGENT_DURABLE_AUTOFIX", "true")
         monkeypatch.setenv("PULSE_AGENT_TEMPORAL_HOST", "temporal:7233")
 
+        saved = []
+
         async def ok(**kwargs):
+            assert saved and saved[0]["id"] == "a1", "action must exist before workflow can record an outcome"
+            assert kwargs["action_id"] == "a1"
             return {"workflow_id": "incident-f1", "run_id": "r1"}
 
         monkeypatch.setattr(tclient, "start_incident_run", ok)
-        monkeypatch.setattr(cm, "save_action", lambda *a, **k: None)
+        monkeypatch.setattr(cm, "save_action", lambda report, **k: saved.append(dict(report)))
 
         mon = self._monitor()
         args = self._args()

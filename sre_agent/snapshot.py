@@ -97,6 +97,7 @@ def capture(kind: str, name: str, namespace: str) -> dict[str, Any] | None:
         "namespace": namespace,
         "metadata": _clean_metadata(raw.get("metadata", {})),
         "uid": raw.get("metadata", {}).get("uid"),
+        "resourceVersion": raw.get("metadata", {}).get("resourceVersion"),
     }
     if kind == "ConfigMap":
         snapshot["data"] = raw.get("data", {})

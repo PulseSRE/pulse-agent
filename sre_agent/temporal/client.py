@@ -123,6 +123,7 @@ async def start_incident_run(
     *,
     require_approval: bool = False,
     recurrence_window_seconds: int = 1800,
+    action_id: str = "",
 ) -> dict:
     """Start the durable fix lifecycle for one finding.
 
@@ -145,6 +146,7 @@ async def start_incident_run(
             require_approval=require_approval,
             approval_timeout_seconds=cfg.approval_timeout,
             recurrence_window_seconds=recurrence_window_seconds,
+            action_id=action_id,
         ),
         id=workflow_id,
         task_queue=cfg.task_queue,

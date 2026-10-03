@@ -33,7 +33,7 @@ treat that as "not verified".
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger("pulse_agent.monitor.health_gate")
@@ -56,6 +56,7 @@ class GateResult:
     status: str
     resource: str
     detail: str
+    observations: dict[str, Any] = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
@@ -202,7 +203,12 @@ def _check_pod(name: str, namespace: str) -> GateResult:
         not_ready = [getattr(cs, "name", "?") for cs in statuses if not getattr(cs, "ready", False)]
         if not_ready and phase == "Running":
             return GateResult(FAIL, ref, f"{ref} is Running but containers not ready: {', '.join(not_ready)}")
-        return GateResult(PASS, ref, f"{ref} is {phase} with {restarts} restarts")
+        return GateResult(
+            PASS,
+            ref,
+            f"{ref} is {phase} with {restarts} restarts",
+            {"uid": getattr(getattr(pod, "metadata", None), "uid", None), "restarts": restarts},
+        )
     return GateResult(FAIL, ref, f"{ref} is in phase {phase}")
 
 

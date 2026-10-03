@@ -89,3 +89,13 @@ def test_empty_skill_name_refused(draft_root):
 def test_missing_durability_is_not_reported_as_persisted_success(draft_root):
     with patch("sre_agent.artifact_store.persist", return_value=False):
         assert not scaffold()
+
+
+def test_transient_persistence_failure_can_retry_without_overwriting_review(draft_root):
+    with patch("sre_agent.artifact_store.persist", side_effect=[False, True]) as persist:
+        assert not scaffold()
+        path = next((draft_root / "drafts").glob("*.json"))
+        original = path.read_text()
+        assert scaffold()
+        assert persist.call_count == 2
+        assert path.read_text() == original

@@ -60,7 +60,7 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
     from ..repositories import get_monitor_repo
     from .actions import get_action_detail, save_action
     from .findings import _ts
-    from .fix_planner import default_fix_plan, execute_fix, get_investigation_for_finding, plan_fix
+    from .fix_planner import default_fix_plan, execute_fix_with_snapshot, get_investigation_for_finding, plan_fix
 
     action = get_action_detail(action_id)
     if action is None:
@@ -130,7 +130,14 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
         return report
 
     try:
-        tool, before_state, after_state = execute_fix(plan)
+        execution = execute_fix_with_snapshot(plan)
+        tool, before_state, after_state = execution.result
+        if not execution.applied:
+            report.update(status="failed", error=after_state, verificationStatus="unverifiable")
+        if execution.snapshot:
+            from ..snapshot import to_json
+
+            report["beforeSnapshot"] = to_json(execution.snapshot)
         report.update(
             tool=tool,
             beforeState=before_state,
@@ -147,12 +154,34 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
         report.update(status="failed", error=error_message, durationMs=_ts() - started)
         logger.error("Approved fix failed: action=%s error=%s", action_id, e)
 
+    if report["status"] == "completed":
+        from .cluster_monitor import get_cluster_monitor_sync
+
+        monitor = get_cluster_monitor_sync()
+        if monitor is not None and monitor.running:
+            report["verificationStatus"] = "pending"
+        else:
+            monitor = None
+            report["verificationStatus"] = "unverifiable"
+            report["verificationEvidence"] = "No running monitor available to observe approved mutation recovery"
+    else:
+        monitor = None
+
     save_action(
         report,
         category=category,
         resources=finding.get("resources", []),
         finding=finding,
     )
+    if monitor is not None:
+        monitor._pending_verifications[action_id] = {
+            "action_id": action_id,
+            "finding_id": finding_id,
+            "category": category,
+            "resources": finding.get("resources", []),
+            "verify_resources": execution.verify_resources or finding.get("resources", []),
+            "target_scan": monitor._scan_counter + 1,
+        }
     return report
 
 

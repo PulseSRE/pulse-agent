@@ -41,7 +41,7 @@ async def apply_fix(plan: dict) -> dict:
     than at the activity timeout — the difference between a fast retry and a
     stalled incident.
     """
-    from ..monitor.fix_planner import FixPlan, execute_fix
+    from ..monitor.fix_planner import FixPlan, FixPreconditionError, execute_fix_with_snapshot
 
     activity.heartbeat("starting")
     fix_plan = FixPlan(
@@ -51,9 +51,32 @@ async def apply_fix(plan: dict) -> dict:
         description=plan.get("description", ""),
         params=plan.get("params", {}),
     )
-    tool, before, after = execute_fix(fix_plan)
+    from kubernetes.client.rest import ApiException
+    from temporalio.exceptions import ApplicationError
+
+    try:
+        execution = execute_fix_with_snapshot(fix_plan)
+    except FixPreconditionError as exc:
+        raise ApplicationError(str(exc), type="FixNotApplied", non_retryable=True) from exc
+    except ApiException as exc:
+        if exc.status in (400, 403, 404, 409, 422):
+            raise ApplicationError(
+                "Mutation refused by API preconditions or permissions", type="FixNotApplied", non_retryable=True
+            ) from exc
+        raise
+    tool, before, after = execution.result
+    if not execution.applied:
+        from temporalio.exceptions import ApplicationError
+
+        raise ApplicationError(f"Fix was not applied: {after}", type="FixNotApplied", non_retryable=True)
     activity.heartbeat("applied")
-    return {"tool": tool, "before": before, "after": after}
+    return {
+        "tool": tool,
+        "before": before,
+        "after": after,
+        "snapshot": execution.snapshot,
+        "verify_resource": execution.verify_resources[0] if execution.verify_resources else None,
+    }
 
 
 @activity.defn(name="pulse.incident.verify")
@@ -64,22 +87,12 @@ async def verify_fix(resource: dict) -> dict:
     window a rollout needs — the same idea as the monitor's 3-scan window, but
     expressed as backoff the platform owns instead of scan-cycle bookkeeping.
     """
-    from ..k8s_client import get_core_client, safe
+    from ..monitor.health_gate import PASS, check_resource
 
-    ns, name = resource.get("namespace", ""), resource.get("name", "")
-    pod = safe(lambda: get_core_client().read_namespaced_pod(name, ns))
-    if isinstance(pod, str):
-        # Gone entirely: for a controller-managed pod that is a successful
-        # replacement, not a failure.
-        return {"healthy": True, "evidence": f"pod {name} no longer present ({pod})"}
-
-    phase = getattr(pod.status, "phase", "")
-    restarts = 0
-    if pod.status and pod.status.container_statuses:
-        restarts = pod.status.container_statuses[0].restart_count
-    if phase != "Running":
-        raise RuntimeError(f"pod {name} is {phase}, not Running yet")
-    return {"healthy": True, "evidence": f"pod {name} Running, restarts={restarts}"}
+    gate = check_resource(resource.get("kind", "Pod"), resource.get("name", ""), resource.get("namespace", ""))
+    if gate.status != PASS:
+        raise RuntimeError(f"Recovery not verified ({gate.status}): {gate.detail}")
+    return {"healthy": True, "evidence": gate.detail, "baseline": gate.observations}
 
 
 @activity.defn(name="pulse.incident.compensate")
@@ -99,33 +112,42 @@ async def check_recurrence(resource: dict) -> dict:
     The monitor answers this by re-reading the database on a later scan, which
     a restart can miss. Here it is a plain read after a durable timer.
     """
-    from ..k8s_client import get_core_client, safe
+    from ..monitor.health_gate import FAIL, PASS, check_resource
 
-    ns, name = resource.get("namespace", ""), resource.get("name", "")
-    pod = safe(lambda: get_core_client().read_namespaced_pod(name, ns))
-    if isinstance(pod, str):
-        return {"recurred": False, "evidence": "resource absent at recheck"}
-
-    restarts = 0
-    if pod.status and pod.status.container_statuses:
-        restarts = pod.status.container_statuses[0].restart_count
-    phase = getattr(pod.status, "phase", "")
-    recurred = phase != "Running" or restarts > int(resource.get("restarts_at_fix", 0))
-    return {
-        "recurred": recurred,
-        "evidence": f"phase={phase} restarts={restarts}",
-    }
+    gate = check_resource(resource.get("kind", "Pod"), resource.get("name", ""), resource.get("namespace", ""))
+    if gate.status not in (PASS, FAIL):
+        raise RuntimeError(f"Recovery recheck is unverifiable: {gate.detail}")
+    if resource.get("kind", "Pod") == "Pod" and gate.status == PASS:
+        uid = resource.get("uid_at_fix")
+        baseline = resource.get("restarts_at_fix")
+        if not isinstance(uid, str) or not uid or type(baseline) is not int or baseline < 0:
+            raise RuntimeError("Pod recurrence baseline is missing; sustained recovery cannot be confirmed")
+        if gate.observations.get("uid") != uid:
+            raise RuntimeError("Pod identity changed; original recurrence comparison is unverifiable")
+        return {"recurred": gate.observations["restarts"] > baseline, "evidence": gate.detail}
+    return {"recurred": gate.status == FAIL, "evidence": gate.detail}
 
 
 @activity.defn(name="pulse.incident.record_outcome")
 async def record_outcome(finding_id: str, verdict: str, evidence: str) -> None:
     """Persist the final verdict where fix history already lives."""
-    try:
-        from ..monitor.actions import update_action_verification
+    from temporalio.exceptions import ApplicationError
 
-        update_action_verification(finding_id, verdict, evidence)
-    except Exception:
-        logger.warning("Could not record outcome for %s", finding_id, exc_info=True)
+    from ..monitor.findings import _ts
+    from ..repositories.monitor_repo import get_monitor_repo
+
+    repo = get_monitor_repo()
+    action_id = finding_id
+    if repo.get_action_by_id(action_id) is None:
+        # Legacy workflow inputs carried a finding ID instead of an action ID.
+        # Only one dispatched action is an unambiguous link; never choose a latest row.
+        rows = repo.db.fetchall("SELECT id FROM actions WHERE finding_id = ? AND status = 'dispatched'", (finding_id,))
+        if len(rows) != 1:
+            raise ApplicationError("Outcome has no unique linked action row", type="MissingAction")
+        action_id = rows[0]["id"]
+    # Use the repository directly: the presentation helper swallows DB errors,
+    # which would let the durable activity claim persistence without a write.
+    repo.update_action_verification(action_id, verdict, evidence, _ts())
 
 
 INCIDENT_ACTIVITIES: Sequence[Callable[..., Any]] = [
