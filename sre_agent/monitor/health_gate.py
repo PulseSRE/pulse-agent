@@ -99,13 +99,30 @@ def _check_workload(kind: str, name: str, namespace: str) -> GateResult:
 
     ready = ready or 0
 
-    # A workload scaled to zero is not healthy, it is switched off. Reporting
-    # 0/0 as a pass would let "scale it to zero" verify as a fix.
+    # Scaling off a workload does not establish incident recovery.
     if desired == 0:
         return GateResult(FAIL, ref, f"{ref} is scaled to 0 replicas — not running, so not repaired")
-
     if ready < desired:
         return GateResult(FAIL, ref, f"{ref} has {ready}/{desired} replicas ready")
+
+    generation = getattr(getattr(obj, "metadata", None), "generation", None)
+    observed = getattr(status, "observed_generation", None)
+    if not isinstance(generation, int) or not isinstance(observed, int):
+        return GateResult(UNVERIFIABLE, ref, f"{ref} did not report controller generation observations")
+    if observed < generation:
+        return GateResult(FAIL, ref, f"{ref} controller observed generation {observed}, awaiting {generation}")
+    if kind == "Deployment":
+        updated = getattr(status, "updated_replicas", None)
+        available = getattr(status, "available_replicas", None)
+        total = getattr(status, "replicas", None)
+        if any(value is None for value in (updated, available, total)):
+            return GateResult(UNVERIFIABLE, ref, f"{ref} did not report complete rollout replica observations")
+        if updated != desired or total != desired or available < desired:
+            return GateResult(
+                FAIL,
+                ref,
+                f"{ref} rollout incomplete: {updated} updated, {available} available, {total} total; desired {desired}",
+            )
 
     return GateResult(PASS, ref, f"{ref} has {ready}/{desired} replicas ready")
 
@@ -128,6 +145,15 @@ def _check_pod(name: str, namespace: str) -> GateResult:
     if phase in ("Running", "Succeeded"):
         statuses = getattr(pod.status, "container_statuses", None) or []
         restarts = sum(int(getattr(cs, "restart_count", 0) or 0) for cs in statuses)
+        if phase == "Running" and not statuses:
+            return GateResult(UNVERIFIABLE, ref, f"{ref} has no observed container readiness")
+        if phase == "Running":
+            conditions = getattr(pod.status, "conditions", None) or []
+            ready_condition = next((c for c in conditions if getattr(c, "type", None) == "Ready"), None)
+            if ready_condition is None:
+                return GateResult(UNVERIFIABLE, ref, f"{ref} has no observed Pod Ready condition")
+            if getattr(ready_condition, "status", None) != "True":
+                return GateResult(FAIL, ref, f"{ref} Pod Ready condition is not True")
         not_ready = [getattr(cs, "name", "?") for cs in statuses if not getattr(cs, "ready", False)]
         if not_ready and phase == "Running":
             return GateResult(FAIL, ref, f"{ref} is Running but containers not ready: {', '.join(not_ready)}")
@@ -164,6 +190,6 @@ def check_resources(resources: list[dict[str, Any]]) -> tuple[str, str]:
 
     if failed:
         return FAIL, "; ".join(r.detail for r in failed)
-    if not passed:
+    if len(passed) != len(results):
         return UNVERIFIABLE, "; ".join(r.detail for r in results)
     return PASS, "; ".join(r.detail for r in passed)

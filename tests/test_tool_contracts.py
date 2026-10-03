@@ -28,8 +28,14 @@ class _ApiError(Exception):
 def _deployment(desired=3, ready=3, revision="4"):
     return SimpleNamespace(
         spec=SimpleNamespace(replicas=desired),
-        status=SimpleNamespace(ready_replicas=ready),
-        metadata=SimpleNamespace(annotations={"deployment.kubernetes.io/revision": revision}),
+        status=SimpleNamespace(
+            ready_replicas=ready,
+            observed_generation=1,
+            updated_replicas=desired,
+            available_replicas=ready,
+            replicas=desired,
+        ),
+        metadata=SimpleNamespace(generation=1, annotations={"deployment.kubernetes.io/revision": revision}),
     )
 
 
@@ -386,3 +392,24 @@ def _async_noop_fn():
             return None
 
     return _Recorder()
+
+
+def test_scale_ack_and_matching_ready_count_do_not_hide_stale_controller():
+    dep = _deployment(desired=3, ready=3)
+    dep.metadata.generation = 2
+    with patch("sre_agent.k8s_client.get_apps_client", return_value=_apps(dep)):
+        status, evidence = tool_contracts.run_probe(
+            {"tool": "scale_deployment", "args": {"namespace": "p", "name": "api", "replicas": 3}, "pre": {}}
+        )
+    assert status == health_gate.FAIL
+    assert "awaiting controller" in evidence
+
+
+def test_scale_to_zero_without_controller_observation_is_not_verified():
+    dep = _deployment(desired=0, ready=0)
+    dep.status.observed_generation = None
+    with patch("sre_agent.k8s_client.get_apps_client", return_value=_apps(dep)):
+        status, _ = tool_contracts.run_probe(
+            {"tool": "scale_deployment", "args": {"namespace": "p", "name": "api", "replicas": 0}, "pre": {}}
+        )
+    assert status == health_gate.UNVERIFIABLE

@@ -171,3 +171,15 @@ class TestListTemplates:
         # 1200, not 900: phase budgets were raised after 103/203 production runs
         # aborted on the old 120s triage timeout; their sum (1140s) must fit.
         assert crashloop["max_duration"] == 1200
+
+
+class TestIncidentMilestoneContracts:
+    def test_three_incidents_have_explicit_mutation_approval_and_recovery_budget(self):
+        for category in ("crashloop", "workloads", "scheduling"):
+            plan = load_templates()[category]
+            mutation = next(p for p in plan.phases if p.id in ("remediate", "rollback_decision"))
+            assert mutation.approval_required, category
+            verify = next(p for p in plan.phases if p.id == "verify")
+            assert verify.runs == "always", category
+            assert "resolution_confirmed" in verify.produces, category
+            assert plan.max_total_duration >= sum(p.timeout_seconds for p in plan.phases), category
