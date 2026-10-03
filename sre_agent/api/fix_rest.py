@@ -6,14 +6,14 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..monitor import (
     execute_rollback,
     get_action_detail,
     get_fix_history,
 )
-from .auth import require_admin, verify_token
+from .auth import get_user_token, require_admin, verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -253,9 +253,24 @@ async def approve_action(action_id: str, approver: str = Depends(require_admin))
 
 
 @router.post("/fix-history/{action_id}/rollback")
-async def rollback_action(action_id: str, _auth=Depends(verify_token)):
-    """Rollback a completed action (Protocol v2). Requires token auth."""
-    result = execute_rollback(action_id)
+async def rollback_action(
+    action_id: str,
+    approver: str = Depends(require_admin),
+    user_token: str | None = Depends(get_user_token),
+):
+    """Rollback as an authenticated administrator using their Kubernetes permissions."""
+    from ..config import get_settings
+    from ..k8s_client import user_token_context
+
+    if get_settings().agent.token_forwarding and not user_token:
+        raise HTTPException(status_code=401, detail="User access token required for rollback")
+
+    def run_rollback():
+        with user_token_context(user_token):
+            return execute_rollback(action_id)
+
+    logger.info("Rollback of action %s requested by %s", action_id, approver)
+    result = await asyncio.to_thread(run_rollback)
     if "error" in result:
         from fastapi.responses import JSONResponse
 

@@ -133,6 +133,22 @@ class ReplayHarness:
         thinking: dict | None = None,
         config: dict | None = None,
     ) -> dict:
+        """Synchronous convenience wrapper for :meth:`run_async`."""
+        return asyncio.run(
+            self.run_async(client, prompt, system_prompt, tool_defs, tool_map, write_tools, thinking, config)
+        )
+
+    async def run_async(
+        self,
+        client: Any,
+        prompt: str,
+        system_prompt: Any = None,
+        tool_defs: list | None = None,
+        tool_map: dict | None = None,
+        write_tools: set[str] | None = None,
+        thinking: dict | None = None,
+        config: dict | None = None,
+    ) -> dict:
         """Execute the agent loop and return results.
 
         Parameters
@@ -190,7 +206,7 @@ class ReplayHarness:
         if thinking is not None:
             kwargs["thinking"] = thinking
         with offline_context(allow_llm_tool_picker=self.allow_llm_tool_picker):
-            response = asyncio.run(run_agent_streaming(**kwargs))
+            response = await run_agent_streaming(**kwargs)
         elapsed_ms = (time.monotonic() - start) * 1000
 
         return {
@@ -246,6 +262,17 @@ class MultiTurnReplayHarness:
         self.configs: list[dict] = []
 
     def run(
+        self,
+        client: Any,
+        system_prompt: Any = None,
+        tool_defs: list | None = None,
+        write_tools: set[str] | None = None,
+        thinking: dict | None = None,
+    ) -> dict:
+        """Run all turns on one event loop, preserving the client's connections."""
+        return asyncio.run(self.run_async(client, system_prompt, tool_defs, write_tools, thinking))
+
+    async def run_async(
         self,
         client: Any,
         system_prompt: Any = None,
@@ -315,7 +342,7 @@ class MultiTurnReplayHarness:
                 kwargs["thinking"] = thinking
 
             with offline_context(allow_llm_tool_picker=self.allow_llm_tool_picker):
-                response = asyncio.run(run_agent_streaming(**kwargs))
+                response = await run_agent_streaming(**kwargs)
             elapsed_ms = (time.monotonic() - start) * 1000
 
             # run_agent_streaming has already appended the assistant turn (including

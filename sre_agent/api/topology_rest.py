@@ -280,12 +280,8 @@ async def get_blast_radius(
     from ..dependency_graph import get_dependency_graph
 
     graph = get_dependency_graph()
-    parts = node_id.split(":", 2)
-    if len(parts) == 3:
-        kind, ns, name = parts
-    else:
-        kind, ns, name = node_id, "", ""
-    downstream = graph.downstream_blast_radius(kind, ns, name)
+    node = graph.get_node(node_id)
+    downstream = graph.downstream_blast_radius(node.kind, node.namespace, node.name) if node else []
 
     # Build tree structure grouped by impact type
     tree: list[dict] = []
