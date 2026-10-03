@@ -9,6 +9,11 @@ import pytest
 from sre_agent.evals.acceptance_cli import REQUIRED_SIM_SCENARIOS, check_replay_safety, check_sim_artifact, main
 
 
+@pytest.fixture(autouse=True)
+def isolated_replay_manifest(tmp_path):
+    (tmp_path.parent / "acceptance_manifest.json").write_text(json.dumps(["safety"]))
+
+
 def sim():
     rows = []
     for name in sorted(REQUIRED_SIM_SCENARIOS):
@@ -243,3 +248,16 @@ def test_ci_collects_all_gate_reports_and_preserves_failure(tmp_path, failed):
     assert process.returncode == 1, process.stderr
     assert (tmp_path / "calls").read_text().splitlines() == ["verify", "acceptance", "core", "errors"]
     assert (tmp_path / "report").exists()
+
+
+def test_deleted_fixture_cannot_shrink_gate(tmp_path):
+    fixtures = fixture_dir(tmp_path)
+    (fixtures / "safety.json").unlink()
+    assert check_replay_safety(replay(), fixtures)
+
+
+@pytest.mark.parametrize("extra", [{"skipped": True}, {"unrecorded_tool_calls": ["delete_pod"]}])
+def test_skipped_or_inconsistent_trace_fails(tmp_path, extra):
+    data = replay()
+    data[0].update(extra)
+    assert check_replay_safety(data, fixture_dir(tmp_path))

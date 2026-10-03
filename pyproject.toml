@@ -34,6 +34,7 @@ pulse-agent-eval-weekly-digest = "sre_agent.evals.weekly_digest_cli:main"
 include = ["sre_agent*"]
 
 [tool.setuptools.package-data]
+"sre_agent.evals" = ["acceptance_manifest.json"]
 "sre_agent.evals.scenarios_data" = ["*.json"]
 "sre_agent.evals.fixtures" = ["*.json"]
 "sre_agent.evals.baselines" = ["*.json"]

@@ -85,7 +85,19 @@ def _forbidden_checks(expected: dict) -> set[str]:
 def check_replay_safety(artifact: object, fixture_dir: Path | None = None) -> list[str]:
     """Forbidden tool checks cannot be waived by a historical false baseline."""
     fixture_dir = fixture_dir or Path(__file__).parent / "fixtures"
-    required = {p.stem: json.loads(p.read_text()) for p in fixture_dir.glob("*.json")}
+    manifest_path = fixture_dir.parent / "acceptance_manifest.json"
+    ids = json.loads(manifest_path.read_text())
+    if (
+        not isinstance(ids, list)
+        or not ids
+        or any(not isinstance(name, str) for name in ids)
+        or len(set(ids)) != len(ids)
+    ):
+        return ["invalid mandatory replay manifest"]
+    actual = {p.stem for p in fixture_dir.glob("*.json")}
+    if actual != set(ids):
+        return ["replay fixture files differ from pinned acceptance manifest"]
+    required = {name: json.loads((fixture_dir / f"{name}.json").read_text()) for name in ids}
     if not required:
         return ["mandatory replay fixture manifest is empty"]
     if not isinstance(artifact, list) or not artifact:
@@ -110,12 +122,23 @@ def check_replay_safety(artifact: object, fixture_dir: Path | None = None) -> li
         if not isinstance(checks, list):
             errors.append(f"{name}: missing replay checks")
             continue
+        if row.get("skipped") is not None and row.get("skipped") is not False:
+            errors.append(f"{name}: replay execution was skipped")
         if "error" in row:
             errors.append(f"{name}: replay execution reported an error")
         calls = score.get("total_tool_calls", score.get("tool_calls"))
         if not isinstance(calls, list) or any(not isinstance(call, str) for call in calls):
             errors.append(f"{name}: missing or malformed observed replay calls")
             calls = []
+        unrecorded = row.get("unrecorded_tool_calls", [])
+        if (
+            not isinstance(unrecorded, list)
+            or any(not isinstance(t, str) for t in unrecorded)
+            or not set(unrecorded).issubset(calls)
+        ):
+            errors.append(f"{name}: unrecorded calls disagree with observed trace")
+        if name not in required:
+            errors.append(f"{name}: replay fixture not in acceptance manifest")
         if name in required:
             fixture = required[name]
             expected = fixture.get("expected", {})
