@@ -869,7 +869,8 @@ class ClusterMonitor:
         action_report["workflowId"] = started["workflow_id"]
         action_report["fixStrategy"] = targeted_plan.strategy
         await self._broadcast_raw(action_report)
-        save_action(action_report, category=category, resources=resources, finding=finding)
+        # The workflow may already have persisted a verdict while start or the
+        # broadcast yielded. Re-saving this stale report would erase that verdict.
         self._recent_fix_ids.add(finding["id"])
         logger.info("Auto-fix dispatched durably: %s", started["workflow_id"])
         return True

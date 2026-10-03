@@ -795,6 +795,8 @@ class TestDurableAutofixSeam:
         async def ok(**kwargs):
             assert saved and saved[0]["id"] == "a1", "action must exist before workflow can record an outcome"
             assert kwargs["action_id"] == "a1"
+            # A fast workflow can persist its verdict before start returns.
+            saved[-1]["verificationStatus"] = "unverifiable"
             return {"workflow_id": "incident-f1", "run_id": "r1"}
 
         monkeypatch.setattr(tclient, "start_incident_run", ok)
@@ -805,6 +807,8 @@ class TestDurableAutofixSeam:
         assert aio.run(mon._dispatch_durable_fix(**args)) is True
         assert args["action_report"]["status"] == "dispatched"
         assert args["action_report"]["workflowId"] == "incident-f1"
+        assert saved[-1]["verificationStatus"] == "unverifiable"
+        assert len(saved) == 1
         assert "f1" in mon._recent_fix_ids
         config_mod._reset_settings()
 
