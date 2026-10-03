@@ -714,6 +714,9 @@ def _make_receive_loop(
                         future.set_result(False)
                     else:
                         approved = data.get("approved", False)
+                        if not isinstance(approved, bool):
+                            logger.warning("Rejected non-boolean confirmation (session=%s)", session_id)
+                            approved = False
                         future.set_result(approved)
                         logger.info("Confirmation received: approved=%s nonce=%s", approved, received_nonce[:8])
                         try:

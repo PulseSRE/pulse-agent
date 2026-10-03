@@ -1,5 +1,8 @@
 # Next-Gen Phase 1: Code Cleanup & Refactoring
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Clean foundation — split oversized files, remove dead code, fix 6 security vulnerabilities, add trend scanners, enable mypy on skills. This is the prerequisite for all next-gen phases.

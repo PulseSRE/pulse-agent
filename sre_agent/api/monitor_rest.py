@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from .auth import verify_token
+from .auth import require_admin, verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -603,7 +603,7 @@ async def create_plan_template(request: Request, _auth=Depends(verify_token)):
 
 
 @router.post("/plan-templates/{incident_type}/run")
-async def run_plan_template(incident_type: str, request: Request, _auth=Depends(verify_token)):
+async def run_plan_template(incident_type: str, request: Request, _auth=Depends(require_admin)):
     """Start a durable, user-triggered run of a plan on Temporal.
 
     Distinct from the monitor's automatic in-process execution: this run
@@ -667,7 +667,7 @@ async def list_workflow_runs(limit: int = Query(25, ge=1, le=100), _auth=Depends
 
 
 @router.post("/workflow-runs/{workflow_id}/cancel")
-async def cancel_workflow_run(workflow_id: str, request: Request, _auth=Depends(verify_token)):
+async def cancel_workflow_run(workflow_id: str, request: Request, _auth=Depends(require_admin)):
     """Stop a running workflow.
 
     Cooperative: an in-flight activity finishes rather than being severed
@@ -692,7 +692,7 @@ async def cancel_workflow_run(workflow_id: str, request: Request, _auth=Depends(
 
 
 @router.post("/workflow-runs/{workflow_id}/approve")
-async def approve_workflow_phase(workflow_id: str, request: Request, _auth=Depends(verify_token)):
+async def approve_workflow_phase(workflow_id: str, request: Request, _auth=Depends(require_admin)):
     """Deliver a human verdict to a run waiting on approval."""
     from ..temporal.client import TemporalDisabledError, approve_plan_phase
 
@@ -700,7 +700,9 @@ async def approve_workflow_phase(workflow_id: str, request: Request, _auth=Depen
     phase_id = str(body.get("phase_id") or "").strip()
     if not phase_id:
         raise HTTPException(status_code=400, detail="phase_id is required")
-    approved = bool(body.get("approved", True))
+    approved = body.get("approved")
+    if not isinstance(approved, bool):
+        raise HTTPException(status_code=400, detail="approved must be an explicit boolean")
 
     try:
         await approve_plan_phase(workflow_id, phase_id, approved)

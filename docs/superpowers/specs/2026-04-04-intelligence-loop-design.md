@@ -1,5 +1,8 @@
 # Intelligence Loop — Design Spec
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 **Goal:** Feed analytics data back into the agent's system prompt to improve query selection, reduce errors, and surface patterns that make dashboards better. The agent gets smarter over time based on what works on this cluster.
 
 **Problem:** The agent has no memory of what worked before. It suggests PromQL queries that failed last time, uses tools that error frequently, and doesn't learn from successful dashboard patterns. All the analytics data we're collecting (tool_usage, promql_queries, tool_chains) goes unused.

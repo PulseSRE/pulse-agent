@@ -634,7 +634,7 @@ After writes, call record_audit_entry to log the action.
 
 1. **Create your skill package** in `sre_agent/skills/my-skill/`
 
-2. **Run bundled evals** (fast, no API key):
+2. **Run bundled fixture evals** (fast, no API key; validates scenario/scoring data, not live model behavior):
    ```bash
    python -m sre_agent.evals.cli --suite my-skill --fail-on-gate
    ```
@@ -647,7 +647,7 @@ After writes, call record_audit_entry to log the action.
 4. **Test routing** — verify your keywords route correctly:
    ```bash
    python -c "
-   from sre_agent.skill_loader import classify_query
+   from sre_agent.skill_router import classify_query
    for q in ['check capacity', 'will we run out of memory', 'list pods']:
        skill = classify_query(q)
        print(f'{q:40} → {skill.name}')
@@ -689,8 +689,12 @@ Copy your skill directory to `sre_agent/skills/` and restart the agent (or call 
 
 ```bash
 cp -r my-skill/ /path/to/sre_agent/skills/
-curl -X POST http://localhost:8080/admin/skills/reload
+curl -X POST http://localhost:8080/admin/skills/reload \
+  -H "Authorization: Bearer $PULSE_AGENT_WS_TOKEN" \
+  -H "X-Forwarded-Access-Token: $USER_ACCESS_TOKEN"
 ```
+
+The reload endpoint uses `require_admin`: a trusted authenticated identity is required and `PULSE_AGENT_ADMIN_USERS` is enforced when configured. The header example is for a trusted local development setup; deployed requests go through the OAuth/reverse proxy. Runtime API edits are persisted in PostgreSQL; bundled file drops change packaged source and must be included in deployment artifacts.
 
 ### Method 2: Toolbox UI
 

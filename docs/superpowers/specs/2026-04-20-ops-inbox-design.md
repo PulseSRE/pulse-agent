@@ -1,5 +1,8 @@
 # Ops Inbox — Proactive SRE Task List
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Give SREs a proactive daily inbox of things that need attention before they become incidents — distinct from the incidents page (reactive, broken now) and the briefing banner (summary, not actionable).

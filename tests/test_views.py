@@ -688,6 +688,7 @@ def mock_k8s():
         patch("sre_agent.k8s_client.get_core_client", return_value=core),
         patch("sre_agent.k8s_client.get_apps_client", return_value=apps),
         patch("sre_agent.k8s_client.get_custom_client", return_value=custom),
+        patch("sre_agent.k8s_client.get_networking_client", return_value=MagicMock()),
     ):
         yield {"core": core, "apps": apps, "custom": custom}
 

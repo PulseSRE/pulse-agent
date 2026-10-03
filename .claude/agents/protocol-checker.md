@@ -7,7 +7,7 @@ matches the API contract.
 
 The Pulse ecosystem has two repos that must stay in sync:
 - **pulse-agent** (this repo) — Python FastAPI backend with WebSocket endpoints
-- **OpenshiftPulse** (at `../OpenshiftPulse`) — React/TypeScript frontend UI
+- **pulse-ui** (at `../pulse-ui`) — React/TypeScript frontend UI
 
 The contract is defined in `API_CONTRACT.md` (source of truth for both repos).
 
@@ -16,10 +16,10 @@ The contract is defined in `API_CONTRACT.md` (source of truth for both repos).
 ### 1. Message Types
 Verify every message type in API_CONTRACT.md is implemented:
 
-**Server→Client events** (in `sre_agent/api.py`):
+**Server→Client events** (in `sre_agent/api/`):
 - `text_delta`, `thinking_delta`, `tool_use`, `component`, `confirm_request`, `done`, `error`, `cleared`
 
-**Client→Server messages** (in `sre_agent/api.py`):
+**Client→Server messages** (in `sre_agent/api/`):
 - `message`, `confirm_response`, `clear`
 
 ### 2. REST Endpoints
@@ -43,9 +43,9 @@ Verify all `spec.kind` values used in tool results match the contract:
 ## When invoked
 
 1. Read `API_CONTRACT.md` for the authoritative spec
-2. Read `sre_agent/api.py` for the actual implementation
+2. Read `sre_agent/api/` for the actual implementation
 3. Grep for all WebSocket `send_json` / `send_text` calls to find message types
 4. Grep for all component spec `kind` values returned by tools
 5. Compare implementation against contract
 6. Report any mismatches, missing implementations, or undocumented features
-7. Check if `../OpenshiftPulse/src` has any protocol mismatches (if accessible)
+7. Check if `../pulse-ui/src` has any protocol mismatches (if accessible)

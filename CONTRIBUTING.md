@@ -1,50 +1,42 @@
 # Contributing
 
-## Code Style
+Start with [README](README.md), [architecture](docs/ARCHITECTURE.md), and [testing](TESTING.md). UI contributions belong in [pulse-ui](https://github.com/PulseSRE/pulse-ui); deployment changes belong in [pulse-operator](https://github.com/PulseSRE/pulse-operator).
 
-### TypeScript (OpenshiftPulse)
-- **Linter**: ESLint with TypeScript + React + React Hooks plugins
-- **Formatter**: Prettier (semi, single quotes, trailing commas, 100 char width)
-- **Type checking**: `tsc --noEmit` (strict mode available via `tsconfig.strict.json`)
-- Run: `npm run verify` (type-check + strict + lint + test + build)
+## Development setup
 
-### Python (pulse-agent)
-- **Linter**: Ruff (pycodestyle, pyflakes, isort, bugbear, simplify)
-- **Formatter**: Ruff format (double quotes, 120 char width)
-- **Type checking**: Mypy (permissive mode)
-- Run: `make verify` (lint + type-check + test)
+Python 3.11+ is required by `pyproject.toml`; CI uses Python 3.11.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[test]'
+```
+
+Provision a disposable PostgreSQL database as described in [TESTING](TESTING.md) before running tests. The autouse fixture drops its public schema; never use a production or development database containing valuable data.
+
+```bash
+make verify
+python -m ruff format --check sre_agent/ tests/
+python scripts/check_discipline.py
+```
+
+`make verify` runs Ruff lint, Mypy, and pytest. Formatting and discipline checks are separate. Live replay is a separate provider-backed quality gate; an offline check is insufficient evidence of model quality.
 
 ## Conventions
 
-### General
-- Types defined once in canonical locations, imported everywhere
-- No duplicate interfaces across files
-- Every REST endpoint documented in API_CONTRACT.md
-- Every security change documented in SECURITY.md
-- Version is dynamic (read from package metadata)
+- Configure through `get_settings()` and Pydantic settings.
+- Register native tools with the tool decorator/registry; verify write classification and safety enforcement for each execution path.
+- Use the Kubernetes client helpers and `safe()` error handling; preserve caller-token context where an interactive route supplies it.
+- Use `get_database()`; schema and forward migrations are maintained in `db_schema.py` and `db_migrations.py`.
+- Update [API_CONTRACT](API_CONTRACT.md) for route/message changes and [SECURITY](SECURITY.md) for authorization or policy changes.
+- Add regressions for changed behavior, including error paths and denied writes. Do not skip a broken prerequisite and report success.
 
-### Python
-- Use `@beta_tool` decorator for K8s tools, register in `tool_registry`
-- Use `safe()` wrapper for all K8s API calls
-- Use `get_database()` for database access (PostgreSQL only — no SQLite fallback)
-- Config via Pydantic Settings (`get_settings()`)
+## Optional pre-commit hook
 
-### TypeScript
-- Use Zustand for state (no Redux)
-- Use `cn()` from `@/lib/utils` for className merging
-- Use lucide-react for icons
-- Use Card, EmptyState from primitives
-- Feature flags via `isFeatureEnabled()`
+`bash scripts/install-hooks.sh` installs a local hook in a normal clone. It runs Ruff lint, Ruff format checking, and six focused test files. It does **not** run Mypy or the entire test suite. Run the complete checks above before requesting review. The script assumes `.git` is a directory and needs adaptation for a Git worktree.
 
-## Pre-commit Hooks
+## CI and review
 
-Install: `bash scripts/install-hooks.sh`
+[evals.yml](.github/workflows/evals.yml) runs on main PRs/pushes, tags, a daily schedule, and manual dispatch. It includes lint, formatting, types, discipline, tests, route documentation coverage, and offline replay. Provider-backed replay and SRE-Bench simulation run under workflow conditions and require credentials. The image build, release publication, version comparison, and secret scan have separate workflows.
 
-Hooks run automatically before every commit:
-- Python: ruff lint + ruff format check + mypy + pytest
-
-## CI
-
-Both repos have GitHub Actions that run on every push to main:
-- pulse-agent: pytest + ruff + eval gates
-- OpenshiftPulse: type-check + strict + lint + test + build
+Describe the problem, final behavior, checks performed, and remaining deployment/provider validation. See [RELEASE](RELEASE.md) before tagging or publishing.

@@ -1,5 +1,8 @@
 # Unified Layout Engine
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 **Date:** 2026-04-14
 **Status:** Approved
 **Author:** Ali + Claude

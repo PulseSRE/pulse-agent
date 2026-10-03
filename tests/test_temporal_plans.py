@@ -150,9 +150,12 @@ async def _run_workflow(plan_dict, params, send_approval=None, findings_by_phase
         return plan_dict
 
     @activity.defn(name="pulse.run_plan_phase")
-    async def stub_phase(plan: dict, phase_id: str, incident: dict, prior: dict, skill_override=None) -> dict:
+    async def stub_phase(
+        plan: dict, phase_id: str, incident: dict, prior: dict, skill_override=None, writes_approved=False
+    ) -> dict:
         ran.append(phase_id)
         diag["overrides"][phase_id] = skill_override
+        diag.setdefault("writes_approved", {})[phase_id] = writes_approved
         diag["in_flight"] += 1
         diag["max_in_flight"] = max(diag["max_in_flight"], diag["in_flight"])
         try:
@@ -203,7 +206,7 @@ class TestPlanWorkflow:
         from sre_agent.temporal.plan_workflow import PlanRunInput
 
         plan = _plan([_phase("remediate", approval=True)])
-        result, ran, _, _ = asyncio.run(
+        result, ran, _, diag = asyncio.run(
             _run_workflow(
                 plan,
                 PlanRunInput(incident_type="test", approval_timeout_seconds=3600),
@@ -211,6 +214,7 @@ class TestPlanWorkflow:
             )
         )
         assert ran == ["remediate"]
+        assert diag["writes_approved"] == {"remediate": True}
         assert result["status"] == "complete"
 
     def test_denied_phase_escalates_without_running(self):

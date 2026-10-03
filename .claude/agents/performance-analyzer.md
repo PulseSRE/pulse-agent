@@ -42,7 +42,7 @@ python3 -m sre_agent.evals.cli --audit-prompt --mode security
 
 ### Frontend bundle
 ```bash
-cd /Users/amobrem/ali/OpenshiftPulse
+cd ../pulse-ui
 npx rspack build --mode production --profile
 ```
 

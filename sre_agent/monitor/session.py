@@ -27,10 +27,12 @@ class MonitorClient:
 
     def resolve_action_response(self, action_id: str, approved: bool) -> bool:
         """Resolve an outstanding action approval request."""
+        if not isinstance(approved, bool):
+            return False
         future = self._pending_action_approvals.get(action_id)
         if not future or future.done():
             return False
-        future.set_result(bool(approved))
+        future.set_result(approved)
         return True
 
     async def send(self, data: dict) -> bool:

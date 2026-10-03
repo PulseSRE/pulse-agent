@@ -1,5 +1,8 @@
 # Async Anthropic SDK Migration — Implementation Plan
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace all sync Anthropic SDK usage with native async clients to eliminate GIL contention that causes healthz probe timeouts on the cluster.

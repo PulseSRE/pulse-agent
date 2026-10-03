@@ -3,12 +3,10 @@
 ## Why
 
 The in-process engine (`plan_runtime.py`) runs a plan as an asyncio task inside
-the agent pod. Two structural consequences, both observed on dev05:
+the agent pod. The original implementation had two structural limitations:
 
 - **Executions die with the pod.** `_record_execution` writes only at the end,
-  so a restart mid-plan loses the run entirely — no record, no resume. The
-  agent pod was rolled five times in a single working day of releases; every
-  in-flight plan died silently each time. This is the same ephemerality bug as
+  so a restart mid-plan loses the run entirely — no record, no resume. This is the same ephemerality problem as
   runtime artifacts (migration 036), one level up: definitions are durable now,
   executions were not.
 - **Approval cannot wait.** `approval_required` phases are marked
@@ -58,9 +56,9 @@ POST /plan-templates/{type}/run ──► start_workflow(PlanRunInput)
 |---|---|
 | Monitor's automatic plan execution | in-process (unchanged) |
 | `POST /plan-templates/{type}/run` (UI "Run durably") | Temporal |
-| Plans using `branch_on` / `branches` / `parallel_with` | in-process only; the run endpoint refuses them by name |
+| Branching, ready-wave parallel phases, and subplans | supported by the interpreter; decisions are replay-safe and subplans execute as child workflows |
 
-Nothing existing changes behaviour. The whole package is inert until
+Durable execution is disabled until
 `PULSE_AGENT_TEMPORAL_HOST` is set; without it the run endpoints answer 503
 with the exact variable to configure.
 
@@ -80,23 +78,11 @@ change, not a code change: `temporal/worker.py` is already the entrypoint.
 | `PULSE_AGENT_TEMPORAL_TASK_QUEUE` | `pulse-plans` | Task queue the worker polls |
 | `PULSE_AGENT_TEMPORAL_APPROVAL_TIMEOUT` | `86400` | Seconds an approval phase waits for a human |
 
-## The open infrastructure decision
+## Infrastructure and limitations
 
-The code is complete and dark. Turning it on requires a Temporal server, and
-that is a deployment decision, not a code one:
+The operator now owns `spec.temporal` and can provision the server and inject agent configuration. Follow the operator's current CRD/README for persistent storage, PostgreSQL access, image, and service names. A disposable Temporal dev server is useful for testing but is not a production durability guarantee. External service/TLS/auth support must be checked against the actual client configuration; a host string alone is not a verified Temporal Cloud integration.
 
-- **Self-hosted** (Temporal OSS via its Helm chart or operator, backed by the
-  existing PostgreSQL or its own): no external dependency, runs air-gapped,
-  but it is a real stateful service to operate — schema upgrades, visibility
-  store, retention.
-- **Temporal Cloud**: nothing to operate, per-action pricing, but an external
-  dependency and egress from the cluster.
-
-For dev05 the pragmatic first step is the single-binary dev server
-(`temporalio/auto-setup` image or `temporal server start-dev`) in a
-`temporal` namespace — sufficient to exercise everything here end to end,
-explicitly not durable enough to *be* the durability story in production.
-The operator should eventually own this surface as `spec.temporal` on the CR.
+`PULSE_AGENT_DURABLE_AUTOFIX` (default false) selects the durable incident-remediation path after approval. The incident workflow and ordinary plan workflow are distinct; inspect `temporal/incident_workflow.py` and related activities for snapshot, verification, cancellation, and fallback behavior. Temporal orchestration does not itself supply Kubernetes authorization. Workers share service credentials. Durable start, approve, and cancel endpoints require `require_admin`. A write-enabled phase must declare `approval_required`, receive an affirmative signal, and run under server trust >=2; other phases cannot authorize writes. Caller tokens are not written into workflow history. The explicit approval activity argument is guarded by a Temporal patch marker; old-history argument shapes remain compatible and omitted approval defaults to denied. Validate these controls with actual cluster RBAC before enabling writes.
 
 ## Testing
 

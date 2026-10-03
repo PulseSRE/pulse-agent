@@ -1,27 +1,19 @@
 # Database
 
-PostgreSQL is required for all production features — memory, monitoring, views, tool analytics, SLOs, evals. Schema defined in `sre_agent/db_schema.py`, migrations in `sre_agent/db_migrations.py`.
+PostgreSQL backs memory, monitoring, dashboards, analytics, SLOs, inbox, and runtime artifacts. There is no SQLite fallback. The connection URL is `PULSE_AGENT_DATABASE_URL`; `db.py`, `db_schema.py`, and `db_migrations.py` define the connection and schema contract.
 
-## Local Development
+## Development and tests
+
+Use separate databases for development and tests. See [TESTING](TESTING.md) for a disposable test database: pytest **drops the public schema**. A development example is:
 
 ```bash
-# Start PostgreSQL
-podman run -d --name pulse-test-pg \
-  -p 5433:5432 \
-  -e POSTGRES_USER=pulse \
-  -e POSTGRES_PASSWORD=pulse \
-  -e POSTGRES_DB=pulse_test \
-  postgres:16-alpine
-
-# Set connection URL
-export PULSE_AGENT_DATABASE_URL=postgresql://pulse:pulse@localhost:5433/pulse_test
+podman run -d --name pulse-dev-pg -p 127.0.0.1:5434:5432 \
+  -e POSTGRES_USER=pulse -e POSTGRES_PASSWORD=pulse \
+  -e POSTGRES_DB=pulse_dev postgres:16-alpine
+export PULSE_AGENT_DATABASE_URL=postgresql://pulse:pulse@localhost:5434/pulse_dev
 ```
 
-Migrations apply automatically on first connection. No manual schema setup needed.
-
-**Restart between sessions:** `podman start pulse-test-pg`
-
-**Reset data:** `podman rm -f pulse-test-pg` and re-run the create command.
+This password is for local disposable use. Migrations run when the database is initialized; no manual schema creation is required.
 
 ## Schema by Feature
 
@@ -118,244 +110,74 @@ Migrations apply automatically on first connection. No manual schema setup neede
 | `user_events` | Raw UI/user event stream | event_type, user_id, payload (JSONB) |
 | `user_interactions` | Aggregated interaction outcomes | interaction_type, outcome, user_id |
 
-**Total: 28 tables, 30+ indexes.**
+Additional tables support operational flags, inbox mutes, episodes and symptoms, cluster memory (`environment_facts`, `workload_baselines`), learning candidates, user skills, and runtime artifact/version storage. The feature grouping above is a navigation aid; `db_schema.py` is the complete DDL.
 
 Full DDL: `sre_agent/db_schema.py`
 
 ## Migrations
 
-### How They Work
+Migrations are forward-only and recorded in `schema_migrations`. The current registry ends at **036**. The migration registry is authoritative, including changes to existing tables:
 
-1. On first `get_database()` call, `run_migrations(db)` executes
-2. Migrations tracked in `schema_migrations` table (version, name, applied_at)
-3. Each migration runs only if its version > current max version
-4. Migrations are forward-only — no rollback support
-5. Failures roll back the individual migration and raise an exception
+| Version | Name |
+|---|---|
+| 001 | `baseline` |
+| 002 | `tool_usage` |
+| 003 | `promql_queries` |
+| 004 | `token_tracking` |
+| 005 | `scan_runs` |
+| 006 | `eval_runs` |
+| 007 | `chat_history` |
+| 008 | `skill_usage` |
+| 009 | `tool_source` |
+| 010 | `prompt_log` |
+| 011 | `routing_decisions` |
+| 012 | `bigint_timestamps` |
+| 013 | `tool_predictions` |
+| 014 | `skill_selection_log` |
+| 015 | `postmortems` |
+| 016 | `slo_definitions` |
+| 017 | `plan_executions` |
+| 018 | `user_events` |
+| 019 | `agent_views` |
+| 020 | `action_outcomes` |
+| 021 | `inbox_items` |
+| 022 | `user_interactions` |
+| 023 | `operational_flags` |
+| 024 | `inbox_mutes` |
+| 025 | `rekey_inbox_correlation_keys` |
+| 026 | `episodes` |
+| 027 | `episode_dismissal` |
+| 028 | `inbox_reset_baseline` |
+| 029 | `action_approval` |
+| 030 | `episode_cause_onset` |
+| 031 | `action_correlation_key` |
+| 032 | `cluster_memory` |
+| 033 | `learning_candidates` |
+| 034 | `action_snapshots` |
+| 035 | `user_skills` |
+| 036 | `runtime_artifacts` |
 
-### Current Migrations (v001 – v026)
+Add the next unused integer and migration callable to `ALL_MIGRATIONS`; maintain the fresh-install DDL in `db_schema.py` too. Test fresh creation and upgrade behavior. Do not manually insert a migration row to silence a failing migration: that can leave the application using columns which do not exist.
 
-| Version | Name | What it does |
-|---------|------|-------------|
-| 1 | baseline | Creates all tables from `ALL_SCHEMAS` |
-| 2 | tool_usage | Adds `tool_usage`, `tool_turns` tables |
-| 3 | promql_queries | Adds `promql_queries` table |
-| 4 | token_tracking | Adds token columns to `tool_turns` |
-| 5 | scan_runs | Adds `scan_runs` table |
-| 6 | eval_runs | Adds `eval_runs` table |
-| 7 | chat_history | Adds `chat_sessions`, `chat_messages` tables |
-| 8 | skill_usage | Adds `skill_usage` table |
-| 9 | tool_source | Adds `tool_source` column to `tool_usage` |
-| 10 | prompt_log | Adds `prompt_log` table |
-| 11 | routing_decisions | Adds routing columns to `tool_turns` |
-| 12 | bigint_timestamps | Fixes timestamp overflow in `investigations` |
-| 13 | tool_predictions | Adds `tool_predictions`, `tool_cooccurrence` tables |
-| 14 | skill_selection_log | Adds ORCA selector logging |
-| 15 | postmortems | Adds `postmortems` table |
-| 16 | slo_definitions | Adds `slo_definitions` table |
-| 17 | plan_executions | Adds `plan_executions` table (phased plan runtime) |
-| 18 | user_events | Adds `user_events` table (raw UI event stream) |
-| 19 | agent_views | Adds agent-lifecycle columns to `views` (view_type, status, trigger_source) |
-| 20 | action_outcomes | Adds outcome-tracking columns to `actions` |
-| 21 | inbox_items | Adds `inbox_items` table (unified Ops Inbox) |
-| 22 | user_interactions | Adds `user_interactions` table (aggregated interaction outcomes) |
-| 23 | operational_flags | Adds `operational_flags` table so the auto-fix kill switch survives restarts |
-| 24 | inbox_mutes | Adds `inbox_mutes` table (silence a known-noisy condition) |
-| 25 | rekey_inbox_correlation_keys | Re-keys inbox items orphaned when correlation keys gained a namespace |
-| 26 | episodes | Adds `episodes` and `episode_symptoms` — one event with a cause, and what it explains |
+## Pooling and failures
 
-### Adding a New Migration
+`PULSE_AGENT_DB_POOL_MIN` defaults to 2; `PULSE_AGENT_DB_POOL_MAX` defaults to **20**. The synchronous database wrapper uses a threaded psycopg2 pool. Follow existing commit/rollback conventions so thread-local connections are returned. Pool exhaustion can reflect long transactions, leaked checkouts, locks, or capacity; inspect logs and PostgreSQL activity before changing the pool size.
 
-1. Add a new entry to `ALL_MIGRATIONS` in `db_migrations.py`:
-   ```python
-   (17, "my_feature", """
-       CREATE TABLE IF NOT EXISTS my_table (
-           id SERIAL PRIMARY KEY,
-           ...
-       );
-   """),
-   ```
-2. Also add the table to `ALL_SCHEMAS` in `db_schema.py` (for fresh installs)
-3. Update the version reference in `CLAUDE.md` if needed
-4. Test: `python3 -m pytest tests/ -k "migration" -v`
+Some analytics writes use `@db_safe` to return a fallback on database errors. This does not make unavailable persistence healthy, and errors still need investigation. Monitor pause-state reads fail closed when the pause flag cannot be read.
 
-## Connection Pooling
+## Production operations
 
-### Configuration
+The operator provisions PostgreSQL and credentials when its database configuration enables the bundled service. Use its current CRD/README for storage, image, service, and external-database settings. Secrets are reconciled by the operator, not Helm `lookup()`. NetworkPolicy admits the agent and, when enabled, the Temporal workload on TCP 5432.
 
-| Setting | Env Var | Default | Description |
-|---------|---------|---------|-------------|
-| `db_pool_min` | `PULSE_AGENT_DB_POOL_MIN` | 2 | Minimum pool connections |
-| `db_pool_max` | `PULSE_AGENT_DB_POOL_MAX` | 10 | Maximum pool connections |
+Resource names and database credentials depend on the CR. Discover them with `oc get statefulsets,services,secrets,pvc -n <namespace>` and the CR rather than copying old Helm release names. Take a PostgreSQL backup and test restoring it to an isolated database before upgrades. A PVC snapshot is storage-level evidence and should be validated for database consistency.
 
-Uses `psycopg2.pool.ThreadedConnectionPool` with thread-local connection tracking.
+Password rotation must update the actual PostgreSQL role and the Secret/connection string together, then restart consumers as needed. Editing only the Secret does not change the database role password. Avoid printing credentials in logs or committing connection strings.
 
-### How It Works
-
-- `execute()` checks out a connection from the pool into thread-local storage
-- Connection stays checked out until `commit()` or error rollback
-- `fetchone()` / `fetchall()` use short-lived ad-hoc connections (auto-returned)
-- `@db_safe` decorator catches all `psycopg2.Error` and `OSError`, returns `None` on failure
-- Fire-and-forget writes (tool_usage, analytics) use `@db_safe` to prevent DB errors from blocking the agent
-
-### Common Pitfall
-
-**Missing `commit()`**: After `execute()`, the connection stays checked out. If you forget `commit()`, the connection leaks and the pool exhausts. Every `execute()` must be followed by `commit()`.
-
-## Production Deployment
-
-### Helm Chart (PostgreSQL StatefulSet)
-
-Deployed automatically via the umbrella chart. Key values:
-
-| Value | Default | Description |
-|-------|---------|-------------|
-| `database.postgresql.enabled` | `true` | Deploy PostgreSQL StatefulSet |
-| `database.postgresql.storage` | `5Gi` | PVC size |
-| `database.postgresql.storageClass` | (default) | Storage class for PVC |
-| `database.postgresql.auth.username` | `pulse` | Database user |
-| `database.postgresql.auth.database` | `pulse` | Database name |
-
-### Security
-
-- Non-root container with `runAsNonRoot: true`
-- `readOnlyRootFilesystem` not set (PG needs write access to data dir)
-- Capabilities dropped: `ALL`
-- Seccomp: `RuntimeDefault`
-- NetworkPolicy: only agent pods can connect (port 5432)
-- Password auto-generated as K8s Secret, preserved across upgrades via `lookup()`
-
-### Backup and Restore
-
-**Manual backup:**
-```bash
-oc exec pulse-openshift-sre-agent-postgresql-0 -n openshiftpulse -- \
-  pg_dump -U pulse pulse > backup.sql
-```
-
-**Restore:**
-```bash
-oc exec -i pulse-openshift-sre-agent-postgresql-0 -n openshiftpulse -- \
-  psql -U pulse pulse < backup.sql
-```
-
-**PVC snapshot** (if storage class supports it):
-```bash
-oc get pvc -n openshiftpulse  # find the PG PVC name
-# Create VolumeSnapshot per your storage provider
-```
-
-### Password Rotation
-
-```bash
-# 1. Generate new password
-NEW_PW=$(openssl rand -hex 16)
-
-# 2. Update K8s secret
-oc patch secret pulse-openshift-sre-agent-pg-auth -n openshiftpulse \
-  -p "{\"data\":{\"password\":\"$(echo -n $NEW_PW | base64)\"}}"
-
-# 3. Update PostgreSQL
-oc exec pulse-openshift-sre-agent-postgresql-0 -n openshiftpulse -- \
-  psql -U postgres -c "ALTER USER pulse PASSWORD '$NEW_PW';"
-
-# 4. Restart agent to pick up new password
-oc rollout restart deployment/pulse-openshift-sre-agent -n openshiftpulse
-```
-
-## High Availability
-
-The default deployment is single-instance (1 replica StatefulSet with RWO PVC). For HA:
-
-### Option 1: Managed PostgreSQL (Recommended)
-
-Use a managed PostgreSQL service (AWS RDS, GCP Cloud SQL, Azure Database) instead of the in-cluster StatefulSet:
-
-1. Set `database.postgresql.enabled=false` in Helm values
-2. Create the database and user on the managed service
-3. Set `PULSE_AGENT_DATABASE_URL` to the managed instance URL
-4. The agent handles connection pooling — no pgBouncer needed for typical workloads
-
-**Benefits:** Automated backups, failover, monitoring, scaling. No PVC management.
-
-### Option 2: Streaming Replication
-
-For in-cluster HA with the existing StatefulSet:
-
-1. Increase `replicas` to 2+ in the StatefulSet
-2. Configure primary/standby replication via `postgresql.conf`:
-   - Primary: `wal_level=replica`, `max_wal_senders=3`
-   - Standby: `primary_conninfo`, `hot_standby=on`
-3. Use a connection proxy (pgBouncer or PgPool-II) for failover
-4. The agent writes to primary only — read replicas can serve `fetchone`/`fetchall` if you add a read URL
-
-**Not recommended** for most deployments — the operational complexity exceeds the benefit for a single-agent workload.
-
-### Option 3: Crunchy PGO / CloudNativePG
-
-Use a Kubernetes-native PostgreSQL operator:
-
-1. Install [CloudNativePG](https://cloudnative-pg.io/) or [Crunchy PGO](https://access.crunchydata.com/documentation/postgres-operator/)
-2. Create a `Cluster` CR with 2+ instances
-3. Set `database.postgresql.enabled=false`
-4. Point `PULSE_AGENT_DATABASE_URL` to the operator-managed service
-5. Operator handles failover, backups, and WAL archiving automatically
-
-**Best of both worlds** — HA without leaving the cluster.
+The default single-instance database is not an HA service. Increasing StatefulSet replicas alone does not configure PostgreSQL replication or failover. If HA is required, provision a supported managed PostgreSQL service or database operator and configure Pulse's external connection through the operator; validate backups, failover, network policy, and migration compatibility.
 
 ## Troubleshooting
 
-### Connection pool exhaustion
-
-**Symptom:** Agent hangs, "could not obtain connection" errors.
-
-**Cause:** Missing `commit()` after `execute()` — connections leak.
-
-**Fix:** Check recent code changes for `db.execute()` without matching `db.commit()`. Restart the agent to clear the pool.
-
-### Migration failure on startup
-
-**Symptom:** Agent crashes with `psycopg2.Error` on boot.
-
-**Cause:** Partially applied migration left the schema in an inconsistent state.
-
-**Fix:**
-```bash
-# Check current migration version
-oc exec pulse-openshift-sre-agent-postgresql-0 -n openshiftpulse -- \
-  psql -U pulse pulse -c "SELECT * FROM schema_migrations ORDER BY version DESC LIMIT 5;"
-
-# If a migration is partially applied, manually fix the schema and bump the version:
-oc exec pulse-openshift-sre-agent-postgresql-0 -n openshiftpulse -- \
-  psql -U pulse pulse -c "INSERT INTO schema_migrations (version, name, applied_at) VALUES (N, 'manual_fix', NOW());"
-```
-
-### Stale test PostgreSQL
-
-**Symptom:** Tests fail with "connection refused" on port 5433.
-
-**Fix:** `podman start pulse-test-pg` or recreate:
-```bash
-podman rm -f pulse-test-pg
-podman run -d --name pulse-test-pg \
-  -p 5433:5432 \
-  -e POSTGRES_USER=pulse \
-  -e POSTGRES_PASSWORD=pulse \
-  -e POSTGRES_DB=pulse_test \
-  postgres:16-alpine
-```
-
-### PVC full
-
-**Symptom:** PostgreSQL pod crashes with "No space left on device".
-
-**Fix:** Expand the PVC (if storage class supports it):
-```bash
-oc patch pvc pg-data-pulse-openshift-sre-agent-postgresql-0 -n openshiftpulse \
-  -p '{"spec":{"resources":{"requests":{"storage":"10Gi"}}}}'
-```
-
-Or clean old data:
-```bash
-oc exec pulse-openshift-sre-agent-postgresql-0 -n openshiftpulse -- \
-  psql -U pulse pulse -c "DELETE FROM tool_usage WHERE timestamp < NOW() - INTERVAL '90 days';"
-```
+- Connection refused: check the service/container, actual host/port, pod readiness, and NetworkPolicy.
+- Migration failure: preserve logs and inspect `SELECT * FROM schema_migrations ORDER BY version DESC`; repair through a reviewed migration and restore plan, not a fabricated applied-version row.
+- Pool exhaustion: inspect outstanding transactions and locks, and verify application commit/rollback paths.
+- Full volume: check supported PVC expansion and retention requirements. Tables use different timestamp representations; do not copy a generic SQL deletion across all tables.

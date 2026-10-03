@@ -10,12 +10,12 @@ Three different certificates get blamed for each other:
 | Certificate | Owner | Symptom when expired |
 |---|---|---|
 | Router default (`router-certs-default` in `openshift-ingress`) | ingress operator | every route on the default domain fails at once |
-| Per-route custom cert (secret referenced by the Route) | the app team | one hostname fails, others fine |
+| Per-route custom cert (`spec.tls.certificate`/key) | the app team | one hostname fails, others fine |
 | Service serving cert (`service.beta.openshift.io/serving-cert-secret-name`) | service CA operator | in-cluster callers fail, external clients unaffected |
 
 Check `days_left` in `get_tls_certificates` before anything else. A cluster-wide
 outage with one expiring cert in `openshift-ingress` is the router cert; a single
-failing hostname with a healthy router cert is a per-route secret.
+failing hostname with a healthy router cert may be a per-route certificate; inspect `spec.tls` and the certificate actually served.
 
 ## Order of operations for renewal
 
@@ -25,7 +25,7 @@ Renewal is not a single step, and the rollout is the part that gets missed.
    expired, the service CA operator is degraded and renewing by hand fixes the
    symptom while leaving the cause. Check `get_cluster_operators` first.
 2. **Replace the secret.** For a router cert this is a TLS secret in
-   `openshift-ingress`; for a route it is the secret the Route references.
+   `openshift-ingress`; for a route with inline custom TLS, update the owning configuration that populates `spec.tls.certificate`/key. Routes do not generally reference a TLS Secret directly.
 3. **Wait for propagation.** The ingress operator reconciles the secret into the
    router pods. This is not instant and does not always restart them.
 4. **Verify the router actually picked it up.** A replaced secret with stale router

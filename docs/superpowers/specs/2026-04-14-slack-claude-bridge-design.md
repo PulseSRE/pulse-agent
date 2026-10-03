@@ -1,5 +1,8 @@
 # Slack Claude Bridge — Design Spec
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 **Date:** 2026-04-14
 **Location:** `/Users/amobrem/ali/slack/`
 **Purpose:** Personal Slack bot that provides Claude chat (via Vertex AI) and remote control of Claude Code running on the user's Mac, accessible from mobile.

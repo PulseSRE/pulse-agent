@@ -1,5 +1,8 @@
 # Adaptive Tool Selection Engine
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 **Date:** 2026-04-12
 **Status:** Approved
 **Goal:** Improve harness tool selection accuracy from 8% to 50%+

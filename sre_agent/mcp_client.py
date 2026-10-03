@@ -53,8 +53,16 @@ _request_id_counter = itertools.count(1)
 class MCPTool:
     """Tool wrapper that calls an MCP server and renders the output."""
 
-    def __init__(self, name: str, fn: Any, description: str, input_schema: dict | None = None):
+    def __init__(
+        self,
+        name: str,
+        fn: Any,
+        description: str,
+        input_schema: dict | None = None,
+        connection: MCPConnection | None = None,
+    ):
         self.name = name
+        self.connection = connection
         self._fn = fn
         self.description = description
         self._input_schema = input_schema or {"type": "object", "properties": {}, "required": []}
@@ -290,6 +298,7 @@ def _connect_sse_attempt(conn: MCPConnection, base_url: str) -> MCPConnection:
                 "name": t.get("name", ""),
                 "description": t.get("description", ""),
                 "inputSchema": t.get("inputSchema", {"type": "object", "properties": {}, "required": []}),
+                "annotations": t.get("annotations", {}),
             }
             for t in tools_raw
             if t.get("name")
@@ -396,6 +405,7 @@ def _discover_tools_stdio(process: subprocess.Popen, toolsets: list[str]) -> lis
                 "name": t.get("name", ""),
                 "description": t.get("description", ""),
                 "inputSchema": t.get("inputSchema", {"type": "object", "properties": {}, "required": []}),
+                "annotations": t.get("annotations", {}),
             }
             for t in tools_raw
             if t.get("name")
@@ -512,10 +522,23 @@ def register_mcp_tools(conn: MCPConnection) -> int:
     Returns the number of tools registered.
     """
     from .mcp_renderer import render_mcp_output
-    from .tool_registry import register_tool
+    from .tool_registry import TOOL_REGISTRY, register_tool, unregister_tool
 
+    advertised = set(conn.tools) | set(conn.prompts)
+    for name, existing in list(TOOL_REGISTRY.items()):
+        if isinstance(existing, MCPTool) and existing.connection is conn and name not in advertised:
+            unregister_tool(name)
     count = 0
-    for tool_name in conn.tools:
+    registered_names = []
+    for tool_name in (name for name in list(conn.tools) if name not in conn.prompts):
+        # Native tools and another connection's tools must never be replaced.
+        existing = TOOL_REGISTRY.get(tool_name)
+        if existing is not None:
+            if isinstance(existing, MCPTool) and existing.connection is conn:
+                unregister_tool(tool_name)
+            else:
+                logger.warning("Skipping colliding MCP tool '%s' from '%s'", tool_name, conn.name)
+                continue
         renderer_config = conn.tool_renderers.get(tool_name)
 
         # Create a wrapper that calls MCP and renders the output
@@ -533,12 +556,25 @@ def register_mcp_tools(conn: MCPConnection) -> int:
         schema_def = conn.tool_schemas.get(tool_name, {})
         description = schema_def.get("description", f"MCP tool from {conn.name}")
         input_schema = schema_def.get("inputSchema", {"type": "object", "properties": {}, "required": []})
-        tool = MCPTool(tool_name, fn, description, input_schema=input_schema)
-        register_tool(tool, is_write=False)
+        tool = MCPTool(tool_name, fn, description, input_schema=input_schema, connection=conn)
+        annotations = schema_def.get("annotations") or {}
+        # Servers are administrator-configured and trusted to describe reads.
+        # Missing or destructive annotations fail closed behind confirmation.
+        is_read = annotations.get("readOnlyHint") is True and annotations.get("destructiveHint") is not True
+        register_tool(tool, is_write=not is_read)
+        registered_names.append(tool_name)
         count += 1
+
+    conn.tools = registered_names
 
     # Register MCP prompts as tools (prompts are callable workflows)
     for prompt_name in conn.prompts:
+        existing = TOOL_REGISTRY.get(prompt_name)
+        if existing is not None:
+            if isinstance(existing, MCPTool) and existing.connection is conn:
+                unregister_tool(prompt_name)
+            else:
+                continue
 
         def _make_prompt_fn(pn, cn):
             def prompt_fn(**kwargs):
@@ -553,7 +589,7 @@ def register_mcp_tools(conn: MCPConnection) -> int:
         schema_def = conn.prompt_schemas.get(prompt_name, {})
         description = schema_def.get("description", f"MCP prompt from {conn.name}")
         input_schema = schema_def.get("inputSchema", {"type": "object", "properties": {}, "required": []})
-        tool = MCPTool(prompt_name, fn, description, input_schema=input_schema)
+        tool = MCPTool(prompt_name, fn, description, input_schema=input_schema, connection=conn)
         register_tool(tool, is_write=False)
         conn.tools.append(prompt_name)
         count += 1

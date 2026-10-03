@@ -1,5 +1,8 @@
 # Tool Chain Intelligence — Layers 1 & 2
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 ## Overview
 
 Mine the `tool_usage` audit data to discover common tool call sequences and inject next-tool hints into the agent's system prompt. Two layers:

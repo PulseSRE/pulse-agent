@@ -586,8 +586,9 @@ async def run_agent_streaming(
     """
     from .event_bus import EventBus
 
-    if write_tools is None:
-        write_tools = set()
+    # A caller may add confirmation requirements, never remove registry ones.
+    # Dynamic MCP registrations happen after this module's import-time snapshot.
+    write_tools = set(write_tools or ()) | (get_write_tools() & tool_map.keys())
 
     if event_bus is None:
         event_bus = EventBus.from_callbacks(
@@ -974,7 +975,7 @@ async def run_agent_turn_streaming(
         system_prompt=system_prompt or SYSTEM_PROMPT,
         tool_defs=effective_defs,
         tool_map=effective_map,
-        write_tools=WRITE_TOOLS,
+        write_tools=get_write_tools(),
         on_text=on_text,
         on_thinking=on_thinking,
         on_tool_use=on_tool_use,

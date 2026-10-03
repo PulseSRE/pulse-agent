@@ -477,37 +477,21 @@ class ViewRepository(BaseRepository):
         return True
 
     @_db_safe
-    def migrate_view_ownership(self, new_owner: str) -> int:
-        """Migrate views from hash-based owners (user-*) to a real username.
+    def migrate_view_ownership(self, new_owner: str, legacy_owner: str | None = None) -> int:
+        """Reassign only the legacy identity proved by the caller's token.
 
-        Called once when a real username is first resolved via X-Forwarded-User.
-        Only migrates if there are hash-based views and no views for the real owner yet.
-        Returns the number of migrated views.
+        Never infer ownership from the common user-* prefix: multiple users
+        can have legacy views, and the first login must not claim them all.
         """
-        db = self.db
+        import re
 
-        # Don't migrate if the new owner already has views
-        existing = db.fetchone("SELECT COUNT(*) as cnt FROM views WHERE owner = ?", (new_owner,))
-        if existing and existing["cnt"] > 0:
+        if not legacy_owner or not re.fullmatch(r"user-[0-9a-f]{16}", legacy_owner):
             return 0
-
-        # Find hash-based owners (user-<hex>)
-        hash_owners = db.fetchall(
-            "SELECT DISTINCT owner FROM views WHERE owner LIKE 'user-%' AND LENGTH(owner) = 21",
-        )
-        if not hash_owners:
-            return 0
-
-        # Migrate all hash-based views to the real owner
-        total = 0
-        for row in hash_owners:
-            old_owner = row["owner"]
-            result = db.execute("UPDATE views SET owner = ? WHERE owner = ?", (new_owner, old_owner))
-            total += getattr(result, "rowcount", 0) if result else 0
-
-        if total > 0:
-            db.commit()
-
+        result = self.db.execute("UPDATE views SET owner = ? WHERE owner = ?", (new_owner, legacy_owner))
+        total = getattr(result, "rowcount", 0) if result else 0
+        # Even a zero-row UPDATE opens a transaction and holds a relation
+        # lock. End it so later schema migrations cannot be blocked by login.
+        self.db.commit()
         return total
 
     # ------------------------------------------------------------------

@@ -1,5 +1,7 @@
 # The Pulse Journey
 
+> Historical project narrative. Dates, benchmark counts, operational claims, and deployment lessons describe earlier releases and are not current guarantees. Use [current documentation](README.md) for deployment and security.
+
 How two repos, 2,555 commits, and 152 days built an AI-powered SRE platform from scratch.
 
 **Repos:** [pulse-agent](https://github.com/PulseSRE/pulse-agent) | [pulse-ui](https://github.com/PulseSRE/pulse-ui)
@@ -199,7 +201,7 @@ This phase was about taking a working prototype and making it maintainable and e
 
 **Why:** SQLite can't handle concurrent access from the agent loop, monitor scanner, and API endpoints. We hit WAL locking issues under load. PostgreSQL with connection pooling (`ThreadedConnectionPool`) handles concurrency natively. The cost: a StatefulSet with a PVC, but we needed persistent storage anyway.
 
-**Ref:** `[DATABASE.md](../DATABASE.md)`, `[sre_agent/db.py](../sre_agent/db.py)`, `[chart/templates/postgresql.yaml](../chart/templates/postgresql.yaml)`
+**Ref:** `[DATABASE.md](../DATABASE.md)`, `[sre_agent/db.py](../sre_agent/db.py)`, `[chart/templates/postgresql.yaml](https://github.com/PulseSRE/pulse-operator)`
 
 ### 6. Pydantic Settings over raw `os.environ`
 
@@ -291,7 +293,7 @@ This phase was about taking a working prototype and making it maintainable and e
 
 **The consequence:** Every deploy generated new credentials, breaking all active WebSocket connections and PostgreSQL authentication. The agent pod would restart with a new token while the nginx configmap still had the old one.
 
-**The fix:** Used `lookup()` to check if a Secret already exists. If it does, reuse the existing value. Only generate a new one on fresh install. Also discovered a double-base64 bug: `lookup()` returns already-base64-encoded `.data` values, so running `b64enc` again double-encodes them. See `[chart/templates/_helpers.tpl](../chart/templates/_helpers.tpl)`.
+**The fix:** Used `lookup()` to check if a Secret already exists. If it does, reuse the existing value. Only generate a new one on fresh install. Also discovered a double-base64 bug: `lookup()` returns already-base64-encoded `.data` values, so running `b64enc` again double-encodes them. See `[chart/templates/_helpers.tpl](https://github.com/PulseSRE/pulse-operator)`.
 
 **Lesson:** Helm's declarative model fights against stateful resources. Always use `lookup()` for secrets.
 
@@ -399,7 +401,7 @@ This project was built almost entirely with AI assistance (Claude Code / Claude 
 ### Long-Term (Vision)
 
 1. **Voice-first SRE** — The [design principles](../DESIGN_PRINCIPLES.md) say "conversational-first." The next step is literal voice interaction — describe a problem verbally, get a diagnosis and fix proposal. Useful for on-call scenarios where you're on your phone at 3am.
-2. **Predictive capacity with ML** — The 4 trend scanners (see `[sre_agent/trend_scanners.py](../sre_agent/trend_scanners.py)`) use `predict_linear()` for simple extrapolation. Real ML models could learn seasonal patterns, workload correlations, and predict capacity needs weeks out.
+2. **Predictive capacity with ML** — The 4 trend scanners (see `[sre_agent/trend_scanners.py](../sre_agent/monitor/trend_scanners.py)`) use `predict_linear()` for simple extrapolation. Real ML models could learn seasonal patterns, workload correlations, and predict capacity needs weeks out.
 3. **Self-healing clusters** — The auto-fix system (see [autonomous remediation spec](superpowers/specs/2026-04-17-autonomous-remediation-design.md)) currently handles individual pod/deployment issues. A self-healing cluster would handle infrastructure-level problems: scaling node pools before predicted capacity shortfalls, rebalancing workloads across availability zones, and coordinating rolling updates with zero user intervention.
 4. **Plugin ecosystem** — Skills are already drop-in `.md` files (see [SKILL_DEVELOPER_GUIDE.md](SKILL_DEVELOPER_GUIDE.md)). The next step is a skill marketplace where teams can share and discover skills — "install the Kafka SRE skill" or "install the GPU cluster management skill." The scaffolder (`[sre_agent/skill_scaffolder.py](../sre_agent/skill_scaffolder.py)`) already generates skills from usage patterns.
 5. **Compliance-as-conversation** — "Are we SOC 2 compliant?" should produce a real-time audit with evidence links, gap analysis, and remediation suggestions. The security scanner (`[sre_agent/security_tools.py](../sre_agent/security_tools.py)`) already has the primitives; it needs a compliance framework layer.

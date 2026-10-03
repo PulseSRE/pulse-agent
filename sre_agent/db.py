@@ -390,16 +390,11 @@ def restore_view_version(view_id: str, owner: str, version: int) -> bool:
     return get_view_repo().restore_view_version(view_id, owner, version)
 
 
-def migrate_view_ownership(new_owner: str) -> int:
-    """Migrate views from hash-based owners (user-*) to a real username.
-
-    Called once when a real username is first resolved via X-Forwarded-User.
-    Only migrates if there are hash-based views and no views for the real owner yet.
-    Returns the number of migrated views.
-    """
+def migrate_view_ownership(new_owner: str, legacy_owner: str | None = None) -> int:
+    """Migrate only the caller's token-bound legacy owner; absent proof is a no-op."""
     from .repositories.view_repo import get_view_repo
 
-    return get_view_repo().migrate_view_ownership(new_owner)
+    return get_view_repo().migrate_view_ownership(new_owner, legacy_owner)
 
 
 # ---------------------------------------------------------------------------

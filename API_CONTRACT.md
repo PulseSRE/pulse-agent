@@ -2,9 +2,11 @@
 
 **Protocol Version: 2**
 
+`admin` means shared-token authentication plus an authenticated identity and the `PULSE_AGENT_ADMIN_USERS` allowlist when configured; an unset allowlist permits any authenticated user. It does not mean Kubernetes cluster-admin.
+
 Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Both repos must implement the same protocol version for compatibility.
 
-> Source of truth for message schemas. When adding or changing a message type, update this file first, then implement in both repos.
+> Protocol reference. Route definitions and schema models are authoritative for implemented behavior; update this document and both repositories when changing messages. Examples are illustrative, not full response-schema validators.
 
 ---
 
@@ -21,7 +23,7 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/tools/usage/stats` | token | Aggregated tool usage statistics (totals, by tool, by mode, by category, error rates) (query params: `from`, `to`) |
 | `GET` | `/fix-history` | token | Paginated fix history with filters (`status`, `category`, `since`, `search`) |
 | `GET` | `/fix-history/{id}` | token | Single action detail with before/after state |
-| `POST` | `/fix-history/{id}/rollback` | token | Rollback a completed action. Actions with a pre-write snapshot (`restore_snapshot` rollback) are restored from it; `restart_deployment` actions roll back by revision; other action types return an error |
+| `POST` | `/fix-history/{id}/rollback` | admin + user token when forwarding | Rollback a completed action. Actions with a pre-write snapshot (`restore_snapshot` rollback) are restored from it after UID/concurrency checks and read-back verification (legacy snapshots without UID are refused); `restart_deployment` actions roll back by revision; other action types return an error |
 | `GET` | `/eval/status` | token | Cached quality gate snapshot (release, safety, integration, outcomes, view_designer) with `dimension_averages` and `prompt_audit` data |
 | `GET` | `/eval/history` | token | Paginated eval run history for trend charts (query params: `suite`, `days`, `limit`) |
 | `GET` | `/eval/trend` | token | Eval score trend summary with sparkline data (query params: `suite`, `days`) |
@@ -76,11 +78,11 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `DELETE` | `/plan-templates/{type}` | token | Delete a runtime-created plan template (bundled templates are protected) |
 | `POST` | `/plan-templates` | token | Create a new plan template (versioned; phases accept depends_on, branch_on/branches, parallel_with, subplan) |
 | `GET` | `/plan-templates/{type}/versions` | token | Version history for one plan template |
-| `POST` | `/plan-templates/{type}/run` | token | Start a durable run of this plan on Temporal. 503 with the reason when durable execution is not configured |
+| `POST` | `/plan-templates/{type}/run` | admin | Start a durable run of this plan on Temporal. 503 with the reason when durable execution is not configured |
 | `GET` | `/workflow-runs` | token | Recent durable runs from Temporal's visibility store (query: `limit` 1-100). Each row carries a `memo` labelling what the run is acting on |
 | `GET` | `/workflow-runs/{workflow_id}` | token | Status plus live progress for one run, queried from the workflow itself |
-| `POST` | `/workflow-runs/{workflow_id}/approve` | token | Deliver a human verdict to a run waiting on approval (body: `phase_id`, `approved`) |
-| `POST` | `/workflow-runs/{workflow_id}/cancel` | token | Stop a running workflow (body: optional `reason`). Cooperative: for an incident run this rolls the fix back from its snapshot and records a `cancelled` verdict rather than merely stopping |
+| `POST` | `/workflow-runs/{workflow_id}/approve` | admin | Deliver a human verdict to a run waiting on approval (body: nonempty `phase_id`, explicit boolean `approved`; missing/non-boolean values return 400) |
+| `POST` | `/workflow-runs/{workflow_id}/cancel` | admin | Stop a running workflow (body: optional `reason`). Cooperative: for an incident run this rolls the fix back from its snapshot and records a `cancelled` verdict rather than merely stopping |
 | `GET` | `/metrics/fix-success-rate` | token | Auto-fix outcome success rate (query: `period` 1-365 days) |
 | `GET` | `/metrics/response-latency` | token | Agent response p50/p95/p99 latency from tool_usage (query: `period` 1-365 days) |
 | `GET` | `/metrics/eval-trend` | token | Eval score trend with sparkline (query: `suite`, `releases` 1-50) |
@@ -152,11 +154,11 @@ Inbox item `metadata` optional keys added for queue explainability: `priority_fa
 | `GET` | `/skills/usage/handoffs` | token | Skill-to-skill handoff analytics |
 | `GET` | `/skills/usage/{name}` | token | Per-skill usage stats |
 | `GET` | `/skills/usage/{name}/trend` | token | Per-skill usage trend with sparkline |
-| `POST` | `/admin/skills/reload` | token | Hot-reload skill packages from disk |
+| `POST` | `/admin/skills/reload` | admin | Hot-reload skill packages from disk |
 | `POST` | `/admin/skills/test` | token | Test routing -- returns which skill matches a given query |
-| `PUT` | `/admin/skills/{name}` | token | Edit skill (prompt, tools, routing rules) |
-| `DELETE` | `/admin/skills/{name}` | token | Delete a skill |
-| `POST` | `/admin/skills/{name}/clone` | token | Clone a skill with a new name |
+| `PUT` | `/admin/skills/{name}` | admin | Edit skill (prompt, tools, routing rules) |
+| `DELETE` | `/admin/skills/{name}` | admin | Delete a skill |
+| `POST` | `/admin/skills/{name}/clone` | admin | Clone a skill with a new name |
 | `GET` | `/admin/skills/{name}/versions` | token | Version history for a skill |
 | `GET` | `/admin/skills/{name}/diff` | token | Diff between two skill versions |
 | `POST` | `/admin/skills/{name}/approve` | admin | Mark an agent-authored skill reviewed, restoring it to automatic routing |
@@ -166,10 +168,10 @@ Inbox item `metadata` optional keys added for queue explainability: `priority_fa
 | `GET` | `/prompt/versions/{skill}` | token | Prompt version history for a skill |
 | `GET` | `/prompt/log` | token | Prompt audit log (hash, sections, tokens) |
 | `GET` | `/admin/mcp` | token | List MCP server connections and status |
-| `POST` | `/admin/mcp/toolsets` | token | Toggle MCP toolsets on/off |
-| `POST` | `/admin/mcp` | token | Register a new MCP server connection |
-| `DELETE` | `/admin/mcp/{name}` | token | Remove an MCP server connection |
-| `POST` | `/admin/mcp/test` | token | Test an MCP server connection |
+| `POST` | `/admin/mcp/toolsets` | admin | Toggle MCP toolsets on/off |
+| `POST` | `/admin/mcp` | admin | Register a new MCP server connection |
+| `DELETE` | `/admin/mcp/{name}` | admin | Remove an MCP server connection |
+| `POST` | `/admin/mcp/test` | admin | Test an MCP server connection |
 | `GET` | `/components` | token | Component registry -- list all 25 component kinds with schemas |
 
 #### Debug (`debug_rest.py`)
@@ -644,7 +646,7 @@ Sent as the first message after connecting to `/ws/monitor`. Configures the moni
 {
   "type": "subscribe_monitor",
   "trustLevel": 1,
-  "autoFixCategories": ["crash_loop", "resource_pressure"]
+  "autoFixCategories": ["crashloop", "workloads"]
 }
 ```
 
@@ -652,7 +654,9 @@ Sent as the first message after connecting to `/ws/monitor`. Configures the moni
 |-------|------|----------|-------------|
 | `type` | `"subscribe_monitor"` | yes | |
 | `trustLevel` | `integer` | no | Autonomous action trust level (0-4). Clamped to server-configured max. Default: `1` |
-| `autoFixCategories` | `string[]` | no | Categories the agent may auto-fix without prompting |
+| `autoFixCategories` | `string[]` | no | Subscriber category selection; current server union starts with all handlers, so subsets do not restrict automatic fixes |
+
+The effective monitor level is floored at the server configuration (default 2); lowering this field in the browser does not lower server autonomy. Level 1 does not enter remediation. Current category filtering cannot enforce a subscriber subset; see [SECURITY](SECURITY.md#monitor-trust-levels). Values are captured on subscription; the protocol has no general trust-update message.
 
 #### `trigger_scan` — Trigger an immediate cluster scan
 
