@@ -168,16 +168,19 @@ def test_delete_uses_observed_pod_preconditions_and_owner_target():
 
 def test_protected_namespace_image_fallback_cannot_bypass_delete_policy():
     pod = SimpleNamespace(metadata=SimpleNamespace(owner_references=[]), spec=SimpleNamespace(containers=[]))
-    core = MagicMock()
+    core, apps = MagicMock(), MagicMock()
     core.read_namespaced_pod.return_value = pod
     with (
         patch("sre_agent.monitor.fix_planner.get_core_client", return_value=core),
+        patch("sre_agent.monitor.fix_planner.get_apps_client", return_value=apps),
+        patch("sre_agent.k8s_client._load_k8s", side_effect=AssertionError("real client initialization")),
         patch("sre_agent.monitor.fix_planner._find_owning_deployment", return_value=None),
     ):
         execution = fix_planner.execute_fix_with_snapshot(plan("patch_image", "pod", "Pod", "production"))
     assert not execution.applied
     assert execution.result[0] == "blocked"
     core.delete_namespaced_pod.assert_not_called()
+    apps.patch_namespaced_deployment.assert_not_called()
 
 
 @pytest.mark.asyncio

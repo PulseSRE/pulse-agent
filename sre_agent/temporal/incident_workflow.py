@@ -101,6 +101,7 @@ class IncidentWorkflow:
         # ── 2. Snapshot before mutating — the compensation data ──────────────
         truthful_compensation = workflow.patched("incident-truthful-compensation-v1")
         self._truthful_compensation = truthful_compensation
+        self._execution_status_evidence = workflow.patched("incident-execution-status-v1")
         self._stage = "snapshotting"
         snapshot = await workflow.execute_activity(
             capture_snapshot,
@@ -131,7 +132,7 @@ class IncidentWorkflow:
                 reason = "Fix was blocked or skipped; no mutation was applied"
                 await workflow.execute_activity(
                     record_outcome,
-                    args=[params.action_id or params.finding_id, "unverifiable", reason],
+                    args=self._outcome_args(params, "unverifiable", reason, False),
                     start_to_close_timeout=timedelta(seconds=30),
                     retry_policy=RetryPolicy(maximum_attempts=3),
                 )
@@ -148,7 +149,7 @@ class IncidentWorkflow:
             reason = f"fix could not be applied: {exc.cause or exc}"
             await workflow.execute_activity(
                 record_outcome,
-                args=[params.action_id or params.finding_id, "failed", f"{reason}; {restored}"],
+                args=self._outcome_args(params, "failed", f"{reason}; {restored}", None),
                 start_to_close_timeout=timedelta(seconds=30),
                 retry_policy=RetryPolicy(maximum_attempts=3),
             )
@@ -161,10 +162,19 @@ class IncidentWorkflow:
             # pod when the executor actually changed its owning deployment.
             if "snapshot" in applied:
                 snapshot = applied["snapshot"]
+        self._applied_evidence = applied.get("applied") is True
         try:
             return await self._run_post_apply(params, snapshot, applied)
         except asyncio.CancelledError:
             return await self._cancel_after_apply(params, snapshot)
+
+    def _outcome_args(self, params: IncidentInput, verdict: str, evidence: str, applied: bool | None) -> list:
+        args: list = [params.action_id or params.finding_id, verdict, evidence]
+        # Old histories retain the three-argument activity command. Only the
+        # explicit apply result in newly versioned histories changes status.
+        if self._execution_status_evidence:
+            args.append(applied)
+        return args
 
     async def _run_post_apply(self, params: IncidentInput, snapshot: dict, applied: dict) -> dict:
         # ── 4. Verify, with backoff as the rollout grace window ───────────────
@@ -196,7 +206,9 @@ class IncidentWorkflow:
             self._stage = "rolled_back" if self._compensated else "still_failing"
             await workflow.execute_activity(
                 record_outcome,
-                args=[params.action_id or params.finding_id, self._stage, f"verification failed; {restored}"],
+                args=self._outcome_args(
+                    params, self._stage, f"verification failed; {restored}", self._applied_evidence or None
+                ),
                 start_to_close_timeout=timedelta(seconds=30),
             )
             return {
@@ -233,7 +245,7 @@ class IncidentWorkflow:
 
         await workflow.execute_activity(
             record_outcome,
-            args=[params.action_id or params.finding_id, verdict, evidence],
+            args=self._outcome_args(params, verdict, evidence, self._applied_evidence or None),
             start_to_close_timeout=timedelta(seconds=30),
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
@@ -269,7 +281,7 @@ class IncidentWorkflow:
         await asyncio.shield(
             workflow.execute_activity(
                 record_outcome,
-                args=[params.action_id or params.finding_id, "cancelled", evidence],
+                args=self._outcome_args(params, "cancelled", evidence, self._applied_evidence or None),
                 start_to_close_timeout=timedelta(seconds=30),
                 retry_policy=RetryPolicy(maximum_attempts=3),
             )

@@ -72,6 +72,7 @@ async def apply_fix(plan: dict) -> dict:
     activity.heartbeat("applied")
     return {
         "tool": tool,
+        "applied": True,
         "before": before,
         "after": after,
         "snapshot": execution.snapshot,
@@ -129,7 +130,7 @@ async def check_recurrence(resource: dict) -> dict:
 
 
 @activity.defn(name="pulse.incident.record_outcome")
-async def record_outcome(finding_id: str, verdict: str, evidence: str) -> None:
+async def record_outcome(finding_id: str, verdict: str, evidence: str, applied: bool | None = None) -> None:
     """Persist the final verdict where fix history already lives."""
     from temporalio.exceptions import ApplicationError
 
@@ -147,7 +148,14 @@ async def record_outcome(finding_id: str, verdict: str, evidence: str) -> None:
         action_id = rows[0]["id"]
     # Use the repository directly: the presentation helper swallows DB errors,
     # which would let the durable activity claim persistence without a write.
-    repo.update_action_verification(action_id, verdict, evidence, _ts())
+    # Execution and recovery are independent: an applied mutation can recur or
+    # remain unverifiable. Legacy payloads and uncertain apply failures cannot
+    # establish completion, and truthy non-booleans never grant it.
+    execution_status = "completed" if applied is True else "failed" if applied is False else None
+    if execution_status is None:
+        repo.update_action_verification(action_id, verdict, evidence, _ts())
+    else:
+        repo.update_action_verification(action_id, verdict, evidence, _ts(), execution_status=execution_status)
 
 
 INCIDENT_ACTIVITIES: Sequence[Callable[..., Any]] = [

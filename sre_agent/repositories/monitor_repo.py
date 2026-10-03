@@ -155,15 +155,18 @@ class MonitorRepository(BaseRepository):
         )
         db.commit()
 
-    def update_action_verification(self, action_id: str, status: str, evidence: str, timestamp: int) -> None:
+    def update_action_verification(
+        self, action_id: str, status: str, evidence: str, timestamp: int, *, execution_status: str | None = None
+    ) -> None:
         """Persist verification result for an action."""
         self.ensure_tables()
         db = self.db
         db.execute(
             """UPDATE actions
-               SET verification_status = ?, verification_evidence = ?, verification_timestamp = ?
+               SET verification_status = ?, verification_evidence = ?, verification_timestamp = ?,
+                   status = COALESCE(?, status)
                WHERE id = ?""",
-            (status, evidence, timestamp, action_id),
+            (status, evidence, timestamp, execution_status, action_id),
         )
         db.commit()
 

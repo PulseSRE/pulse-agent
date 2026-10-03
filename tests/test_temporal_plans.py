@@ -542,7 +542,7 @@ async def _run_incident(params, *, verify_fails=False, send_approval=None):
     @activity.defn(name="pulse.incident.apply_fix")
     async def stub_apply(plan: dict) -> dict:
         calls.append("apply")
-        return {"tool": "delete_pod", "before": "crashloop", "after": "recreated"}
+        return {"applied": True, "tool": "delete_pod", "before": "crashloop", "after": "recreated"}
 
     @activity.defn(name="pulse.incident.verify")
     async def stub_verify(resource: dict) -> dict:
@@ -562,7 +562,7 @@ async def _run_incident(params, *, verify_fails=False, send_approval=None):
         return {"recurred": bool(resource.get("_recurs")), "evidence": "phase=Running"}
 
     @activity.defn(name="pulse.incident.record_outcome")
-    async def stub_record(finding_id: str, verdict: str, evidence: str) -> None:
+    async def stub_record(finding_id: str, verdict: str, evidence: str, applied: bool | None = None) -> None:
         calls.append(f"record:{verdict}")
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
@@ -849,7 +849,7 @@ class TestIncidentApplyFailure:
             return "nothing to restore"
 
         @activity.defn(name="pulse.incident.record_outcome")
-        async def rec(finding_id: str, verdict: str, evidence: str) -> None:
+        async def rec(finding_id: str, verdict: str, evidence: str, applied: bool | None = None) -> None:
             calls.append(f"record:{verdict}")
 
         @activity.defn(name="pulse.incident.verify")
@@ -920,7 +920,7 @@ class TestIncidentCancellation:
         @activity.defn(name="pulse.incident.apply_fix")
         async def apply(plan: dict) -> dict:
             calls.append("apply")
-            return {"tool": "delete_pod", "after": "recreated"}
+            return {"applied": True, "tool": "delete_pod", "after": "recreated"}
 
         @activity.defn(name="pulse.incident.verify")
         async def verify(resource: dict) -> dict:
@@ -938,7 +938,7 @@ class TestIncidentCancellation:
             return {"recurred": False, "evidence": "phase=Running"}
 
         @activity.defn(name="pulse.incident.record_outcome")
-        async def rec(finding_id: str, verdict: str, evidence: str) -> None:
+        async def rec(finding_id: str, verdict: str, evidence: str, applied: bool | None = None) -> None:
             calls.append(f"record:{verdict}")
 
         async def go():
@@ -1008,7 +1008,7 @@ class TestIncidentCancellation:
 
         @activity.defn(name="pulse.incident.apply_fix")
         async def apply(plan: dict) -> dict:
-            return {"tool": "delete_pod"}
+            return {"applied": True, "tool": "delete_pod"}
 
         @activity.defn(name="pulse.incident.verify")
         async def verify(resource: dict) -> dict:
@@ -1024,7 +1024,7 @@ class TestIncidentCancellation:
             return {"recurred": False, "evidence": "ok"}
 
         @activity.defn(name="pulse.incident.record_outcome")
-        async def rec(finding_id: str, verdict: str, evidence: str) -> None:
+        async def rec(finding_id: str, verdict: str, evidence: str, applied: bool | None = None) -> None:
             calls.append(f"record:{verdict}")
 
         async def go():
