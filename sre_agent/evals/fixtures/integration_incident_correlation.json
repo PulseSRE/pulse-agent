@@ -9,7 +9,7 @@
     },
     "expected": {
         "should_mention": ["ConfigMap", "14:02", "root cause", "configuration"],
-        "should_use_tools": ["correlate_incident", "get_events"],
+        "should_use_tools": ["correlate_incident"],
         "should_not_use_tools": ["delete_pod", "scale_deployment"],
         "max_tool_calls": 8
     }

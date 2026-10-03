@@ -137,7 +137,10 @@ class TestFixHistory:
         assert r.status_code in (200, 404)
 
     def test_rollback_not_found(self, api_client, api_headers):
-        r = api_client.post("/fix-history/nonexistent/rollback", headers=api_headers)
+        r = api_client.post(
+            "/fix-history/nonexistent/rollback",
+            headers={**api_headers, "X-Forwarded-User": "admin", "X-Forwarded-Access-Token": "user-token"},
+        )
         assert r.status_code == 400
 
 

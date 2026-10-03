@@ -1074,7 +1074,7 @@ class TestMultiTurnHistory:
 
         from sre_agent.evals import replay
 
-        src = inspect.getsource(replay.MultiTurnReplayHarness.run)
+        src = inspect.getsource(replay.MultiTurnReplayHarness.run_async)
         assert '"messages": messages,' in src, "multi-turn must pass the live list"
         assert '"messages": list(messages)' not in src, "copying discards the tool exchange"
 
@@ -1083,7 +1083,7 @@ class TestMultiTurnHistory:
 
         from sre_agent.evals import replay
 
-        src = inspect.getsource(replay.MultiTurnReplayHarness.run)
+        src = inspect.getsource(replay.MultiTurnReplayHarness.run_async)
         assert 'messages[-1].get("role") == "assistant"' in src
 
 
