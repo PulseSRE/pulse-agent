@@ -37,7 +37,7 @@ Legacy dashboard ownership migration is bound to the forwarded access token: onl
 
 ### MCP classification and administration
 
-MCP tools are confirmation-required by default, including tools with missing annotations. An administrator-configured server may mark a tool read-only with `readOnlyHint: true`; a simultaneous `destructiveHint: true` prevents that exemption. This trusts the configured server's annotation, not an independent capability sandbox. Native tool names and other connections' tools cannot be replaced by an MCP registration; refreshing the same connection is allowed. MCP prompt-loading helpers are read-only.
+MCP tools are confirmation-required by default, including tools with missing annotations. An administrator-configured server may mark a tool read-only with `readOnlyHint: true`; a simultaneous `destructiveHint: true` prevents that exemption. This trusts the configured server's annotation, not an independent capability sandbox. Native tool names and other connections' tools cannot be replaced by an MCP registration; refreshing the same connection is allowed and removes its no-longer-advertised registrations. MCP prompt-loading helpers are read-only.
 
 The central agent loop unions registry write classifications with caller-supplied write sets, so an empty or stale caller set cannot remove the confirmation requirement. Read-only skill configurations exclude MCP write tools. MCP server add/remove/test and toolset changes use `require_admin`, including its configured identity allowlist behavior described above.
 
@@ -45,7 +45,7 @@ The central agent loop unions registry write classifications with caller-supplie
 
 `PlanRuntime` retains each skill's write-tool classification and passes its optional confirmation callback and caller token to the agent loop. Without a confirmation callback, registered writes are denied. Write-enabled phases are serialized within that runtime; this is not a cluster-wide lock. Default background investigations cannot authorize writes; the separate monitor auto-fix executor retains its trust-aware authorization path.
 
-Durable plan start, phase approval, and cancellation require `require_admin`. A Temporal phase may authorize tool writes only when it declares `approval_required`, receives an affirmative workflow approval signal, and the worker's server trust setting is at least 2. Other phases remain unable to authorize writes. Worker execution uses service credentials; caller tokens are not serialized into workflow history. The workflow uses a patch marker to preserve existing history argument shapes; the activity's omitted write-approval argument defaults to false.
+Durable plan start, phase approval, and cancellation require `require_admin`. Approval requests require an explicit JSON boolean; omitted or non-boolean verdicts are rejected rather than truthiness-coerced. A Temporal phase may authorize tool writes only when it declares `approval_required`, receives an affirmative workflow approval signal, and the worker's server trust setting is at least 2. Other phases remain unable to authorize writes. Worker execution uses service credentials; caller tokens are not serialized into workflow history. The workflow uses a patch marker to preserve existing history argument shapes; the activity's omitted write-approval argument defaults to false.
 
 These controls do not add generic policy rules or snapshots to every tool. Keep Temporal/MCP providers trusted and verify actual deployment credentials, approvals, denial behavior, and RBAC before enabling writes.
 
