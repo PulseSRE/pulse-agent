@@ -567,22 +567,22 @@ class MonitorRepository(BaseRepository):
         )
 
     def fetch_fix_rate(self, days: int) -> dict | None:
-        """Auto-remediation success rate from actions."""
+        """Verified recovery among executed actions; unanswered proposals are excluded."""
         return self.db.fetchone(
-            "SELECT COUNT(*) FILTER (WHERE status = 'completed') AS good, "
+            "SELECT COUNT(*) FILTER (WHERE status = 'completed' AND verification_status = 'verified') AS good, "
             "COUNT(*) AS total FROM actions "
-            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
+            "WHERE status IN ('completed', 'failed', 'rolled_back') "
+            "AND timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
             (days,),
         )
 
     def fetch_false_positive_rate(self, days: int) -> dict | None:
-        """False positive rate from findings noise_score."""
-        return self.db.fetchone(
-            "SELECT COUNT(*) FILTER (WHERE noise_score > 0.7) AS noise, "
-            "COUNT(*) AS total FROM findings "
-            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
-            (days,),
-        )
+        """Unavailable: findings have no persisted false-positive labels.
+
+        Inbox noise scores are heuristics, not observed false positives. Do not
+        query a nonexistent findings.noise_score column or manufacture a rate.
+        """
+        return None
 
     def fetch_selector_recall(self, days: int) -> dict | None:
         """Selector recall from skill_selection_log."""
@@ -615,11 +615,14 @@ class MonitorRepository(BaseRepository):
     def fetch_time_to_resolution(self, days: int) -> dict | None:
         """Average time from finding detection to verified fix."""
         return self.db.fetchone(
-            "SELECT AVG(a.timestamp - f.timestamp) / 1000 as avg_seconds "
+            "SELECT AVG(a.verification_timestamp - f.timestamp) / 1000 as avg_seconds, COUNT(*) as sample_count "
             "FROM actions a JOIN findings f ON a.finding_id = f.id "
             "WHERE a.status = 'completed' "
             "AND a.verification_status = 'verified' "
-            "AND a.timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000",
+            "AND a.verification_timestamp >= f.timestamp "
+            "AND a.verification_timestamp >= a.timestamp "
+            "AND a.verification_timestamp <= EXTRACT(EPOCH FROM NOW())::BIGINT * 1000 "
+            "AND a.verification_timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000",
             (days,),
         )
 

@@ -66,7 +66,8 @@ def _compute_kpi_dashboard_sync(days: int) -> dict:
         fix_total = fix_row["total"] if fix_row else 0
         fix_rate = round(fix_row["good"] / max(fix_total, 1), 3) if fix_row else 0
         kpis["auto_fix_success"] = {
-            "label": "Auto-Remediation Success",
+            "label": "Verified Recovery Rate",
+            "description": "Executed actions with a verified recovery verdict; pending verification is not success",
             "value": fix_rate,
             "unit": "ratio",
             "target": 0.85,
@@ -88,7 +89,17 @@ def _compute_kpi_dashboard_sync(days: int) -> dict:
             "value": fp_rate,
             "unit": "ratio",
             "target": 0.02,
-            "status": "pass" if fp_rate <= 0.02 else "warn" if fp_rate <= 0.05 else "fail",
+            "status": "info"
+            if not noise_row or not noise_row["total"]
+            else "pass"
+            if fp_rate <= 0.02
+            else "warn"
+            if fp_rate <= 0.05
+            else "fail",
+            "sample_count": noise_row["total"] if noise_row else 0,
+            "description": "Unavailable until false-positive labels are recorded"
+            if not noise_row
+            else "Observed false-positive feedback",
         }
 
         # 5. Selector recall@5 (from latest eval or selection log)
@@ -127,12 +138,20 @@ def _compute_kpi_dashboard_sync(days: int) -> dict:
         # 8. Time-to-Resolution (finding detected → verified fixed)
         ttr_row = repo.fetch_time_to_resolution(days)
         ttr_seconds = int(ttr_row["avg_seconds"] or 0) if ttr_row else 0
+        ttr_samples = int(ttr_row["sample_count"] or 0) if ttr_row else 0
         kpis["time_to_resolution"] = {
             "label": "Time to Resolution",
             "value": ttr_seconds,
             "unit": "seconds",
             "target": 600,
-            "status": "pass" if ttr_seconds <= 600 else "warn" if ttr_seconds <= 1800 else "fail",
+            "status": "info"
+            if not ttr_samples
+            else "pass"
+            if ttr_seconds <= 600
+            else "warn"
+            if ttr_seconds <= 1800
+            else "fail",
+            "sample_count": ttr_samples,
             "description": "Finding detected → fix verified",
         }
 
@@ -203,7 +222,7 @@ async def get_kpi_dashboard(
     days: int = Query(7, ge=1, le=90),
     _auth=Depends(verify_token),
 ):
-    """Operational KPIs — 9 metrics aligned with ORCA targets."""
+    """Operational metrics, including observed recovery timing and sample counts."""
     return await asyncio.to_thread(_compute_kpi_dashboard_sync, days)
 
 

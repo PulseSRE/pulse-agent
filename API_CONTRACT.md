@@ -86,7 +86,7 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/metrics/fix-success-rate` | token | Auto-fix outcome success rate (query: `period` 1-365 days) |
 | `GET` | `/metrics/response-latency` | token | Agent response p50/p95/p99 latency from tool_usage (query: `period` 1-365 days) |
 | `GET` | `/metrics/eval-trend` | token | Eval score trend with sparkline (query: `suite`, `releases` 1-50) |
-| `GET` | `/kpi` | token | 9 operational KPIs aligned with ORCA targets |
+| `GET` | `/kpi` | token | Operational metrics; recovery rate requires verified outcomes and resolution time uses verification timestamps. `sample_count: 0` / `status: info` indicates no recovery evidence. False-positive rate is unavailable until labels are persisted. |
 | `GET` | `/analytics/plans` | token | Plan template usage, phase success rate, and duration analytics |
 | `GET` | `/activity` | token | Recent agent activity feed (used by the Admin Overview tab) |
 | `POST` | `/analytics/events` | token | Fire-and-forget UI session event batch recorder |
