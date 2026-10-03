@@ -33,16 +33,16 @@ Pulse Agent uses the ORCA (Orchestrated Routing & Classification Architecture) s
 
 ### Skill Selector (6 channels)
 
-Every incoming query is scored by 6 independent channels. Scores are fused with learned weights and re-ranked:
+The selector supports six scoring channels (availability depends on data/configuration). Scores are fused with the default weights below or persisted learned weights:
 
 | Channel | Signal | Weight |
 |---------|--------|--------|
-| **Keyword** | Skill keyword index (longest-match-first) | 0.30 |
+| **Keyword** | Skill keyword index (longest-match-first) | 0.25 |
 | **Component** | K8s resource types extracted from query (Pod, Deployment, Service, etc.) matched to skill categories | 0.20 |
 | **Historical** | Token co-occurrence from past successful skill usages (from `skill_usage` table) | 0.20 |
 | **Semantic** | TF-IDF cosine similarity between query and skill descriptions/keywords | 0.15 |
 | **Taxonomy** | Alert name prefixes and scanner category matching | 0.10 |
-| **Temporal** | Recent-change keywords ("just deployed", "after upgrade") boost operations skills | 0.05 |
+| **Temporal** | Recent-change keywords, cluster changes, and time-of-day signals | 0.10 |
 
 Weights are not static -- they are **recomputed from outcomes** via `selector_learning.py`. The system analyzes `skill_selection_log` entries (correct selections vs. overrides) and adjusts channel weights to optimize routing accuracy. Learned weights persist to the database.
 
