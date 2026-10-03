@@ -7,76 +7,14 @@ description: |
   selection, dry-run, rollback, and post-deploy verification.
 ---
 
-# Pulse Deploy
+# Pulse deployment workflow
 
-Deploy both the UI and Agent to OpenShift with safety checks.
+The deployed product is managed by [pulse-operator](https://github.com/PulseSRE/pulse-operator), installed via OLM. There is no local umbrella Helm deploy script. Read the operator README/CRD and [agent README](../../../README.md) before changing a cluster.
 
-## Pre-flight
+1. Confirm the requested context/namespace/CR and inspect `oc whoami`, `oc whoami --show-server`, and `oc get openshiftpulse -A` without exposing credentials.
+2. Use tested published agent/UI images as a matched pair. Inspect the existing CR and propose the exact image/config change; do not assume historical Helm resource names.
+3. Follow user authorization for deployment. Preview the CR diff and retain previous image/config references for recovery.
+4. Apply only the intended CR fields through the operator, then verify rollout, CR conditions, pod readiness, `/version`, authenticated API/UI behavior, and read-only cluster access.
+5. Test approved writes/rollback only in a disposable namespace. Browser trust/category controls cannot lower current server autonomy; configure the server/CR accordingly.
 
-1. Verify cluster login:
-```bash
-oc whoami 2>&1 || echo "NOT LOGGED IN — run: oc login <cluster-url>"
-oc whoami --show-server
-```
-
-2. Check for uncommitted changes:
-```bash
-git status --short
-cd /Users/amobrem/ali/OpenshiftPulse && git status --short
-```
-
-Warn if there are uncommitted changes — images will be tagged `-dirty`.
-
-3. Run quick verification (skip if user says "fast" or "quick"):
-```bash
-python3 -m pytest tests/ -x -q 2>&1 | tail -3
-cd /Users/amobrem/ali/OpenshiftPulse && npm run type-check 2>&1 | tail -1
-```
-
-## Deploy
-
-### Standard Deploy
-```bash
-cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh
-```
-
-### Dry Run
-If user asks for dry run or preview:
-```bash
-cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --dry-run
-```
-
-### With MCP Enabled
-```bash
-cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --set agent.mcp.enabled=true
-```
-
-## Post-Deploy Verification
-
-After deploy completes:
-
-1. Verify agent version:
-```bash
-oc exec -n openshiftpulse deploy/pulse-openshift-sre-agent -- cat /opt/app-root/src/pyproject.toml | grep version | head -1
-```
-
-2. Check pod health:
-```bash
-oc get pods -n openshiftpulse --no-headers
-```
-
-3. Report the URL and version to the user.
-
-## Rollback
-
-If user asks to rollback:
-```bash
-cd /Users/amobrem/ali/OpenshiftPulse && ./deploy/deploy.sh --rollback
-```
-
-## Quick Reference
-```
-/deploy              # standard deploy
-/deploy --dry-run    # preview without applying
-/deploy --rollback   # roll back to previous revision
-```
+Rollback uses the prior known-good image/config pair. Database migrations are forward-only: check compatibility/backups before downgrading. Report checks that actually ran and remaining cluster validation. Never claim success from pod existence alone.

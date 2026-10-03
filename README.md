@@ -9,14 +9,12 @@
   <img src="https://img.shields.io/badge/tools-143_(107+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
   <img src="https://img.shields.io/badge/scanners-27-10b981?style=for-the-badge" alt="Scanners">
-  <img src="https://img.shields.io/badge/tests-3389-10b981?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/eval_suites-16_(192_scenarios)-10b981?style=for-the-badge" alt="Eval Suites">
-  <img src="https://img.shields.io/badge/release_gate-97.5%25-10b981?style=for-the-badge" alt="Release Gate">
   <img src="https://img.shields.io/badge/PromQL%20recipes-83-10b981?style=for-the-badge" alt="PromQL Recipes">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 
-AI-powered OpenShift SRE and Security Agent built on Claude. Pulse Agent connects to your cluster via the Kubernetes API and uses Claude Opus for diagnostics, incident triage, security audits, and automated remediation -- all through natural language. It pairs with the [OpenShift Pulse](https://github.com/PulseSRE/pulse-ui) UI for rich incident management, or runs standalone as a CLI. Both are deployed together via the [pulse-operator](https://github.com/PulseSRE/pulse-operator) — see [Deploy to OpenShift](#deploy-to-openshift) below.
+AI-powered OpenShift SRE and Security Agent built on Claude. Pulse Agent connects to your cluster via the Kubernetes API and uses the configured Claude model for diagnostics, incident triage, security audits, and automated remediation -- all through natural language. It pairs with the [OpenShift Pulse](https://github.com/PulseSRE/pulse-ui) UI for rich incident management, or runs standalone as a CLI. Both are deployed together via the [pulse-operator](https://github.com/PulseSRE/pulse-operator) — see [Deploy to OpenShift](#deploy-to-openshift) below.
 
 > **Runs on OpenShift, not vanilla Kubernetes.** The deployed product uses
 > `route.openshift.io` for ingress, `oauth.openshift.io` for single sign-on, and
@@ -27,7 +25,7 @@ AI-powered OpenShift SRE and Security Agent built on Claude. Pulse Agent connect
 > The CLI below is a developer workflow and will talk to any cluster your
 > kubeconfig points at; only the deployed product is OpenShift-bound.
 
-**Docs:** [Operator (install)](https://github.com/PulseSRE/pulse-operator) | [API Contract](API_CONTRACT.md) | [Architecture](docs/ARCHITECTURE.md) | [Database](DATABASE.md) | [Security](SECURITY.md) | [Design Principles](DESIGN_PRINCIPLES.md) | [Testing & Evals](TESTING.md) | [Skill Developer Guide](docs/SKILL_DEVELOPER_GUIDE.md) | [Contributing](CONTRIBUTING.md) | [Changelog](CHANGELOG.md)
+**Docs:** [Documentation index](docs/README.md) | [Operator (install)](https://github.com/PulseSRE/pulse-operator) | [API Contract](API_CONTRACT.md) | [Architecture](docs/ARCHITECTURE.md) | [Database](DATABASE.md) | [Security](SECURITY.md) | [Design Principles](DESIGN_PRINCIPLES.md) | [Testing & Evals](TESTING.md) | [Skill Developer Guide](docs/SKILL_DEVELOPER_GUIDE.md) | [Contributing](CONTRIBUTING.md) | [Changelog](CHANGELOG.md)
 
 ## Agent Intelligence (ORCA)
 
@@ -110,7 +108,7 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 - **Incident Triage** -- Correlate events, pod status, logs, and Prometheus metrics to identify root causes
 - **Resource Management** -- Analyze quotas, capacity, utilization, and HPA status across nodes
 - **Runbook Execution** -- 10 built-in runbooks. Scale deployments, restart pods, cordon/drain nodes, apply YAML (with confirmation gates)
-- **PromQL** -- 83 production-tested recipes across 16 categories, metric discovery, query verification against live clusters
+- **PromQL** -- PromQL recipes (validate against your cluster metrics) across 16 categories, metric discovery, query verification against live clusters
 - **Right-Sizing** -- `get_resource_recommendations` compares actual CPU/memory usage to requests/limits via Prometheus
 
 ### Security Scanner
@@ -123,7 +121,7 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 
 ### Autonomous Monitor
 - **27 Scanners** -- 5 availability (crashlooping pods, pending pods, failed workloads, image pull errors, DaemonSet gaps) + 5 audit (config, RBAC, deployments, warning events, auth) + 5 predictive trend (memory/disk pressure forecast, HPA exhaustion, error rate acceleration, operator degradation) + 4 liveness (stuck, hot loop, control plane, degraded) + 2 each for infrastructure, security, monitoring and resources
-- **Auto-Fix** -- Trust level 3 auto-fixes safe categories (crashloop pod deletion, deployment restarts). Trust level 4 fixes everything automatically. Rate-limited to 3 fixes per scan with a per-resource attempt cap, and a database-backed kill switch (`POST /monitor/pause`) that survives pod restarts
+- **Auto-Fix** -- The server trust setting controls remediation: level 2 asks, levels 3/4 allow automatic fixes. Browser selections cannot lower the server level; current category subsets do not restrict level-3 handlers. See [security limitations](SECURITY.md#monitor-trust-levels). Rate-limited to 3 fixes per scan with a per-resource attempt cap, and a database-backed kill switch (`POST /monitor/pause`) that survives pod restarts
 - **Confidence Scores** -- Every finding, investigation, and action includes a 0-100% confidence score
 - **Noise Learning** -- Tracks transient findings and assigns noise scores to suppress flaky alerts
 - **Simulation Preview** -- Predict impact, risk, and duration before executing a fix
@@ -137,7 +135,7 @@ Optional and inert until configured — see [docs/TEMPORAL.md](docs/TEMPORAL.md)
 - **Configure with** `PULSE_AGENT_TEMPORAL_HOST` (plus `_NAMESPACE`, `_TASK_QUEUE`, `_APPROVAL_TIMEOUT`). The [operator](https://github.com/PulseSRE/pulse-operator) provisions a server with `spec.temporal.enabled` and injects the host
 
 ### Verified Action
-Nothing is reported as fixed because a symptom stopped appearing. Every mutating path is a contract: check first, capture an undo, then prove the outcome by reading the cluster.
+Verification contracts cover five native write tools. They check first, capture a snapshot where supported, and probe the outcome. Other mutation paths require their own safety review; no universal coverage is claimed.
 
 - **Verification Contracts** (`tool_contracts.py`) -- The five most-used write tools (`restart_deployment`, `scale_deployment`, `delete_pod`, `rollback_deployment`, `cordon_node`) run as precondition read -> snapshot -> action -> postcondition probe. A missing target or permission gap refuses the write *before* anything changes, under the caller's own token
 - **Tool-Specific Postconditions** -- A scale-to-0 verifies as 0 ready replicas; a rollback verifies the revision actually moved; a deleted pod verifies through its owning controller. Probes run on the monitor's verification pipeline with a grace window, because a rollout in progress is not a failed rollout
@@ -171,7 +169,7 @@ Nothing is reported as fixed because a symptom stopped appearing. Every mutating
 
 ### Prerequisites
 
-- **Python 3.12+**
+- **Python 3.11+**
 - **Access to a Kubernetes or OpenShift cluster** (`oc login` or valid `~/.kube/config`) — the CLI itself is not OpenShift-bound; the deployed product is
 - **Claude API access** via Anthropic API key or Google Vertex AI project
 - **PostgreSQL 14+** for data persistence (optional for basic CLI use, required for memory/monitor/views)
@@ -181,7 +179,9 @@ Nothing is reported as fixed because a symptom stopped appearing. Every mutating
 ```bash
 git clone https://github.com/PulseSRE/pulse-agent.git
 cd pulse-agent
-pip install -e .
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
 ```
 
 ### Configure API Access
@@ -205,16 +205,16 @@ export ANTHROPIC_API_KEY=sk-ant-...
 | `ANTHROPIC_VERTEX_PROJECT_ID` | GCP project for Vertex AI | required* |
 | `CLOUD_ML_REGION` | GCP region | required* |
 | `ANTHROPIC_API_KEY` | Direct Anthropic API key | required* |
-| `PULSE_AGENT_MODEL` | Claude model | `claude-opus-4-6` |
+| `PULSE_AGENT_MODEL` | Claude model | `claude-sonnet-5` |
 | `PULSE_AGENT_DATABASE_URL` | PostgreSQL connection URL | required for full features |
 | `PULSE_AGENT_MEMORY` | Enable self-improving memory | `1` (enabled) |
 | `PULSE_AGENT_AUTOFIX_ENABLED` | Enable monitor auto-fix | `true` |
-| `PULSE_AGENT_MAX_TRUST_LEVEL` | Server-side max trust level (0-4). Also accepts `PULSE_AGENT_TRUST_LEVEL`, the name the operator injects from `spec.agent.trustLevel` | `2` (ask first) |
-| `PULSE_AGENT_PROTECTED_NAMESPACES` | Namespaces where destructive actions are denied on both the chat and auto-fix paths (comma list, `*` wildcards) | `production,openshift-*,kube-system` |
+| `PULSE_AGENT_MAX_TRUST_LEVEL` | Server monitor trust level (0-4); effective trust is floored here. Also accepts `PULSE_AGENT_TRUST_LEVEL`, the name the operator injects from `spec.agent.trustLevel` | `2` (ask first) |
+| `PULSE_AGENT_PROTECTED_NAMESPACES` | Protected namespaces for the pod-deletion deny rule on chat and auto-fix paths (comma list, `*` wildcards) | `production,openshift-*,kube-system` |
 | `PULSE_AGENT_ALLOW_NODE_OPS` | Allow node-level operations (cordon/drain) through chat confirmation | `false` |
 | `PULSE_AGENT_RECURRENCE_WINDOW` | Seconds after a verified fix within which the same problem returning is recorded as a recurrence | `1800` |
 | `PULSE_AGENT_SCAN_INTERVAL` | Monitor scan interval (seconds) | `60` |
-| `PULSE_AGENT_WS_TOKEN` | WebSocket auth token | auto-generated |
+| `PULSE_AGENT_WS_TOKEN` | Shared WS/REST service token; missing token rejects access | generated by the operator; configure for standalone API |
 | `PULSE_AGENT_HARNESS` | Enable tool selection optimizations | `1` (enabled) |
 
 *One of Vertex AI or Anthropic API key is required.
@@ -237,20 +237,19 @@ pulse-agent-api
 For full features (memory, views, tool analytics, SLOs), you need a PostgreSQL instance. The simplest local setup:
 
 ```bash
-podman run -d --name pulse-pg \
-  -p 5433:5432 \
+podman run -d --name pulse-dev-pg \
+  -p 127.0.0.1:5434:5432 \
   -e POSTGRES_USER=pulse \
   -e POSTGRES_PASSWORD=pulse \
-  -e POSTGRES_DB=pulse_test \
+  -e POSTGRES_DB=pulse_dev \
   postgres:16-alpine
 
-export PULSE_AGENT_DATABASE_URL=postgresql://pulse:pulse@localhost:5433/pulse_test
+export PULSE_AGENT_DATABASE_URL=postgresql://pulse:pulse@localhost:5434/pulse_dev
 ```
 
 Schema migrations are applied automatically on startup.
 
-The test suite (`make test`) uses `PULSE_AGENT_TEST_DATABASE_URL`, defaulting to the
-same URL. Create that database as **UTF-8** — a `SQL_ASCII` cluster (the default for
+The test suite (`make test`) uses a **separate disposable** `PULSE_AGENT_TEST_DATABASE_URL`; its fixture drops the public schema. See [TESTING](TESTING.md). It does not use the development URL above by default. Create that database as **UTF-8** — a `SQL_ASCII` cluster (the default for
 some standalone macOS builds) fails on fixtures containing an em dash, and the error
 surfaces as an unrelated-looking empty result rather than an encoding error.
 

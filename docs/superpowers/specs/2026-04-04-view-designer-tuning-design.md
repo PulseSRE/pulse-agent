@@ -1,5 +1,8 @@
 # View Designer Tuning — Design Spec
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 **Goal:** Make the view designer produce consistently high-quality dashboards by adding code-level validation, improving the critique rubric, tightening prompts, and building a comprehensive fixture-based test suite.
 
 **Problem:** The view designer is nearly unusable — duplicate widgets, generic titles, broken layouts. All quality enforcement is in the system prompt (hoping Claude follows it). No validation before saving. Critique scoring is too shallow.

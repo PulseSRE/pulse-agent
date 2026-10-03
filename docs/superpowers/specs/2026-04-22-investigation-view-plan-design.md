@@ -1,5 +1,8 @@
 # Investigation View Plan
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 ## Problem
 
 When a user claims an inbox item, `_generate_view_for_item()` builds a shallow view — 3 info_card components that echo the alert metadata (title, severity, namespace, status). The user sees what they already know from the inbox, not a diagnostic dashboard that helps them verify the diagnosis and act on it.

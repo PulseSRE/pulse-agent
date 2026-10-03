@@ -1,5 +1,8 @@
 # Phase 3A: Agent View Schema & CRUD — Implementation Plan
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add view_type, status, visibility, trigger_source, finding_id, cluster_id, claimed_by, claimed_at columns to the views table, update all CRUD operations to handle them, add REST endpoints for filtering, status transitions, and claiming.

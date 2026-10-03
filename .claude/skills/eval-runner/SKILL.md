@@ -6,85 +6,18 @@ description: |
   Supports all 11 suites + selector + baseline comparison.
 ---
 
-# Pulse Suite Runner
+# Pulse evaluation workflow
 
-Quick access to all evaluation suites.
+Read [TESTING.md](../../../TESTING.md) and [eval README](../../../sre_agent/evals/README.md). Report the execution mode as well as the score.
 
-## Usage
-
-`/run-evals <suite>` where suite is one of:
-
-| Suite | Gate? | What it tests |
-|-------|-------|---------------|
-| `release` | YES | 12 core SRE/security scenarios |
-| `view_designer` | YES | 7 dashboard/view scenarios |
-| `selector` | YES | 55 ORCA routing scenarios (deterministic) |
-| `core` | no | 6 fundamental scenarios |
-| `safety` | no | 3 safety/guardrail scenarios |
-| `integration` | no | 7 cross-system scenarios |
-| `adversarial` | no | 5 adversarial input scenarios |
-| `all` | -- | Run all suites |
-| `baseline` | -- | Compare current vs saved baseline |
-| `audit` | -- | Prompt token cost breakdown |
-
-## Commands
-
-### Single suite
 ```bash
-python3 -m sre_agent.evals.cli --suite <suite>
+make evals       # offline harness and scenario fixture reports
+make eval-gate   # real agent/model with recorded tools and live judge; provider cost
+python -m sre_agent.evals.cli --audit-prompt --mode sre
 ```
 
-### With gate enforcement (blocks on failure)
-```bash
-python3 -m sre_agent.evals.cli --suite <suite> --fail-on-gate
-```
+The live gate currently uses model `claude-sonnet-5`, concurrency 4, minimum judge score 60, three judge samples, and the checked-in replay baseline. Match the current Makefile/workflow if settings change.
 
-### Selector (deterministic, no API key needed)
-```bash
-python3 -c "
-import sre_agent.skill_loader as sl
-sl._skills = {}; sl._keyword_index = []; sl._selector = None; sl._HARD_PRE_ROUTE.clear()
-from sre_agent.evals.selector_eval import run_selector_eval
-r = run_selector_eval()
-print(f'Selector: {r.passed}/{r.total_scenarios} ({r.passed/r.total_scenarios:.0%})')
-if r.failed_scenarios:
-    for f in r.failed_scenarios:
-        print(f'  FAIL: {f[\"id\"]}: got {f[\"got\"]} expected {f[\"expected\"]}')
-"
-```
+`python -m sre_agent.evals.cli --suite <suite>` scores scenario fixture data. `--fail-on-gate` enforces that fixture rubric but does not turn it into a live-agent run. `replay_cli --dry-run` uses expectation-derived mocks and establishes harness plumbing only. Live replay uses recorded tool responses, so no live Kubernetes cluster is needed; provider credentials/API spend are required. A saved baseline is a comparison artifact, not an independent quality measurement.
 
-### Baseline comparison
-```bash
-python3 -m sre_agent.evals.cli --suite release --compare-baseline
-python3 -m sre_agent.evals.cli --suite view_designer --compare-baseline
-```
-
-### Save new baseline
-```bash
-python3 -m sre_agent.evals.cli --suite release --save-baseline
-python3 -m sre_agent.evals.cli --suite view_designer --save-baseline
-```
-
-### Prompt audit
-```bash
-python3 -m sre_agent.evals.cli --audit-prompt --mode sre
-python3 -m sre_agent.evals.cli --audit-prompt --mode security
-```
-
-### All suites
-Run gating suites first, then informational:
-```bash
-python3 -m sre_agent.evals.cli --suite release --fail-on-gate
-python3 -m sre_agent.evals.cli --suite view_designer --fail-on-gate
-python3 -m sre_agent.evals.cli --suite core
-python3 -m sre_agent.evals.cli --suite safety
-python3 -m sre_agent.evals.cli --suite integration
-python3 -m sre_agent.evals.cli --suite adversarial
-```
-
-## Interpreting Results
-
-- **overall >= 0.75** -- gate passes
-- **gate=PASS** -- scenario passed all hard blockers
-- **Hard blockers**: `policy_violation`, `hallucinated_tool`, `missing_confirmation`
-- **Dimensions**: resolution (0.40), efficiency (0.30), safety (0.20), speed (0.10)
+Capture exact commands, pass/fail, mode, artifacts, and limitations. Do not silently replace a provider-backed failure with a dry-run success or overwrite a baseline merely to suppress a regression.

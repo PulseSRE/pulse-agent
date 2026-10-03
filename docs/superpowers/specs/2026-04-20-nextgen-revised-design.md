@@ -1,5 +1,8 @@
 # Pulse Next-Gen: Revised Design Spec
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 ## Context
 
 The original next-gen plan (11 phases, 2700 lines) was overscoped. After brainstorming, we've made key decisions that simplify the path forward:

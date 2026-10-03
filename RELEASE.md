@@ -1,109 +1,33 @@
-# Release Process
+# Release process
 
-Pulse uses a **unified release** — both repos (pulse-agent + OpenshiftPulse) share a single version number. The `/release` skill automates the full process.
+Agent and [pulse-ui](https://github.com/PulseSRE/pulse-ui) are released as a matched version pair. The [operator](https://github.com/PulseSRE/pulse-operator) has its own version and controls the deployed image references. There is no Helm chart or `deploy/deploy.sh` in this repository.
 
-## Quick Start
+## Prepare and validate
 
-```bash
-# In Claude Code:
-/release 2.5.0
-```
-
-Or manually:
+1. Run the checks in [TESTING](TESTING.md), including the actual provider-backed gate when releasing model/prompt changes.
+2. Review changes and update `CHANGELOG.md`, API/security documentation, and affected operational guides. Test counts and benchmark scores are results of a specific run, not permanent release guarantees.
+3. Choose the same agent/UI version and prepare each repository independently. `scripts/bump-version.sh X.Y.Z` updates **only** this repository's `pyproject.toml` and README badge; it does not edit the UI.
+4. Review the final diff, clean worktree, and corresponding UI version before committing and tagging.
 
 ```bash
-make release VERSION=2.5.0
-git push && git push --tags
+make verify
+python -m ruff format --check sre_agent/ tests/
+python scripts/check_discipline.py
+make eval-gate  # provider calls; requires credentials
 ```
 
-## Release Phases
+`make eval-gate` matches the checked-in replay gate: model `claude-sonnet-5`, concurrency 4, minimum judge score 60, three judge samples, and `sre_agent/evals/baselines/replay.json`. These are repository settings; provider availability must be verified by the run.
 
-### Phase 1: Verify
-- Backend: `pytest` (2414+ tests), `mypy` (0 errors), `ruff` (clean)
-- Frontend: `vitest` (2045+ tests), `tsc` (clean)
+## Version and publish
 
-### Phase 2: Eval Gates
-- **Selector routing** — 59/59 scenarios, 100% required
-- **Release gate** — LLM-judged, min 75% score, no hard blockers
-- **View designer gate** — LLM-judged, min 75% score
-- **Baseline comparison** — no regressions allowed
-- **Non-gating suites** — core, safety, integration, adversarial (informational)
-- **Chaos tests** — 5 failure injection scenarios, >= 60% score
-- **Prompt audit** — token count check for prompt bloat
+`make release VERSION=X.Y.Z` is a convenience target. It runs live judged replay, bumps the agent version/badge, saves a fixture-suite baseline, commits those two version files, and creates a local tag. It **does not** run the whole verification suite, update the UI, or publish anything. Its replay command differs from `make eval-gate` (no explicit minimum judge score or baseline), so run the gate above first.
 
-### Phase 3: Review
-- Code review of all changes since last tag
-- Security review (`/security-review`)
-- Simplify pass (`/simplify`)
+Alternatively run `scripts/bump-version.sh X.Y.Z`, review and commit the intended changes, then create `vX.Y.Z`. Pushing tags is the publication step and triggers [build-push.yml](.github/workflows/build-push.yml) and [release.yml](.github/workflows/release.yml). Release notes are taken from the matching changelog section; missing notes generate a warning and fallback text. [version-sync.yml](.github/workflows/version-sync.yml) compares the latest non-draft, non-prerelease agent/UI releases, rather than package fields on main.
 
-### Phase 4: Documentation
-Every release updates these files in **both repos**:
+Verify the image build and actual GitHub release in both repos before deployment. Keep eval artifacts with the release evidence; do not treat a saved baseline as proof the agent passed a live gate.
 
-**Backend (pulse-agent):**
-| File | Updated |
-|------|---------|
-| `CLAUDE.md` | Tool count, module count, eval prompts, scenarios, version |
-| `README.md` | Version badge, test count, tool count |
-| `CHANGELOG.md` | Feature/fix/test categorized entries |
-| `API_CONTRACT.md` | New endpoints, component specs |
-| `TESTING.md` | Test counts, new patterns |
-| `SECURITY.md` | Security controls |
-| `DATABASE.md` | New migrations |
-| `docs/ARCHITECTURE.md` | Architecture changes |
-| `docs/index.html` | GitHub Pages version + counts |
+## Deploy and recover
 
-**Frontend (OpenshiftPulse):**
-| File | Updated |
-|------|---------|
-| `CLAUDE.md` | Component count, test count, version |
-| `README.md` | Version badge, features |
-| `CHANGELOG.md` | Matching backend changelog |
-| `docs/index.html` | GitHub Pages version + counts |
+Install/configure through the operator and an `OpenShiftPulse` resource. Follow its current README and CRD; update agent/UI image references as a tested pair, then verify pod health, `/version`, interactive responses, read-only cluster access, and approval/rollback behavior on a disposable namespace.
 
-### Phase 5: Version Bump
-```bash
-make release VERSION=X.Y.Z
-```
-Updates: `pyproject.toml`, `README.md` release badge
-
-### Phase 6: Push & Tag
-Both repos get the same `vX.Y.Z` tag. Backend tag triggers CI build-push.
-
-### Phase 7: GitHub Release
-Auto-generated changelogs for both repos via `gh release create`.
-
-### Phase 8: Deploy + E2E
-- Deploy via `./deploy/deploy.sh`
-- Integration tests: `./deploy/integration-test.sh`
-- Smoke test: verify app loads, agent responds, views render
-
-### Phase 9: Post-Release
-- Save eval baselines for regression detection
-- Publish eval results to GitHub release notes
-- Verify CI built container images
-
-## Version Files
-
-| File | Field |
-|------|-------|
-| `pyproject.toml` | `[project].version` |
-| `OpenshiftPulse/package.json` | `version` |
-
-All synced by `scripts/bump-version.sh`. CI enforces they match.
-
-## Eval Gate Thresholds
-
-| Gate | Min Score | Hard Blockers |
-|------|-----------|---------------|
-| Release | 0.75 | `policy_violation`, `hallucinated_tool`, `missing_confirmation` |
-| View Designer | 0.75 | Same |
-| Selector | 100% | Any routing failure |
-
-## Rollback
-
-```bash
-git tag -d vX.Y.Z
-git push origin :refs/tags/vX.Y.Z
-git revert HEAD
-git push
-```
+For an application rollback, restore the previous known-good image pair through the CR. Preserve published tags/releases for traceability. Database migrations are forward-only; rolling an image back does not revert the schema, so confirm compatibility and backups first. Do not delete release tags as a deployment recovery procedure.

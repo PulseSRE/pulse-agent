@@ -1,6 +1,6 @@
 # Design Principles
 
-These principles guide every feature, interaction, and architectural decision in Pulse.
+These principles state product goals, not implemented guarantees or measured service levels. Current behavior and limitations are documented in [SECURITY](SECURITY.md) and [architecture](docs/ARCHITECTURE.md).
 
 ## 1. Conversational-first, visual-second, code-third
 
@@ -20,7 +20,7 @@ The UI feels alive — it greets you, surfaces wins, explains trade-offs in huma
 
 ## 5. Human-in-the-loop by default for anything that matters
 
-AI can autonomously handle 85%+ of routine ops, but every high-risk, high-cost, or high-impact change (security policy, production scaling, compliance, architecture changes) requires explicit human approval. No "set it and forget it" surprises.
+Prefer explicit approval for high-risk, high-cost, or high-impact changes. Autonomous completion rates must be measured on representative workloads; no universal percentage is established here. Validate execution-path controls before enabling unattended writes.
 
 ## 6. Radical transparency & explainability
 

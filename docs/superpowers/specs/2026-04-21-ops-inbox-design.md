@@ -1,5 +1,8 @@
 # Ops Inbox — Unified SRE Worklist
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 **Goal:** Replace the Incidents page with a single unified inbox that combines monitor findings, proactive tasks, alerts, and assessments into one priority-ranked worklist. Merges the original "Ops Inbox" (proactive task generators) with the "Mission Board" concept (team coordination, claims, shared tasks).
 
 **Key insight:** SREs shouldn't have to check two pages. Reactive incidents ("something broke") and proactive tasks ("something will break") belong in the same priority-sorted list. The inbox is the "start your shift here" surface.

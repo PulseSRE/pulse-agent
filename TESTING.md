@@ -1,51 +1,23 @@
 # Testing Strategy
 
-Definitive reference for all testing layers in Pulse Agent, how to run them, and how they connect to CI and release.
+Guide to checks and their evidence limits. The checked-in workflows and commands are authoritative; fixture inventories and example outputs below are illustrative and may change.
 
-## Overview
+## Evidence layers
 
-Pulse Agent uses a layered testing strategy designed to catch different categories of defects at different costs:
+| Check | What it proves | Requirements |
+|---|---|---|
+| pytest, lint, types, discipline | Covered behavior and static consistency | Disposable PostgreSQL; Python/test dependencies |
+| Replay `--dry-run` | Replay/scoring plumbing, using fixture-derived mock output | No provider calls or live cluster |
+| Scenario suite reports | Scoring of supplied fixture data | Not a live-agent quality test |
+| Live judged replay | Real model behavior against recorded tool results | Provider credentials/API cost; no live cluster |
+| SRE-Bench simulation | Real agent behavior against an observing simulated backend | Provider credentials; checked-in simulation fixtures |
+| Cluster acceptance | Actual proxy/RBAC/API/network/persistence/action behavior | Disposable OpenShift test environment |
 
-| Layer | What it catches | Cost | Runs in CI |
-|-------|----------------|------|------------|
-| **Unit tests** | Logic bugs, regressions, API contract violations | Free, ~1s | Every PR and push |
-| **Deterministic evals** | Tool selection errors, safety violations, guardrail failures | Free, ~2s | Every PR and push |
-| **Replay fixtures** | Response quality degradation (offline, no cluster needed) | Free (dry-run) or API cost (judge) | Dry-run always; judge on tags/daily/prompt changes |
-| **Skill-bundled evals** | Skill-specific tool selection and coverage | Free | Via unit test collection |
-| **Prompt ablation** | Wasted prompt tokens, section value measurement | Free | On prompt changes |
-| **A/B baseline comparison** | Score regressions between versions | Free | On prompt changes |
-| **Outcome regression** | Success rate and latency regressions in production actions | Free | Every PR and push |
-
-Testing philosophy: deterministic tests run on every commit at zero cost. LLM-judged tests run only when prompt-affecting files change, on release tags, or on schedule, to control API spend.
-
-## Testing Pyramid
-
-```
-                    +---------------------+
-                    |   Live LLM Judge    |   <- release tags, daily cron, prompt changes
-                    |  (replay + scoring) |      Costs API calls. 4-axis grading.
-                    +---------------------+
-                  +-------------------------+
-                  |    Replay Fixtures      |   <- dry-run on every CI run
-                  |  43 recorded traces     |      Deterministic scoring, no API key.
-                  +-------------------------+
-                +-----------------------+-----+
-                |  Deterministic Evals          |   <- every PR and push
-                |  16 suites, 192 scenarios       |      Tool selection, safety, guardrails.
-                +-------------------------------+
-              +-----------------------------------+
-              |       Skill-Bundled Evals          |   <- every PR and push
-              |  Per-skill evals.yaml scenarios    |      Tool selection per skill domain.
-              +-----------------------------------+
-            +---------------------------------------+
-            |          Unit Tests             |   <- every PR and push
-            |  Tools, scanners, API, config, memory  |      Fast, deterministic, mocked K8s.
-            +---------------------------------------+
-```
+Offline fixture scores do not establish model quality. Unit tests commonly mock Kubernetes and, without provider credentials, use a stub async model. They do not prove deployment or authorization correctness on a cluster.
 
 ## Quick Reference
 
-All commands run from the project root (`/Users/amobrem/ali/pulse-agent`).
+Run commands from this repository root in an activated Python 3.11+ virtual environment after `python -m pip install -e ".[test]"`.
 
 ### Unit Tests
 
@@ -57,25 +29,24 @@ python3 -m pytest tests/ -x                           # stop on first failure
 make test                                             # shorthand (pytest -q)
 make verify                                           # lint + type-check + test
 make test-all                                         # verify + deterministic evals (release, core, safety, prompt audit)
-make test-everything                                  # verify + ALL 16 eval suites (includes LLM judge — needs API key)
-make evals                                            # deterministic evals only
-make evals-full                                       # all evals including LLM-judged suites
+make eval-gate                                        # actual live judged replay gate (provider credentials/cost)
+make evals                                            # offline harness/fixture reports; not model-quality evidence
+make evals-full                                       # additional scenario-suite reports; inspect actual execution mode
 make chaos-test                                       # chaos engineering — 5 failure scenarios against live cluster
 make chaos-test-dry                                   # preview chaos scenarios without deploying
 ```
 
-### Run Everything
+### Pre-review checks
 
 ```bash
-# Fast — unit tests + deterministic evals (~70s, no API key needed)
-make test-all
-
-# Full — unit tests + ALL eval suites including LLM judge (~5min, needs API key)
-make test-everything
-
-# Chaos engineering — deploys broken resources, scores agent response (~20min, needs cluster)
-make chaos-test
+make verify
+python -m ruff format --check sre_agent/ tests/
+python scripts/check_discipline.py
+make evals       # offline plumbing/reports
+make eval-gate   # real model + judge, costs provider calls
 ```
+
+`make verify` does not include formatting, discipline, or live replay. `make test-all` adds offline eval reports; `make test-everything` runs the `evals-full` target and must not be treated as equivalent to the replay release gate. `make chaos-test` creates broken resources on a live cluster; inspect its script and use only a disposable test scope.
 
 ### Eval Framework
 
@@ -198,16 +169,18 @@ def test_my_tool_returns_pod_info(mock_k8s):
 
 ### Running with local PostgreSQL
 
-For tests marked `requires_pg`, start a local Postgres via Podman:
+**Destructive fixture:** `tests/conftest.py` drops/recreates the public schema. Use a dedicated disposable test database; never point it at development or production data. Both URLs below intentionally refer to the disposable database.
 
 ```bash
-podman run -d --name pulse-test-pg \
-  -e POSTGRES_USER=pulse \
-  -e POSTGRES_PASSWORD=pulse \
-  -e POSTGRES_DB=pulse_test \
-  -p 5433:5432 \
-  postgres:16
+podman run -d --name pulse-test-pg -p 127.0.0.1:5433:5432 \
+  -e POSTGRES_USER=pulse -e POSTGRES_PASSWORD=pulse \
+  -e POSTGRES_DB=pulse_test postgres:16-alpine
+export PULSE_AGENT_TEST_DATABASE_URL=postgresql://pulse:pulse@localhost:5433/pulse_test
+export PULSE_AGENT_DATABASE_URL="$PULSE_AGENT_TEST_DATABASE_URL"
+python -m pytest tests/ -q
 ```
+
+Docker can replace Podman. Start an existing disposable container rather than creating another with the same name. pytest uses a 120-second per-test timeout and a 300-second faulthandler timeout (`pyproject.toml`). Temporal tests may download a test-server binary and need network access on first use. Test duration depends on the environment; no fixed one-second/full-suite estimate is promised.
 
 ## Eval Framework
 
@@ -577,38 +550,11 @@ python -m sre_agent.evals.cli --audit-prompt --mode sre --format json --output a
 
 **Services:** PostgreSQL 16 on port 5433 (`pulse:pulse@localhost:5433/pulse_test`)
 
-### Pipeline Steps
+### Pipeline steps
 
-| Step | Gating? | When |
-|------|---------|------|
-| Lint (`ruff check`) | Yes | Always |
-| Format check (`ruff format --check`) | Yes | Always |
-| Unit tests (`pytest tests/ -q`) | Yes | Always |
-| Version sync (pyproject.toml vs Chart.yaml) | Yes | Always |
-| Helm lint | Yes | Always |
-| Docs consistency check | Yes | Always |
-| Prompt change detection | -- | PRs only |
-| Baseline comparison (`--fail-on-regression`) | **Yes** (if prompt changed) | PRs with prompt changes |
-| Prompt token audit | No | PRs with prompt changes |
-| View designer eval gate (`--fail-on-gate`) | **Yes** | Always |
-| Release eval gate (`--fail-on-gate`) | **Yes** | Always |
-| Replay dry-run | No | Always |
-| Live replay with LLM judge | No | Daily cron, release tags, prompt changes, manual |
-| Safety evals | No | Always |
-| Integration evals | No | Always |
-| Outcome regression report | No | Always |
-| Weekly digest generation | No | Always |
-| Eval summary (GitHub step summary) | No | Always |
+Always-run checks include Ruff lint/format, Mypy, discipline rules, pytest, package-version/README consistency, and router-derived API-documentation coverage. Helm lint and Chart.yaml sync were removed with the charts.
 
-**Prompt-affecting files** (trigger baseline comparison when changed):
-- `sre_agent/agent.py`
-- `sre_agent/security_agent.py`
-- `sre_agent/view_designer.py`
-- `sre_agent/orchestrator.py`
-- `sre_agent/runbooks.py`
-- `sre_agent/harness.py`
-- `sre_agent/intelligence.py`
-- `sre_agent/tool_chains.py`
+Offline fixture reports and prompt baseline comparisons are non-gating reports. Replay dry-run checks harness plumbing. **Live judged replay is gating** when scheduled, pushed to main, tagged, requested manually, or triggered by prompt changes; it fails if the configured Vertex credentials are missing. The command uses `claude-sonnet-5`, concurrency 4, `--judge-min 60`, `--judge-samples 3`, and the checked-in replay baseline. The SRE-Bench simulation step supplies a separate behavioral gate under its workflow conditions. Inspect [.github/workflows/evals.yml](.github/workflows/evals.yml) for exact triggers and generated artifacts.
 
 ### Artifacts
 
@@ -639,43 +585,9 @@ The pipeline publishes a GitHub step summary with a table like:
 
 Download full artifacts from the Actions run page for detailed per-scenario breakdowns.
 
-## Release Process
+## Release process
 
-### How Testing Connects to Release
-
-```
-make verify                          # local: lint + type-check + test
-  |
-  v
-git push                             # triggers evals.yml
-  |
-  v
-CI: lint + tests + eval gates        # must all pass
-  |
-  v
-make release VERSION=1.x.0           # bumps version, commits, tags
-  |
-  v
-git push && git push --tags          # triggers build-push.yml
-  |
-  v
-build-push.yml:
-  1. ruff check                      # lint again
-  2. pytest tests/ -q                # tests again
-  3. docker build + push to quay.io  # only if tests pass
-```
-
-### Workflow: `.github/workflows/build-push.yml`
-
-Triggered on version tags (`v*`) or manual dispatch.
-
-Steps:
-1. Lint with `ruff check`
-2. Run all unit tests (`pytest tests/ -q`)
-3. Build container image (`Dockerfile.full`)
-4. Push to `quay.io/PulseSRE/pulse-agent` with tag and `latest`
-
-The evals.yml workflow also runs on version tags, providing the full eval gate check alongside the build.
+See [RELEASE](RELEASE.md) for current versioning/publication and operator deployment. Build and release workflows are separate from eval checks. A successful image build is not proof of a provider-backed gate or cluster acceptance.
 
 ### Outcome Regression Policy
 
@@ -932,3 +844,16 @@ Defined in `sre_agent/skills/*/evals.yaml`. Auto-registered as eval suites.
 
 Internal/meta tools that don't need user-facing eval prompts:
 `critique_view`, `get_cluster_patterns`, `get_current_user`, `get_view_details`, `get_view_versions`, `set_current_user`, `set_store`, `verify_query`
+
+### Replay client lifetime and correlation coverage
+
+Each replay fixture uses one event loop for all conversation turns, judge
+samples, and owned-client cleanup. `tests/test_replay_event_loop.py` exercises
+this with a loop-bound client, including failure cleanup, without provider calls.
+
+The incident-correlation fixture requires `correlate_incident`, which already
+reads Kubernetes events and returns their timeline. A second `get_events` call
+is optional: the September 30 nightly run scored 90/100 but failed solely for
+omitting that redundant call. Content/judge requirements, forbidden writes,
+and the tool-call budget remain enforced. The recording still supplies raw
+events when the model chooses to inspect them.

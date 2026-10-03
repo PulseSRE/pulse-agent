@@ -1,5 +1,8 @@
 # Customizable Topology Perspectives — Design Spec
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 ## Goal
 
 Extend `get_topology_graph()` with agent-composed filtering so the agent can generate purpose-built topology views — Physical, Logical, Network, Multi-Tenant, Helm — each answering a different operator question. The agent infers the right perspective from the query, but the UI provides perspective quick-launch pills for one-click override.

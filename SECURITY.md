@@ -2,7 +2,7 @@
 
 ## Reporting Vulnerabilities
 
-Report security issues to [GitHub Issues](https://github.com/PulseSRE/pulse-agent/issues) with the `security` label.
+For sensitive vulnerabilities, use the repository’s private reporting channel if enabled, or contact the maintainers privately before disclosing exploit details. Public [issues](https://github.com/PulseSRE/pulse-agent/issues) are appropriate for non-sensitive hardening requests; do not include tokens, kubeconfig, or private cluster data.
 
 ## Authentication
 
@@ -12,7 +12,7 @@ All WebSocket endpoints (`/ws/agent`, `/ws/monitor`) require `PULSE_AGENT_WS_TOK
 If `PULSE_AGENT_WS_TOKEN` is not set on the server, all connections are rejected (fail-closed).
 
 ### REST Authentication
-All REST endpoints except `/healthz` and `/version` require token authentication via the `_verify_rest_token()` function. Accepts either:
+REST application endpoints generally require token authentication; `/healthz`, `/version`, and Prometheus `/metrics` are public. Route-specific dependencies are listed in [API_CONTRACT](API_CONTRACT.md). Token authentication is enforced via the `_verify_rest_token()` function. Accepts either:
 - `Authorization: Bearer <token>` header
 - `?token=<token>` query parameter
 
@@ -23,28 +23,43 @@ Every `confirm_request` event includes a JIT nonce (generated via `secrets.token
 
 ## Authorization
 
-### RBAC Levels
-The agent uses the pod's ServiceAccount for Kubernetes API calls (not user impersonation). Permissions are controlled by the Helm chart's ClusterRole:
+### Identity and Kubernetes credentials
 
-- **Default (read-only):** `get`, `list`, `watch` on pods, nodes, events, services, namespaces, configmaps, PVCs, resource quotas, deployments, replicasets, statefulsets, daemonsets, jobs, cronjobs, HPAs, metrics, RBAC roles/bindings, network policies, ingresses, routes, SCCs, OLM resources (subscriptions, operatorgroups, catalogsources), ArgoCD resources (applications, appprojects, applicationsets), and cluster version/operators.
+The shared agent token authenticates the UI/service connection; it does not establish a user's Kubernetes privileges. The trusted OAuth/reverse proxy supplies user identity and, when enabled, an access token. With `PULSE_AGENT_TOKEN_FORWARDING` (default enabled), interactive paths that propagate `user_token_context` use the caller's token. Background monitor/worker operations use service-account credentials. Review each execution path; this is not universal impersonation.
 
-- **`rbac.allowWriteOperations=true`:** Adds `delete` on pods, `create` on pods/eviction, `patch` on nodes (cordon/uncordon), `patch`/`update` on deployments and deployments/scale, `create` on namespaces, `create` on network policies, `create`/`update`/`patch` on configmaps (audit trail), `patch`/`create` on workload resources (deployments, statefulsets, daemonsets, jobs, cronjobs, HPAs), `create` on OLM resources, `create`/`patch`/`update` on ArgoCD resources.
+`require_admin` verifies the shared token and a user identity. `PULSE_AGENT_ADMIN_USERS`, when configured, restricts that identity to the comma-separated allowlist. When unset, **any authenticated user is allowed**; the dependency name does not imply cluster-admin RBAC. Set an explicit allowlist in production. `PULSE_AGENT_DEV_USER` is a local fallback and must not be relied on as production identity.
 
-- **`rbac.allowSecretAccess=true`:** Adds `get`, `list` on secrets (required for secret hygiene scanning).
+Deployment RBAC is owned by pulse-operator and its `OpenShiftPulse` CR, including write-operation and secret-read options. Inspect the reconciled ClusterRoles and the caller's own permissions; old Helm `rbac.*` values no longer configure this repository. Token forwarding must fail closed for protected interactive writes if a user token is required but absent; the rollback route explicitly checks that case.
 
-No wildcard RBAC rules are used.
+### Ownership migration
 
-### Trust Levels (Monitor Endpoint)
+Legacy dashboard ownership migration is bound to the forwarded access token: only rows matching `user-` plus the first 16 hex characters of that token's SHA-256 hash can be reassigned to the authenticated username. Login without an access token does not migrate views. Existing views owned by that username do not justify migrating other users' legacy rows.
 
-| Level | Name | Behavior |
-|-------|------|----------|
-| 0 | Monitor only | Observe and report findings — no action taken |
-| 1 | Suggest | Propose remediations but take no action |
-| 2 | Ask | Propose fixes and prompt the user for approval via `action_response` |
-| 3 | Auto-fix safe | Auto-apply fixes for enabled safe categories; prompt for others |
-| 4 | Full autonomous | Apply all fixable findings automatically (requires `PULSE_AGENT_MAX_TRUST_LEVEL=4`) |
+### MCP classification and administration
 
-The client's requested trust level is clamped to `PULSE_AGENT_MAX_TRUST_LEVEL` (default: 3) on the server side. The client cannot escalate beyond the server-configured maximum.
+MCP tools are confirmation-required by default, including tools with missing annotations. An administrator-configured server may mark a tool read-only with `readOnlyHint: true`; a simultaneous `destructiveHint: true` prevents that exemption. This trusts the configured server's annotation, not an independent capability sandbox. Native tool names and other connections' tools cannot be replaced by an MCP registration; refreshing the same connection is allowed. MCP prompt-loading helpers are read-only.
+
+The central agent loop unions registry write classifications with caller-supplied write sets, so an empty or stale caller set cannot remove the confirmation requirement. Read-only skill configurations exclude MCP write tools. MCP server add/remove/test and toolset changes use `require_admin`, including its configured identity allowlist behavior described above.
+
+### Plan and durable workflow writes
+
+`PlanRuntime` retains each skill's write-tool classification and passes its optional confirmation callback and caller token to the agent loop. Without a confirmation callback, registered writes are denied. Write-enabled phases are serialized within that runtime; this is not a cluster-wide lock. Default background investigations cannot authorize writes; the separate monitor auto-fix executor retains its trust-aware authorization path.
+
+Durable plan start, phase approval, and cancellation require `require_admin`. A Temporal phase may authorize tool writes only when it declares `approval_required`, receives an affirmative workflow approval signal, and the worker's server trust setting is at least 2. Other phases remain unable to authorize writes. Worker execution uses service credentials; caller tokens are not serialized into workflow history. The workflow uses a patch marker to preserve existing history argument shapes; the activity's omitted write-approval argument defaults to false.
+
+These controls do not add generic policy rules or snapshots to every tool. Keep Temporal/MCP providers trusted and verify actual deployment credentials, approvals, denial behavior, and RBAC before enabling writes.
+
+### Monitor trust levels
+
+| Level | Current server behavior |
+|---|---|
+| 0 | Scan/report; no remediation |
+| 1 | Scan/report; no remediation (not an action proposal mode) |
+| 2 | Propose fixes and wait for an action response |
+| 3 | Automatically fix effective categories |
+| 4 | Automatically fix all supported fixable findings |
+
+`PULSE_AGENT_MAX_TRUST_LEVEL` defaults to **2** and accepts the alias `PULSE_AGENT_TRUST_LEVEL`. Although WS requests are clamped to this value, effective monitor trust is floored at the configured level. Browser settings cannot lower it. Current effective categories start with every registered handler and union browser selections: choosing a smaller subset in the UI does **not** restrict level-3 automatic actions. Configure observe-only at the server/CR for safe validation; do not treat browser trust/category controls as authorization boundaries.
 
 ### Harness Deny Policy
 
@@ -102,7 +117,7 @@ Two mechanisms to halt all auto-fix actions:
 2. **Environment variable:** `PULSE_AGENT_AUTOFIX_ENABLED=false` — disables auto-fix at startup
 
 ### Confirmation Gate
-- **Interactive agent (`/ws/agent`):** All write operations require a `confirm_request`/`confirm_response` round-trip with nonce verification before execution. This is enforced programmatically in code — the agent cannot bypass it regardless of trust level.
+- **Interactive agent (`/ws/agent`):** Tools classified as writes in the interactive configuration require a `confirm_request`/`confirm_response` round-trip with nonce verification. The registry classifications are enforced centrally; MCP classification and plan/worker authorization follow the scoped rules above. A server falsely annotating a mutating MCP tool as read-only remains outside that guarantee.
 - **Monitor auto-fix (`/ws/monitor` at trust level 3+):** Fixes execute WITHOUT the interactive confirmation gate. This is by design for autonomous remediation. Safety is enforced through rate limiting, cooldown, bare pod protection, and the emergency kill switch instead.
 
 ## Prompt Injection Defense
@@ -142,30 +157,15 @@ Investigation prompts wrap cluster data in delimiters:
 - **Seccomp:** `seccompProfile: RuntimeDefault`
 - **Health probes:** Liveness and readiness via `/healthz`
 
-## Database Security
+## Database and network boundary
 
-### PostgreSQL (Required)
-- PostgreSQL is required for all data-backed features (memory, monitor, views, tool analytics, SLOs, evals, inbox). There is no SQLite fallback — `get_database()` raises at startup if `PULSE_AGENT_DATABASE_URL` is unset.
-- Uses RHEL 9 PostgreSQL image in the Helm-deployed StatefulSet
-- NetworkPolicy restricts database access to agent pods only
-- Database password is auto-generated as a Kubernetes Secret on Helm install, preserved across upgrades via `lookup()`
-- Connection via `PULSE_AGENT_DATABASE_URL` environment variable
-- `@db_safe` decorator on fire-and-forget analytics writes (tool usage, etc.) prevents transient DB errors from crashing the agent
+PostgreSQL is required for persistent features; `PULSE_AGENT_DATABASE_URL` configures it. Deployment images, password Secrets, storage, and NetworkPolicy are reconciled by the operator. Credentials must be rotated in PostgreSQL and consumers together; updating a Secret alone is insufficient. `@db_safe` limits the impact of some analytics failures but does not make unavailable storage healthy.
 
-## Network Security
+When configured by the operator, NetworkPolicy scopes agent/UI/monitoring/MCP traffic and admits agent and enabled Temporal database consumers on TCP 5432. Verify actual selectors, DNS, provider/API egress, Prometheus ingress, and policy enforcement in the deployed namespace. Do not copy the removed Helm selector/value examples as current policy. Public `/metrics` must be reachable only by intended monitoring clients at the deployment boundary.
 
-### Egress (when NetworkPolicy enabled)
-- DNS: port 53 (UDP/TCP)
-- HTTPS: ports 443 and 6443 (Kubernetes API + external AI API)
-- All other egress blocked
+## Coverage limitations
 
-### Ingress
-- Port 8080 (WebSocket/HTTP), restricted to pods matching `networkPolicy.uiPodSelector` (defaults to the Pulse UI's `app: openshiftpulse` label, same namespace) — not open to arbitrary pods on the cluster network
-- All other ingress blocked
-
-### PostgreSQL NetworkPolicy
-- Allows ingress only from agent pods (label selector match)
-- No external access to the database
+Policy rules and five native verification contracts are scoped controls. No claim is made that every mutation has snapshot/undo support or caller-context propagation. MCP tools, authored plans, Temporal activities, view actions, and unattended fixes must each be tested for classification, credentials, approval, policy enforcement, and fail-closed behavior. Model prompts and text sanitization reduce risk but are not authorization controls or complete prompt-injection protection.
 
 ## Audit Trail
 
@@ -191,7 +191,9 @@ Investigation prompts wrap cluster data in delimiters:
 - Daily investigations: 20 (configurable)
 - Confirmation timeout: 120 seconds
 
-## Security Fixes (Phase 1 — v2.5.0)
+## Historical security fixes (Phase 1 — v2.5.0)
+
+These entries describe prior remediation; they are not evidence that all current execution paths are secure.
 
 ### IDOR (Insecure Direct Object Reference) — Fixed
 **Issue:** View tools bypassed ownership checks when `db.get_view()` returned `None` (view not found), falling back to cluster-wide queries without owner filtering. This allowed users to access views they didn't own by crafting requests for non-existent view IDs, which would then return all views in the cluster.
@@ -222,3 +224,17 @@ Patterns are validated before being passed to Prometheus query_range.
 **Issue:** The `GET /topology` and `POST /blast-radius` endpoints did not enforce namespace scoping, allowing users to retrieve topology data and blast radius analysis across the entire cluster, even if they only had access to specific namespaces.
 
 **Fix (commit ee359bb):** Both endpoints now filter resources by the `namespace` query parameter. If a namespace is provided, only resources in that namespace are included in the topology graph and blast radius analysis. This prevents privilege escalation by restricting visibility to authorized namespaces only.
+
+### Rollback authorization and snapshot integrity
+
+`POST /fix-history/{id}/rollback` requires an attributable user and enforces
+`PULSE_AGENT_ADMIN_USERS` like fix approval. When token forwarding is enabled,
+a missing user access token is rejected; the rollback's Kubernetes reads and
+writes run under that token rather than the agent ServiceAccount. The request
+logs the requesting user and action ID.
+
+Snapshot rollback atomically tests the original resource UID and the freshly
+read resourceVersion before replacing mutable subtrees using JSON Patch. A
+follow-up read must match the snapshot before success is recorded. Snapshots
+created before UID capture cannot establish resource identity and are refused;
+they require manual recovery.

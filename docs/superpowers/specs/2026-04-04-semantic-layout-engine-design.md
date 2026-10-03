@@ -1,5 +1,8 @@
 # Semantic Layout Engine — Design Spec
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 **Goal:** Replace the 5 fixed layout templates with a smart auto-layout engine that computes grid positions from component roles. No template selection needed — the engine handles any combination of components automatically.
 
 **Problem:** The current template system uses greedy first-match slot assignment. Components must arrive in the right order. A `grid` containing metric_cards can match a w=1 metric_card slot, getting squished. Only 5 templates exist — anything outside them gets ugly full-width stacking. The agent has to pick a template ID, adding another decision point to an already complex prompt.

@@ -1,17 +1,17 @@
 # Pulse Agent Evals
 
-Deterministic and LLM-judged eval framework for scoring agent quality and gating releases.
+Evaluation framework with fixture reports, replay harness checks, and live model/judge runs. Only executing the real agent establishes model-behavior evidence.
 
-> **See also:** [`TESTING.md`](../../TESTING.md) for the full testing strategy, all 122 eval prompts, CI pipeline, and release process.
+> **See also:** [`TESTING.md`](../../TESTING.md) for commands, evidence limits, CI conditions, and the release process.
 
 ## Scenario Suites
 
-16 suites covering 192 total scenarios:
+Scenario-suite inventory below is illustrative; JSON/YAML fixtures are authoritative. Suite scores of hand-authored data do not prove agent quality:
 
 | Suite | Scenarios | Purpose |
 |-------|-----------|---------|
 | `core` | 6 | Fundamental SRE diagnostics |
-| `release` | 19 | Release gate (CI blocks on failure) |
+| `release` | 19 | Fixture report; actual release gate is live judged replay |
 | `safety` | 5 | Dangerous action guardrails |
 | `integration` | 23 | Cross-tool workflows |
 | `adversarial` | 5 | Prompt injection and edge cases |
@@ -31,7 +31,7 @@ Scenario fixtures live in `sre_agent/evals/scenarios_data/*.json`.
 
 ## Replay Fixtures
 
-43 replay fixtures capture real agent tool-call traces for offline evaluation. Used by the replay harness to test scoring without live cluster access.
+Replay fixtures provide recorded cluster/tool responses. `--dry-run` builds mock responses from fixture expectations and checks plumbing, not model quality. A live replay invokes the real model and optional judge against those recordings without a live cluster.
 
 ### Replay runs the real agent
 
@@ -59,7 +59,7 @@ Every scenario is scored across four dimensions:
 - **safety** (20%) — zero rejected/dangerous actions?
 - **speed** (10%) — completed within time budget?
 
-Release gate requires minimum overall score, minimum per-dimension thresholds, and no hard blocker violations.
+The ORCA rubric scores scenario data. The current live replay gate instead uses deterministic replay checks, judge scores, and baseline comparison; see `make eval-gate` and the workflow for actual thresholds.
 
 ## LLM Judge
 

@@ -1,5 +1,8 @@
 # Extensible Agent Architecture — Plan
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 ## Context
 
 Pulse Agent has 4 agent modes hardcoded in Python. Adding a new specialization or modifying agent behavior requires changing Python files, rebuilding, and redeploying. The goal is a fully extensible system where an admin can:

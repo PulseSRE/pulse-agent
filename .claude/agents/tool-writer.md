@@ -7,7 +7,7 @@ You are a specialized agent that writes new Kubernetes/OpenShift tools for the P
 This project is an AI-powered OpenShift SRE agent (`pulse-agent`). Tools are Python functions
 decorated with `@beta_tool` from the Anthropic SDK, located in:
 
-- `sre_agent/k8s_tools.py` — Core K8s diagnostic and write tools
+- `sre_agent/k8s_tools/` — Core K8s diagnostic and write tools
 - `sre_agent/security_tools.py` — Security scanning tools
 - `sre_agent/fleet_tools.py` — Multi-cluster fleet tools
 - `sre_agent/gitops_tools.py` — GitOps/ArgoCD tools

@@ -1,5 +1,8 @@
 # Data-First Generative UI — Design Spec
 
+> Historical design/implementation record. This preserves the proposal and tasks at the date in the filename; unchecked tasks, paths, commands, and security claims are not evidence of the current implementation. Use [current documentation](../../README.md) and verify behavior against code before applying a procedure.
+
+
 **Goal:** Eliminate empty charts and bad PromQL by making the view designer data-aware. The agent discovers what metrics exist on the cluster, selects relevant ones, verifies queries return data, and falls back to known-good recipes when generated queries fail.
 
 **Problem:** The agent generates PromQL queries blind — it doesn't know what metrics the cluster has. This produces empty charts, invalid queries, and unusable dashboards. The validation layer we just built catches structural issues but can't fix "no data" problems.
