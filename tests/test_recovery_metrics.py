@@ -4,16 +4,21 @@ import time
 
 import pytest
 
-from sre_agent.db import get_database
+from sre_agent.db import Database, reset_database, set_database
 from sre_agent.repositories.monitor_repo import MonitorRepository
-from tests.conftest import truncate_core_tables
+from tests.conftest import _TEST_DB_URL, truncate_core_tables
 
 
 @pytest.fixture
 def repo():
-    db = get_database()
+    db = Database(_TEST_DB_URL)
+    set_database(db)
     truncate_core_tables(db)
-    return MonitorRepository(db)
+    try:
+        yield MonitorRepository(db)
+    finally:
+        truncate_core_tables(db)
+        reset_database()
 
 
 def save_case(repo, name, detected, action_at, verified_at, verdict="verified"):

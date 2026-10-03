@@ -48,7 +48,8 @@ def _compute_kpi_dashboard_sync(days: int) -> dict:
         mttr_seconds = int((mttr_row["avg_ms"] or 0) / 1000) if mttr_row else 0
         has_remediations = mttr_row and mttr_row["avg_ms"] is not None
         kpis["mttr"] = {
-            "label": "Mean Time to Remediate",
+            "label": "Action Execution Time",
+            "description": "Completed tool execution duration; excludes approval wait and does not prove recovery",
             "value": mttr_seconds,
             "unit": "seconds",
             "target": 300,
