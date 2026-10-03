@@ -16,6 +16,10 @@ _expires = 0.0
 
 @router.get("/readiness")
 async def installation_readiness(_auth=Depends(verify_token)):
+    return await get_installation_report()
+
+
+async def get_installation_report() -> dict:
     global _cached, _expires
     # Single flight plus a short cache bounds repeated read-only cluster probes.
     async with _lock:
