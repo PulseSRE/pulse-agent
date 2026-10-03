@@ -69,6 +69,13 @@ class _SimBackedTool:
             args["confirmed"] = approved is not None
             if approved is not None:
                 self._approvals.pop(approved)
+        # Pulse exposes pod_name; the benchmark's canonical pod tools use name.
+        # Preserve the real tool schema presented to the model, and translate
+        # only at the backend boundary after matching the approval input.
+        if self.name in {"describe_pod", "get_pod_logs", "delete_pod"} and "pod_name" in args:
+            if "name" in args and args["name"] != args["pod_name"]:
+                raise ValueError("conflicting pod identity in simulation input")
+            args["name"] = args.pop("pod_name")
         return json.dumps(self._backend.call(self.name, **args))
 
 

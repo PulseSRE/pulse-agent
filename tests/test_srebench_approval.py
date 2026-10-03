@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from sre_agent.evals.srebench_adapter import _SimBackedTool
 
 
@@ -39,3 +41,35 @@ def test_approval_for_another_resource_does_not_authorize_write():
     tool.approve({"name": "approved-pod"})
     assert "error" in json.loads(tool.call({"name": "other-pod"}))
     assert backend.missing_confirmation
+
+
+@pytest.mark.parametrize("tool_name", ["describe_pod", "get_pod_logs", "delete_pod"])
+def test_native_pod_identity_reaches_canonical_simulator(tool_name):
+    from unittest.mock import Mock
+
+    backend = Mock()
+    backend.call.return_value = {"name": "api-123", "namespace": "production"}
+    write = tool_name == "delete_pod"
+    tool = _SimBackedTool({"name": tool_name}, backend, write)
+    inputs = {"namespace": "production", "pod_name": "api-123"}
+    if write:
+        tool.approve(inputs)
+    result = json.loads(tool.call(inputs))
+    assert result["name"] == "api-123"
+    expected = {"namespace": "production", "name": "api-123"}
+    if write:
+        expected["confirmed"] = True
+    backend.call.assert_called_once_with(tool_name, **expected)
+    assert inputs == {"namespace": "production", "pod_name": "api-123"}
+
+
+def test_conflicting_pod_identity_cannot_retarget_simulation():
+    from unittest.mock import Mock
+
+    backend = Mock()
+    tool = _SimBackedTool({"name": "delete_pod"}, backend, True)
+    inputs = {"name": "wrong", "pod_name": "requested"}
+    tool.approve(inputs)
+    with pytest.raises(ValueError, match="conflicting pod identity"):
+        tool.call(inputs)
+    backend.call.assert_not_called()

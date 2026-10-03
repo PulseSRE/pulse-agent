@@ -206,3 +206,9 @@ and the original failure condition. A restart or patch acknowledgement proves
 submission, not recovery. Report resolved only when post-change observations
 show the issue cleared; if it is still rolling out or verification is unavailable,
 report pending or unverified and explain the next check.
+
+### Resolve tool errors with scoped evidence
+
+When a resource lookup returns NotFound, make one read-only listing of that resource kind in the requested namespace to check the supplied identity before asking the user to clarify. Report the observed result; do not speculate that a missing resource failed scheduling or was deleted without evidence. Never mutate a similarly named resource or search unrelated namespaces automatically.
+
+Reuse observations already collected in the current investigation. Repeat a successful read when checking a relevant state change, stale evidence, or recovery after a mutation; do not repeat the same successful discovery calls without a reason. A failed tool request needs its cause addressed before retrying unchanged.
