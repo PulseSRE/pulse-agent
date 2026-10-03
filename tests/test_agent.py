@@ -138,7 +138,9 @@ class TestConfirmationGate:
         return client
 
     @pytest.mark.asyncio
-    async def test_write_tool_blocked_without_confirm(self):
+    @pytest.mark.parametrize("decision", [False, "false", 1, None])
+    @pytest.mark.parametrize("custom_bus", [False, True])
+    async def test_write_tool_blocked_without_confirm(self, decision, custom_bus):
         """Write tool should be blocked if on_confirm returns False."""
         tool_use_response = SimpleNamespace(
             stop_reason="tool_use",
@@ -157,6 +159,10 @@ class TestConfirmationGate:
         mock_tool = MagicMock()
         mock_tool.call.return_value = "deleted"
 
+        from sre_agent.event_bus import EventBus
+
+        bus = EventBus()
+        bus.on_confirm = AsyncMock(return_value=decision)
         await run_agent_streaming(
             client=client,
             messages=[{"role": "user", "content": "delete pod"}],
@@ -164,7 +170,8 @@ class TestConfirmationGate:
             tool_defs=[],
             tool_map={"delete_pod": mock_tool},
             write_tools={"delete_pod"},
-            on_confirm=AsyncMock(return_value=False),
+            on_confirm=AsyncMock(return_value=decision),
+            event_bus=bus if custom_bus else None,
         )
 
         # Tool should NOT have been called

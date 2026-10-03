@@ -119,9 +119,10 @@ async def run_plan_phase(
         # Only a verdict delivered through the workflow's approval gate can
         # authorize writes. Ordinary investigation phases stay read-only.
         async def confirm_write(_name, _input):
+            from ..action_policy import approved_phase_can_write
             from ..config import get_settings
 
-            return writes_approved and get_settings().monitor.max_trust_level >= 2
+            return approved_phase_can_write(writes_approved, get_settings().monitor.max_trust_level)
 
         runtime = PlanRuntime(client=client, on_confirm=confirm_write)
         output = await runtime._execute_phase(phase, incident, priors)

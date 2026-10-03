@@ -17,6 +17,7 @@ from typing import Any
 
 import anthropic
 
+from .action_policy import effective_write_tools, is_explicit_approval
 from .config import get_settings
 
 # Import tool modules to trigger @beta_tool auto-registration in TOOL_REGISTRY.
@@ -588,7 +589,7 @@ async def run_agent_streaming(
 
     # A caller may add confirmation requirements, never remove registry ones.
     # Dynamic MCP registrations happen after this module's import-time snapshot.
-    write_tools = set(write_tools or ()) | (get_write_tools() & tool_map.keys())
+    write_tools = effective_write_tools(write_tools or (), get_write_tools(), tool_map.keys())
 
     if event_bus is None:
         event_bus = EventBus.from_callbacks(
@@ -878,7 +879,7 @@ async def run_agent_streaming(
             # Execute write tools sequentially (need confirmation gate)
             for block in write_blocks:
                 confirmed = await event_bus.on_confirm(block.name, block.input)
-                if not confirmed:
+                if not is_explicit_approval(confirmed):
                     results_map[block.id] = ("Operation denied. No confirmation callback or user rejected.", None)
                     await event_bus.on_tool_result(
                         {
