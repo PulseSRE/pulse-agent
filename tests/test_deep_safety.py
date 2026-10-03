@@ -1,7 +1,6 @@
 """Cross-boundary regressions for dynamic tools, plans and owner migration."""
 
 import hashlib
-import sqlite3
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
@@ -14,29 +13,25 @@ from sre_agent.skill_plan import SkillPhase
 from sre_agent.tool_registry import TOOL_REGISTRY, WRITE_TOOL_NAMES, unregister_tool
 
 
-class _MemoryDB:
-    def __init__(self):
-        self.conn = sqlite3.connect(":memory:")
-        self.conn.row_factory = sqlite3.Row
-
-    def execute(self, sql, params=()):
-        return self.conn.execute(sql, params)
-
-    def commit(self):
-        self.conn.commit()
-
-
 def test_legacy_migration_cannot_claim_other_users_or_require_empty_new_owner():
-    db = _MemoryDB()
-    db.execute("CREATE TABLE views (id text, owner text)")
+    from sre_agent.db import get_database
+    from tests.conftest import truncate_tables
+
+    db = get_database()
+    truncate_tables(db, "views")
     alice = "user-" + hashlib.sha256(b"alice-token").hexdigest()[:16]
     bob = "user-" + hashlib.sha256(b"bob-token").hexdigest()[:16]
-    for row in [("a", alice), ("b", bob), ("existing", "alice")]:
-        db.execute("INSERT INTO views VALUES (?,?)", row)
     repo = ViewRepository(db=db)
+    for view_id, owner in [("a", alice), ("b", bob), ("existing", "alice")]:
+        assert repo.save_view(owner, view_id, view_id, "", []) == view_id
     assert repo.migrate_view_ownership("charlie") == 0
     assert repo.migrate_view_ownership("alice", alice) == 1
-    assert dict(db.execute("SELECT id,owner FROM views").fetchall()) == {"a": "alice", "b": bob, "existing": "alice"}
+    assert {row["id"]: row["owner"] for row in db.fetchall("SELECT id,owner FROM views")} == {
+        "a": "alice",
+        "b": bob,
+        "existing": "alice",
+    }
+    db.commit()
 
 
 def test_forwarded_username_without_token_does_not_trigger_migration():
