@@ -54,7 +54,7 @@ async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -
             active_ns_category.setdefault(ns_key, set()).add(rkey)
 
     completed_ids: list[str] = []
-    for action_id, payload in monitor._pending_verifications.items():
+    for action_id, payload in list(monitor._pending_verifications.items()):
         if monitor._scan_counter < int(payload.get("target_scan", 0)):
             continue
 

@@ -836,8 +836,13 @@ class ClusterMonitor:
             from ..temporal.client import start_incident_run
 
             resource = dict(resources[0]) if resources else {}
+            # Fast blocked/no-op workflows may record an outcome immediately.
+            # Establish the action row before dispatch, not after awaiting start.
+            action_report["status"] = "dispatched"
+            save_action(action_report, category=category, resources=resources, finding=finding)
             started = await start_incident_run(
                 finding_id=str(finding.get("id", "")),
+                action_id=action_report["id"],
                 resource=resource,
                 fix_plan={
                     "strategy": targeted_plan.strategy,
@@ -864,7 +869,8 @@ class ClusterMonitor:
         action_report["workflowId"] = started["workflow_id"]
         action_report["fixStrategy"] = targeted_plan.strategy
         await self._broadcast_raw(action_report)
-        save_action(action_report, category=category, resources=resources, finding=finding)
+        # The workflow may already have persisted a verdict while start or the
+        # broadcast yielded. Re-saving this stale report would erase that verdict.
         self._recent_fix_ids.add(finding["id"])
         logger.info("Auto-fix dispatched durably: %s", started["workflow_id"])
         return True
@@ -886,7 +892,7 @@ class ClusterMonitor:
         the execution semantics cannot drift between "asked first" and "acted
         directly".
         """
-        from .fix_planner import execute_fix as execute_targeted_fix
+        from .fix_planner import execute_fix_with_snapshot as execute_targeted_fix
 
         # Durable path (opt-in, PULSE_AGENT_DURABLE_AUTOFIX). Hands the
         # post-approval sequence — snapshot, apply, verify, settle, recheck —
@@ -909,12 +915,24 @@ class ClusterMonitor:
 
         start_ms = _ts()
         try:
-            tool, before_state, after_state = await asyncio.to_thread(execute_targeted_fix, targeted_plan)
-            # The restorable copy the executor captured. before_state is a
-            # human-readable sentence; this is what an undo actually needs.
-            from .fix_planner import take_last_snapshot
-
-            _snapshot = take_last_snapshot()
+            execution = await asyncio.to_thread(execute_targeted_fix, targeted_plan)
+            tool, before_state, after_state = execution.result
+            _snapshot = execution.snapshot
+            if not execution.applied:
+                action_report.update(
+                    tool=tool,
+                    status="failed",
+                    beforeState=before_state,
+                    afterState=after_state,
+                    error=after_state,
+                    durationMs=_ts() - start_ms,
+                    verificationStatus="unverifiable",
+                )
+                if _METRICS_AVAILABLE:
+                    AUTOFIX_TOTAL.labels(outcome="failure").inc()
+                await self._broadcast_raw(action_report)
+                save_action(action_report, category=category, resources=resources, finding=finding)
+                return False
             duration_ms = _ts() - start_ms
 
             action_report["tool"] = tool
@@ -941,7 +959,7 @@ class ClusterMonitor:
                 "resources": resources,
                 # What the health gate reads. Falls back to the fixed
                 # resource when there is no better target.
-                "verify_resources": verify_resources or resources,
+                "verify_resources": execution.verify_resources or verify_resources or resources,
                 "target_scan": self._scan_counter + 1,
             }
 
@@ -969,38 +987,18 @@ class ClusterMonitor:
         except Exception as e:
             duration_ms = _ts() - start_ms
 
-            from kubernetes.client.rest import ApiException as _ApiException
+            from ..errors import classify_exception
 
-            if isinstance(e, _ApiException) and e.status == 404:
-                logger.info(
-                    "Auto-fix: resource gone (404) for %s — resolving finding",
-                    finding["id"],
-                )
-                action_report["status"] = "completed"
-                action_report["afterState"] = "Resource no longer exists — resolved"
-                action_report["durationMs"] = duration_ms
-                self._recent_fix_ids.add(finding["id"])
-                _resolve_finding_inbox(finding["id"], finding)
-                if _METRICS_AVAILABLE:
-                    AUTOFIX_TOTAL.labels(outcome="success").inc()
-            else:
-                from ..errors import classify_exception
-
-                # str(e) on a kubernetes ApiException dumps the whole object,
-                # headers and all — classify_exception extracts the structured
-                # Status body's message instead, so this stays readable.
-                action_report["status"] = "failed"
-                action_report["error"] = str(classify_exception(e, category))[:500]
-                action_report["durationMs"] = duration_ms
-                if _METRICS_AVAILABLE:
-                    AUTOFIX_TOTAL.labels(outcome="failure").inc()
-
-                logger.info(
-                    "Auto-fix failed: category=%s finding=%s error=%s",
-                    category,
-                    finding["id"],
-                    e,
-                )
+            action_report["status"] = "failed"
+            action_report["error"] = str(classify_exception(e, category))[:500]
+            action_report["durationMs"] = duration_ms
+            action_report["verificationStatus"] = "unverifiable"
+            action_report["verificationEvidence"] = (
+                "Mutation did not complete; resource absence or API failure is not recovery evidence"
+            )
+            if _METRICS_AVAILABLE:
+                AUTOFIX_TOTAL.labels(outcome="failure").inc()
+            logger.info("Auto-fix failed: category=%s finding=%s", category, finding["id"], exc_info=True)
 
         await self._broadcast_raw(action_report)
 

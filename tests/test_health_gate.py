@@ -31,8 +31,15 @@ def _apps(obj=None, exc=None):
 
 def _deployment(desired: int, ready: int | None):
     return SimpleNamespace(
+        metadata=SimpleNamespace(generation=1),
         spec=SimpleNamespace(replicas=desired),
-        status=SimpleNamespace(ready_replicas=ready),
+        status=SimpleNamespace(
+            ready_replicas=ready,
+            observed_generation=1,
+            updated_replicas=desired,
+            available_replicas=ready,
+            replicas=desired,
+        ),
     )
 
 
@@ -91,6 +98,7 @@ class TestPodHealth:
         pod = SimpleNamespace(
             status=SimpleNamespace(
                 phase="Running",
+                conditions=[SimpleNamespace(type="Ready", status="True")],
                 container_statuses=[SimpleNamespace(name="app", ready=True, restart_count=2)],
             )
         )
@@ -102,6 +110,7 @@ class TestPodHealth:
         pod = SimpleNamespace(
             status=SimpleNamespace(
                 phase="Running",
+                conditions=[SimpleNamespace(type="Ready", status="True")],
                 container_statuses=[SimpleNamespace(name="app", ready=False, restart_count=9)],
             )
         )
@@ -154,8 +163,9 @@ class TestOwnerBasedVerification:
 
     def test_replicaset_is_checkable(self):
         rs = SimpleNamespace(
+            metadata=SimpleNamespace(generation=1),
             spec=SimpleNamespace(replicas=2),
-            status=SimpleNamespace(ready_replicas=2),
+            status=SimpleNamespace(ready_replicas=2, observed_generation=1),
         )
         apps = MagicMock()
         apps.read_namespaced_replica_set.return_value = rs
@@ -169,3 +179,128 @@ class TestOwnerBasedVerification:
             status, evidence = health_gate.check_resources([{"kind": "Deployment", "name": "web", "namespace": "prod"}])
         assert status == health_gate.FAIL
         assert "0/3" in evidence
+
+
+class TestIncidentRecoveryEvidence:
+    def test_failed_rollout_old_ready_replicas_do_not_verify_recovery(self):
+        dep = _deployment(3, 3)
+        dep.metadata.generation = 2
+        with patch("sre_agent.k8s_client.get_apps_client", return_value=_apps(dep)):
+            assert health_gate.check_resource("Deployment", "api", "prod").status == health_gate.FAIL
+        dep.status.observed_generation = 2
+        dep.status.updated_replicas = 1
+        with patch("sre_agent.k8s_client.get_apps_client", return_value=_apps(dep)):
+            assert health_gate.check_resource("Deployment", "api", "prod").status == health_gate.FAIL
+        dep.status.updated_replicas = 3
+        with patch("sre_agent.k8s_client.get_apps_client", return_value=_apps(dep)):
+            assert health_gate.check_resource("Deployment", "api", "prod").status == health_gate.PASS
+
+    def test_crashloop_running_without_readiness_is_not_recovered(self):
+        pod = SimpleNamespace(status=SimpleNamespace(phase="Running", container_statuses=[]))
+        core = MagicMock()
+        core.read_namespaced_pod.return_value = pod
+        with patch("sre_agent.k8s_client.get_core_client", return_value=core):
+            assert health_gate.check_resource("Pod", "api-1", "prod").status == health_gate.UNVERIFIABLE
+        pod.status.container_statuses = [SimpleNamespace(name="app", ready=True, restart_count=8)]
+        pod.status.conditions = [SimpleNamespace(type="Ready", status="False")]
+        with patch("sre_agent.k8s_client.get_core_client", return_value=core):
+            assert health_gate.check_resource("Pod", "api-1", "prod").status == health_gate.FAIL
+
+    def test_pending_pod_requires_scheduled_ready_observation(self):
+        pod = SimpleNamespace(status=SimpleNamespace(phase="Pending"))
+        core = MagicMock()
+        core.read_namespaced_pod.return_value = pod
+        with patch("sre_agent.k8s_client.get_core_client", return_value=core):
+            assert health_gate.check_resource("Pod", "pending", "prod").status == health_gate.FAIL
+        pod.status = SimpleNamespace(
+            phase="Running",
+            container_statuses=[SimpleNamespace(name="app", ready=True, restart_count=0)],
+            conditions=[SimpleNamespace(type="Ready", status="True")],
+        )
+        with patch("sre_agent.k8s_client.get_core_client", return_value=core):
+            assert health_gate.check_resource("Pod", "pending", "prod").status == health_gate.PASS
+
+    def test_one_unreadable_target_prevents_aggregate_resolution(self):
+        with patch("sre_agent.k8s_client.get_apps_client", return_value=_apps(_deployment(1, 1))):
+            status, evidence = health_gate.check_resources(
+                [
+                    {"kind": "Deployment", "name": "ok", "namespace": "prod"},
+                    {"kind": "Service", "name": "unknown", "namespace": "prod"},
+                ]
+            )
+        assert status == health_gate.UNVERIFIABLE
+        assert "no health check" in evidence
+
+
+class TestControllerOwnerRollouts:
+    def stateful(self, current="old", updated=1, strategy="RollingUpdate", partition=0):
+        return SimpleNamespace(
+            metadata=SimpleNamespace(generation=2),
+            spec=SimpleNamespace(
+                replicas=3,
+                update_strategy=SimpleNamespace(type=strategy, rolling_update=SimpleNamespace(partition=partition)),
+            ),
+            status=SimpleNamespace(
+                ready_replicas=3,
+                observed_generation=2,
+                current_revision=current,
+                update_revision="new",
+                updated_replicas=updated,
+            ),
+        )
+
+    def daemon(self, updated=1, strategy="RollingUpdate"):
+        return SimpleNamespace(
+            metadata=SimpleNamespace(generation=2),
+            spec=SimpleNamespace(update_strategy=SimpleNamespace(type=strategy)),
+            status=SimpleNamespace(
+                desired_number_scheduled=3,
+                number_ready=3,
+                observed_generation=2,
+                updated_number_scheduled=updated,
+                current_number_scheduled=3,
+                number_available=3,
+            ),
+        )
+
+    def gate(self, kind, obj):
+        with patch("sre_agent.k8s_client.get_apps_client", return_value=_apps(obj)):
+            return health_gate.check_resource(kind, "owner", "prod").status
+
+    def test_statefulset_old_ready_replicas_cannot_verify_recovery(self):
+        assert self.gate("StatefulSet", self.stateful()) == health_gate.FAIL
+        assert self.gate("StatefulSet", self.stateful(current="new", updated=1)) == health_gate.FAIL
+        assert self.gate("StatefulSet", self.stateful(current="new", updated=3)) == health_gate.PASS
+
+    def test_daemonset_old_ready_replicas_cannot_verify_recovery(self):
+        assert self.gate("DaemonSet", self.daemon()) == health_gate.FAIL
+        assert self.gate("DaemonSet", self.daemon(updated=3)) == health_gate.PASS
+
+    def test_deliberate_old_replicas_do_not_prove_recovery(self):
+        assert self.gate("StatefulSet", self.stateful(strategy="OnDelete")) == health_gate.UNVERIFIABLE
+        assert self.gate("StatefulSet", self.stateful(partition=2)) == health_gate.UNVERIFIABLE
+        assert self.gate("DaemonSet", self.daemon(strategy="OnDelete")) == health_gate.UNVERIFIABLE
+        assert self.gate("DaemonSet", self.daemon(updated=3, strategy="OnDelete")) == health_gate.PASS
+
+    def test_missing_revision_or_rollout_observations_are_unverifiable(self):
+        stateful = self.stateful(current="new", updated=3)
+        stateful.status.update_revision = None
+        assert self.gate("StatefulSet", stateful) == health_gate.UNVERIFIABLE
+        daemon = self.daemon(updated=3)
+        daemon.status.updated_number_scheduled = None
+        assert self.gate("DaemonSet", daemon) == health_gate.UNVERIFIABLE
+
+    def test_deleted_pod_owner_contract_does_not_hide_incomplete_rollout(self):
+        from sre_agent.tool_contracts import run_probe
+
+        for kind, owner in (("StatefulSet", self.stateful()), ("DaemonSet", self.daemon())):
+            with patch("sre_agent.k8s_client.get_apps_client", return_value=_apps(owner)):
+                status, evidence = run_probe(
+                    {
+                        "tool": "delete_pod",
+                        "args": {"namespace": "prod", "pod_name": "replaced"},
+                        "pre": {"owner": {"kind": kind, "name": "owner", "namespace": "prod"}},
+                    }
+                )
+            assert status == health_gate.FAIL
+            assert "rollout incomplete" in evidence

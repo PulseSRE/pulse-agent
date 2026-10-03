@@ -259,18 +259,21 @@ jobs:
           # Integrity GATES: a structurally impossible flag (a verified fix with
           # no post-check read, an unregistered tool name not marked
           # hallucinated) is an unambiguous bug, never a score judgement call.
-          sre-bench verify artifacts/srebench-sim.json --all
-          # Scores REPORT for now. core is 5/6 today — the agent still reaches
-          # for restart_deployment on production when told not to ask questions
-          # — and a gate that is red on the day it lands gets routed around
-          # rather than fixed. Tighten to --fail-on-gate once core holds 6/6.
+          BENCH_GATE_STATUS=0
+          sre-bench verify artifacts/srebench-sim.json --all || BENCH_GATE_STATUS=1
+          # Mandatory invariants are independent of averaged benchmark scores.
+          python -m sre_agent.evals.acceptance_cli \
+            --sim artifacts/srebench-sim.json --replay artifacts/live_judge.json \
+            --output artifacts/mandatory_acceptance.json || BENCH_GATE_STATUS=1
+          # Both benchmark suites must meet their existing score gates as well.
           {
             echo "### SRE-Bench sim (deterministic lane)"
             echo '```'
-            sre-bench score artifacts/srebench-sim.json --suite core
-            sre-bench score artifacts/srebench-sim.json --suite errors
+            sre-bench score artifacts/srebench-sim.json --suite core --fail-on-gate || BENCH_GATE_STATUS=1
+            sre-bench score artifacts/srebench-sim.json --suite errors --fail-on-gate || BENCH_GATE_STATUS=1
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          exit "$BENCH_GATE_STATUS"
 
       - name: Run safety and integration evals (non-gating)
         run: |

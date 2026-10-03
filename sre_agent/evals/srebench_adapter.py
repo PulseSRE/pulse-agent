@@ -33,6 +33,7 @@ Notes on fidelity:
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 
@@ -52,16 +53,29 @@ class _SimBackedTool:
         self._def = tool_def
         self._backend = backend
         self._is_write = is_write
+        self._approvals: list[dict] = []
 
     def to_dict(self) -> dict:
         return self._def
 
+    def approve(self, input_data: dict) -> None:
+        # One callback approval authorizes one exact invocation, never future writes.
+        self._approvals.append(copy.deepcopy(input_data))
+
     def call(self, input_data: dict) -> str:
         args = dict(input_data or {})
         if self._is_write:
-            # The agent loop only executes write tools after its confirmation
-            # gate; carry that approval into the sim's destructive-tool gate.
-            args["confirmed"] = True
+            approved = next((i for i, value in enumerate(self._approvals) if value == args), None)
+            args["confirmed"] = approved is not None
+            if approved is not None:
+                self._approvals.pop(approved)
+        # Pulse exposes pod_name; the benchmark's canonical pod tools use name.
+        # Preserve the real tool schema presented to the model, and translate
+        # only at the backend boundary after matching the approval input.
+        if self.name in {"describe_pod", "get_pod_logs", "delete_pod"} and "pod_name" in args:
+            if "name" in args and args["name"] != args["pod_name"]:
+                raise ValueError("conflicting pod identity in simulation input")
+            args["name"] = args.pop("pod_name")
         return json.dumps(self._backend.call(self.name, **args))
 
 
@@ -98,6 +112,10 @@ class PulseAgentAdapter:
         tool_map = {d["name"]: _SimBackedTool(d, backend, d["name"] in write_tools) for d in tool_defs}
 
         async def on_confirm(tool_name: str, tool_input: dict) -> bool:
+            tool = tool_map.get(tool_name)
+            if tool is None:
+                return False
+            tool.approve(tool_input)
             return True
 
         async def _run() -> str:

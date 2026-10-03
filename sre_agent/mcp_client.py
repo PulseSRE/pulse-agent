@@ -560,8 +560,9 @@ def register_mcp_tools(conn: MCPConnection) -> int:
         annotations = schema_def.get("annotations") or {}
         # Servers are administrator-configured and trusted to describe reads.
         # Missing or destructive annotations fail closed behind confirmation.
-        is_read = annotations.get("readOnlyHint") is True and annotations.get("destructiveHint") is not True
-        register_tool(tool, is_write=not is_read)
+        from .action_policy import mcp_requires_confirmation
+
+        register_tool(tool, is_write=mcp_requires_confirmation(annotations))
         registered_names.append(tool_name)
         count += 1
 

@@ -542,7 +542,7 @@ async def _run_incident(params, *, verify_fails=False, send_approval=None):
     @activity.defn(name="pulse.incident.apply_fix")
     async def stub_apply(plan: dict) -> dict:
         calls.append("apply")
-        return {"tool": "delete_pod", "before": "crashloop", "after": "recreated"}
+        return {"applied": True, "tool": "delete_pod", "before": "crashloop", "after": "recreated"}
 
     @activity.defn(name="pulse.incident.verify")
     async def stub_verify(resource: dict) -> dict:
@@ -562,7 +562,7 @@ async def _run_incident(params, *, verify_fails=False, send_approval=None):
         return {"recurred": bool(resource.get("_recurs")), "evidence": "phase=Running"}
 
     @activity.defn(name="pulse.incident.record_outcome")
-    async def stub_record(finding_id: str, verdict: str, evidence: str) -> None:
+    async def stub_record(finding_id: str, verdict: str, evidence: str, applied: bool | None = None) -> None:
         calls.append(f"record:{verdict}")
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
@@ -731,7 +731,7 @@ class TestDurableAutofixSeam:
 
     def _args(self):
         return {
-            "action_report": {},
+            "action_report": {"id": "a1"},
             "targeted_plan": self._plan(),
             "resources": [{"name": "p1", "namespace": "dev"}],
             "finding": {"id": "f1"},
@@ -790,17 +790,25 @@ class TestDurableAutofixSeam:
         monkeypatch.setenv("PULSE_AGENT_DURABLE_AUTOFIX", "true")
         monkeypatch.setenv("PULSE_AGENT_TEMPORAL_HOST", "temporal:7233")
 
+        saved = []
+
         async def ok(**kwargs):
+            assert saved and saved[0]["id"] == "a1", "action must exist before workflow can record an outcome"
+            assert kwargs["action_id"] == "a1"
+            # A fast workflow can persist its verdict before start returns.
+            saved[-1]["verificationStatus"] = "unverifiable"
             return {"workflow_id": "incident-f1", "run_id": "r1"}
 
         monkeypatch.setattr(tclient, "start_incident_run", ok)
-        monkeypatch.setattr(cm, "save_action", lambda *a, **k: None)
+        monkeypatch.setattr(cm, "save_action", lambda report, **k: saved.append(dict(report)))
 
         mon = self._monitor()
         args = self._args()
         assert aio.run(mon._dispatch_durable_fix(**args)) is True
         assert args["action_report"]["status"] == "dispatched"
         assert args["action_report"]["workflowId"] == "incident-f1"
+        assert saved[-1]["verificationStatus"] == "unverifiable"
+        assert len(saved) == 1
         assert "f1" in mon._recent_fix_ids
         config_mod._reset_settings()
 
@@ -841,7 +849,7 @@ class TestIncidentApplyFailure:
             return "nothing to restore"
 
         @activity.defn(name="pulse.incident.record_outcome")
-        async def rec(finding_id: str, verdict: str, evidence: str) -> None:
+        async def rec(finding_id: str, verdict: str, evidence: str, applied: bool | None = None) -> None:
             calls.append(f"record:{verdict}")
 
         @activity.defn(name="pulse.incident.verify")
@@ -912,7 +920,7 @@ class TestIncidentCancellation:
         @activity.defn(name="pulse.incident.apply_fix")
         async def apply(plan: dict) -> dict:
             calls.append("apply")
-            return {"tool": "delete_pod", "after": "recreated"}
+            return {"applied": True, "tool": "delete_pod", "after": "recreated"}
 
         @activity.defn(name="pulse.incident.verify")
         async def verify(resource: dict) -> dict:
@@ -930,7 +938,7 @@ class TestIncidentCancellation:
             return {"recurred": False, "evidence": "phase=Running"}
 
         @activity.defn(name="pulse.incident.record_outcome")
-        async def rec(finding_id: str, verdict: str, evidence: str) -> None:
+        async def rec(finding_id: str, verdict: str, evidence: str, applied: bool | None = None) -> None:
             calls.append(f"record:{verdict}")
 
         async def go():
@@ -1000,7 +1008,7 @@ class TestIncidentCancellation:
 
         @activity.defn(name="pulse.incident.apply_fix")
         async def apply(plan: dict) -> dict:
-            return {"tool": "delete_pod"}
+            return {"applied": True, "tool": "delete_pod"}
 
         @activity.defn(name="pulse.incident.verify")
         async def verify(resource: dict) -> dict:
@@ -1016,7 +1024,7 @@ class TestIncidentCancellation:
             return {"recurred": False, "evidence": "ok"}
 
         @activity.defn(name="pulse.incident.record_outcome")
-        async def rec(finding_id: str, verdict: str, evidence: str) -> None:
+        async def rec(finding_id: str, verdict: str, evidence: str, applied: bool | None = None) -> None:
             calls.append(f"record:{verdict}")
 
         async def go():

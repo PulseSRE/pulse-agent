@@ -32,7 +32,7 @@ phases:
     required: false
     depends_on: [diagnose]
     timeout_seconds: 300
-    approval_required: false
+    approval_required: true
     produces: [fix_applied, fix_type]
 
   - id: verify

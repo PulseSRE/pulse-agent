@@ -15,11 +15,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .artifact_store import KIND_EVAL_FIXTURE, KIND_EVAL_SCENARIO, hydrate
+from .artifact_store import KIND_EVAL_DRAFT, KIND_EVAL_FIXTURE, KIND_EVAL_SCENARIO, hydrate
 
 __all__ = [
     "bundled_fixtures_dir",
     "bundled_scenarios_dir",
+    "drafts_dir",
     "fixtures_dir",
     "hydrate_evals_dirs",
     "scenarios_dir",
@@ -49,6 +50,13 @@ def fixtures_dir() -> Path:
     return directory
 
 
+def drafts_dir() -> Path:
+    """Review-only artifacts; never scanned by scenario or replay loaders."""
+    directory = _user_evals_root() / "drafts"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
 def bundled_scenarios_dir() -> Path:
     """The read-only scenario suites shipped inside the package."""
     return Path(__file__).parent / "evals" / "scenarios_data"
@@ -68,4 +76,5 @@ def hydrate_evals_dirs() -> int:
     """
     written = hydrate(KIND_EVAL_SCENARIO, scenarios_dir())
     written += hydrate(KIND_EVAL_FIXTURE, fixtures_dir())
+    written += hydrate(KIND_EVAL_DRAFT, drafts_dir())
     return written

@@ -85,7 +85,9 @@ class EventBus:
         if self._on_confirm is None:
             return False
         result = await _invoke_optional(self._on_confirm, tool_name, input_data)
-        return bool(result) if result is not None else False
+        from .action_policy import is_explicit_approval
+
+        return is_explicit_approval(result)
 
     @classmethod
     def from_callbacks(

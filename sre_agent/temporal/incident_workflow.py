@@ -61,6 +61,8 @@ class IncidentInput:
     #: How long to wait before asking whether the fix held. The monitor's
     #: PULSE_AGENT_RECURRENCE_WINDOW, as a durable timer.
     recurrence_window_seconds: int = 1800
+    #: Actual action row for post-fix evidence; old histories retain their ID fallback.
+    action_id: str = ""
 
 
 @workflow.defn(name="PulseIncidentWorkflow")
@@ -97,6 +99,9 @@ class IncidentWorkflow:
                 return {"verdict": "denied", "evidence": "a human declined the fix"}
 
         # ── 2. Snapshot before mutating — the compensation data ──────────────
+        truthful_compensation = workflow.patched("incident-truthful-compensation-v1")
+        self._truthful_compensation = truthful_compensation
+        self._execution_status_evidence = workflow.patched("incident-execution-status-v1")
         self._stage = "snapshotting"
         snapshot = await workflow.execute_activity(
             capture_snapshot,
@@ -123,6 +128,15 @@ class IncidentWorkflow:
             # forever — strictly worse than the inline path, which records a
             # failure. Found by running this against the live server.
             self._stage = "apply_failed"
+            if getattr(exc.cause, "type", None) == "FixNotApplied":
+                reason = "Fix was blocked or skipped; no mutation was applied"
+                await workflow.execute_activity(
+                    record_outcome,
+                    args=self._outcome_args(params, "unverifiable", reason, False),
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=RetryPolicy(maximum_attempts=3),
+                )
+                return {"verdict": "failed", "evidence": reason, "compensated": False}
             # The failure may have landed after a partial mutation, so undo
             # defensively; restore is a no-op when there is nothing to undo.
             restored = await workflow.execute_activity(
@@ -131,30 +145,46 @@ class IncidentWorkflow:
                 start_to_close_timeout=timedelta(seconds=120),
                 retry_policy=RetryPolicy(maximum_attempts=3),
             )
-            self._compensated = True
+            self._compensated = bool(snapshot) if self._truthful_compensation else True
             reason = f"fix could not be applied: {exc.cause or exc}"
             await workflow.execute_activity(
                 record_outcome,
-                args=[params.finding_id, "failed", f"{reason}; {restored}"],
+                args=self._outcome_args(params, "failed", f"{reason}; {restored}", None),
                 start_to_close_timeout=timedelta(seconds=30),
                 retry_policy=RetryPolicy(maximum_attempts=3),
             )
-            return {"verdict": "failed", "evidence": reason, "compensated": True}
+            return {"verdict": "failed", "evidence": reason, "compensated": self._compensated}
 
         # From here the cluster is already mutated, so every exit — including a
         # human hitting cancel — has to leave a verdict behind. See _run_post_apply.
+        if workflow.patched("incident-execution-evidence-v1"):
+            # Recorded per-call compensation data, not a snapshot of the original
+            # pod when the executor actually changed its owning deployment.
+            if "snapshot" in applied:
+                snapshot = applied["snapshot"]
+        self._applied_evidence = applied.get("applied") is True
         try:
             return await self._run_post_apply(params, snapshot, applied)
         except asyncio.CancelledError:
             return await self._cancel_after_apply(params, snapshot)
 
+    def _outcome_args(self, params: IncidentInput, verdict: str, evidence: str, applied: bool | None) -> list:
+        args: list = [params.action_id or params.finding_id, verdict, evidence]
+        # Old histories retain the three-argument activity command. Only the
+        # explicit apply result in newly versioned histories changes status.
+        if self._execution_status_evidence:
+            args.append(applied)
+        return args
+
     async def _run_post_apply(self, params: IncidentInput, snapshot: dict, applied: dict) -> dict:
         # ── 4. Verify, with backoff as the rollout grace window ───────────────
         self._stage = "verifying"
+        evidence_linked = workflow.patched("incident-execution-evidence-v1")
+        verify_resource = (applied.get("verify_resource") or params.resource) if evidence_linked else params.resource
         try:
             verified = await workflow.execute_activity(
                 verify_fix,
-                params.resource,
+                verify_resource,
                 start_to_close_timeout=timedelta(seconds=60),
                 retry_policy=RetryPolicy(
                     initial_interval=timedelta(seconds=10),
@@ -172,18 +202,20 @@ class IncidentWorkflow:
                 start_to_close_timeout=timedelta(seconds=120),
                 retry_policy=RetryPolicy(maximum_attempts=3),
             )
-            self._compensated = True
-            self._stage = "rolled_back"
+            self._compensated = bool(snapshot) if self._truthful_compensation else True
+            self._stage = "rolled_back" if self._compensated else "still_failing"
             await workflow.execute_activity(
                 record_outcome,
-                args=[params.finding_id, "rolled_back", f"verification failed; {restored}"],
+                args=self._outcome_args(
+                    params, self._stage, f"verification failed; {restored}", self._applied_evidence or None
+                ),
                 start_to_close_timeout=timedelta(seconds=30),
             )
             return {
-                "verdict": "rolled_back",
+                "verdict": self._stage,
                 "evidence": restored,
                 "applied": applied,
-                "compensated": True,
+                "compensated": self._compensated,
             }
 
         # ── 5. Durable timer: does the verdict still hold later? ─────────────
@@ -193,20 +225,27 @@ class IncidentWorkflow:
         await workflow.sleep(timedelta(seconds=params.recurrence_window_seconds))
 
         self._stage = "rechecking"
-        recheck = await workflow.execute_activity(
-            check_recurrence,
-            params.resource,
-            start_to_close_timeout=timedelta(seconds=60),
-            retry_policy=RetryPolicy(maximum_attempts=3),
-        )
-
-        verdict = "verified_then_recurred" if recheck.get("recurred") else "verified"
-        evidence = f"{verified.get('evidence', '')}; recheck: {recheck.get('evidence', '')}"
+        recheck_resource = dict(verify_resource)
+        if evidence_linked and verify_resource.get("kind", "Pod") == "Pod":
+            baseline = verified.get("baseline", {})
+            recheck_resource.update(uid_at_fix=baseline.get("uid"), restarts_at_fix=baseline.get("restarts"))
+        try:
+            recheck = await workflow.execute_activity(
+                check_recurrence,
+                recheck_resource,
+                start_to_close_timeout=timedelta(seconds=60),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
+            verdict = "verified_then_recurred" if recheck.get("recurred") else "verified"
+            evidence = f"{verified.get('evidence', '')}; recheck: {recheck.get('evidence', '')}"
+        except ActivityError:
+            verdict = "unverifiable"
+            evidence = f"{verified.get('evidence', '')}; sustained recovery could not be confirmed at recheck"
         self._stage = verdict
 
         await workflow.execute_activity(
             record_outcome,
-            args=[params.finding_id, verdict, evidence],
+            args=self._outcome_args(params, verdict, evidence, self._applied_evidence or None),
             start_to_close_timeout=timedelta(seconds=30),
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
@@ -236,13 +275,13 @@ class IncidentWorkflow:
                 retry_policy=RetryPolicy(maximum_attempts=3),
             )
         )
-        self._compensated = True
+        self._compensated = bool(snapshot) if self._truthful_compensation else True
         self._stage = "cancelled"
         evidence = f"cancelled by request after the fix was applied; {restored}"
         await asyncio.shield(
             workflow.execute_activity(
                 record_outcome,
-                args=[params.finding_id, "cancelled", evidence],
+                args=self._outcome_args(params, "cancelled", evidence, self._applied_evidence or None),
                 start_to_close_timeout=timedelta(seconds=30),
                 retry_policy=RetryPolicy(maximum_attempts=3),
             )
@@ -251,4 +290,4 @@ class IncidentWorkflow:
         # marking it Cancelled. That is the intent: the terminal state should
         # carry the verdict, and "Cancelled with no result" is what we are
         # avoiding. The verdict field says what happened.
-        return {"verdict": "cancelled", "evidence": evidence, "compensated": True}
+        return {"verdict": "cancelled", "evidence": evidence, "compensated": self._compensated}

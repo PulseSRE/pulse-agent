@@ -467,51 +467,31 @@ def _get_prompt_analytics(days: int = 30, skill: str | None = None) -> dict:
 @router.get("/readiness")
 async def analytics_readiness(_auth=Depends(verify_token)):
     """Lightweight readiness gate summary for Mission Control outcomes card."""
-    return _get_readiness_summary()
+    return await _get_readiness_summary()
 
 
-def _get_readiness_summary() -> dict:
-    # The readiness module may or may not exist. Handle both cases.
-    try:
-        from ..readiness import evaluate_gates
+async def _get_readiness_summary() -> dict:
+    from .readiness_rest import get_installation_report
 
-        gates = evaluate_gates()
-        passed = sum(1 for g in gates if g.get("status") == "pass")
-        failed = sum(1 for g in gates if g.get("status") == "fail")
-        attention = sum(1 for g in gates if g.get("status") == "attention")
-        total = len(gates)
-        attention_items = [
+    report = await get_installation_report()
+    gates = report["checks"]
+    passed = sum(g.get("status") == "healthy" for g in gates)
+    failed = sum(g.get("status") == "unhealthy" for g in gates)
+    attention = len(gates) - passed - failed
+    return {
+        "total_gates": len(gates),
+        "passed": passed,
+        "failed": failed,
+        "attention": attention,
+        "pass_rate": round(passed / len(gates), 3) if gates else 0.0,
+        "attention_items": [
             {"gate": g.get("id", "unknown"), "message": g.get("message", "")}
             for g in gates
-            if g.get("status") in ("fail", "attention")
-        ]
-        return {
-            "total_gates": total,
-            "passed": passed,
-            "failed": failed,
-            "attention": attention,
-            "pass_rate": round(passed / total, 3) if total > 0 else 0.0,
-            "attention_items": attention_items[:5],
-        }
-    except ImportError:
-        return {
-            "total_gates": 0,
-            "passed": 0,
-            "failed": 0,
-            "attention": 0,
-            "pass_rate": 0.0,
-            "attention_items": [],
-        }
-    except Exception:
-        logger.debug("Failed to get readiness summary", exc_info=True)
-        return {
-            "total_gates": 0,
-            "passed": 0,
-            "failed": 0,
-            "attention": 0,
-            "pass_rate": 0.0,
-            "attention_items": [],
-        }
+            if g.get("status") != "healthy"
+        ][:5],
+        "scope": report["scope"],
+        "checked_at": report["checked_at"],
+    }
 
 
 # ── Recommendations Router ─────────────────────────────────────────────────

@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from ..k8s_client import get_apps_client, get_core_client
@@ -237,12 +238,19 @@ _STRATEGY_POLICY_TOOLS: dict[str, str] = {
 }
 
 
+class FixPreconditionError(ValueError):
+    """A proven refusal before any mutation was attempted."""
+
+
 def execute_fix(plan: FixPlan) -> tuple[str, str, str]:
     """Execute a targeted fix plan. Returns (tool_name, before_state, after_state).
 
     Raises ValueError for unknown strategies. Returns a ``blocked`` result when
     the harness deny policy refuses the equivalent tool.
     """
+    _last_snapshot.set(None)
+    _verify_resources.set([])
+    _expected_deployment_uid.set(None)
     executor = _EXECUTORS.get(plan.strategy)
     if not executor:
         raise ValueError(f"No executor for strategy: {plan.strategy}")
@@ -278,32 +286,106 @@ def execute_fix(plan: FixPlan) -> tuple[str, str, str]:
     return result
 
 
-# The snapshot the most recent executor captured. execute_targeted_fix returns a
-# 3-tuple that predates snapshots and is consumed in several places; threading a
-# fourth element through would break every caller, so the executor leaves it here
-# and execute_targeted_fix hands it back alongside.
-_last_snapshot: dict | None = None
+# Worker/context-local so concurrent actions never borrow compensation data.
+_last_snapshot: ContextVar[dict | None] = ContextVar("fix_snapshot", default=None)
+_expected_deployment_uid: ContextVar[str | None] = ContextVar("fix_deployment_uid", default=None)
+_verify_resources: ContextVar[list[dict] | None] = ContextVar("fix_verify_resources", default=None)
+
+
+@dataclass(frozen=True)
+class FixExecution:
+    result: tuple[str, str, str]
+    snapshot: dict | None
+    verify_resources: list[dict]
+
+    @property
+    def applied(self) -> bool:
+        return self.result[0] in {"delete_pod", "rollback_deployment", "patch_resources"}
+
+
+def execute_fix_with_snapshot(plan: FixPlan) -> FixExecution:
+    """Consume snapshot in the same worker as execution, preserving triple API."""
+    token = _last_snapshot.set(None)
+    target_token = _verify_resources.set([])
+    uid_token = _expected_deployment_uid.set(None)
+    try:
+        result = execute_fix(plan)
+        return FixExecution(result, take_last_snapshot(), list(_verify_resources.get() or []))
+    finally:
+        _last_snapshot.reset(token)
+        _verify_resources.reset(target_token)
+        _expected_deployment_uid.reset(uid_token)
 
 
 def take_last_snapshot() -> dict | None:
-    """Return and clear the snapshot the last executor captured."""
-    global _last_snapshot
-    snap, _last_snapshot = _last_snapshot, None
+    """Return and clear only this worker's last snapshot."""
+    snap = _last_snapshot.get()
+    _last_snapshot.set(None)
     return snap
 
 
-def _snapshot_before(kind: str, name: str, namespace: str) -> None:
-    """Capture a restorable copy before a write. Never blocks the fix."""
-    global _last_snapshot
+def _snapshot_before(kind: str, name: str, namespace: str, observed=None) -> None:
+    """Missing undo is explicit; a mismatched snapshot refuses the mutation."""
+    snapshot = None
+    _verify_resources.set([{"kind": kind, "name": name, "namespace": namespace}])
     try:
         from ..snapshot import capture
 
-        _last_snapshot = capture(kind, name, namespace)
-        if _last_snapshot is None:
+        snapshot = capture(kind, name, namespace)
+        _last_snapshot.set(snapshot)
+        _verify_resources.set([{"kind": kind, "name": name, "namespace": namespace}])
+        if snapshot is None:
             logger.warning("No snapshot for %s %s/%s — this fix will not be undoable", kind, namespace, name)
     except Exception:
         logger.warning("Snapshot failed for %s %s/%s", kind, namespace, name, exc_info=True)
-        _last_snapshot = None
+        _last_snapshot.set(None)
+
+    if observed is not None and snapshot is not None:
+        uid, version = _identity(observed)
+        if snapshot.get("uid") != uid or snapshot.get("resourceVersion") != version:
+            _last_snapshot.set(None)
+            raise FixPreconditionError("Target changed while snapshot was captured; re-investigate before mutation")
+
+
+def _identity(obj) -> tuple[str, str]:
+    metadata = getattr(obj, "metadata", None)
+    uid = getattr(metadata, "uid", None)
+    version = getattr(metadata, "resource_version", None)
+    if not isinstance(uid, str) or not uid or not isinstance(version, str) or not version:
+        raise FixPreconditionError(
+            "Target UID/resourceVersion missing; refusing mutation without identity preconditions"
+        )
+    return uid, version
+
+
+def _patch_tests(obj) -> list[dict]:
+    uid, version = _identity(obj)
+    return [
+        {"op": "test", "path": "/metadata/uid", "value": uid},
+        {"op": "test", "path": "/metadata/resourceVersion", "value": version},
+    ]
+
+
+def _delete_observed_pod(pod, name: str, namespace: str, *, force=False) -> str | None:
+    from kubernetes.client import V1DeleteOptions, V1Preconditions
+
+    from ..policy import check_write_policy
+
+    denied = check_write_policy("delete_pod", {"namespace": namespace, "pod_name": name})
+    if denied is not None:
+        return f"blocked: {denied.message}"
+    target = _controller_target(pod, namespace)
+    if target is None:
+        return "skip: pod has no supported controlling owner; recreation cannot be confirmed"
+    uid, version = _identity(pod)
+    _verify_resources.set([target])
+    # Pod deletion has no restorable spec. Never attach a snapshot of an unmodified owner.
+    _last_snapshot.set(None)
+    options = V1DeleteOptions(preconditions=V1Preconditions(uid=uid, resource_version=version))
+    get_core_client().delete_namespaced_pod(
+        name, namespace, body=options, **({"grace_period_seconds": 0} if force else {})
+    )
+    return None
 
 
 def _get_first_resource(plan: FixPlan) -> tuple[dict, str]:
@@ -315,18 +397,63 @@ def _get_first_resource(plan: FixPlan) -> tuple[dict, str]:
     return r, r.get("namespace", "default")
 
 
-def _find_owning_deployment(pod_name: str, ns: str) -> str | None:
-    """Walk Pod → ReplicaSet → Deployment owner chain. Returns deployment name or None."""
-    core = get_core_client()
+def _controller_target(pod, namespace: str) -> dict | None:
+    owners = pod.metadata.owner_references or []
+    owner = next(
+        (
+            ref
+            for ref in owners
+            if getattr(ref, "controller", None) is True and ref.kind in {"ReplicaSet", "StatefulSet", "DaemonSet"}
+        ),
+        None,
+    )
+    if owner is None:
+        return None
     apps = get_apps_client()
-    pod = core.read_namespaced_pod(pod_name, ns)
-    for ref in pod.metadata.owner_references or []:
-        if ref.kind == "ReplicaSet":
-            rs = apps.read_namespaced_replica_set(ref.name, ns)
-            for rs_ref in rs.metadata.owner_references or []:
-                if rs_ref.kind == "Deployment":
-                    return rs_ref.name
-    return None
+    reader = {
+        "ReplicaSet": apps.read_namespaced_replica_set,
+        "StatefulSet": apps.read_namespaced_stateful_set,
+        "DaemonSet": apps.read_namespaced_daemon_set,
+    }[owner.kind]
+    obj = reader(owner.name, namespace)
+    expected_uid = getattr(owner, "uid", None)
+    if not isinstance(expected_uid, str) or not expected_uid or getattr(obj.metadata, "uid", None) != expected_uid:
+        raise FixPreconditionError("Controlling owner identity changed; re-investigate before mutation")
+    target = {"kind": owner.kind, "name": owner.name, "namespace": namespace}
+    if owner.kind == "ReplicaSet":
+        dep_ref = next(
+            (
+                ref
+                for ref in (obj.metadata.owner_references or [])
+                if getattr(ref, "controller", None) is True and ref.kind == "Deployment"
+            ),
+            None,
+        )
+        if dep_ref:
+            dep = apps.read_namespaced_deployment(dep_ref.name, namespace)
+            expected_dep_uid = getattr(dep_ref, "uid", None)
+            if (
+                not isinstance(expected_dep_uid, str)
+                or not expected_dep_uid
+                or getattr(dep.metadata, "uid", None) != expected_dep_uid
+            ):
+                raise FixPreconditionError("Deployment owner identity changed; re-investigate before mutation")
+            _expected_deployment_uid.set(expected_dep_uid)
+            target = {"kind": "Deployment", "name": dep_ref.name, "namespace": namespace}
+    return target
+
+
+def _find_owning_deployment(pod_name: str, ns: str, pod=None) -> str | None:
+    pod = pod if pod is not None else get_core_client().read_namespaced_pod(pod_name, ns)
+    target = _controller_target(pod, ns)
+    return target["name"] if target and target["kind"] == "Deployment" else None
+
+
+def _check_deployment_identity(dep) -> None:
+    uid, _version = _identity(dep)
+    expected = _expected_deployment_uid.get()
+    if expected is not None and uid != expected:
+        raise FixPreconditionError("Deployment was recreated after owner resolution; mutation refused")
 
 
 def _execute_patch_image(plan: FixPlan) -> tuple[str, str, str]:
@@ -338,11 +465,13 @@ def _execute_patch_image(plan: FixPlan) -> tuple[str, str, str]:
     pod = core.read_namespaced_pod(r["name"], ns)
     bad_image = pod.spec.containers[0].image if pod.spec.containers else "unknown"
 
-    dep_name = _find_owning_deployment(r["name"], ns)
+    dep_name = _find_owning_deployment(r["name"], ns, pod)
 
     if not dep_name:
         # Fallback: delete the pod
-        core.delete_namespaced_pod(r["name"], ns)
+        refused = _delete_observed_pod(pod, r["name"], ns)
+        if refused:
+            return (refused.split(":", 1)[0], "", refused)
         return (
             "delete_pod",
             f"Pod {r['name']} in {ns}: image={bad_image}",
@@ -351,7 +480,8 @@ def _execute_patch_image(plan: FixPlan) -> tuple[str, str, str]:
 
     dep = apps.read_namespaced_deployment(dep_name, ns)
     revision = (dep.metadata.annotations or {}).get("deployment.kubernetes.io/revision", "0")
-    _snapshot_before("Deployment", dep_name, ns)
+    _check_deployment_identity(dep)
+    _snapshot_before("Deployment", dep_name, ns, dep)
     before = f"Deployment {dep_name} in {ns}: image={bad_image}, revision={revision}"
 
     # Find previous revision's ReplicaSet
@@ -365,8 +495,22 @@ def _execute_patch_image(plan: FixPlan) -> tuple[str, str, str]:
         if rs_rev == str(rollback_revision) and rs.spec.template.spec.containers:
             good_image = rs.spec.template.spec.containers[0].image
             container_name = rs.spec.template.spec.containers[0].name
-            body = {"spec": {"template": {"spec": {"containers": [{"name": container_name, "image": good_image}]}}}}
-            apps.patch_namespaced_deployment(dep_name, ns, body=body)
+            index = next(
+                (
+                    i
+                    for i, container in enumerate(dep.spec.template.spec.containers)
+                    if container.name == container_name
+                ),
+                None,
+            )
+            if index is None:
+                raise FixPreconditionError(
+                    "Rollback container is not present in current deployment; human review required"
+                )
+            body = _patch_tests(dep) + [
+                {"op": "replace", "path": f"/spec/template/spec/containers/{index}/image", "value": good_image}
+            ]
+            apps.patch_namespaced_deployment(dep_name, ns, body=body, _content_type="application/json-patch+json")
             return (
                 "rollback_deployment",
                 before,
@@ -374,7 +518,9 @@ def _execute_patch_image(plan: FixPlan) -> tuple[str, str, str]:
             )
 
     # Fallback: delete pod if previous revision not found
-    core.delete_namespaced_pod(r["name"], ns)
+    refused = _delete_observed_pod(pod, r["name"], ns)
+    if refused:
+        return (refused.split(":", 1)[0], before, refused)
     return ("delete_pod", before, f"Pod {r['name']} deleted — previous revision not found")
 
 
@@ -416,22 +562,16 @@ def _execute_patch_resources(plan: FixPlan) -> tuple[str, str, str]:
 
     before = f"Deployment {name} in {ns}: memory limit={current_limit}"
 
-    body = {
-        "spec": {
-            "template": {
-                "spec": {
-                    "containers": [
-                        {
-                            "name": container.name,
-                            "resources": {"limits": {"memory": new_limit}},
-                        }
-                    ]
-                }
-            }
-        }
-    }
-    _snapshot_before("Deployment", name, ns)
-    apps.patch_namespaced_deployment(name, ns, body=body)
+    _check_deployment_identity(dep)
+    _snapshot_before("Deployment", name, ns, dep)
+    limits = dict(container.resources.limits or {}) if container.resources else {}
+    limits["memory"] = new_limit
+    if container.resources is None:
+        operation = {"op": "add", "path": "/spec/template/spec/containers/0/resources", "value": {"limits": limits}}
+    else:
+        operation = {"op": "add", "path": "/spec/template/spec/containers/0/resources/limits", "value": limits}
+    body = _patch_tests(dep) + [operation]
+    apps.patch_namespaced_deployment(name, ns, body=body, _content_type="application/json-patch+json")
 
     return ("patch_resources", before, f"Deployment {name} patched: memory limit {current_limit} -> {new_limit}")
 
@@ -470,7 +610,9 @@ def _execute_restart_controller(plan: FixPlan) -> tuple[str, str, str]:
         )
 
     before = f"Pod {pod_name} in {ns}: phase={pod.status.phase}, restarts={pod.status.container_statuses[0].restart_count if pod.status.container_statuses else 0}"
-    core.delete_namespaced_pod(pod_name, ns, grace_period_seconds=0)
+    refused = _delete_observed_pod(pod, pod_name, ns, force=True)
+    if refused:
+        return (refused.split(":", 1)[0], before, refused)
 
     return (
         "delete_pod",

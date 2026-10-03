@@ -113,16 +113,21 @@ class TestExecuteFix:
         # Pod with owner
         pod = MagicMock()
         pod.spec.containers = [MagicMock(name="app", image="app:v999")]
-        pod.metadata.owner_references = [MagicMock(kind="ReplicaSet", name="app-rs")]
+        pod.metadata.owner_references = [MagicMock(kind="ReplicaSet", controller=True, uid="rs-uid")]
+        pod.metadata.owner_references[0].name = "app-rs"
         core.read_namespaced_pod.return_value = pod
 
         # RS -> Deployment
         rs = MagicMock()
-        rs.metadata.owner_references = [MagicMock(kind="Deployment", name="app")]
+        rs.metadata.uid = "rs-uid"
+        rs.metadata.owner_references = [MagicMock(kind="Deployment", controller=True, uid="dep-uid")]
+        rs.metadata.owner_references[0].name = "app"
         apps.read_namespaced_replica_set.return_value = rs
 
         # Deployment
         dep = MagicMock()
+        dep.metadata.uid = "dep-uid"
+        dep.metadata.resource_version = "7"
         dep.metadata.annotations = {"deployment.kubernetes.io/revision": "3"}
         dep.spec.selector.match_labels = {"app": "myapp"}
         apps.read_namespaced_deployment.return_value = dep
@@ -130,7 +135,10 @@ class TestExecuteFix:
         # Previous RS (revision 2)
         prev_rs = MagicMock()
         prev_rs.metadata.annotations = {"deployment.kubernetes.io/revision": "2"}
-        prev_rs.spec.template.spec.containers = [MagicMock(name="app", image="app:v2.0")]
+        prev_container = MagicMock(image="app:v2.0")
+        prev_container.name = "app"
+        prev_rs.spec.template.spec.containers = [prev_container]
+        dep.spec.template.spec.containers = [prev_container]
         apps.list_namespaced_replica_set.return_value = MagicMock(items=[prev_rs])
 
         plan = FixPlan(
@@ -144,7 +152,8 @@ class TestExecuteFix:
                 "resources": [{"kind": "Pod", "name": "app-abc", "namespace": "prod"}],
             },
         )
-        tool, _before, after = execute_fix(plan)
+        with patch("sre_agent.snapshot.capture", return_value=None):
+            tool, _before, after = execute_fix(plan)
         assert tool == "rollback_deployment"
         assert "app:v2.0" in after
         apps.patch_namespaced_deployment.assert_called_once()
@@ -159,6 +168,8 @@ class TestExecuteFix:
         container.name = "app"
         container.resources.limits = {"memory": "256Mi"}
         dep.spec.template.spec.containers = [container]
+        dep.metadata.uid = "dep-uid"
+        dep.metadata.resource_version = "7"
         dep.metadata.annotations = {}
         apps.read_namespaced_deployment.return_value = dep
 
@@ -173,7 +184,8 @@ class TestExecuteFix:
                 "resources": [{"kind": "Deployment", "name": "api", "namespace": "prod"}],
             },
         )
-        tool, _before, after = execute_fix(plan)
+        with patch("sre_agent.snapshot.capture", return_value=None):
+            tool, _before, after = execute_fix(plan)
         assert tool == "patch_resources"
         assert "512Mi" in after
         apps.patch_namespaced_deployment.assert_called_once()

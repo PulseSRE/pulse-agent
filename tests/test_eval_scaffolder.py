@@ -1,241 +1,101 @@
-"""Tests for auto-generated eval scenarios from skill scaffolding."""
-
-from __future__ import annotations
+"""Automatic skill scaffolds are redacted review drafts, never eval assertions."""
 
 import json
-from dataclasses import dataclass, field
-from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
-from sre_agent.eval_scaffolder import (
-    scaffold_eval_from_investigation,
-    scaffold_eval_from_plan,
-)
+from sre_agent import eval_scaffolder, eval_store
+from sre_agent.artifact_store import KIND_EVAL_DRAFT
 
 
-@dataclass
-class FakeSkillOutput:
-    status: str = "completed"
-    findings: dict = field(default_factory=dict)
-    evidence_summary: str = ""
-    actions_taken: list[str] = field(default_factory=list)
-    open_questions: list[str] = field(default_factory=list)
-    risk_flags: list[str] = field(default_factory=list)
-    confidence: float = 0.9
-    branch_signal: str = ""
-
-
-@dataclass
-class FakePlanResult:
-    plan_id: str = "test-plan"
-    plan_name: str = "Test Plan"
-    status: str = "complete"
-    phase_outputs: dict = field(default_factory=dict)
-    total_duration_ms: int = 45000
-    phases_completed: int = 3
-    phases_total: int = 3
-
-
-@pytest.fixture()
-def scaffold_dirs(tmp_path: Path, monkeypatch):
-    """Point the writable evals dir at tmp_path, exercising the real eval_store path."""
+@pytest.fixture
+def draft_root(tmp_path, monkeypatch):
     from sre_agent.config import _reset_settings
 
     monkeypatch.setenv("PULSE_AGENT_USER_EVALS_DIR", str(tmp_path))
     _reset_settings()
-    yield tmp_path / "scenarios_data", tmp_path / "fixtures"
+    yield tmp_path
     _reset_settings()
 
 
-def _make_plan_result(**overrides) -> FakePlanResult:
-    diagnose = FakeSkillOutput(
-        evidence_summary="Container exceeded memory limit",
-        findings={"root_cause": "OOM kill due to memory leak"},
-        actions_taken=["describe_pod", "get_pod_logs"],
+def scaffold():
+    return eval_scaffolder.scaffold_eval_from_plan(
+        skill_name="oom-api",
+        finding={"id": "private-resource-name", "title": "SECRET_TOKEN", "category": "oom"},
+        plan_result=SimpleNamespace(
+            phase_outputs={"verify": SimpleNamespace(status="completed", evidence_summary="SECRET_TOKEN")}
+        ),
+        tools_called=["describe_pod", "get_pod_logs", "patch_resource", "SECRET_TOKEN"],
+        confidence=0.99,
+        duration_seconds=45,
     )
-    verify = FakeSkillOutput(
-        status="completed",
-        evidence_summary="Pod stable after patch",
-        actions_taken=["list_pods"],
-    )
-    defaults = {
-        "phase_outputs": {"diagnose": diagnose, "verify": verify},
-        "total_duration_ms": 45000,
-    }
-    defaults.update(overrides)
-    return FakePlanResult(**defaults)
 
 
-def _make_finding(**overrides) -> dict:
-    defaults = {
-        "id": "f-001",
-        "title": "OOM killed pods in production",
-        "category": "oom",
-        "severity": "critical",
-    }
-    defaults.update(overrides)
-    return defaults
+def test_plan_generates_nonrunnable_private_durable_draft_only(draft_root):
+    with patch("sre_agent.artifact_store.persist", return_value=True) as persist:
+        assert scaffold()
+    path = next((draft_root / "drafts").glob("*.json"))
+    rendered = path.read_text()
+    draft = json.loads(rendered)
+    assert "SECRET_TOKEN" not in rendered
+    assert "private-resource-name" not in rendered
+    assert draft["review"]["status"] == "needs_review"
+    assert draft["runnable"] is False
+    assert draft["recorded_responses"] == {}
+    assert draft["expected"] == {"should_block_release": False}
+    assert "verification_passed" not in draft
+    assert "duration_seconds" not in draft
+    assert draft["observations"]["stored_action_verification"] == "not_available"
+    assert draft["tool_selection"]["requested_tools"] == ["describe_pod", "get_pod_logs", "patch_resource"]
+    assert draft["tool_selection"]["omitted_count"] == 1
+    assert not (draft_root / "fixtures").exists()
+    assert not (draft_root / "scenarios_data").exists()
+    assert persist.call_args.args[0] == KIND_EVAL_DRAFT
+    assert path.stat().st_mode & 0o777 == 0o600
 
 
-class TestScaffoldEvalFromPlan:
-    def test_creates_scenario_and_fixture(self, scaffold_dirs):
-        scenarios_dir, fixtures_dir = scaffold_dirs
-
-        result = scaffold_eval_from_plan(
-            skill_name="oom-api-server",
-            finding=_make_finding(),
-            plan_result=_make_plan_result(),
-            tools_called=["describe_pod", "get_pod_logs", "patch_resource"],
-            confidence=0.92,
-            duration_seconds=45.0,
-        )
-
-        assert result is True
-
-        suite_file = scenarios_dir / "scaffolded.json"
-        assert suite_file.exists()
-        suite = json.loads(suite_file.read_text())
-        assert suite["suite_name"] == "scaffolded"
-        assert len(suite["scenarios"]) == 1
-
-        scenario = suite["scenarios"][0]
-        assert scenario["scenario_id"] == "scaffolded_oom-api-server_oom"
-        assert scenario["category"] == "sre"
-        assert scenario["description"].startswith("Auto-generated:")
-        assert scenario["tool_calls"] == ["describe_pod", "get_pod_logs", "patch_resource"]
-        assert scenario["duration_seconds"] == 45.0
-        assert scenario["verification_passed"] is True
-        assert scenario["rollback_available"] is True
-        assert scenario["expected"]["should_block_release"] is False
-
-        fixture_file = fixtures_dir / "scaffolded_oom-api-server_oom.json"
-        assert fixture_file.exists()
-        fixture = json.loads(fixture_file.read_text())
-        assert fixture["name"] == "scaffolded_oom-api-server_oom"
-        assert fixture["prompt"] == "OOM killed pods in production"
-        assert "should_mention" in fixture["expected"]
-        assert "should_use_tools" in fixture["expected"]
-
-    def test_deduplication_by_scenario_id(self, scaffold_dirs):
-        scenarios_dir, _ = scaffold_dirs
-
-        for _ in range(2):
-            scaffold_eval_from_plan(
-                skill_name="oom-api-server",
-                finding=_make_finding(),
-                plan_result=_make_plan_result(),
-                tools_called=["describe_pod"],
-                confidence=0.9,
-                duration_seconds=30.0,
-            )
-
-        suite = json.loads((scenarios_dir / "scaffolded.json").read_text())
-        assert len(suite["scenarios"]) == 1
-
-    def test_bootstrap_creates_suite_file(self, scaffold_dirs):
-        scenarios_dir, _ = scaffold_dirs
-        suite_file = scenarios_dir / "scaffolded.json"
-        assert not suite_file.exists()
-
-        scaffold_eval_from_plan(
-            skill_name="test-skill",
-            finding=_make_finding(category="crashloop"),
-            plan_result=_make_plan_result(),
-            tools_called=["list_pods"],
-            confidence=0.8,
-            duration_seconds=20.0,
-        )
-
-        assert suite_file.exists()
-        suite = json.loads(suite_file.read_text())
-        assert suite["suite_name"] == "scaffolded"
-        assert suite["description"].startswith("Auto-generated")
-
-    def test_path_traversal_sanitized(self, scaffold_dirs):
-        scenarios_dir, _fixtures_dir = scaffold_dirs
-
-        result = scaffold_eval_from_plan(
-            skill_name="../../etc/passwd",
-            finding=_make_finding(),
-            plan_result=_make_plan_result(),
-            tools_called=["list_pods"],
-            confidence=0.8,
-            duration_seconds=20.0,
-        )
-
-        # Sanitizer strips dangerous chars — the ID is safe
-        assert result is True
-        suite = json.loads((scenarios_dir / "scaffolded.json").read_text())
-        scenario_id = suite["scenarios"][0]["scenario_id"]
-        assert ".." not in scenario_id
-        assert "/" not in scenario_id
-
-    def test_empty_skill_name_rejected(self, scaffold_dirs):
-        _scenarios_dir, _ = scaffold_dirs
-
-        result = scaffold_eval_from_plan(
-            skill_name="///",
-            finding=_make_finding(),
-            plan_result=_make_plan_result(),
-            tools_called=["list_pods"],
-            confidence=0.8,
-            duration_seconds=20.0,
-        )
-
-        assert result is False
-
-    def test_evidence_capped_at_500_chars(self, scaffold_dirs):
-        _, fixtures_dir = scaffold_dirs
-        long_evidence = "A" * 2000
-
-        diagnose = FakeSkillOutput(
-            evidence_summary=long_evidence,
-            findings={"root_cause": "memory leak"},
-            actions_taken=["describe_pod"],
-        )
-        plan_result = _make_plan_result(phase_outputs={"diagnose": diagnose})
-
-        scaffold_eval_from_plan(
-            skill_name="long-evidence",
-            finding=_make_finding(),
-            plan_result=plan_result,
-            tools_called=["describe_pod"],
-            confidence=0.9,
-            duration_seconds=30.0,
-        )
-
-        fixture_file = fixtures_dir / "scaffolded_long-evidence_oom.json"
-        assert fixture_file.exists()
-        fixture = json.loads(fixture_file.read_text())
-        for response in fixture["recorded_responses"].values():
-            assert len(response) <= 500
+def test_existing_review_and_reviewed_fixture_are_never_overwritten(draft_root):
+    with patch("sre_agent.artifact_store.persist", return_value=True):
+        assert scaffold()
+        path = next((draft_root / "drafts").glob("*.json"))
+        path.write_text("review-in-progress")
+        fixture = eval_store.fixtures_dir() / "reviewed.json"
+        fixture.write_text("reviewed fixture")
+        assert not scaffold()
+    assert path.read_text() == "review-in-progress"
+    assert fixture.read_text() == "reviewed fixture"
 
 
-class TestScaffoldEvalFromInvestigation:
-    def test_creates_scenario_only(self, scaffold_dirs):
-        scenarios_dir, fixtures_dir = scaffold_dirs
-
-        result = scaffold_eval_from_investigation(
+def test_investigation_does_not_invent_resolution_metrics_or_tools(draft_root):
+    with patch("sre_agent.artifact_store.persist", return_value=True):
+        assert eval_scaffolder.scaffold_eval_from_investigation(
             skill_name="node-pressure",
-            finding=_make_finding(category="nodes", title="Node memory pressure detected"),
-            investigation_result={
-                "summary": "Node worker-2 is under memory pressure",
-                "suspectedCause": "Too many pods scheduled",
-                "confidence": 0.85,
-            },
+            finding={"id": "f1", "title": "SECRET_TOKEN"},
+            investigation_result={"summary": "SECRET_TOKEN", "confidence": 0.99},
         )
+    draft = json.loads(next((draft_root / "drafts").glob("*.json")).read_text())
+    assert draft["tool_selection"]["requested_tools"] == []
+    assert draft["observations"]["stored_action_verification"] == "not_available"
+    assert "SECRET_TOKEN" not in json.dumps(draft)
 
-        assert result is True
 
-        suite = json.loads((scenarios_dir / "scaffolded.json").read_text())
-        assert len(suite["scenarios"]) == 1
-        scenario = suite["scenarios"][0]
-        assert scenario["scenario_id"] == "scaffolded_node-pressure_nodes"
-        assert scenario["tool_calls"] == ["proactive_investigation"]
-        assert scenario["verification_passed"] is None
-        assert scenario["expected"]["should_block_release"] is False
+def test_empty_skill_name_refused(draft_root):
+    assert not eval_scaffolder.scaffold_eval_from_investigation(skill_name="///", finding={}, investigation_result={})
+    assert not (draft_root / "drafts").exists()
 
-        # No fixture for flat investigation path
-        fixture_files = list(fixtures_dir.glob("scaffolded_node-pressure*"))
-        assert len(fixture_files) == 0
+
+def test_missing_durability_is_not_reported_as_persisted_success(draft_root):
+    with patch("sre_agent.artifact_store.persist", return_value=False):
+        assert not scaffold()
+
+
+def test_transient_persistence_failure_can_retry_without_overwriting_review(draft_root):
+    with patch("sre_agent.artifact_store.persist", side_effect=[False, True]) as persist:
+        assert not scaffold()
+        path = next((draft_root / "drafts").glob("*.json"))
+        original = path.read_text()
+        assert scaffold()
+        assert persist.call_count == 2
+        assert path.read_text() == original

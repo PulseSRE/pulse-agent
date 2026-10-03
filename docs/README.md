@@ -6,6 +6,7 @@ Start with the guide for your task. Current implementation lives in `sre_agent/`
 |---|---|
 | Install/configure and run the CLI | [README](../README.md) |
 | Deploy the OpenShift product | [pulse-operator](https://github.com/PulseSRE/pulse-operator) |
+| Inspect installation prerequisites | [Installation readiness](INSTALLATION_READINESS.md) |
 | Understand execution and trust boundaries | [Architecture](ARCHITECTURE.md), [Security](../SECURITY.md) |
 | Integrate REST/WebSocket clients | [API contract](../API_CONTRACT.md) |
 | Run checks and interpret their evidence | [Testing](../TESTING.md), [Eval framework](../sre_agent/evals/README.md) |

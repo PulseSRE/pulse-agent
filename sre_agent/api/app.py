@@ -298,6 +298,10 @@ app.include_router(inbox_router)
 app.include_router(episode_router)
 app.include_router(debug_router)
 
+from .readiness_rest import router as readiness_router
+
+app.include_router(readiness_router)
+
 # Prometheus scrape endpoint. Mounted AFTER the routers on purpose: a Starlette
 # Mount matches on path prefix, so mounting "/metrics" first swallowed every
 # /metrics/* REST route registered later -- /metrics/fix-success-rate,

@@ -71,7 +71,7 @@ class TestWritableTarget:
         roots: list[Path] = []
         with patch.object(eval_store, "hydrate", side_effect=lambda kind, root: roots.append(root) or 0):
             eval_store.hydrate_evals_dirs()
-        assert roots == [evals_dir / "scenarios_data", evals_dir / "fixtures"]
+        assert roots == [evals_dir / "scenarios_data", evals_dir / "fixtures", evals_dir / "drafts"]
 
     def test_hydration_restores_db_rows_even_when_package_dir_is_read_only(self, evals_dir, tmp_path):
         """Simulates the cluster: site-packages locked down, settings dir writable."""
@@ -81,7 +81,11 @@ class TestWritableTarget:
         try:
 
             def rows(kind: str) -> list[dict]:
-                return [_suite_row()] if kind == KIND_EVAL_SCENARIO else [_fixture_row()]
+                return (
+                    [_suite_row()]
+                    if kind == KIND_EVAL_SCENARIO
+                    else ([_fixture_row()] if kind == KIND_EVAL_FIXTURE else [])
+                )
 
             with patch.object(artifact_store, "list_artifacts", side_effect=rows):
                 written = eval_store.hydrate_evals_dirs()
@@ -106,7 +110,11 @@ class TestWritableTarget:
         try:
 
             def rows(kind: str) -> list[dict]:
-                return [_suite_row()] if kind == KIND_EVAL_SCENARIO else [_fixture_row()]
+                return (
+                    [_suite_row()]
+                    if kind == KIND_EVAL_SCENARIO
+                    else ([_fixture_row()] if kind == KIND_EVAL_FIXTURE else [])
+                )
 
             with (
                 patch.object(artifact_store, "list_artifacts", side_effect=rows),

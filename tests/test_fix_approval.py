@@ -218,3 +218,32 @@ def test_an_unexecutable_fix_is_blocked_with_remediation_before_touching_the_clu
     assert report["status"] == "failed"
     assert "allowWriteOperations" in report["error"]
     assert wired.saved and wired.saved[0]["status"] == "failed"
+
+
+@pytest.mark.parametrize("tool", ["blocked", "skip", "require_human_review"])
+def test_approved_nonmutation_is_failed_and_never_scheduled(wired, tool):
+    wired.execute.return_value = (tool, "before", "not applied")
+    with patch("sre_agent.monitor.cluster_monitor.get_cluster_monitor_sync") as monitor:
+        report = approve_fix("a-1", "sre@example.com")
+    assert report["status"] == "failed"
+    assert report["verificationStatus"] == "unverifiable"
+    monitor.assert_not_called()
+
+
+def test_approved_mutation_carries_own_snapshot_and_verification_target(wired):
+    from sre_agent.monitor import fix_planner
+
+    def execute(_plan):
+        fix_planner._last_snapshot.set(
+            {"kind": "Deployment", "name": "actual", "namespace": "dev", "spec": {}, "metadata": {}}
+        )
+        fix_planner._verify_resources.set([{"kind": "Deployment", "name": "actual", "namespace": "dev"}])
+        return "patch_resources", "before", "after"
+
+    wired.execute.side_effect = execute
+    monitor = MagicMock(running=True, _scan_counter=3, _pending_verifications={})
+    with patch("sre_agent.monitor.cluster_monitor.get_cluster_monitor_sync", return_value=monitor):
+        report = approve_fix("a-1", "sre@example.com")
+    assert report["verificationStatus"] == "pending"
+    assert '"actual"' in report["beforeSnapshot"]
+    assert monitor._pending_verifications["a-1"]["verify_resources"][0]["name"] == "actual"

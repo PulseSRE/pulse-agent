@@ -12,6 +12,8 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from tests.conftest import _StubAsyncClient
+
 
 @pytest.fixture
 def pulse_token():
@@ -22,6 +24,13 @@ def pulse_token():
 def ws_client(pulse_token, monkeypatch):
     monkeypatch.setenv("PULSE_AGENT_WS_TOKEN", pulse_token)
     monkeypatch.setenv("PULSE_AGENT_MEMORY", "0")
+    # Contract tests must remain deterministic even when a developer has live
+    # provider credentials. Exercise the real websocket/agent path, replacing
+    # only the external model transport.
+    import anthropic
+
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", _StubAsyncClient)
+    monkeypatch.setattr(anthropic, "AsyncAnthropicVertex", _StubAsyncClient, raising=False)
 
     with (
         patch("sre_agent.k8s_client._initialized", True),
@@ -67,9 +76,8 @@ class TestChatClientMessages:
                     "fleet": False,
                 }
             )
-            # Should get at least one response (text_delta, error, or done)
-            data = ws.receive_json()
-            assert "type" in data
+            events = _receive_completed_turn(ws)
+            assert events[-1]["full_response"] == _StubAsyncClient.STUB_TEXT
 
     def test_confirm_response_without_pending_nonce(self, ws_client, pulse_token):
         """confirm_response with no pending request should be ignored or error."""
@@ -112,37 +120,31 @@ class TestChatServerEvents:
         """After a message, the done event should include full_response."""
         with ws_client.websocket_connect(f"/ws/agent?token={pulse_token}") as ws:
             ws.send_json({"type": "message", "content": "hello"})
-            events = []
-            for _ in range(50):
-                try:
-                    data = ws.receive_json()
-                    events.append(data)
-                    if data.get("type") == "done":
-                        break
-                except Exception:
-                    break
-
-            done_events = [e for e in events if e.get("type") == "done"]
-            if done_events:
-                assert "full_response" in done_events[0]
+            events = _receive_completed_turn(ws)
+            assert events[-1]["full_response"] == _StubAsyncClient.STUB_TEXT
+            assert sum(event["type"] == "done" for event in events) == 1
 
     def test_text_delta_schema(self, ws_client, pulse_token):
-        """text_delta events must have a text field."""
+        """A successful streamed turn must emit text, then a matching done."""
         with ws_client.websocket_connect(f"/ws/agent?token={pulse_token}") as ws:
             ws.send_json({"type": "message", "content": "hi"})
-            events = []
-            for _ in range(50):
-                try:
-                    data = ws.receive_json()
-                    events.append(data)
-                    if data.get("type") == "done":
-                        break
-                except Exception:
-                    break
+            events = _receive_completed_turn(ws)
+            text_deltas = [event for event in events if event["type"] == "text_delta"]
+            assert text_deltas, "Turn completed without streaming any text"
+            assert all(isinstance(event["text"], str) for event in text_deltas)
+            assert "".join(event["text"] for event in text_deltas) == events[-1]["full_response"]
 
-            text_deltas = [e for e in events if e.get("type") == "text_delta"]
-            for td in text_deltas:
-                assert "text" in td, "text_delta missing 'text' field"
+
+def _receive_completed_turn(ws):
+    """Errors, disconnects and missing terminal events must fail the contract."""
+    events = []
+    for _ in range(50):
+        event = ws.receive_json()
+        assert event.get("type") != "error", event
+        events.append(event)
+        if event.get("type") == "done":
+            return events
+    pytest.fail("No done event within 50 protocol messages")
 
 
 # ---------------------------------------------------------------------------
@@ -172,9 +174,10 @@ class TestMonitorClientMessages:
             ws.close()
 
     def test_monitor_rejects_no_token(self, ws_client):
-        with pytest.raises((WebSocketDisconnect, Exception)):
+        with pytest.raises(WebSocketDisconnect) as denied:
             with ws_client.websocket_connect("/ws/monitor"):
                 pass
+        assert denied.value.code == 4001
 
 
 # ---------------------------------------------------------------------------
@@ -186,14 +189,16 @@ class TestAuthContract:
     """Verify auth behavior matches API_CONTRACT.md."""
 
     def test_no_token_disconnects_with_4001(self, ws_client):
-        with pytest.raises((WebSocketDisconnect, Exception)):
+        with pytest.raises(WebSocketDisconnect) as denied:
             with ws_client.websocket_connect("/ws/agent"):
                 pass
+        assert denied.value.code == 4001
 
     def test_wrong_token_disconnects(self, ws_client):
-        with pytest.raises((WebSocketDisconnect, Exception)):
+        with pytest.raises(WebSocketDisconnect) as denied:
             with ws_client.websocket_connect("/ws/agent?token=wrong"):
                 pass
+        assert denied.value.code == 4001
 
     def test_valid_token_connects(self, ws_client, pulse_token):
         with ws_client.websocket_connect(f"/ws/agent?token={pulse_token}") as ws:
@@ -236,22 +241,22 @@ class TestRESTContract:
         assert "sre" in data
         assert "security" in data
         assert isinstance(data["sre"], list)
-        if data["sre"]:
-            tool = data["sre"][0]
-            assert "name" in tool
-            assert "description" in tool
-            assert "requires_confirmation" in tool
+        assert data["sre"], "SRE tool discovery unexpectedly returned no tools"
+        for tool in data["sre"]:
+            assert isinstance(tool["name"], str)
+            assert isinstance(tool["description"], str)
+            assert isinstance(tool["requires_confirmation"], bool)
 
     def test_agents(self, ws_client, pulse_token):
         resp = ws_client.get(f"/agents?token={pulse_token}")
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, list)
-        if data:
-            agent = data[0]
-            assert "name" in agent
-            assert "description" in agent
-            assert "tools_count" in agent
+        assert data, "Agent discovery unexpectedly returned no skills"
+        for agent in data:
+            assert isinstance(agent["name"], str)
+            assert isinstance(agent["description"], str)
+            assert isinstance(agent["tools_count"], int)
 
     def test_views_list(self, ws_client, pulse_token):
         resp = ws_client.get(

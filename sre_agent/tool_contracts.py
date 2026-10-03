@@ -195,6 +195,16 @@ def _probe_scale_deployment(args: dict, pre: dict) -> tuple[str, str]:
             f"{ref} spec shows {desired} replicas, but the scale requested {requested} — the change did not hold",
         )
     if ready == requested:
+        generation = getattr(getattr(dep, "metadata", None), "generation", None)
+        observed = getattr(dep.status, "observed_generation", None)
+        if not isinstance(generation, int) or not isinstance(observed, int):
+            return health_gate.UNVERIFIABLE, f"{ref} scale has no controller generation observations"
+        if observed < generation:
+            return health_gate.FAIL, f"{ref} scale awaiting controller observation of generation {generation}"
+        if requested > 0:
+            gate = health_gate.check_resource("Deployment", name, ns)
+            if gate.status != health_gate.PASS:
+                return gate.status, gate.detail
         return health_gate.PASS, f"{ref} scaled to {requested} as requested ({ready} ready)"
     return health_gate.FAIL, f"{ref} requested {requested} replicas but {ready} are ready"
 

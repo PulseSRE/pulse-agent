@@ -36,6 +36,7 @@ KIND_SKILL = "skill"
 KIND_PLAN = "plan"
 KIND_EVAL_SCENARIO = "eval_scenario"
 KIND_EVAL_FIXTURE = "eval_fixture"
+KIND_EVAL_DRAFT = "eval_draft"
 
 
 def _db():
