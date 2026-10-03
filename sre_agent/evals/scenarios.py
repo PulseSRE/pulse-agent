@@ -58,6 +58,13 @@ def load_raw_suite(suite_name: str) -> dict:
     if packaged is None and runtime is None:
         raise FileNotFoundError(f"Eval suite not found in package or runtime dir: {suite_name}.json")
 
+    for payload in (packaged, runtime):
+        if payload and (payload.get("artifact_kind") == "incident_replay_draft" or payload.get("runnable") is False):
+            raise ValueError("Unreviewed incident drafts cannot run as eval scenarios")
+        for scenario in (payload or {}).get("scenarios", []):
+            if scenario.get("artifact_kind") == "incident_replay_draft" or scenario.get("runnable") is False:
+                raise ValueError("Unreviewed incident drafts cannot run as eval scenarios")
+
     merged = dict(packaged or runtime or {})
     by_id: dict[str, dict] = {}
     for payload in (packaged, runtime):

@@ -61,7 +61,12 @@ def load_fixture(name: str) -> dict:
         path = directory / f"{name}.json"
         if path.exists():
             with open(path, encoding="utf-8") as fh:
-                return json.load(fh)
+                fixture = json.load(fh)
+                if isinstance(fixture, dict) and (
+                    fixture.get("artifact_kind") == "incident_replay_draft" or fixture.get("runnable") is False
+                ):
+                    raise ValueError("Unreviewed incident drafts cannot run as replay fixtures")
+                return fixture
     raise FileNotFoundError(f"Fixture not found: {_FIXTURES_DIR / (name + '.json')}")
 
 

@@ -902,3 +902,5 @@ post-checks prove outcomes in the simulator. Tomorrow's real-cluster release
 acceptance remains a separate deployment/RBAC/remediation requirement.
 
 Replay acceptance pins all 49 fixture IDs in `sre_agent/evals/acceptance_manifest.json`; deleting, renaming, or adding fixtures requires an explicit manifest update. Skipped rows and inconsistent observed call diagnostics fail acceptance. The simulation adapter forwards confirmation only after the actual callback approves the exact tool arguments, consumes that approval once, and overrides model-supplied confirmation claims. Adapter regressions exercise callback bypass, mismatched resources, and approval reuse; these validate harness fidelity, not provider behavior.
+
+Verified incident evidence can seed review-only eval drafts via the explicit selected-action CLI. See [EVAL_LAB.md](EVAL_LAB.md) for source validation, redaction, actual-recording review, and promotion boundaries. Automatic scaffolding writes nonrunnable drafts rather than replay results.
