@@ -371,6 +371,7 @@ async def _run_fixture_async(
 
         output = {
             "fixture": name,
+            "dry_run": dry_run,
             "prompt": fixture["prompt"],
             "score": score,
             "response_preview": result["response"][:500],
@@ -432,7 +433,9 @@ async def _run_multi_turn_fixture(
 
         output = {
             "fixture": name,
+            "dry_run": dry_run,
             "multi_turn": True,
+            "turn_tool_calls": [[tc["name"] for tc in turn["tool_calls"]] for turn in result["turns"]],
             "prompt": " → ".join(t["prompt"][:50] for t in fixture["turns"]),
             "score": score,
             "response_preview": result["turns"][-1]["response"][:500] if result["turns"] else "",
@@ -539,6 +542,7 @@ def main() -> None:
         except Exception as e:
             return {
                 "fixture": name,
+                "dry_run": args.dry_run,
                 "error": str(e),
                 "score": {"passed": False, "score": 0, "checks": [], "tool_calls": []},
                 "response_preview": "",

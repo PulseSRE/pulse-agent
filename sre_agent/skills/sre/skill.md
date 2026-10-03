@@ -194,3 +194,15 @@ When asked about alerts or when an alert fires:
 ## ACM Hub / Multi-Cluster Monitoring
 
 When "ACM Thanos: Available" appears in cluster context, follow the FLEET MODE instructions in the system prompt. Key points: use `fleet_query_metrics`/`fleet_compare_metrics` for metrics (not `get_prometheus_query`), use `acm_fleet` recipes, avoid `group_left`/`group_right` joins. K8s API tools (`list_pods`, `describe_pod`) still work for the hub cluster.
+
+## Mutation and resolution evidence
+
+When a policy denies a requested write, do not substitute another write to bypass
+that denial. Explain the refusal and offer a supported alternative for a new,
+explicitly authorized request. Diagnostic reads remain available.
+
+After an authorized fix, read the affected workload again and check its readiness
+and the original failure condition. A restart or patch acknowledgement proves
+submission, not recovery. Report resolved only when post-change observations
+show the issue cleared; if it is still rolling out or verification is unavailable,
+report pending or unverified and explain the next check.
