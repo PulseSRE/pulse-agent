@@ -19,6 +19,12 @@ the cluster equivalent: read the live object and require it to affirmatively
 look healthy. The gate's output becomes the verification evidence, so what an
 operator reads is a measurement rather than a restatement of the fallback.
 
+Rollout verification requires the controller to observe the current generation
+and report current replicas. StatefulSet OnDelete or partitioned updates and
+DaemonSet OnDelete may deliberately retain old replicas: readiness alone does
+not prove incident recovery, so incomplete intentional rollouts are reported
+UNVERIFIABLE. A completed rollout can pass regardless of update strategy.
+
 The gate never invents success. It returns UNVERIFIABLE — distinct from both
 pass and fail — whenever it cannot get a clear answer, and the caller must
 treat that as "not verified".
@@ -122,6 +128,45 @@ def _check_workload(kind: str, name: str, namespace: str) -> GateResult:
                 FAIL,
                 ref,
                 f"{ref} rollout incomplete: {updated} updated, {available} available, {total} total; desired {desired}",
+            )
+
+    if kind == "StatefulSet":
+        current = getattr(status, "current_revision", None)
+        target = getattr(status, "update_revision", None)
+        updated = getattr(status, "updated_replicas", None)
+        if not current or not target or updated is None:
+            return GateResult(UNVERIFIABLE, ref, f"{ref} did not report complete StatefulSet revision observations")
+        if current != target or updated != desired:
+            strategy = getattr(getattr(obj, "spec", None), "update_strategy", None)
+            strategy_type = getattr(strategy, "type", None)
+            partition = getattr(getattr(strategy, "rolling_update", None), "partition", None) or 0
+            if strategy_type == "OnDelete" or partition > 0:
+                return GateResult(
+                    UNVERIFIABLE,
+                    ref,
+                    f"{ref} retains old replicas under {strategy_type or 'RollingUpdate'} strategy (partition {partition}); incident recovery is not proven",
+                )
+            return GateResult(
+                FAIL,
+                ref,
+                f"{ref} rollout incomplete: revision {current} -> {target}, {updated}/{desired} replicas updated",
+            )
+    if kind == "DaemonSet":
+        updated = getattr(status, "updated_number_scheduled", None)
+        available = getattr(status, "number_available", None)
+        scheduled = getattr(status, "current_number_scheduled", None)
+        if any(value is None for value in (updated, available, scheduled)):
+            return GateResult(UNVERIFIABLE, ref, f"{ref} did not report complete DaemonSet rollout observations")
+        if updated != desired or scheduled != desired or available < desired:
+            strategy = getattr(getattr(obj, "spec", None), "update_strategy", None)
+            if getattr(strategy, "type", None) == "OnDelete":
+                return GateResult(
+                    UNVERIFIABLE, ref, f"{ref} retains old pods under OnDelete; incident recovery is not proven"
+                )
+            return GateResult(
+                FAIL,
+                ref,
+                f"{ref} rollout incomplete: {updated} updated, {available} available, {scheduled} scheduled; desired {desired}",
             )
 
     return GateResult(PASS, ref, f"{ref} has {ready}/{desired} replicas ready")
