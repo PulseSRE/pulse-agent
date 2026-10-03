@@ -182,9 +182,12 @@ class PlanWorkflow:
         # never re-decide a branch differently from what ran.
         skill_override = resolve_branch(phase, self._outputs)
         timeout = timedelta(seconds=int(phase.get("timeout_seconds", 120) * _PHASE_TIMEOUT_MARGIN))
+        args = [plan, phase["id"], params.incident, self._outputs, skill_override]
+        if workflow.patched("explicit-plan-write-approval"):
+            args.append(bool(phase.get("approval_required") and self._approvals.get(phase["id"])))
         return await workflow.execute_activity(
             run_plan_phase,
-            args=[plan, phase["id"], params.incident, self._outputs, skill_override],
+            args=args,
             start_to_close_timeout=timeout,
             # The engine already retries a failed contract internally;
             # activity-level retry only covers a dead worker, and an

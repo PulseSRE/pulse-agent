@@ -91,7 +91,12 @@ async def load_plan(incident_type: str) -> dict:
 
 @activity.defn(name="pulse.run_plan_phase")
 async def run_plan_phase(
-    plan: dict, phase_id: str, incident: dict, prior_outputs: dict, skill_override: str | None = None
+    plan: dict,
+    phase_id: str,
+    incident: dict,
+    prior_outputs: dict,
+    skill_override: str | None = None,
+    writes_approved: bool = False,
 ) -> dict:
     """One phase, held to its contract, exactly as the in-process engine runs it.
 
@@ -111,7 +116,14 @@ async def run_plan_phase(
 
     client = create_async_client()
     try:
-        runtime = PlanRuntime(client=client)
+        # Only a verdict delivered through the workflow's approval gate can
+        # authorize writes. Ordinary investigation phases stay read-only.
+        async def confirm_write(_name, _input):
+            from ..config import get_settings
+
+            return writes_approved and get_settings().monitor.max_trust_level >= 2
+
+        runtime = PlanRuntime(client=client, on_confirm=confirm_write)
         output = await runtime._execute_phase(phase, incident, priors)
     finally:
         try:

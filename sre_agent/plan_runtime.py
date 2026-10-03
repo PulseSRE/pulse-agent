@@ -17,6 +17,7 @@ import logging
 import re
 import time
 import uuid
+from contextlib import asynccontextmanager
 
 from .skill_plan import (
     PlanResult,
@@ -33,13 +34,23 @@ logger = logging.getLogger("pulse_agent.plan_runtime")
 class PlanRuntime:
     """Executes skill plans with phased control flow."""
 
-    def __init__(self, client=None):
+    def __init__(self, client=None, *, on_confirm=None, user_token: str | None = None):
         """
         Args:
             client: Anthropic client (optional, created lazily)
         """
         self._client = client
+        self._on_confirm = on_confirm
+        self._user_token = user_token
         self._write_mutex = asyncio.Lock()  # serializes write operations across parallel phases
+
+    @asynccontextmanager
+    async def _phase_write_guard(self, write_tools: set[str]):
+        if write_tools:
+            async with self._write_mutex:
+                yield
+        else:
+            yield
 
     async def execute(
         self,
@@ -363,14 +374,16 @@ class PlanRuntime:
                 agent_mode=f"pipeline:plan:{phase.skill_name}",
             )
 
-            async with borrow_async_client(self._client) as client:
+            async with self._phase_write_guard(config["write_tools"]), borrow_async_client(self._client) as client:
                 response = await run_agent_streaming(
                     client,
                     [{"role": "user", "content": prompt}],
                     config["system_prompt"],
                     config["tool_defs"],
                     config["tool_map"],
-                    set(),
+                    config["write_tools"],
+                    on_confirm=self._on_confirm,
+                    user_token=self._user_token,
                     on_tool_use=on_tool,
                     on_tool_result=on_tool_result,
                     mode=phase.skill_name,

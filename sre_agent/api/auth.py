@@ -66,16 +66,16 @@ def _get_current_user(
     if x_forwarded_user and isinstance(x_forwarded_user, str) and x_forwarded_user.strip():
         username = x_forwarded_user.strip()
         # One-time migration: move hash-based views to real username
-        if not _user_cache.get(f"_migrated_{username}"):
+        if x_forwarded_access_token:
             try:
                 from .. import db
 
-                migrated = db.migrate_view_ownership(username)
+                legacy_owner = "user-" + hashlib.sha256(x_forwarded_access_token.encode()).hexdigest()[:16]
+                migrated = db.migrate_view_ownership(username, legacy_owner)
                 if migrated:
                     logger.info("Migrated %d views to user '%s'", migrated, username)
             except Exception:
                 logger.debug("View ownership migration failed for user '%s'", username, exc_info=True)
-            _user_cache[f"_migrated_{username}"] = (username, time.time())
         return username
 
     token = x_forwarded_access_token or ""

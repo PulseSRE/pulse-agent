@@ -589,7 +589,7 @@ async def list_mcp_servers(_auth=Depends(verify_token)):
 
 
 @router.post("/admin/mcp/toolsets")
-async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
+async def update_mcp_toolsets(body: dict, _auth=Depends(require_admin)):
     """Update MCP server toolsets by patching the deployment and reconnecting.
 
     Expects: {"toolsets": ["core", "config", "helm", ...]}
@@ -760,7 +760,7 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(verify_token)):
 
 
 @router.post("/admin/mcp")
-async def add_mcp_server(body: dict, _auth=Depends(verify_token)):
+async def add_mcp_server(body: dict, _auth=Depends(require_admin)):
     """Add a standalone MCP server connection.
 
     Expects: {"name": "my-server", "url": "http://...", "transport": "sse"}
@@ -836,7 +836,7 @@ async def add_mcp_server(body: dict, _auth=Depends(verify_token)):
 
 
 @router.delete("/admin/mcp/{name}")
-async def remove_mcp_server(name: str, _auth=Depends(verify_token)):
+async def remove_mcp_server(name: str, _auth=Depends(require_admin)):
     """Remove a standalone MCP server connection."""
     from ..mcp_client import remove_standalone_server
 
@@ -847,7 +847,7 @@ async def remove_mcp_server(name: str, _auth=Depends(verify_token)):
 
 
 @router.post("/admin/mcp/test")
-async def test_mcp_server(body: dict, _auth=Depends(verify_token)):
+async def test_mcp_server(body: dict, _auth=Depends(require_admin)):
     """Test connectivity to an MCP server without registering it.
 
     Expects: {"url": "http://...", "transport": "sse"}

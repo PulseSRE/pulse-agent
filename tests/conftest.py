@@ -443,6 +443,7 @@ def mock_k8s():
         patch("sre_agent.k8s_client.get_apps_client") as apps,
         patch("sre_agent.k8s_client.get_custom_client") as custom,
         patch("sre_agent.k8s_client.get_version_client") as version,
+        patch("sre_agent.k8s_client.get_networking_client") as networking,
         patch("sre_agent.k8s_tools.advanced.k8s_stream") as stream,
     ):
         core_mock = MagicMock()
@@ -454,12 +455,14 @@ def mock_k8s():
         apps.return_value = apps_mock
         custom.return_value = custom_mock
         version.return_value = version_mock
+        networking.return_value = MagicMock()
 
         yield {
             "core": core_mock,
             "apps": apps_mock,
             "custom": custom_mock,
             "version": version_mock,
+            "networking": networking.return_value,
             "stream": stream,
         }
 

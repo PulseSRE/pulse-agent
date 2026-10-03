@@ -962,6 +962,9 @@ async def websocket_monitor(websocket: WebSocket):
                 if not isinstance(action_id, str) or len(action_id) > 200:
                     continue
                 approved = data.get("approved", False)
+                if not isinstance(approved, bool):
+                    await websocket.send_json({"type": "error", "message": "approved must be a boolean"})
+                    continue
                 handled = client.resolve_action_response(action_id, approved)
                 logger.info("Action response: id=%s approved=%s handled=%s", action_id, approved, handled)
                 if handled:

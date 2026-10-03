@@ -367,7 +367,7 @@ class TestOnToolResult:
         assert r["was_confirmed"] is None
 
     @pytest.mark.asyncio
-    async def test_on_tool_result_called_for_write_tool_confirmed(self):
+    async def test_on_tool_result_called_for_write_tool_confirmed(self, mock_k8s):
         tool_use_response = SimpleNamespace(
             stop_reason="tool_use",
             content=[SimpleNamespace(type="tool_use", id="t1", name="delete_pod", input={"pod_name": "x"})],
