@@ -585,6 +585,13 @@ The pipeline publishes a GitHub step summary with a table like:
 
 Download full artifacts from the Actions run page for detailed per-scenario breakdowns.
 
+### Production container check
+
+The `Container Build` workflow builds the production Dockerfile on pull requests
+and pushes to `main`, then checks the installed package entry point. It does not
+start the API or publish an image. This catches packaging and base-image build
+failures before a release is tagged; evaluation and test gates remain separate.
+
 ## Release process
 
 See [RELEASE](RELEASE.md) for current versioning/publication and operator deployment. Build and release workflows are separate from eval checks. A successful image build is not proof of a provider-backed gate or cluster acceptance.

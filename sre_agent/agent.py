@@ -604,6 +604,7 @@ async def run_agent_streaming(
 
     full_text_parts = []
     iterations = 0
+    policy_denied_write = False
 
     from .loop_budget import LoopBudget, compact_tool_results
 
@@ -878,6 +879,26 @@ async def run_agent_streaming(
 
             # Execute write tools sequentially (need confirmation gate)
             for block in write_blocks:
+                # A model must not reinterpret a denied mutation as permission
+                # to attempt another write. Keep diagnostics available, but a
+                # different mutation requires a new user turn after the refusal.
+                if policy_denied_write:
+                    reason = "Operation blocked: a write was denied by policy in this turn. Diagnose or propose an alternative for a new user request; do not substitute another mutation."
+                    results_map[block.id] = (reason, None)
+                    await event_bus.on_tool_result(
+                        {
+                            "tool_name": block.name,
+                            "input": block.input,
+                            "status": "denied",
+                            "error_message": reason,
+                            "error_category": "forbidden",
+                            "duration_ms": 0,
+                            "result_bytes": len(reason),
+                            "was_confirmed": False,
+                            "turn_number": iterations,
+                        },
+                    )
+                    continue
                 confirmed = await event_bus.on_confirm(block.name, block.input)
                 if not is_explicit_approval(confirmed):
                     results_map[block.id] = ("Operation denied. No confirmation callback or user rejected.", None)
@@ -908,6 +929,8 @@ async def run_agent_streaming(
                     user_token,
                     _abort_401,
                 )
+                if exec_meta["error_category"] == "forbidden":
+                    policy_denied_write = True
                 write_elapsed_ms = int((time.time() - write_start) * 1000)
                 results_map[block.id] = (text, component)
                 await event_bus.on_tool_result(

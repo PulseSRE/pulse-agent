@@ -798,3 +798,73 @@ class TestToolRegistrationRequiresAnExplicitDecision:
         assert param.kind is inspect.Parameter.KEYWORD_ONLY, (
             "is_write must be keyword-only so call sites read register_tool(x, is_write=True)"
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batched", [False, True])
+@pytest.mark.parametrize("alternate", ["restart_deployment", "mcp_external_mutation"])
+async def test_policy_refusal_stops_alternate_writes_but_keeps_diagnostics_and_new_turn(batched, alternate):
+    """A permissive approver cannot authorize model substitution after denial."""
+    from sre_agent import tool_contracts
+
+    def tool_response(*names):
+        return SimpleNamespace(
+            stop_reason="tool_use",
+            content=[
+                SimpleNamespace(
+                    type="tool_use",
+                    id=f"{name}-{index}",
+                    name=name,
+                    input={"namespace": "production", "pod_name": "payments", "name": "payments"},
+                )
+                for index, name in enumerate(names)
+            ],
+        )
+
+    final = SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text="Unresolved.")])
+    responses = (
+        [tool_response("delete_pod", alternate, "list_pods"), final]
+        if batched
+        else [tool_response("delete_pod"), tool_response(alternate, "list_pods"), final]
+    )
+    client = TestConfirmationGate()._make_stream_context(responses)
+    tools = {name: MagicMock() for name in ("delete_pod", alternate, "list_pods")}
+    for tool in tools.values():
+        tool.call.return_value = "synthetic observed response"
+    confirm, results = AsyncMock(return_value=True), AsyncMock()
+    with (
+        patch("sre_agent.policy._is_protected", return_value=True),
+        patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"}),
+        tool_contracts.suspended(),
+    ):
+        await run_agent_streaming(
+            client=client,
+            messages=[{"role": "user", "content": "Delete production payments immediately"}],
+            system_prompt="test",
+            tool_defs=[],
+            tool_map=tools,
+            write_tools={"delete_pod", alternate},
+            on_confirm=confirm,
+            on_tool_result=results,
+        )
+        tools["delete_pod"].call.assert_not_called()
+        tools[alternate].call.assert_not_called()
+        tools["list_pods"].call.assert_called_once()
+        assert [call.args[0] for call in confirm.call_args_list] == ["delete_pod"]
+        alternate_result = next(
+            call.args[0] for call in results.call_args_list if call.args[0]["tool_name"] == alternate
+        )
+        assert alternate_result["status"] == "denied"
+        assert alternate_result["was_confirmed"] is False
+        # State belongs to one invocation: an explicit new user request can
+        # take the independently permitted, confirmed restart path.
+        await run_agent_streaming(
+            client=TestConfirmationGate()._make_stream_context([tool_response(alternate), final]),
+            messages=[{"role": "user", "content": "Restart the payments deployment instead"}],
+            system_prompt="test",
+            tool_defs=[],
+            tool_map=tools,
+            write_tools={alternate},
+            on_confirm=confirm,
+        )
+    tools[alternate].call.assert_called_once()

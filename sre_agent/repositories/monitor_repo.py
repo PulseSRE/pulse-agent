@@ -13,6 +13,7 @@ import logging
 
 from .. import db_schema
 from .base import BaseRepository
+from .monitor_findings import ACTIVE, MONITOR_FINDINGS, graph_findings
 
 logger = logging.getLogger("pulse_agent.monitor")
 
@@ -624,7 +625,7 @@ class MonitorRepository(BaseRepository):
             "AND a.verification_status = 'verified' "
             "AND a.verification_timestamp >= f.timestamp "
             "AND a.verification_timestamp >= a.timestamp "
-            "AND a.verification_timestamp <= EXTRACT(EPOCH FROM NOW())::BIGINT * 1000 "
+            "AND a.verification_timestamp <= FLOOR(EXTRACT(EPOCH FROM statement_timestamp()) * 1000)::BIGINT "
             "AND a.verification_timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000",
             (days,),
         )
@@ -890,28 +891,30 @@ class MonitorRepository(BaseRepository):
 
     def fetch_active_findings(self) -> list[dict]:
         """Fetch active (unresolved) findings for topology overlay."""
-        return self.db.fetchall("SELECT category, severity, resources FROM findings WHERE resolved = 0")
+        return graph_findings(self.db.fetchall(MONITOR_FINDINGS + ACTIVE))
 
     async def async_fetch_active_findings(self) -> list[dict]:
         """Async version: fetch active (unresolved) findings for topology overlay."""
         db = await self.get_async_db()
-        return await db.fetchall("SELECT category, severity, resources FROM findings WHERE resolved = 0")
+        return graph_findings(await db.fetchall(MONITOR_FINDINGS + ACTIVE))
 
     def fetch_recent_deployments(self, minutes: int = 15) -> list[dict]:
         """Fetch recent deployment audit findings."""
-        return self.db.fetchall(
-            "SELECT resources FROM findings "
-            "WHERE category = 'audit_deployment' "
-            "AND timestamp > EXTRACT(EPOCH FROM NOW() - MAKE_INTERVAL(mins => ?))::BIGINT * 1000",
-            (minutes,),
+        return graph_findings(
+            self.db.fetchall(
+                MONITOR_FINDINGS + " AND split_part(correlation_key, ':', 1) = 'audit_deployment'"
+                " AND created_at > EXTRACT(EPOCH FROM NOW() - MAKE_INTERVAL(mins => ?))::BIGINT",
+                (minutes,),
+            )
         )
 
     def fetch_deployment_risk_findings(self) -> list[dict]:
-        """Fetch deployment risk findings for topology risk scoring."""
-        return self.db.fetchall(
-            "SELECT resources, category FROM findings "
-            "WHERE category = 'audit_deployment' AND resolved = 0 "
-            "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '2 hours')::BIGINT * 1000"
+        """Active deployment audit items inside the risk window."""
+        return graph_findings(
+            self.db.fetchall(
+                MONITOR_FINDINGS + ACTIVE + " AND split_part(correlation_key, ':', 1) = 'audit_deployment'"
+                " AND created_at > EXTRACT(EPOCH FROM NOW() - INTERVAL '2 hours')::BIGINT"
+            )
         )
 
     def fetch_finding_by_id(self, finding_id: str) -> dict | None:
@@ -1049,8 +1052,8 @@ class MonitorRepository(BaseRepository):
         self.db.execute(
             "INSERT INTO skill_selection_log "
             "(session_id, query_summary, selected_skill, threshold_used, "
-            "selection_ms, channel_weights) "
-            "VALUES (%s, %s, %s, %s, %s, %s)",
+            "selection_ms, channel_weights, channel_scores, fused_scores) "
+            "VALUES (%s, %s, %s, %s, %s, %s, '{}'::jsonb, '{}'::jsonb)",
             (session_id, query_summary, selected_skill, 0.0, 0, channel_weights_json),
         )
         self.db.commit()
@@ -1065,7 +1068,7 @@ class MonitorRepository(BaseRepository):
 
     def fetch_unresolved_finding_status(self) -> list[dict]:
         """Fetch severity and resources for unresolved findings."""
-        return self.db.fetchall("SELECT severity, resources FROM findings WHERE resolved = 0")
+        return graph_findings(self.db.fetchall(MONITOR_FINDINGS + ACTIVE))
 
     # ── Inbox generators (inbox_generators.py) ────────────────────────────────
 

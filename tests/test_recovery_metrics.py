@@ -96,3 +96,34 @@ def test_success_rate_requires_recovery_and_excludes_unanswered_proposals(repo):
     result = repo.fetch_fix_rate(7)
     assert result["total"] == 3
     assert result["good"] == 1
+
+
+def test_subsecond_verification_after_transaction_start_is_included(repo):
+    """A real, aging PostgreSQL transaction cannot freeze the recovery bound."""
+    import psycopg2
+
+    now = int(time.time() * 1000)
+    save_case(repo, "millisecond-recovery", now - 10000, now - 5000, now - 1000)
+    save_case(repo, "future-recovery", now - 10000, now - 5000, now + 60000)
+    with psycopg2.connect(_TEST_DB_URL) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT NOW(), pg_sleep(2.1)")
+            # Choose a first-half-second timestamp after transaction NOW(), then
+            # wait until it is definitely in the past. No host-clock rounding.
+            cursor.execute(
+                "UPDATE actions SET verification_timestamp = "
+                "FLOOR(EXTRACT(EPOCH FROM clock_timestamp()))::BIGINT * 1000 + 123 "
+                "WHERE id = 'a-millisecond-recovery' RETURNING verification_timestamp"
+            )
+            observed = cursor.fetchone()[0]
+            assert observed % 1000 == 123
+            cursor.execute("SELECT pg_sleep(0.2)")
+
+            class TransactionDatabase:
+                def fetchone(self, query, params):
+                    cursor.execute(query, params)
+                    return dict(zip([item[0] for item in cursor.description], cursor.fetchone()))
+
+            result = MonitorRepository(TransactionDatabase()).fetch_time_to_resolution(7)
+            assert result["sample_count"] == 1
+            assert result["avg_seconds"] > 0
