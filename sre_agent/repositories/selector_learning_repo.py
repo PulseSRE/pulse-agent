@@ -35,8 +35,8 @@ class SelectorLearningRepository(BaseRepository):
         """Save learned weights to DB so they survive pod restarts."""
         self.db.execute(
             "INSERT INTO skill_selection_log (session_id, query_summary, selected_skill, "
-            "threshold_used, selection_ms, channel_weights) "
-            "VALUES (%s, %s, %s, %s, %s, %s)",
+            "threshold_used, selection_ms, channel_weights, channel_scores, fused_scores) "
+            "VALUES (%s, %s, %s, %s, %s, %s, '{}'::jsonb, '{}'::jsonb)",
             (
                 "__weight_snapshot__",
                 "learned_weights",

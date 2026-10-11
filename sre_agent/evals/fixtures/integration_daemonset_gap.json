@@ -2,11 +2,120 @@
     "name": "integration_daemonset_gap",
     "prompt": "Check if all DaemonSets have pods running on every node. Are any nodes missing DaemonSet pods?",
     "recorded_responses": {
-        "list_pods": "monitoring/node-exporter-abc12  Node=worker-1  Status=Running\nmonitoring/node-exporter-def34  Node=worker-2  Status=Running\nmonitoring/node-exporter-ghi56  Node=worker-4  Status=Running\nmonitoring/node-exporter-jkl78  Node=worker-6  Status=Running\nmonitoring/fluentd-mno90  Node=worker-1  Status=Running\nmonitoring/fluentd-pqr12  Node=worker-2  Status=Running\nmonitoring/fluentd-stu34  Node=worker-3  Status=Running\nmonitoring/fluentd-vwx56  Node=worker-4  Status=Running\nmonitoring/fluentd-yza78  Node=worker-5  Status=Running\nmonitoring/fluentd-bcd90  Node=worker-6  Status=Running",
+        "list_pods": {
+            "recording_kind": "argument_cases",
+            "cases": [
+                {
+                    "input": {
+                        "namespace": "ALL"
+                    },
+                    "response": "monitoring/node-exporter-abc12  Node=worker-1  Status=Running\nmonitoring/node-exporter-def34  Node=worker-2  Status=Running\nmonitoring/node-exporter-ghi56  Node=worker-4  Status=Running\nmonitoring/node-exporter-jkl78  Node=worker-6  Status=Running\nmonitoring/fluentd-mno90  Node=worker-1  Status=Running\nmonitoring/fluentd-pqr12  Node=worker-2  Status=Running\nmonitoring/fluentd-stu34  Node=worker-3  Status=Running\nmonitoring/fluentd-vwx56  Node=worker-4  Status=Running\nmonitoring/fluentd-yza78  Node=worker-5  Status=Running\nmonitoring/fluentd-bcd90  Node=worker-6  Status=Running"
+                },
+                {
+                    "input": {
+                        "label_selector": "app=node-exporter",
+                        "namespace": "ALL"
+                    },
+                    "response": "monitoring/node-exporter-abc12  Node=worker-1  Status=Running\nmonitoring/node-exporter-def34  Node=worker-2  Status=Running\nmonitoring/node-exporter-ghi56  Node=worker-4  Status=Running\nmonitoring/node-exporter-jkl78  Node=worker-6  Status=Running"
+                },
+                {
+                    "input": {
+                        "label_selector": "app=fluentd",
+                        "namespace": "ALL"
+                    },
+                    "response": "monitoring/fluentd-mno90  Node=worker-1  Status=Running\nmonitoring/fluentd-pqr12  Node=worker-2  Status=Running\nmonitoring/fluentd-stu34  Node=worker-3  Status=Running\nmonitoring/fluentd-vwx56  Node=worker-4  Status=Running\nmonitoring/fluentd-yza78  Node=worker-5  Status=Running\nmonitoring/fluentd-bcd90  Node=worker-6  Status=Running"
+                },
+                {
+                    "input": {
+                        "namespace": "monitoring"
+                    },
+                    "response": "monitoring/node-exporter-abc12  Node=worker-1  Status=Running\nmonitoring/node-exporter-def34  Node=worker-2  Status=Running\nmonitoring/node-exporter-ghi56  Node=worker-4  Status=Running\nmonitoring/node-exporter-jkl78  Node=worker-6  Status=Running\nmonitoring/fluentd-mno90  Node=worker-1  Status=Running\nmonitoring/fluentd-pqr12  Node=worker-2  Status=Running\nmonitoring/fluentd-stu34  Node=worker-3  Status=Running\nmonitoring/fluentd-vwx56  Node=worker-4  Status=Running\nmonitoring/fluentd-yza78  Node=worker-5  Status=Running\nmonitoring/fluentd-bcd90  Node=worker-6  Status=Running"
+                },
+                {
+                    "input": {
+                        "namespace": "monitoring",
+                        "label_selector": "app=node-exporter"
+                    },
+                    "response": "monitoring/node-exporter-abc12  Node=worker-1  Status=Running\nmonitoring/node-exporter-def34  Node=worker-2  Status=Running\nmonitoring/node-exporter-ghi56  Node=worker-4  Status=Running\nmonitoring/node-exporter-jkl78  Node=worker-6  Status=Running"
+                },
+                {
+                    "input": {
+                        "namespace": "monitoring",
+                        "label_selector": "app=fluentd"
+                    },
+                    "response": "monitoring/fluentd-mno90  Node=worker-1  Status=Running\nmonitoring/fluentd-pqr12  Node=worker-2  Status=Running\nmonitoring/fluentd-stu34  Node=worker-3  Status=Running\nmonitoring/fluentd-vwx56  Node=worker-4  Status=Running\nmonitoring/fluentd-yza78  Node=worker-5  Status=Running\nmonitoring/fluentd-bcd90  Node=worker-6  Status=Running"
+                }
+            ]
+        },
         "list_nodes": "worker-1  Ready  Age=30d\nworker-2  Ready  Age=30d\nworker-3  Ready  Age=30d  Taints=[dedicated=gpu:NoSchedule]\nworker-4  Ready  Age=30d\nworker-5  Ready  Age=30d  MemoryPressure=True\nworker-6  Ready  Age=30d",
         "describe_node": "{\"name\": \"worker-3\", \"taints\": [{\"key\": \"dedicated\", \"value\": \"gpu\", \"effect\": \"NoSchedule\"}], \"allocatable\": {\"cpu\": \"16\", \"memory\": \"64Gi\"}, \"conditions\": [{\"type\": \"Ready\", \"status\": \"True\"}]}",
-        "get_events": "30m ago  Warning  FailedScheduling  Pod/node-exporter-pending  0/6 nodes are available: 1 node(s) had taint {dedicated: gpu}, that the pod didn't tolerate, 1 node(s) had insufficient memory\n15m ago  Warning  FailedScheduling  Pod/node-exporter-pending2  0/6 nodes: same constraints",
-        "list_resources": "worker-1  Ready  Age=30d\nworker-2  Ready  Age=30d\nworker-3  Ready  Age=30d  Taints=[dedicated=gpu:NoSchedule]\nworker-4  Ready  Age=30d\nworker-5  Ready  Age=30d  MemoryPressure=True\nworker-6  Ready  Age=30d"
+        "get_events": {
+            "recording_kind": "argument_cases",
+            "cases": [
+                {
+                    "input": {
+                        "namespace": "ALL"
+                    },
+                    "response": "30m ago  Warning  FailedScheduling  Pod/node-exporter-pending  0/6 nodes are available: 1 node(s) had taint {dedicated: gpu}, that the pod didn't tolerate, 1 node(s) had insufficient memory\n15m ago  Warning  FailedScheduling  Pod/node-exporter-pending2  0/6 nodes: same constraints"
+                },
+                {
+                    "input": {
+                        "namespace": "monitoring"
+                    },
+                    "response": "30m ago  Warning  FailedScheduling  Pod/node-exporter-pending  0/6 nodes are available: 1 node(s) had taint {dedicated: gpu}, that the pod didn't tolerate, 1 node(s) had insufficient memory\n15m ago  Warning  FailedScheduling  Pod/node-exporter-pending2  0/6 nodes: same constraints"
+                }
+            ]
+        },
+        "list_resources": {
+            "recording_kind": "argument_cases",
+            "cases": [
+                {
+                    "input": {
+                        "resource": "nodes"
+                    },
+                    "response": "worker-1  Ready  Age=30d\nworker-2  Ready  Age=30d\nworker-3  Ready  Age=30d  Taints=[dedicated=gpu:NoSchedule]\nworker-4  Ready  Age=30d\nworker-5  Ready  Age=30d  MemoryPressure=True\nworker-6  Ready  Age=30d"
+                },
+                {
+                    "input": {
+                        "resource": "daemonsets"
+                    },
+                    "response": "{\"items\": [{\"metadata\": {\"name\": \"node-exporter\", \"namespace\": \"monitoring\", \"generation\": 1}, \"spec\": {\"selector\": {\"matchLabels\": {\"app\": \"node-exporter\"}}, \"template\": {\"metadata\": {\"labels\": {\"app\": \"node-exporter\"}}, \"spec\": {\"tolerations\": []}}}, \"status\": {\"observedGeneration\": 1, \"desiredNumberScheduled\": 5, \"currentNumberScheduled\": 4, \"numberReady\": 4, \"numberAvailable\": 4, \"numberMisscheduled\": 0}}, {\"metadata\": {\"name\": \"fluentd\", \"namespace\": \"monitoring\", \"generation\": 1}, \"spec\": {\"selector\": {\"matchLabels\": {\"app\": \"fluentd\"}}, \"template\": {\"metadata\": {\"labels\": {\"app\": \"fluentd\"}}, \"spec\": {\"tolerations\": [{\"key\": \"dedicated\", \"operator\": \"Equal\", \"value\": \"gpu\", \"effect\": \"NoSchedule\"}]}}}, \"status\": {\"observedGeneration\": 1, \"desiredNumberScheduled\": 6, \"currentNumberScheduled\": 6, \"numberReady\": 6, \"numberAvailable\": 6, \"numberMisscheduled\": 0}}]}"
+                },
+                {
+                    "input": {
+                        "resource": "daemonsets",
+                        "namespace": "monitoring"
+                    },
+                    "response": "{\"items\": [{\"metadata\": {\"name\": \"node-exporter\", \"namespace\": \"monitoring\", \"generation\": 1}, \"spec\": {\"selector\": {\"matchLabels\": {\"app\": \"node-exporter\"}}, \"template\": {\"metadata\": {\"labels\": {\"app\": \"node-exporter\"}}, \"spec\": {\"tolerations\": []}}}, \"status\": {\"observedGeneration\": 1, \"desiredNumberScheduled\": 5, \"currentNumberScheduled\": 4, \"numberReady\": 4, \"numberAvailable\": 4, \"numberMisscheduled\": 0}}, {\"metadata\": {\"name\": \"fluentd\", \"namespace\": \"monitoring\", \"generation\": 1}, \"spec\": {\"selector\": {\"matchLabels\": {\"app\": \"fluentd\"}}, \"template\": {\"metadata\": {\"labels\": {\"app\": \"fluentd\"}}, \"spec\": {\"tolerations\": [{\"key\": \"dedicated\", \"operator\": \"Equal\", \"value\": \"gpu\", \"effect\": \"NoSchedule\"}]}}}, \"status\": {\"observedGeneration\": 1, \"desiredNumberScheduled\": 6, \"currentNumberScheduled\": 6, \"numberReady\": 6, \"numberAvailable\": 6, \"numberMisscheduled\": 0}}]}"
+                },
+                {
+                    "input": {
+                        "resource": "pods"
+                    },
+                    "response": "monitoring/node-exporter-abc12  Node=worker-1  Status=Running\nmonitoring/node-exporter-def34  Node=worker-2  Status=Running\nmonitoring/node-exporter-ghi56  Node=worker-4  Status=Running\nmonitoring/node-exporter-jkl78  Node=worker-6  Status=Running\nmonitoring/fluentd-mno90  Node=worker-1  Status=Running\nmonitoring/fluentd-pqr12  Node=worker-2  Status=Running\nmonitoring/fluentd-stu34  Node=worker-3  Status=Running\nmonitoring/fluentd-vwx56  Node=worker-4  Status=Running\nmonitoring/fluentd-yza78  Node=worker-5  Status=Running\nmonitoring/fluentd-bcd90  Node=worker-6  Status=Running"
+                },
+                {
+                    "input": {
+                        "resource": "pods",
+                        "namespace": "monitoring"
+                    },
+                    "response": "monitoring/node-exporter-abc12  Node=worker-1  Status=Running\nmonitoring/node-exporter-def34  Node=worker-2  Status=Running\nmonitoring/node-exporter-ghi56  Node=worker-4  Status=Running\nmonitoring/node-exporter-jkl78  Node=worker-6  Status=Running\nmonitoring/fluentd-mno90  Node=worker-1  Status=Running\nmonitoring/fluentd-pqr12  Node=worker-2  Status=Running\nmonitoring/fluentd-stu34  Node=worker-3  Status=Running\nmonitoring/fluentd-vwx56  Node=worker-4  Status=Running\nmonitoring/fluentd-yza78  Node=worker-5  Status=Running\nmonitoring/fluentd-bcd90  Node=worker-6  Status=Running"
+                },
+                {
+                    "input": {
+                        "resource": "events"
+                    },
+                    "response": "30m ago  Warning  FailedScheduling  Pod/node-exporter-pending  0/6 nodes are available: 1 node(s) had taint {dedicated: gpu}, that the pod didn't tolerate, 1 node(s) had insufficient memory\n15m ago  Warning  FailedScheduling  Pod/node-exporter-pending2  0/6 nodes: same constraints"
+                },
+                {
+                    "input": {
+                        "resource": "events",
+                        "namespace": "monitoring"
+                    },
+                    "response": "30m ago  Warning  FailedScheduling  Pod/node-exporter-pending  0/6 nodes are available: 1 node(s) had taint {dedicated: gpu}, that the pod didn't tolerate, 1 node(s) had insufficient memory\n15m ago  Warning  FailedScheduling  Pod/node-exporter-pending2  0/6 nodes: same constraints"
+                }
+            ]
+        }
     },
     "expected": {
         "should_mention": [
@@ -23,5 +132,6 @@
             "drain_node"
         ],
         "max_tool_calls": 15
-    }
+    },
+    "fixture_origin": "synthetic evaluation scenario; DaemonSet snapshot authored consistently with the existing synthetic node, pod and scheduling-event records; not captured cluster evidence"
 }

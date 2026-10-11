@@ -313,6 +313,10 @@ Each fixture is a JSON file with this structure:
 }
 ```
 
+Argument-specific snapshots can use `{"recording_kind": "argument_cases", "cases": [{"input": {"resource": "daemonsets", "namespace": "monitoring"}, "response": "recorded output"}]}` as a tool's recorded value. The matcher accepts documented resource aliases, inferred API groups and default selectors; other arguments require their own case. Missing or ambiguous cases cannot silently return another resource's snapshot. Unmatched cases return the missing-recording sentinel and remain visible in replay diagnostics. Legacy string recordings retain their existing behavior.
+
+`integration_daemonset_gap` is explicitly synthetic. Its DaemonSet snapshot is consistent with the node and pod records: node-exporter has four running pods and five eligible nodes because its template does not tolerate the GPU node's NoSchedule taint; fluentd tolerates that taint and has six running pods. Controller desired scheduling and coverage of all six nodes are different quantities. Returned records contain resource state, not a prose answer or captured-cluster claim. Expected answers and score thresholds remain unchanged.
+
 ### Current Fixtures
 
 | Fixture | Category |
@@ -584,6 +588,13 @@ The pipeline publishes a GitHub step summary with a table like:
 ```
 
 Download full artifacts from the Actions run page for detailed per-scenario breakdowns.
+
+### Production container check
+
+The `Container Build` workflow builds the production Dockerfile on pull requests
+and pushes to `main`, then checks the installed package entry point. It does not
+start the API or publish an image. This catches packaging and base-image build
+failures before a release is tagged; evaluation and test gates remain separate.
 
 ## Release process
 

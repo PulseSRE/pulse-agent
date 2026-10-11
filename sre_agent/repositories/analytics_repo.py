@@ -239,7 +239,8 @@ class AnalyticsRepository(BaseRepository):
     def fetch_eval_scores(self, suite: str, limit: int) -> list[dict]:
         """Fetch recent eval scores for sparkline."""
         return self.db.fetchall(
-            "SELECT score, pass, scenarios, timestamp FROM eval_runs WHERE suite = ? ORDER BY id DESC LIMIT ?",
+            "SELECT average_overall AS score, gate_passed AS pass, scenario_count AS scenarios, timestamp "
+            "FROM eval_runs WHERE suite_name = ? ORDER BY id DESC LIMIT ?",
             (suite, limit),
         )
 

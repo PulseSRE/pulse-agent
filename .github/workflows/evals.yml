@@ -254,6 +254,7 @@ jobs:
           trap 'rm -f /tmp/gcp-sa-key.json' EXIT
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json
           pip install "sre-bench[vertex] @ git+https://github.com/PulseSRE/sre-bench.git@main"
+          python scripts/check_sim_adapter.py
           sre-bench run --adapter sre_agent.evals.srebench_adapter:factory \
             --all --sim --out artifacts/srebench-sim.json
           # Integrity GATES: a structurally impossible flag (a verified fix with
@@ -266,6 +267,10 @@ jobs:
             --sim artifacts/srebench-sim.json --replay artifacts/live_judge.json \
             --output artifacts/mandatory_acceptance.json || BENCH_GATE_STATUS=1
           # Both benchmark suites must meet their existing score gates as well.
+          # Retain per-scenario diagnostics in the downloadable artifact while
+          # keeping the concise score summaries below readable in Actions.
+          sre-bench score artifacts/srebench-sim.json --suite core --out artifacts/srebench-core-scores.json || BENCH_GATE_STATUS=1
+          sre-bench score artifacts/srebench-sim.json --suite errors --out artifacts/srebench-error-scores.json || BENCH_GATE_STATUS=1
           {
             echo "### SRE-Bench sim (deterministic lane)"
             echo '```'

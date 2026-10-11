@@ -142,15 +142,19 @@ class SkillAnalyticsRepository(BaseRepository):
     def fetch_recent_deploy_count(self) -> dict | None:
         """Count recent audit_deployment findings (last 30 minutes)."""
         return self.db.fetchone(
-            "SELECT COUNT(*) as cnt FROM findings "
-            "WHERE category = 'audit_deployment' "
-            "AND timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '30 minutes')::BIGINT * 1000"
+            "SELECT COUNT(*) as cnt FROM inbox_items WHERE created_by = 'system:monitor' "
+            "AND finding_id IS NOT NULL AND finding_id <> '' "
+            "AND split_part(correlation_key, ':', 1) = 'audit_deployment' "
+            "AND created_at > EXTRACT(EPOCH FROM NOW() - INTERVAL '30 minutes')::BIGINT"
         )
 
     def fetch_active_incident_count(self) -> dict | None:
         """Count unresolved non-audit findings."""
         return self.db.fetchone(
-            "SELECT COUNT(*) as cnt FROM findings WHERE resolved = 0 AND category NOT LIKE 'audit_%'"
+            "SELECT COUNT(*) as cnt FROM inbox_items WHERE created_by = 'system:monitor' "
+            "AND finding_id IS NOT NULL AND finding_id <> '' "
+            "AND status NOT IN ('resolved', 'archived') "
+            "AND LEFT(split_part(correlation_key, ':', 1), 6) <> 'audit_'"
         )
 
     # -- Selector: historical co-occurrence ------------------------------------

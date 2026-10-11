@@ -1,0 +1,31 @@
+name: Container Build
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      # Exercise the production Dockerfile before tagging a release. This job
+      # builds only; registry publication stays in the release workflow.
+      - name: Build production image
+        run: docker build --tag pulse-agent:ci .
+      - name: Verify packaged entry points
+        run: |
+          docker run --rm --entrypoint python pulse-agent:ci -c '
+          from importlib.metadata import distribution
+          package = distribution("openshift-sre-agent")
+          names = {entry.name for entry in package.entry_points}
+          assert "pulse-agent-api" in names, names
+          print("Packaged version:", package.version)
+          '

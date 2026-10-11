@@ -73,3 +73,52 @@ def test_conflicting_pod_identity_cannot_retarget_simulation():
     with pytest.raises(ValueError, match="conflicting pod identity"):
         tool.call(inputs)
     backend.call.assert_not_called()
+
+
+@pytest.mark.parametrize("selector", ["configmaps", "configmap", "cm", "ConfigMap"])
+def test_native_resource_selector_reaches_simulator_without_wrong_namespace_rows(selector):
+    from unittest.mock import Mock
+
+    backend = Mock()
+    backend.call.return_value = {
+        "configmaps": [
+            {"name": "db-config", "namespace": "production", "data": {"DB_PORT": "5432"}},
+            {"name": "db-config", "namespace": "other", "data": {"DB_PORT": "9999"}},
+        ]
+    }
+    inputs = {"resource": selector, "namespace": "production"}
+    tool = _SimBackedTool({"name": "list_resources"}, backend, False)
+    result = json.loads(tool.call(inputs))
+    assert result == {"configmaps": [{"name": "db-config", "namespace": "production", "data": {"DB_PORT": "5432"}}]}
+    backend.call.assert_called_once_with("list_resources", kind="configmaps", namespace="production")
+    assert inputs == {"resource": selector, "namespace": "production"}
+
+
+def test_conflicting_list_selector_cannot_silently_return_nodes():
+    from unittest.mock import Mock
+
+    backend = Mock()
+    tool = _SimBackedTool({"name": "list_resources"}, backend, False)
+    with pytest.raises(ValueError, match="conflicting resource"):
+        tool.call({"resource": "configmaps", "kind": "nodes", "namespace": "production"})
+    backend.call.assert_not_called()
+
+
+@pytest.mark.parametrize("namespace", ["", "ALL"])
+def test_all_namespace_listing_preserves_observed_rows(namespace):
+    from unittest.mock import Mock
+
+    backend = Mock()
+    backend.call.return_value = {"configmaps": [{"namespace": "a"}, {"namespace": "b"}]}
+    tool = _SimBackedTool({"name": "list_resources"}, backend, False)
+    assert json.loads(tool.call({"resource": "cm", "namespace": namespace})) == backend.call.return_value
+    backend.call.assert_called_once_with("list_resources", kind="configmaps", namespace=namespace)
+
+
+def test_cluster_scoped_listing_does_not_require_row_namespace():
+    from unittest.mock import Mock
+
+    backend = Mock()
+    backend.call.return_value = {"nodes": [{"name": "worker-1"}]}
+    tool = _SimBackedTool({"name": "list_resources"}, backend, False)
+    assert json.loads(tool.call({"resource": "node", "namespace": "production"})) == backend.call.return_value

@@ -93,7 +93,63 @@ class RecordedTool:
 
     def call(self, input_data: dict) -> Any:
         self.calls.append(dict(input_data or {}))
+        if isinstance(self.value, dict) and self.value.get("recording_kind") == "argument_cases":
+            cases = self.value.get("cases")
+            if not isinstance(cases, list) or not cases:
+                raise ValueError("Argument recording needs nonempty cases")
+            requested = self._normalized_input(input_data or {})
+            matches = []
+            for case in cases:
+                if not isinstance(case, dict) or not isinstance(case.get("input"), dict) or "response" not in case:
+                    raise ValueError("Argument recording needs input and response")
+                if self._normalized_input(case["input"]) == requested:
+                    matches.append(case["response"])
+            if len(matches) > 1:
+                raise ValueError("Ambiguous argument recording")
+            if not matches:
+                self.missing = True
+                return no_recording_message(self.name)
+            return matches[0]
         return self.value
+
+    def _normalized_input(self, input_data: dict) -> dict:
+        args = dict(input_data)
+        if self.name == "list_resources":
+            from ..k8s_tools.generic import _resolve_short_name
+
+            resource = args.get("resource")
+            if isinstance(resource, str):
+                resource = resource.strip().lower()
+                args["resource"], args["group"] = _resolve_short_name(resource, args.get("group", ""))
+            # Only documented defaults are equivalent: nonempty selectors,
+            # API groups, names and namespaces must have their own recording.
+            defaults = {
+                "namespace": "",
+                "group": "",
+                "version": "v1",
+                "label_selector": "",
+                "field_selector": "",
+                "sort_by": "",
+                "show_wide": False,
+            }
+            if isinstance(args.get("namespace"), str) and args["namespace"].upper() == "ALL":
+                args["namespace"] = ""
+            for key, value in defaults.items():
+                if key in args and args[key] == value:
+                    args.pop(key)
+        elif self.name in {"list_pods", "get_events"}:
+            args.setdefault("namespace", "default")
+            if str(args["namespace"]).upper() == "ALL":
+                args["namespace"] = "ALL"
+            selectors = (
+                ("label_selector", "field_selector")
+                if self.name == "list_pods"
+                else ("resource_kind", "resource_name", "event_type")
+            )
+            for key in selectors:
+                if args.get(key) == "":
+                    args.pop(key)
+        return args
 
 
 class MissingRecordingTool(RecordedTool):

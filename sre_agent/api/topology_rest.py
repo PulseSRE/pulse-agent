@@ -87,9 +87,9 @@ async def get_topology(
                 res_str = res_str.strip()
                 if not res_str:
                     continue
-                parts = res_str.split("/", 1)
-                ns = parts[0] if len(parts) == 2 else ""
-                name = parts[1] if len(parts) == 2 else parts[0]
+                kind, ns, name = res_str.split(":", 2)
+                if kind != "Deployment":
+                    continue
                 assessment = score_deployment_change(deployment_name=name, namespace=ns)
                 risk_scores[res_str] = assessment.score
     except Exception:

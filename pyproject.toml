@@ -5,7 +5,9 @@ description = "An AI-powered OpenShift SRE agent using Claude"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic[vertex]>=0.115.0",
-    "kubernetes>=35.0.0",
+    # 37 replaces generated models/signatures with typed nullable models.
+    # Keep the validated client API until that migration is explicitly audited.
+    "kubernetes>=35.0.0,<37.0.0",
     "rich>=15.0.0",
     "fastapi>=0.135.0",
     "uvicorn[standard]>=0.42.0",

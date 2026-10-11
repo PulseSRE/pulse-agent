@@ -14,7 +14,9 @@ Rules:
 
 - ``delete_pod`` in a protected namespace is denied outright;
   ``restart_deployment`` is the reviewable alternative and stays allowed,
-  so routine remediation (crashloop restarts) is unaffected.
+  so routine remediation (crashloop restarts) is unaffected when requested
+  independently. After a forbidden write, the agent stops further writes for
+  that invocation; a new user turn is required to authorize an alternative.
 - ``drain_node`` / ``cordon_node`` require the change-process break-glass
   flag (``PULSE_AGENT_ALLOW_NODE_OPS``) regardless of confirmation —
   node-level operations are never a chat-approval decision.
@@ -75,13 +77,13 @@ def check_write_policy(name: str, input_data: dict | None) -> ToolError | None:
             message=(
                 f"Policy: '{name}' is denied in protected namespace '{namespace}' "
                 "(PULSE_AGENT_PROTECTED_NAMESPACES). Raw pod deletion in protected "
-                "namespaces is not confirmable in chat; use restart_deployment for a "
-                "reviewable, controller-managed replacement."
+                "namespaces is not confirmable in chat. Stop writes for this turn; propose "
+                "restart_deployment for a new user request and reviewable, controller-managed replacement."
             ),
             category="forbidden",
             operation=name,
             suggestions=[
-                "restart_deployment on the owning workload achieves a safe pod replacement",
+                "Propose restart_deployment on the owning workload for a new user request",
                 "If the pod is truly orphaned, remove it through the change process",
             ],
         )
