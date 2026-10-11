@@ -114,7 +114,8 @@
                     },
                     "response": "30m ago  Warning  FailedScheduling  Pod/node-exporter-pending  0/6 nodes are available: 1 node(s) had taint {dedicated: gpu}, that the pod didn't tolerate, 1 node(s) had insufficient memory\n15m ago  Warning  FailedScheduling  Pod/node-exporter-pending2  0/6 nodes: same constraints"
                 }
-            ]
+            ],
+            "supports_presentation": true
         }
     },
     "expected": {

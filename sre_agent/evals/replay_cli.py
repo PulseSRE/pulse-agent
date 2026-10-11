@@ -262,7 +262,7 @@ def _expected_for(expected: dict, dry_run: bool) -> dict:
     """
     if not dry_run:
         return expected
-    mock_determined = {"should_mention", "overall_should_mention", "should_use_tools_in_order"}
+    mock_determined = {"should_mention", "overall_should_mention", "should_use_tools_in_order", "final_state"}
     trimmed = {k: v for k, v in expected.items() if k not in mock_determined}
     if "per_turn" in trimmed:
         trimmed["per_turn"] = [{k: v for k, v in t.items() if k not in mock_determined} for t in trimmed["per_turn"]]
@@ -379,6 +379,7 @@ async def _run_fixture_async(
             "mode": result.get("mode"),
             "offered_tool_count": result.get("offered_tool_count"),
             "tool_attempts": result.get("tool_attempts", []),
+            "fixture_state": result.get("fixture_state", {}),
             "unrecorded_tool_calls": result.get("unrecorded_tool_calls", []),
             "unoffered_recorded_tools": result.get("unoffered_recorded_tools", []),
         }

@@ -141,6 +141,19 @@ def _tool_diagnostic(event: dict) -> dict:
     }
 
 
+def _fixture_state(effective_map: dict) -> dict:
+    # Export only outcome fields, never arbitrary stored request/payload state.
+    for tool in effective_map.values():
+        value = getattr(tool, "value", None)
+        if isinstance(value, dict) and value.get("recording_kind") == "synthetic_memory_view":
+            state = tool._state
+            return {
+                "memory_widget_added": state.get("memory_widget_added") is True,
+                "view_widget_count": len(state["view"]["widgets"]),
+            }
+    return {}
+
+
 def _unrecorded_calls(effective_map: dict) -> list[str]:
     """Names of tools the agent called that the fixture never recorded."""
     return sorted(name for name, tool in effective_map.items() if getattr(tool, "missing", False) and tool.calls)
@@ -277,6 +290,7 @@ class ReplayHarness:
             "response": response,
             "tool_calls": list(self.tool_calls),
             "tool_attempts": tool_attempts,
+            "fixture_state": _fixture_state(effective_map),
             "duration_ms": elapsed_ms,
             "mode": cfg["mode"],
             "offered_tool_count": len(cfg["tool_defs"]),
@@ -429,6 +443,7 @@ class MultiTurnReplayHarness:
                     "response": response,
                     "tool_calls": turn_tool_calls,
                     "tool_attempts": turn_tool_attempts,
+                    "fixture_state": _fixture_state(effective_map),
                     "duration_ms": elapsed_ms,
                     "mode": cfg["mode"],
                     "unrecorded_tool_calls": _unrecorded_calls(effective_map),
@@ -657,6 +672,17 @@ def score_replay(result: dict, expected: dict) -> dict:
             {
                 "check": f"tool calls <= {max_calls} (actual: {len(called_tools)})",
                 "passed": within,
+                "weight": 1,
+                "kind": "structure",
+            }
+        )
+
+    for key, wanted in expected.get("final_state", {}).items():
+        observed = result.get("fixture_state", {}).get(key)
+        checks.append(
+            {
+                "check": f"final state {key} == {wanted}",
+                "passed": type(observed) is type(wanted) and observed == wanted,
                 "weight": 1,
                 "kind": "structure",
             }

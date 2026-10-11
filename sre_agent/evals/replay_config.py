@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import json
 import logging
 import threading
 from typing import Any
@@ -84,7 +85,7 @@ class RecordedTool:
         self.calls: list[dict] = []
         initial = (
             value.get("initial_state", {})
-            if isinstance(value, dict) and value.get("recording_kind") == "argument_cases"
+            if isinstance(value, dict) and value.get("recording_kind") in {"argument_cases", "synthetic_memory_view"}
             else {}
         )
         if not isinstance(initial, dict):
@@ -102,6 +103,14 @@ class RecordedTool:
 
     def call(self, input_data: dict) -> Any:
         self.calls.append(dict(input_data or {}))
+        if isinstance(self.value, dict) and self.value.get("recording_kind") == "synthetic_memory_view":
+            from .synthetic_view import call
+
+            response = call(self.name, input_data or {}, self._state)
+            if response is None:
+                self.missing = True
+                return no_recording_message(self.name)
+            return response
         if isinstance(self.value, dict) and self.value.get("recording_kind") == "argument_cases":
             cases = self.value.get("cases")
             if not isinstance(cases, list) or not cases:
@@ -131,7 +140,25 @@ class RecordedTool:
                     raise ValueError("State transition needs object changes and an explicit boolean success")
                 if succeeded is True:
                     self._state.update(copy.deepcopy(changes))
-            return copy.deepcopy(matched["response"])
+            response = copy.deepcopy(matched["response"])
+            if (
+                self.name == "list_resources"
+                and self.value.get("supports_presentation") is True
+                and input_data.get("sort_by") in {"name", "-name"}
+            ):
+                reverse = input_data["sort_by"].startswith("-")
+                try:
+                    data = json.loads(response)
+                except (ValueError, TypeError):
+                    response = "\n".join(
+                        sorted(response.splitlines(), key=lambda line: line.split()[0], reverse=reverse)
+                    )
+                else:
+                    data["items"].sort(
+                        key=lambda row: row.get("metadata", {}).get("name", row.get("name", "")), reverse=reverse
+                    )
+                    response = json.dumps(data)
+            return response
         return self.value
 
     def _normalized_input(self, input_data: dict) -> dict:
@@ -139,6 +166,14 @@ class RecordedTool:
         if self.name == "list_resources":
             from ..k8s_tools.generic import _resolve_short_name
 
+            for field in ("namespace", "group", "label_selector", "field_selector", "sort_by", "show_wide"):
+                if field in args and args[field] is None:
+                    args.pop(field)
+            if self.value.get("supports_presentation") is True:
+                if type(args.get("show_wide")) is bool:
+                    args.pop("show_wide")
+                if args.get("sort_by") in {"name", "-name"}:
+                    args.pop("sort_by")
             resource = args.get("resource")
             if isinstance(resource, str):
                 resource = resource.strip().lower()
@@ -218,7 +253,7 @@ def shadow_tool_map(base_map: dict, recorded_responses: dict[str, Any]) -> dict[
     """
     state: dict = {}
     for value in recorded_responses.values():
-        if isinstance(value, dict) and value.get("recording_kind") == "argument_cases":
+        if isinstance(value, dict) and value.get("recording_kind") in {"argument_cases", "synthetic_memory_view"}:
             initial = value.get("initial_state", {})
             if not isinstance(initial, dict):
                 raise ValueError("Recording initial state must be an object")

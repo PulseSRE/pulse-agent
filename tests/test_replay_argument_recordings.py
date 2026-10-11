@@ -105,3 +105,40 @@ def test_ambiguous_alias_cases_fail_closed():
     )
     with pytest.raises(ValueError, match="Ambiguous"):
         tool.call({"resource": "daemonset"})
+
+
+@pytest.mark.parametrize("resource", ["ds", "nodes"])
+@pytest.mark.parametrize("sort_by", ["", "name", "-name"])
+def test_supported_full_snapshots_accept_wide_and_name_sort(tools, resource, sort_by):
+    response = tools["list_resources"].call(
+        {"resource": resource, "namespace": "ALL", "show_wide": True, "sort_by": sort_by}
+    )
+    assert response != no_recording_message("list_resources")
+    if resource == "ds":
+        names = [row["metadata"]["name"] for row in json.loads(response)["items"]]
+    else:
+        names = [line.split()[0] for line in response.splitlines()]
+    if sort_by:
+        assert names == sorted(names, reverse=sort_by.startswith("-"))
+    assert tools["list_resources"].call(
+        {"resource": resource, "namespace": "wrong", "show_wide": True}
+    ) == no_recording_message("list_resources")
+
+
+@pytest.mark.parametrize("resource", ["daemonsets", "nodes"])
+def test_production_null_unused_selectors_and_scope_are_equivalent_to_defaults(tools, resource):
+    response = tools["list_resources"].call(
+        {
+            "resource": resource,
+            "namespace": None,
+            "group": None,
+            "show_wide": None,
+            "sort_by": None,
+            "label_selector": None,
+            "field_selector": None,
+        }
+    )
+    assert response != no_recording_message("list_resources")
+    assert tools["list_resources"].call({"resource": resource, "version": None}) == no_recording_message(
+        "list_resources"
+    )
