@@ -87,6 +87,73 @@ async def _replay_confirm(tool_name: str, input_data: dict) -> bool:
     return True
 
 
+_DIAGNOSTIC_FIELDS = frozenset(
+    {
+        "resource",
+        "kind",
+        "namespace",
+        "group",
+        "version",
+        "name",
+        "pod_name",
+        "view_id",
+        "label_selector",
+        "field_selector",
+        "sort_by",
+        "show_wide",
+        "query",
+        "time_range",
+        "title",
+        "description",
+        "resource_kind",
+        "resource_name",
+        "event_type",
+        "category",
+    }
+)
+
+
+def _tool_diagnostic(event: dict) -> dict:
+    """Keep useful synthetic request arguments without exporting payloads/secrets."""
+    import re
+
+    inputs: dict[str, Any] = {}
+    for key, value in (event.get("input") or {}).items():
+        if key not in _DIAGNOSTIC_FIELDS or not isinstance(value, (str, int, float, bool, type(None))):
+            inputs[key] = "<redacted>"
+        elif isinstance(value, str):
+            value = re.sub(
+                r"(?i)((?:password|token|secret|authorization|api_key|client_secret)\s*(?:=~|!~|!=|=|:)\s*)(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s,;}]+)",
+                r'\1"<redacted>"',
+                value,
+            )
+            value = re.sub(r"(?i)bearer\s+[^\s,;]+", "Bearer <redacted>", value)
+            inputs[key] = value[:2000]
+        else:
+            inputs[key] = value
+    return {
+        "name": event.get("tool_name"),
+        "input": inputs,
+        "status": event.get("status"),
+        "error_category": event.get("error_category"),
+        "was_confirmed": event.get("was_confirmed"),
+        "iteration": event.get("turn_number"),
+    }
+
+
+def _fixture_state(effective_map: dict) -> dict:
+    # Export only outcome fields, never arbitrary stored request/payload state.
+    for tool in effective_map.values():
+        value = getattr(tool, "value", None)
+        if isinstance(value, dict) and value.get("recording_kind") == "synthetic_memory_view":
+            state = tool._state
+            return {
+                "memory_widget_added": state.get("memory_widget_added") is True,
+                "view_widget_count": len(state["view"]["widgets"]),
+            }
+    return {}
+
+
 def _unrecorded_calls(effective_map: dict) -> list[str]:
     """Names of tools the agent called that the fixture never recorded."""
     return sorted(name for name, tool in effective_map.items() if getattr(tool, "missing", False) and tool.calls)
@@ -174,6 +241,7 @@ class ReplayHarness:
         ``unrecorded_tool_calls`` and ``unoffered_recorded_tools``.
         """
         self.tool_calls = []
+        tool_attempts: list[dict] = []
 
         cfg = config or build_replay_config(
             prompt,
@@ -196,6 +264,9 @@ class ReplayHarness:
         async def _on_tool_use(tool_name: str) -> None:
             self.tool_calls.append({"name": tool_name, "timestamp": time.time()})
 
+        async def _on_tool_result(event: dict) -> None:
+            tool_attempts.append(_tool_diagnostic(event))
+
         start = time.monotonic()
         kwargs: dict[str, Any] = {
             "client": client,
@@ -205,6 +276,7 @@ class ReplayHarness:
             "tool_map": effective_map,
             "write_tools": set(cfg["write_tools"]) if write_tools is None else write_tools,
             "on_tool_use": _on_tool_use,
+            "on_tool_result": _on_tool_result,
             "on_confirm": _replay_confirm,
             "mode": cfg["mode"],
         }
@@ -217,6 +289,8 @@ class ReplayHarness:
         return {
             "response": response,
             "tool_calls": list(self.tool_calls),
+            "tool_attempts": tool_attempts,
+            "fixture_state": _fixture_state(effective_map),
             "duration_ms": elapsed_ms,
             "mode": cfg["mode"],
             "offered_tool_count": len(cfg["tool_defs"]),
@@ -303,6 +377,7 @@ class MultiTurnReplayHarness:
 
         for i, turn in enumerate(self.turns):
             turn_tool_calls: list[dict] = []
+            turn_tool_attempts: list[dict] = []
             recorded = turn.get("recorded_responses", {})
 
             cfg = build_replay_config(
@@ -322,6 +397,9 @@ class MultiTurnReplayHarness:
             async def _on_tool_use(tool_name: str, _calls: list[dict] = turn_tool_calls) -> None:
                 _calls.append({"name": tool_name, "timestamp": time.time()})
 
+            async def _on_tool_result(event: dict, _attempts: list[dict] = turn_tool_attempts) -> None:
+                _attempts.append(_tool_diagnostic(event))
+
             # Add user message
             messages.append({"role": "user", "content": turn["prompt"]})
 
@@ -340,6 +418,7 @@ class MultiTurnReplayHarness:
                 "tool_map": effective_map,
                 "write_tools": set(cfg["write_tools"]) if write_tools is None else write_tools,
                 "on_tool_use": _on_tool_use,
+                "on_tool_result": _on_tool_result,
                 "on_confirm": _replay_confirm,
                 "mode": cfg["mode"],
             }
@@ -363,6 +442,8 @@ class MultiTurnReplayHarness:
                     "prompt": turn["prompt"],
                     "response": response,
                     "tool_calls": turn_tool_calls,
+                    "tool_attempts": turn_tool_attempts,
+                    "fixture_state": _fixture_state(effective_map),
                     "duration_ms": elapsed_ms,
                     "mode": cfg["mode"],
                     "unrecorded_tool_calls": _unrecorded_calls(effective_map),
@@ -591,6 +672,17 @@ def score_replay(result: dict, expected: dict) -> dict:
             {
                 "check": f"tool calls <= {max_calls} (actual: {len(called_tools)})",
                 "passed": within,
+                "weight": 1,
+                "kind": "structure",
+            }
+        )
+
+    for key, wanted in expected.get("final_state", {}).items():
+        observed = result.get("fixture_state", {}).get(key)
+        checks.append(
+            {
+                "check": f"final state {key} == {wanted}",
+                "passed": type(observed) is type(wanted) and observed == wanted,
                 "weight": 1,
                 "kind": "structure",
             }

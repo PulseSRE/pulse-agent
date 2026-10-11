@@ -262,7 +262,7 @@ def _expected_for(expected: dict, dry_run: bool) -> dict:
     """
     if not dry_run:
         return expected
-    mock_determined = {"should_mention", "overall_should_mention", "should_use_tools_in_order"}
+    mock_determined = {"should_mention", "overall_should_mention", "should_use_tools_in_order", "final_state"}
     trimmed = {k: v for k, v in expected.items() if k not in mock_determined}
     if "per_turn" in trimmed:
         trimmed["per_turn"] = [{k: v for k, v in t.items() if k not in mock_determined} for t in trimmed["per_turn"]]
@@ -378,6 +378,8 @@ async def _run_fixture_async(
             "duration_ms": result["duration_ms"],
             "mode": result.get("mode"),
             "offered_tool_count": result.get("offered_tool_count"),
+            "tool_attempts": result.get("tool_attempts", []),
+            "fixture_state": result.get("fixture_state", {}),
             "unrecorded_tool_calls": result.get("unrecorded_tool_calls", []),
             "unoffered_recorded_tools": result.get("unoffered_recorded_tools", []),
         }
@@ -436,6 +438,7 @@ async def _run_multi_turn_fixture(
             "dry_run": dry_run,
             "multi_turn": True,
             "turn_tool_calls": [[tc["name"] for tc in turn["tool_calls"]] for turn in result["turns"]],
+            "turn_tool_attempts": [turn.get("tool_attempts", []) for turn in result["turns"]],
             "prompt": " → ".join(t["prompt"][:50] for t in fixture["turns"]),
             "score": score,
             "response_preview": result["turns"][-1]["response"][:500] if result["turns"] else "",

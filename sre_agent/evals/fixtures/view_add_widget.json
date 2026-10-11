@@ -2,15 +2,126 @@
     "name": "view_add_widget",
     "prompt": "Add a memory usage chart to my SRE Overview dashboard",
     "recorded_responses": {
-        "list_saved_views": "Views:\n  1. SRE Overview (id=view-001) — 5 widgets, created 2d ago\n  2. Incident Report (id=view-002) — 3 widgets, created 5d ago",
-        "get_view_details": "{\"id\": \"view-001\", \"title\": \"SRE Overview\", \"widgets\": [{\"kind\": \"info_card_grid\", \"title\": \"Cluster Health\"}, {\"kind\": \"chart\", \"title\": \"CPU Usage\"}, {\"kind\": \"chart\", \"title\": \"Network Traffic\"}, {\"kind\": \"data_table\", \"title\": \"Pod Status\"}, {\"kind\": \"status_list\", \"title\": \"Alerts\"}]}",
-        "get_prometheus_query": "Query: sum(container_memory_working_set_bytes{namespace!=\"\"}) by (namespace)\nResults (6 series):\n  production: 4.2Gi\n  staging: 2.1Gi\n  monitoring: 1.8Gi\n  kube-system: 1.2Gi\n  openshift-monitoring: 0.9Gi\n  default: 0.3Gi",
-        "add_widget_to_view": "Widget 'Memory Usage' added to view 'SRE Overview' (now 6 widgets)"
+        "list_saved_views": "Views:\n  1. SRE Overview (id=view-001) \u2014 5 widgets, created 2d ago\n  2. Incident Report (id=view-002) \u2014 3 widgets, created 5d ago",
+        "get_view_details": {
+            "recording_kind": "synthetic_memory_view",
+            "initial_state": {
+                "view": {
+                    "id": "view-001",
+                    "title": "SRE Overview",
+                    "widgets": [
+                        {
+                            "kind": "info_card_grid",
+                            "title": "Cluster Health"
+                        },
+                        {
+                            "kind": "chart",
+                            "title": "CPU Usage"
+                        },
+                        {
+                            "kind": "chart",
+                            "title": "Network Traffic"
+                        },
+                        {
+                            "kind": "data_table",
+                            "title": "Pod Status"
+                        },
+                        {
+                            "kind": "status_list",
+                            "title": "Alerts"
+                        }
+                    ]
+                },
+                "memory_widget_added": false,
+                "memory_series": [
+                    {
+                        "labels": {
+                            "namespace": "production",
+                            "container": "app",
+                            "image": "synthetic/app",
+                            "pod": "production-app"
+                        },
+                        "bytes": 4509715661
+                    },
+                    {
+                        "labels": {
+                            "namespace": "staging",
+                            "container": "app",
+                            "image": "synthetic/app",
+                            "pod": "staging-app"
+                        },
+                        "bytes": 2254857830
+                    },
+                    {
+                        "labels": {
+                            "namespace": "monitoring",
+                            "container": "app",
+                            "image": "synthetic/app",
+                            "pod": "monitoring-app"
+                        },
+                        "bytes": 1932735283
+                    },
+                    {
+                        "labels": {
+                            "namespace": "kube-system",
+                            "container": "app",
+                            "image": "synthetic/app",
+                            "pod": "kube-system-app"
+                        },
+                        "bytes": 1288490189
+                    },
+                    {
+                        "labels": {
+                            "namespace": "openshift-monitoring",
+                            "container": "app",
+                            "image": "synthetic/app",
+                            "pod": "openshift-monitoring-app"
+                        },
+                        "bytes": 966367642
+                    },
+                    {
+                        "labels": {
+                            "namespace": "default",
+                            "container": "app",
+                            "image": "synthetic/app",
+                            "pod": "default-app"
+                        },
+                        "bytes": 322122547
+                    }
+                ]
+            }
+        },
+        "get_prometheus_query": {
+            "recording_kind": "synthetic_memory_view"
+        },
+        "add_widget_to_view": {
+            "recording_kind": "synthetic_memory_view"
+        },
+        "discover_metrics": {
+            "recording_kind": "synthetic_memory_view"
+        },
+        "verify_query": {
+            "recording_kind": "synthetic_memory_view"
+        }
     },
     "expected": {
-        "should_mention": ["memory", "added"],
-        "should_use_tools": ["get_prometheus_query"],
-        "should_not_use_tools": ["create_dashboard", "delete_pod"],
-        "max_tool_calls": 8
-    }
+        "should_mention": [
+            "memory",
+            "added"
+        ],
+        "should_use_tools": [
+            "get_prometheus_query",
+            "add_widget_to_view"
+        ],
+        "should_not_use_tools": [
+            "create_dashboard",
+            "delete_pod"
+        ],
+        "max_tool_calls": 8,
+        "final_state": {
+            "memory_widget_added": true,
+            "view_widget_count": 6
+        }
+    },
+    "fixture_origin": "synthetic constant memory dataset and frontend apply environment, not captured cluster/browser evidence; supports metric filters and namespace/total sums"
 }

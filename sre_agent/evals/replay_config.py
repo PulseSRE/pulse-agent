@@ -23,6 +23,8 @@ the two can be compared side by side.
 from __future__ import annotations
 
 import contextlib
+import copy
+import json
 import logging
 import threading
 from typing import Any
@@ -76,11 +78,19 @@ class RecordedTool:
 
     missing = False
 
-    def __init__(self, name: str, value: Any, schema: dict | None = None):
+    def __init__(self, name: str, value: Any, schema: dict | None = None, *, state: dict | None = None):
         self.name = name
         self.value = value
         self.schema = schema
         self.calls: list[dict] = []
+        initial = (
+            value.get("initial_state", {})
+            if isinstance(value, dict) and value.get("recording_kind") in {"argument_cases", "synthetic_memory_view"}
+            else {}
+        )
+        if not isinstance(initial, dict):
+            raise ValueError("Recording initial state must be an object")
+        self._state = state if state is not None else copy.deepcopy(initial)
 
     def to_dict(self) -> dict:
         if self.schema:
@@ -93,6 +103,14 @@ class RecordedTool:
 
     def call(self, input_data: dict) -> Any:
         self.calls.append(dict(input_data or {}))
+        if isinstance(self.value, dict) and self.value.get("recording_kind") == "synthetic_memory_view":
+            from .synthetic_view import call
+
+            response = call(self.name, input_data or {}, self._state)
+            if response is None:
+                self.missing = True
+                return no_recording_message(self.name)
+            return response
         if isinstance(self.value, dict) and self.value.get("recording_kind") == "argument_cases":
             cases = self.value.get("cases")
             if not isinstance(cases, list) or not cases:
@@ -102,14 +120,45 @@ class RecordedTool:
             for case in cases:
                 if not isinstance(case, dict) or not isinstance(case.get("input"), dict) or "response" not in case:
                     raise ValueError("Argument recording needs input and response")
-                if self._normalized_input(case["input"]) == requested:
-                    matches.append(case["response"])
+                required = case.get("requires_state", {})
+                if not isinstance(required, dict):
+                    raise ValueError("Recording state conditions must be an object")
+                if self._normalized_input(case["input"]) == requested and all(
+                    key in self._state and self._state[key] == value for key, value in required.items()
+                ):
+                    matches.append(case)
             if len(matches) > 1:
                 raise ValueError("Ambiguous argument recording")
             if not matches:
                 self.missing = True
                 return no_recording_message(self.name)
-            return matches[0]
+            matched = matches[0]
+            if "set_state" in matched:
+                changes = matched["set_state"]
+                succeeded = matched.get("succeeded")
+                if not isinstance(changes, dict) or type(succeeded) is not bool:
+                    raise ValueError("State transition needs object changes and an explicit boolean success")
+                if succeeded is True:
+                    self._state.update(copy.deepcopy(changes))
+            response = copy.deepcopy(matched["response"])
+            if (
+                self.name == "list_resources"
+                and self.value.get("supports_presentation") is True
+                and input_data.get("sort_by") in {"name", "-name"}
+            ):
+                reverse = input_data["sort_by"].startswith("-")
+                try:
+                    data = json.loads(response)
+                except (ValueError, TypeError):
+                    response = "\n".join(
+                        sorted(response.splitlines(), key=lambda line: line.split()[0], reverse=reverse)
+                    )
+                else:
+                    data["items"].sort(
+                        key=lambda row: row.get("metadata", {}).get("name", row.get("name", "")), reverse=reverse
+                    )
+                    response = json.dumps(data)
+            return response
         return self.value
 
     def _normalized_input(self, input_data: dict) -> dict:
@@ -117,6 +166,14 @@ class RecordedTool:
         if self.name == "list_resources":
             from ..k8s_tools.generic import _resolve_short_name
 
+            for field in ("namespace", "group", "label_selector", "field_selector", "sort_by", "show_wide"):
+                if field in args and args[field] is None:
+                    args.pop(field)
+            if self.value.get("supports_presentation") is True:
+                if type(args.get("show_wide")) is bool:
+                    args.pop("show_wide")
+                if args.get("sort_by") in {"name", "-name"}:
+                    args.pop("sort_by")
             resource = args.get("resource")
             if isinstance(resource, str):
                 resource = resource.strip().lower()
@@ -136,6 +193,10 @@ class RecordedTool:
                 args["namespace"] = ""
             for key, value in defaults.items():
                 if key in args and args[key] == value:
+                    args.pop(key)
+        elif self.name == "get_prometheus_query":
+            for key, value in {"time_range": "1h", "title": "", "description": ""}.items():
+                if args.get(key) == value:
                     args.pop(key)
         elif self.name in {"list_pods", "get_events"}:
             args.setdefault("namespace", "default")
@@ -190,16 +251,26 @@ def shadow_tool_map(base_map: dict, recorded_responses: dict[str, Any]) -> dict[
     Recorded tools absent from *base_map* are added, keeping the pre-existing
     behaviour that a recording is always honoured.
     """
+    state: dict = {}
+    for value in recorded_responses.values():
+        if isinstance(value, dict) and value.get("recording_kind") in {"argument_cases", "synthetic_memory_view"}:
+            initial = value.get("initial_state", {})
+            if not isinstance(initial, dict):
+                raise ValueError("Recording initial state must be an object")
+            for key, item in initial.items():
+                if key in state and state[key] != item:
+                    raise ValueError("Conflicting recording initial state")
+                state[key] = copy.deepcopy(item)
     shadowed: dict[str, RecordedTool] = {}
     for name, tool in base_map.items():
         schema = _schema_of(tool)
         if name in recorded_responses:
-            shadowed[name] = RecordedTool(name, recorded_responses[name], schema)
+            shadowed[name] = RecordedTool(name, recorded_responses[name], schema, state=state)
         else:
             shadowed[name] = MissingRecordingTool(name, schema)
     for name, value in recorded_responses.items():
         if name not in shadowed:
-            shadowed[name] = RecordedTool(name, value)
+            shadowed[name] = RecordedTool(name, value, state=state)
     return shadowed
 
 
