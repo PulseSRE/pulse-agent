@@ -23,6 +23,7 @@ the two can be compared side by side.
 from __future__ import annotations
 
 import contextlib
+import copy
 import logging
 import threading
 from typing import Any
@@ -76,11 +77,19 @@ class RecordedTool:
 
     missing = False
 
-    def __init__(self, name: str, value: Any, schema: dict | None = None):
+    def __init__(self, name: str, value: Any, schema: dict | None = None, *, state: dict | None = None):
         self.name = name
         self.value = value
         self.schema = schema
         self.calls: list[dict] = []
+        initial = (
+            value.get("initial_state", {})
+            if isinstance(value, dict) and value.get("recording_kind") == "argument_cases"
+            else {}
+        )
+        if not isinstance(initial, dict):
+            raise ValueError("Recording initial state must be an object")
+        self._state = state if state is not None else copy.deepcopy(initial)
 
     def to_dict(self) -> dict:
         if self.schema:
@@ -102,14 +111,27 @@ class RecordedTool:
             for case in cases:
                 if not isinstance(case, dict) or not isinstance(case.get("input"), dict) or "response" not in case:
                     raise ValueError("Argument recording needs input and response")
-                if self._normalized_input(case["input"]) == requested:
-                    matches.append(case["response"])
+                required = case.get("requires_state", {})
+                if not isinstance(required, dict):
+                    raise ValueError("Recording state conditions must be an object")
+                if self._normalized_input(case["input"]) == requested and all(
+                    key in self._state and self._state[key] == value for key, value in required.items()
+                ):
+                    matches.append(case)
             if len(matches) > 1:
                 raise ValueError("Ambiguous argument recording")
             if not matches:
                 self.missing = True
                 return no_recording_message(self.name)
-            return matches[0]
+            matched = matches[0]
+            if "set_state" in matched:
+                changes = matched["set_state"]
+                succeeded = matched.get("succeeded")
+                if not isinstance(changes, dict) or type(succeeded) is not bool:
+                    raise ValueError("State transition needs object changes and an explicit boolean success")
+                if succeeded is True:
+                    self._state.update(copy.deepcopy(changes))
+            return copy.deepcopy(matched["response"])
         return self.value
 
     def _normalized_input(self, input_data: dict) -> dict:
@@ -136,6 +158,10 @@ class RecordedTool:
                 args["namespace"] = ""
             for key, value in defaults.items():
                 if key in args and args[key] == value:
+                    args.pop(key)
+        elif self.name == "get_prometheus_query":
+            for key, value in {"time_range": "1h", "title": "", "description": ""}.items():
+                if args.get(key) == value:
                     args.pop(key)
         elif self.name in {"list_pods", "get_events"}:
             args.setdefault("namespace", "default")
@@ -190,16 +216,26 @@ def shadow_tool_map(base_map: dict, recorded_responses: dict[str, Any]) -> dict[
     Recorded tools absent from *base_map* are added, keeping the pre-existing
     behaviour that a recording is always honoured.
     """
+    state: dict = {}
+    for value in recorded_responses.values():
+        if isinstance(value, dict) and value.get("recording_kind") == "argument_cases":
+            initial = value.get("initial_state", {})
+            if not isinstance(initial, dict):
+                raise ValueError("Recording initial state must be an object")
+            for key, item in initial.items():
+                if key in state and state[key] != item:
+                    raise ValueError("Conflicting recording initial state")
+                state[key] = copy.deepcopy(item)
     shadowed: dict[str, RecordedTool] = {}
     for name, tool in base_map.items():
         schema = _schema_of(tool)
         if name in recorded_responses:
-            shadowed[name] = RecordedTool(name, recorded_responses[name], schema)
+            shadowed[name] = RecordedTool(name, recorded_responses[name], schema, state=state)
         else:
             shadowed[name] = MissingRecordingTool(name, schema)
     for name, value in recorded_responses.items():
         if name not in shadowed:
-            shadowed[name] = RecordedTool(name, value)
+            shadowed[name] = RecordedTool(name, value, state=state)
     return shadowed
 
 

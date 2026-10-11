@@ -2,15 +2,211 @@
     "name": "view_add_widget",
     "prompt": "Add a memory usage chart to my SRE Overview dashboard",
     "recorded_responses": {
-        "list_saved_views": "Views:\n  1. SRE Overview (id=view-001) — 5 widgets, created 2d ago\n  2. Incident Report (id=view-002) — 3 widgets, created 5d ago",
-        "get_view_details": "{\"id\": \"view-001\", \"title\": \"SRE Overview\", \"widgets\": [{\"kind\": \"info_card_grid\", \"title\": \"Cluster Health\"}, {\"kind\": \"chart\", \"title\": \"CPU Usage\"}, {\"kind\": \"chart\", \"title\": \"Network Traffic\"}, {\"kind\": \"data_table\", \"title\": \"Pod Status\"}, {\"kind\": \"status_list\", \"title\": \"Alerts\"}]}",
-        "get_prometheus_query": "Query: sum(container_memory_working_set_bytes{namespace!=\"\"}) by (namespace)\nResults (6 series):\n  production: 4.2Gi\n  staging: 2.1Gi\n  monitoring: 1.8Gi\n  kube-system: 1.2Gi\n  openshift-monitoring: 0.9Gi\n  default: 0.3Gi",
-        "add_widget_to_view": "Widget 'Memory Usage' added to view 'SRE Overview' (now 6 widgets)"
+        "list_saved_views": "Views:\n  1. SRE Overview (id=view-001) \u2014 5 widgets, created 2d ago\n  2. Incident Report (id=view-002) \u2014 3 widgets, created 5d ago",
+        "get_view_details": {
+            "recording_kind": "argument_cases",
+            "initial_state": {
+                "memory_component_ready": false,
+                "memory_widget_added": false
+            },
+            "cases": [
+                {
+                    "input": {
+                        "view_id": "view-001"
+                    },
+                    "requires_state": {
+                        "memory_widget_added": false
+                    },
+                    "response": "{\"id\": \"view-001\", \"title\": \"SRE Overview\", \"widgets\": [{\"kind\": \"info_card_grid\", \"title\": \"Cluster Health\"}, {\"kind\": \"chart\", \"title\": \"CPU Usage\"}, {\"kind\": \"chart\", \"title\": \"Network Traffic\"}, {\"kind\": \"data_table\", \"title\": \"Pod Status\"}, {\"kind\": \"status_list\", \"title\": \"Alerts\"}]}"
+                },
+                {
+                    "input": {
+                        "view_id": "view-001"
+                    },
+                    "requires_state": {
+                        "memory_widget_added": true,
+                        "memory_component_variant": "0"
+                    },
+                    "response": "{\"id\": \"view-001\", \"title\": \"SRE Overview\", \"widgets\": [{\"kind\": \"info_card_grid\", \"title\": \"Cluster Health\"}, {\"kind\": \"chart\", \"title\": \"CPU Usage\"}, {\"kind\": \"chart\", \"title\": \"Network Traffic\"}, {\"kind\": \"data_table\", \"title\": \"Pod Status\"}, {\"kind\": \"status_list\", \"title\": \"Alerts\"}, {\"kind\": \"chart\", \"title\": \"Memory Usage by namespace\", \"query\": \"sum(container_memory_working_set_bytes{namespace!=\\\"\\\"}) by (namespace)\"}]}"
+                },
+                {
+                    "input": {
+                        "view_id": "view-001"
+                    },
+                    "requires_state": {
+                        "memory_widget_added": true,
+                        "memory_component_variant": "1"
+                    },
+                    "response": "{\"id\": \"view-001\", \"title\": \"SRE Overview\", \"widgets\": [{\"kind\": \"info_card_grid\", \"title\": \"Cluster Health\"}, {\"kind\": \"chart\", \"title\": \"CPU Usage\"}, {\"kind\": \"chart\", \"title\": \"Network Traffic\"}, {\"kind\": \"data_table\", \"title\": \"Pod Status\"}, {\"kind\": \"status_list\", \"title\": \"Alerts\"}, {\"kind\": \"chart\", \"title\": \"Memory Usage by Namespace\", \"query\": \"sum(container_memory_working_set_bytes{namespace!=\\\"\\\"}) by (namespace)\"}]}"
+                },
+                {
+                    "input": {
+                        "view_id": "view-001"
+                    },
+                    "requires_state": {
+                        "memory_widget_added": true,
+                        "memory_component_variant": "2"
+                    },
+                    "response": "{\"id\": \"view-001\", \"title\": \"SRE Overview\", \"widgets\": [{\"kind\": \"info_card_grid\", \"title\": \"Cluster Health\"}, {\"kind\": \"chart\", \"title\": \"CPU Usage\"}, {\"kind\": \"chart\", \"title\": \"Network Traffic\"}, {\"kind\": \"data_table\", \"title\": \"Pod Status\"}, {\"kind\": \"status_list\", \"title\": \"Alerts\"}, {\"kind\": \"chart\", \"title\": \"Memory Usage\", \"query\": \"sum(container_memory_working_set_bytes{namespace!=\\\"\\\"}) by (namespace)\"}]}"
+                },
+                {
+                    "input": {
+                        "view_id": "view-001"
+                    },
+                    "requires_state": {
+                        "memory_widget_added": true,
+                        "memory_component_variant": "3"
+                    },
+                    "response": "{\"id\": \"view-001\", \"title\": \"SRE Overview\", \"widgets\": [{\"kind\": \"info_card_grid\", \"title\": \"Cluster Health\"}, {\"kind\": \"chart\", \"title\": \"CPU Usage\"}, {\"kind\": \"chart\", \"title\": \"Network Traffic\"}, {\"kind\": \"data_table\", \"title\": \"Pod Status\"}, {\"kind\": \"status_list\", \"title\": \"Alerts\"}, {\"kind\": \"chart\", \"title\": \"Memory Usage by namespace\", \"query\": \"sum(container_memory_working_set_bytes) by (namespace)\"}]}"
+                },
+                {
+                    "input": {
+                        "view_id": "view-001"
+                    },
+                    "requires_state": {
+                        "memory_widget_added": true,
+                        "memory_component_variant": "4"
+                    },
+                    "response": "{\"id\": \"view-001\", \"title\": \"SRE Overview\", \"widgets\": [{\"kind\": \"info_card_grid\", \"title\": \"Cluster Health\"}, {\"kind\": \"chart\", \"title\": \"CPU Usage\"}, {\"kind\": \"chart\", \"title\": \"Network Traffic\"}, {\"kind\": \"data_table\", \"title\": \"Pod Status\"}, {\"kind\": \"status_list\", \"title\": \"Alerts\"}, {\"kind\": \"chart\", \"title\": \"Memory Usage by Namespace\", \"query\": \"sum(container_memory_working_set_bytes) by (namespace)\"}]}"
+                },
+                {
+                    "input": {
+                        "view_id": "view-001"
+                    },
+                    "requires_state": {
+                        "memory_widget_added": true,
+                        "memory_component_variant": "5"
+                    },
+                    "response": "{\"id\": \"view-001\", \"title\": \"SRE Overview\", \"widgets\": [{\"kind\": \"info_card_grid\", \"title\": \"Cluster Health\"}, {\"kind\": \"chart\", \"title\": \"CPU Usage\"}, {\"kind\": \"chart\", \"title\": \"Network Traffic\"}, {\"kind\": \"data_table\", \"title\": \"Pod Status\"}, {\"kind\": \"status_list\", \"title\": \"Alerts\"}, {\"kind\": \"chart\", \"title\": \"Memory Usage\", \"query\": \"sum(container_memory_working_set_bytes) by (namespace)\"}]}"
+                }
+            ]
+        },
+        "get_prometheus_query": {
+            "recording_kind": "argument_cases",
+            "cases": [
+                {
+                    "input": {
+                        "query": "sum(container_memory_working_set_bytes{namespace!=\"\"}) by (namespace)"
+                    },
+                    "requires_state": {
+                        "memory_widget_added": false
+                    },
+                    "response": "Query: sum(container_memory_working_set_bytes{namespace!=\"\"}) by (namespace)\nResults (6 series):\n  production: 4.2Gi\n  staging: 2.1Gi\n  monitoring: 1.8Gi\n  kube-system: 1.2Gi\n  openshift-monitoring: 0.9Gi\n  default: 0.3Gi",
+                    "succeeded": true,
+                    "set_state": {
+                        "memory_component_ready": true,
+                        "memory_component_variant": "0"
+                    }
+                },
+                {
+                    "input": {
+                        "query": "sum(container_memory_working_set_bytes{namespace!=\"\"}) by (namespace)",
+                        "title": "Memory Usage by Namespace"
+                    },
+                    "requires_state": {
+                        "memory_widget_added": false
+                    },
+                    "response": "Query: sum(container_memory_working_set_bytes{namespace!=\"\"}) by (namespace)\nResults (6 series):\n  production: 4.2Gi\n  staging: 2.1Gi\n  monitoring: 1.8Gi\n  kube-system: 1.2Gi\n  openshift-monitoring: 0.9Gi\n  default: 0.3Gi",
+                    "succeeded": true,
+                    "set_state": {
+                        "memory_component_ready": true,
+                        "memory_component_variant": "1"
+                    }
+                },
+                {
+                    "input": {
+                        "query": "sum(container_memory_working_set_bytes{namespace!=\"\"}) by (namespace)",
+                        "title": "Memory Usage"
+                    },
+                    "requires_state": {
+                        "memory_widget_added": false
+                    },
+                    "response": "Query: sum(container_memory_working_set_bytes{namespace!=\"\"}) by (namespace)\nResults (6 series):\n  production: 4.2Gi\n  staging: 2.1Gi\n  monitoring: 1.8Gi\n  kube-system: 1.2Gi\n  openshift-monitoring: 0.9Gi\n  default: 0.3Gi",
+                    "succeeded": true,
+                    "set_state": {
+                        "memory_component_ready": true,
+                        "memory_component_variant": "2"
+                    }
+                },
+                {
+                    "input": {
+                        "query": "sum(container_memory_working_set_bytes) by (namespace)"
+                    },
+                    "requires_state": {
+                        "memory_widget_added": false
+                    },
+                    "response": "Query: sum(container_memory_working_set_bytes) by (namespace)\nResults (6 series):\n  production: 4.2Gi\n  staging: 2.1Gi\n  monitoring: 1.8Gi\n  kube-system: 1.2Gi\n  openshift-monitoring: 0.9Gi\n  default: 0.3Gi",
+                    "succeeded": true,
+                    "set_state": {
+                        "memory_component_ready": true,
+                        "memory_component_variant": "3"
+                    }
+                },
+                {
+                    "input": {
+                        "query": "sum(container_memory_working_set_bytes) by (namespace)",
+                        "title": "Memory Usage by Namespace"
+                    },
+                    "requires_state": {
+                        "memory_widget_added": false
+                    },
+                    "response": "Query: sum(container_memory_working_set_bytes) by (namespace)\nResults (6 series):\n  production: 4.2Gi\n  staging: 2.1Gi\n  monitoring: 1.8Gi\n  kube-system: 1.2Gi\n  openshift-monitoring: 0.9Gi\n  default: 0.3Gi",
+                    "succeeded": true,
+                    "set_state": {
+                        "memory_component_ready": true,
+                        "memory_component_variant": "4"
+                    }
+                },
+                {
+                    "input": {
+                        "query": "sum(container_memory_working_set_bytes) by (namespace)",
+                        "title": "Memory Usage"
+                    },
+                    "requires_state": {
+                        "memory_widget_added": false
+                    },
+                    "response": "Query: sum(container_memory_working_set_bytes) by (namespace)\nResults (6 series):\n  production: 4.2Gi\n  staging: 2.1Gi\n  monitoring: 1.8Gi\n  kube-system: 1.2Gi\n  openshift-monitoring: 0.9Gi\n  default: 0.3Gi",
+                    "succeeded": true,
+                    "set_state": {
+                        "memory_component_ready": true,
+                        "memory_component_variant": "5"
+                    }
+                }
+            ]
+        },
+        "add_widget_to_view": {
+            "recording_kind": "argument_cases",
+            "cases": [
+                {
+                    "input": {
+                        "view_id": "view-001"
+                    },
+                    "requires_state": {
+                        "memory_component_ready": true,
+                        "memory_widget_added": false
+                    },
+                    "response": "Latest memory chart added to view 'SRE Overview' (now 6 widgets)",
+                    "succeeded": true,
+                    "set_state": {
+                        "memory_widget_added": true
+                    }
+                }
+            ]
+        }
     },
     "expected": {
-        "should_mention": ["memory", "added"],
-        "should_use_tools": ["get_prometheus_query"],
-        "should_not_use_tools": ["create_dashboard", "delete_pod"],
+        "should_mention": [
+            "memory",
+            "added"
+        ],
+        "should_use_tools": [
+            "get_prometheus_query"
+        ],
+        "should_not_use_tools": [
+            "create_dashboard",
+            "delete_pod"
+        ],
         "max_tool_calls": 8
-    }
+    },
+    "fixture_origin": "synthetic replay of frontend application of the latest supported memory-chart component; not captured cluster or browser evidence"
 }

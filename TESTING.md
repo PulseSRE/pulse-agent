@@ -315,6 +315,10 @@ Each fixture is a JSON file with this structure:
 
 Argument-specific snapshots can use `{"recording_kind": "argument_cases", "cases": [{"input": {"resource": "daemonsets", "namespace": "monitoring"}, "response": "recorded output"}]}` as a tool's recorded value. The matcher accepts documented resource aliases, inferred API groups and default selectors; other arguments require their own case. Missing or ambiguous cases cannot silently return another resource's snapshot. Unmatched cases return the missing-recording sentinel and remain visible in replay diagnostics. Legacy string recordings retain their existing behavior.
 
+Argument cases may declare `initial_state`, `requires_state`, and `set_state`. State is shared only within one shadow tool map and resets for a new fixture run. A transition requires a uniquely matching case with `succeeded: true`; missing, ambiguous, failed, or malformed transitions leave state unchanged. Reads do not advance state.
+
+`view_add_widget` explicitly models a synthetic frontend apply acknowledgement, since the production tool emits a frontend control signal rather than committing the view directly. Its limited memory-query recordings generate a component before the matching add action; only then do view details show six widgets with the recorded query and caption. Unsupported query/caption/description variants return the missing-recording sentinel. This validates replay consistency, not a live browser save. The fixture retains its eight-call budget and existing score thresholds.
+
 `integration_daemonset_gap` is explicitly synthetic. Its DaemonSet snapshot is consistent with the node and pod records: node-exporter has four running pods and five eligible nodes because its template does not tolerate the GPU node's NoSchedule taint; fluentd tolerates that taint and has six running pods. Controller desired scheduling and coverage of all six nodes are different quantities. Returned records contain resource state, not a prose answer or captured-cluster claim. Expected answers and score thresholds remain unchanged.
 
 ### Current Fixtures
