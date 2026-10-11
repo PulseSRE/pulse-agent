@@ -15,7 +15,7 @@ The UI reverse proxy supplies the shared agent credential and forwards authentic
 - `agent.py`: shared asynchronous streaming loop using `AsyncAnthropic` / `AsyncAnthropicVertex`. Synchronous Kubernetes tools run in an executor; callbacks are mediated by `event_bus.py`.
 - `config.py`: Pydantic configuration; Python 3.11+ and package dependencies are declared in `pyproject.toml`.
 
-The orchestration path classifies/routs prompts to skill configurations. `skill_loader.py`, `skill_router.py`, `skill_selector.py`, `selector_learning.py`, and `synthesis.py` contain loading, routing, selection/learning, and multi-skill result synthesis. Skill routing features are configuration-dependent; static benchmark counts are not a runtime invariant.
+The orchestration path classifies/routes prompts to skill configurations. `skill_loader.py`, `skill_router.py`, `skill_selector.py`, `selector_learning.py`, and `synthesis.py` contain loading, routing, selection/learning, and multi-skill result synthesis. Skill routing features are configuration-dependent; static benchmark counts are not a runtime invariant. Explicit plan authoring is distinct from incident diagnosis: a request mentioning a recovery plan is not automatically a request to create a reusable skill/plan. Plan-authoring signals match explicit positive authoring intent; negated authoring clauses are excluded from routing signals while the original user prompt is retained for execution.
 
 ## Tools and skills
 
@@ -37,7 +37,7 @@ The server setting `PULSE_AGENT_MAX_TRUST_LEVEL` defaults to **2**; `PULSE_AGENT
 
 Levels 0/1 do not enter remediation; level 2 proposes actions for approval; level 3 automatically handles the effective categories; level 4 handles all fixable findings. **Current category limitation:** effective categories start with every registered auto-fix handler and union subscriber selections. Browser subsets therefore cannot restrict level-3 categories. Do not use that UI control as a safety boundary.
 
-Safety controls include a per-scan cap, per-resource cooldown/attempt tracking, controller-owned pod checks, deny policy, and the persisted pause flag. Verification reads live state and may return unverifiable; disappearance of a finding alone is insufficient evidence of resolution. `monitor/recurrence.py` revises a previously verified outcome when the condition returns within the configured horizon. Approval, verification, concurrency conflicts, and denied operations need real cluster testing as well as mocked tests.
+Safety controls include a per-scan cap, per-resource cooldown/attempt tracking, controller-owned pod checks, deny policy, and the persisted pause flag. Verification reads current controller generations, rollout/container readiness and recorded identity where supported, and may return unverifiable; disappearance of a finding alone is insufficient evidence of resolution. `monitor/recurrence.py` revises a previously verified outcome when the condition returns within the configured horizon. Approval, verification, concurrency conflicts, and denied operations need real cluster testing as well as mocked tests.
 
 ## Persistence and learning
 
@@ -56,3 +56,5 @@ Durable plan and incident-remediation flows have different routing and configura
 [SECURITY](../SECURITY.md) describes credential/identity distinctions, caller-token forwarding, scoped policy, and known coverage limitations. [TESTING](../TESTING.md) distinguishes test success, offline harness checks, provider-backed replay, and cluster verification. No source-only audit proves deployment readiness.
 
 Historical specifications/plans under `superpowers/` and [JOURNEY](JOURNEY.md) preserve past design decisions and proposed tasks. They are not current deployment instructions. Runtime behavior must be verified against the code and current tests.
+
+Monitor topology overlays and category counts use persisted monitor inbox items; the legacy memory findings table is a different contract. See [database guide](../DATABASE.md). Eval scaffolding produces review-only drafts, not inferred recordings or automatically promoted scenario gates; see [eval lab](../EVAL_LAB.md).

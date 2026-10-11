@@ -92,3 +92,7 @@ names: dependency ordering, approval, denial, and the 24-hour timeout (instant
 under time-skipping) are all executed, not mocked. Sequencing decisions are
 additionally covered as pure functions. The test server binary is downloaded
 and cached by `temporalio` on first use.
+
+## Execution and recovery records
+
+Durable incident activities record execution completion only from an explicit boolean apply result. Verification is independent: an executed action can remain unverifiable, recur, be compensated or be cancelled. Old workflow histories retain their activity argument shape through patch markers; missing historical apply evidence does not manufacture completed execution. The UI's verified recovery requires a completed action plus affirmative verification evidence. These compatibility tests are separate from proving sustained recovery against a real cluster.

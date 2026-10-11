@@ -31,6 +31,8 @@ The shared agent token authenticates the UI/service connection; it does not esta
 
 Deployment RBAC is owned by pulse-operator and its `OpenShiftPulse` CR, including write-operation and secret-read options. Inspect the reconciled ClusterRoles and the caller's own permissions; old Helm `rbac.*` values no longer configure this repository. Token forwarding must fail closed for protected interactive writes if a user token is required but absent; the rollback route explicitly checks that case.
 
+A deterministic policy denial in the shared agent loop blocks substitute writes for the remainder of that user turn. Read-only diagnosis remains available; a different mutation requires a new explicit user request. Approval does not override the configured policy.
+
 ### Ownership migration
 
 Legacy dashboard ownership migration is bound to the forwarded access token: only rows matching `user-` plus the first 16 hex characters of that token's SHA-256 hash can be reassigned to the authenticated username. Login without an access token does not migrate views. Existing views owned by that username do not justify migrating other users' legacy rows.

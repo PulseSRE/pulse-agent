@@ -15,6 +15,12 @@ export PULSE_AGENT_DATABASE_URL=postgresql://pulse:pulse@localhost:5434/pulse_de
 
 This password is for local disposable use. Migrations run when the database is initialized; no manual schema creation is required.
 
+## Monitor findings and phase traces
+
+Monitor findings are persisted through `inbox_items` created by `system:monitor`, with the linked `finding_id`, JSON resources and category-prefixed correlation key. Active overlays/counts exclude resolved or archived items; recent deployment history uses inbox `created_at` timestamps in seconds. The legacy `findings` memory table has a singular `resource` field and no `category` or `resources` columns; it is not the monitor topology source. Repository projection converts resource objects to graph IDs (`Kind:namespace:name`).
+
+Plan phase audit traces use `skill_selection_log.channel_weights` for the stored phase summary and empty JSON objects for required `channel_scores`/`fused_scores`. Those summaries are not actual tool recordings or independent recovery observations. Recovery timing uses the stored verification timestamp with a millisecond-precise statement-time future guard; action/proposal time alone is not a resolution time.
+
 ## Schema by Feature
 
 ### Memory (3 tables)

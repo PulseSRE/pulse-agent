@@ -63,6 +63,7 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/analytics/intelligence` | token | 8 intelligence sections as structured dicts: query reliability, error hotspots, token efficiency, harness effectiveness, routing accuracy, feedback analysis, token trending, dashboard patterns (query: `days` 1-90, `mode`) |
 | `GET` | `/analytics/prompt` | token | Prompt section breakdown, cache hit rate, version drift history (query: `days` 1-365, `skill`) |
 | `GET` | `/recommendations` | token | Contextual capability recommendations: unused scanners, untried features (max 4) |
+| `GET` | `/readiness` | token | Installation diagnostics: nine scoped checks with healthy/unhealthy/unknown results; provider connectivity is not probed; 60-second cache. See [readiness guide](docs/INSTALLATION_READINESS.md). |
 | `GET` | `/analytics/readiness` | token | Readiness gate summary: pass/fail/attention counts, pass rate, attention items |
 | `GET` | `/postmortems` | token | Auto-generated postmortems, newest first (query: `limit` 1-100) |
 | `GET` | `/topology` | token | Dependency graph nodes + edges for visualization (query: `namespace` optional filter) |
@@ -1095,7 +1096,7 @@ Emitted when ORCA detects that two skills should run in parallel (score gap <= t
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `skills` | `string[]` | Names of the skills running in parallel (always 2) |
+| `skills` | `string[]` | Names of the selected skills; cardinality depends on routing |
 
 #### `skill_progress` — Individual skill status update
 
@@ -1210,13 +1211,48 @@ Structured UI components returned by agent tools via the `component` event. The 
 
 ---
 
+## REST endpoints added to the inventory
+
+Source-derived paths below supplement the table above. Authentication names identify the actual FastAPI dependencies; body/query schemas and ownership checks remain defined by the router. UI-proxy requests add `/api/agent` to the agent paths.
+
+| Method | Path | Dependencies | Purpose |
+|---|---|---|---|
+| `POST` | `/fix-history/{action_id}/approve` | `require_admin` | Run a fix that was proposed while nobody was connected to approve it. |
+| `POST` | `/inbox/reset` | `require_admin` | Re-baseline the inbox: archive what is open, then rescan from now. |
+| `POST` | `/admin/skills/{name}/pin` | `require_admin` | Exempt an agent-created skill from curator lifecycle proposals. |
+| `POST` | `/admin/skills/{name}/unpin` | `require_admin` | Return a pinned skill to normal curator lifecycle. |
+| `POST` | `/admin/skills/{name}/archive` | `require_admin` | Retire an agent-created skill — recoverable, never a delete. |
+| `POST` | `/admin/skills/{name}/restore` | `require_admin` | Bring an archived skill back into rotation. |
+| `GET` | `/admin/skills/archived` | `require_admin` | Archived skills available for restore. |
+| `GET` | `/memory/summary` | `verify_token` | Get summary stats for the agent intelligence page. |
+| `GET` | `/memory/environment` | `verify_token` | Facts Pulse holds about this cluster — ownership, retention, conventions. |
+| `POST` | `/memory/environment` | `verify_token` | Record or correct a fact. Operators can fix what the agent believes. |
+| `DELETE` | `/memory/environment/{scope}/{key}` | `verify_token` | Drop a fact that has stopped being true. |
+| `GET` | `/memory/baselines` | `verify_token` | Learned norms per workload, with whether each is backed by enough samples. |
+| `GET` | `/memory/learning` | `verify_token` | How the verified-trajectory gate is behaving. |
+| `POST` | `/episodes/{episode_id}/dismiss` | `get_owner` | Close an episode an operator says is over. |
+| `GET` | `/views/{view_id}` | `get_owner` | Get a single view by ID. |
+| `PUT` | `/views/{view_id}` | `get_owner` | Update a view (title, description, layout, positions). Owner only. |
+| `DELETE` | `/views/{view_id}` | `get_owner` | Delete a view. Owner only. |
+| `POST` | `/views/{view_id}/clone` | `get_owner` | Clone a view to the current user's account. Only the owner can clone their own views. |
+| `POST` | `/views/{view_id}/share` | `get_owner` | Generate a share link for a view. The link allows others to clone it. |
+| `POST` | `/views/claim/{share_token:path}` | `get_owner` | Claim a shared view using a share token. Clones the view to your account. |
+| `GET` | `/views/{view_id}/versions` | `get_owner` | List version history for a view. |
+| `POST` | `/views/{view_id}/undo` | `get_owner` | Undo the last change to a view (restore previous version). |
+| `POST` | `/views/{view_id}/actions` | `get_owner`, `get_user_token` | Execute a tool action from a view's action_button component. |
+| `POST` | `/views/{view_id}/status` | `get_owner` | Transition a view's status. |
+| `POST` | `/views/{view_id}/claim` | `get_owner` | Claim a team view. |
+| `DELETE` | `/views/{view_id}/claim` | `get_owner` | Release a claim on a view. |
+
 ## Version Compatibility
 
-The UI sends a `GET /version` request before connecting. If the agent's `protocol` field doesn't match the UI's `EXPECTED_PROTOCOL`, the UI shows a warning but still connects (graceful degradation).
+The UI checks `GET /version` before connecting. The current agent protocol is `2`; the current pulse-ui client accepts protocols `1` and `2` and refuses a connection when a returned protocol is unsupported. A failed HTTP version response has a legacy fallback in the client; it does not prove compatibility. Use a matched agent/UI release and verify the specific deployed feature contracts.
 
 ### Protocol Version History
 
-| Version | Changes | UI Version | Agent Version |
+| Version | Changes Historical examples below are retained for reference; they are not a tested compatibility matrix for current releases.
+
+| UI Version | Agent Version |
 |---------|---------|------------|---------------|
 | `2` | `/ws/monitor` for autonomous scanning, `/ws/agent` for auto-routing orchestration, `subscribe_monitor` / `trigger_scan` / `action_response` / `get_fix_history` client messages, `finding` / `prediction` / `action_report` / `investigation_report` / `verification_report` / `findings_snapshot` / `monitor_status` server events, fix history / predictions / memory / context REST endpoints, monitor pause/resume, nonce-based confirmation replay prevention | v5.12.0+ | v1.4.0+ |
 | `1` | Initial protocol: text/thinking streaming, tool use, components, confirmations | v5.0.0+ | v1.0.0+ |
@@ -1240,6 +1276,6 @@ The UI sends a `GET /version` request before connecting. If the agent's `protoco
 | v5.6.0+ | v1.1.0-v1.3.0 | 1 | Compatible |
 | v5.3.0+ | v1.0.0 | 1 | Compatible |
 
-> Both repos should tag releases together when protocol changes occur. Minor UI/Agent releases within the same protocol version are always compatible.
+> The table above preserves historical release examples, not current tested compatibility. Agent/UI releases are paired. A shared protocol number alone does not establish feature, security or database compatibility.
 >
 > **Versioning reset:** the UI's version numbering was reset from the `v6.x` line to a fresh `v2.x` line (coinciding with the org move to PulseSRE / rename to `pulse-ui`). Both repos now share the same version number for each release (e.g. `v2.7.1` / `v2.7.1`).
