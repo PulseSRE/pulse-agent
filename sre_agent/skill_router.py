@@ -106,6 +106,19 @@ def _init_hard_pre_route() -> None:
                 logger.debug("Invalid trigger_pattern regex for skill %s: %s", skill.name, pattern, exc_info=True)
 
 
+_NEGATED_PLAN_AUTHORING = re.compile(
+    r"\b(?:do\s+not|don't|don\u2019t|never)\s+(?:build|create|make)\s+"
+    r"(?:(?:me|us|a|an|the|new|custom|safe|phased|investigation|recovery|remediation|rollback|troubleshooting|diagnostic)\s+){0,4}plan\b",
+    re.IGNORECASE,
+)
+
+
+def _routing_query(query: str) -> str:
+    # The original prompt still reaches the agent; a negated authoring clause
+    # must not vote for the plan builder through keyword or hard-route channels.
+    return _NEGATED_PLAN_AUTHORING.sub("", query)
+
+
 def _hard_pre_route(query: str):
     """Check deterministic pre-route rules before ORCA.
 
@@ -117,7 +130,7 @@ def _hard_pre_route(query: str):
     from .skill_loader import get_skill
 
     for pattern, skill_name in _HARD_PRE_ROUTE:
-        if pattern.search(query):
+        if pattern.search(_routing_query(query)):
             skill = get_skill(skill_name)
             if skill:
                 logger.info("Hard pre-route: '%s' → %s (pattern: %s)", query[:60], skill_name, pattern.pattern)
@@ -199,9 +212,9 @@ def classify_query(query: str, *, context: dict | None = None):
     try:
         from .orchestrator import fix_typos
 
-        q = fix_typos(query)
+        q = fix_typos(_routing_query(query))
     except ImportError:
-        q = query
+        q = _routing_query(query)
 
     selector = _get_selector()
     result = selector.select(q, context=context)

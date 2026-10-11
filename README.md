@@ -321,42 +321,24 @@ Consolidated management page with 8 tabs:
 ```bash
 pip install -e '.[test]'
 python3 -m pytest tests/ -v           # Full test suite
-python3 -m pytest tests/test_foo.py   # Single file
+python3 -m pytest tests/test_health_gate.py   # Single file
 make verify                           # Lint + type-check + tests
 ```
 
-All tests run without a live cluster or API key (fully mocked). See [TESTING.md](TESTING.md) for test conventions, fixtures, and coverage targets.
+The pytest suite uses a disposable PostgreSQL database and controlled Kubernetes/model responses; it does not prove live cluster behavior. Provider-backed evaluation commands are separate and require credentials. See [TESTING.md](TESTING.md) for test conventions, fixtures, and coverage targets.
 
 ### Eval Framework
 
-16 eval suites with 192 scenarios for release gating and regression detection:
-
-| Suite | Scenarios | Purpose |
-|-------|:---------:|---------|
-| `release` | 19 | Primary CI gate (must pass) |
-| `selector` | 59 | Skill routing accuracy |
-| `sysadmin` | 20 | Real-world sysadmin queries |
-| `integration` | 23 | Reliability and failure modes |
-| `view_designer` | 11 | Dashboard generation quality |
-| `fleet` | 11 | Multi-cluster operations |
-| `core` | 6 | Mixed baseline coverage |
-| `capacity_planner` | 5 | Capacity analysis accuracy |
-| `plan_builder` | 5 | Investigation plan quality |
-| `postmortem` | 5 | Auto-postmortem generation |
-| `slo_management` | 5 | SLO burn rate and alerting |
-| `adversarial` | 5 | Prompt injection and edge cases |
-| `errors` | 5 | Error handling and recovery |
-| `autofix` | 7 | Auto-fix decision accuracy |
-| `safety` | 5 | Safety and compliance checks |
-| `scaffolded` | 1 | Auto-generated skill scenarios |
+Fixture inventories change with the checked-in JSON/YAML. Scenario reports score supplied fixture data; they are not live-agent release evidence.
 
 ```bash
-python3 -m sre_agent.evals.cli --suite release --fail-on-gate   # CI gate
-python3 -m sre_agent.evals.cli --suite core --save-baseline     # Save baseline
-python3 -m sre_agent.evals.cli --suite core --compare-baseline  # Regression check
+make evals       # offline harness and fixture reports
+make eval-gate   # live model and judge against recorded tool results
+python -m sre_agent.evals.acceptance_cli --sim artifacts/srebench-sim.json \
+  --replay artifacts/live_judge.json --output artifacts/mandatory_acceptance.json
 ```
 
-Current release gate average: **99.6%**.
+CI also runs the production agent through SRE-Bench simulation, enforces the core/error score gates, and checks mandatory safety/outcome artifacts. See [TESTING](TESTING.md) and [release procedure](RELEASE.md) for credentials, exact workflow commands and evidence limits. A historical score or successful image build cannot establish current model quality or real-cluster recovery.
 
 ## Architecture
 
@@ -365,7 +347,7 @@ Simplified overview. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full d
 ```
 sre_agent/
   main.py              CLI entry point (Rich UI, streaming)
-  serve.py + api/      FastAPI server (WebSocket + REST, 12 modules)
+  serve.py + api/      FastAPI server (WebSocket + REST)
   agent.py             Shared agent loop (Claude API, tool execution, confirmation gates)
   config.py            Pydantic v2 Settings (PULSE_AGENT_ env prefix)
 
@@ -375,15 +357,15 @@ sre_agent/
   selector_learning.py Batch weight recomputation from outcomes
   skill_scaffolder.py  Auto-scaffold skills from novel resolutions
   skill_plan.py        Phased plan data structures
-  plan_templates/      10 YAML plan templates (crashloop, OOM, nodes, workloads, image_pull, ...)
+  plan_templates/      YAML plan templates (crashloop, OOM, nodes, workloads, image_pull, ...)
   postmortem.py        Auto-postmortem from plan outputs
   slo_registry.py      SLO/SLI registry with burn rates
   dependency_graph.py  Live K8s resource dependency graph
   change_risk.py       Pre-deploy risk scoring
 
   # Tools
-  k8s_tools/           41 K8s tools across 11 submodules
-  security_tools.py    9 security scanning tools
+  k8s_tools/           Kubernetes tool modules
+  security_tools.py    Security scanning tools
   fleet_tools.py       5 multi-cluster tools
   gitops_tools.py      6 ArgoCD tools
   predict_tools.py     3 predictive analytics tools

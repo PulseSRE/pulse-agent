@@ -133,3 +133,9 @@ python -m sre_agent.evals.weekly_digest_cli --current-days 7 --baseline-days 7 -
 ```bash
 python -m sre_agent.evals.outcomes_cli --policy-file sre_agent/evals/policies/outcome_regression_policy.yaml
 ```
+
+## Required evidence and reviewed drafts
+
+The release path combines live judged replay with the real production agent against SRE-Bench simulation, then validates mandatory safety/outcome artifacts and the benchmark core/error gates. See [TESTING](../../TESTING.md) for exact commands and CI conditions; offline suite averages are not substitutes. Record the installed SRE-Bench revision because the current workflow fetches its mutable `main` branch.
+
+Automatic eval scaffolding produces non-runnable metadata drafts, never invented recordings or new executable suites. Exporting a selected verified incident also requires independent human review and actual sanitized tool recordings before fixture promotion. See [EVAL_LAB](../../EVAL_LAB.md).

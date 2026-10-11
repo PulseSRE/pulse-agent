@@ -3,7 +3,7 @@ name: run-evals
 description: |
   Run Pulse evaluation suites quickly. Use when the user says "run evals", "check evals",
   "run the gate", "check routing", "run release suite", or wants to verify scores.
-  Supports all 11 suites + selector + baseline comparison.
+  Supports fixture suites, live replay, simulation acceptance and baseline comparison.
 ---
 
 # Pulse evaluation workflow

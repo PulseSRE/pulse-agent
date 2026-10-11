@@ -29,7 +29,9 @@ requires_tools:
 skip_component_hints: true
 route_priority: 40
 trigger_patterns:
-  - "build.*plan|create.*plan|make.*plan"
+  # Match the requested object, not an unrelated pod-creation failure followed
+  # by a recovery-plan clause. Negated authoring remains diagnostic context.
+  - "\\b(?<!not )(?<!n't )(?<!n’t )(?<!never )(?<!cannot )(?:build|create|make)\\s+(?:(?:me|us|a|an|the|new|custom|safe|phased|investigation|recovery|remediation|rollback|troubleshooting|diagnostic)\\s+){0,4}plan\\b"
   - "build.*skill|create.*skill|new.*skill"
   - "build.*runbook|create.*runbook"
   - "investigation.*strategy|how.*investigate"

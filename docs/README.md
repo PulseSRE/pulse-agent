@@ -12,8 +12,10 @@ Start with the guide for your task. Current implementation lives in `sre_agent/`
 | Run checks and interpret their evidence | [Testing](../TESTING.md), [Eval framework](../sre_agent/evals/README.md) |
 | Operate schema/persistence | [Database](../DATABASE.md) |
 | Configure durable workflows | [Temporal](TEMPORAL.md) |
+| Review an incident as an eval draft | [Eval lab](../EVAL_LAB.md) |
 | Create a skill | [Skill developer guide](SKILL_DEVELOPER_GUIDE.md) |
 | Contribute/release | [Contributing](../CONTRIBUTING.md), [Release](../RELEASE.md) |
+| Inspect documentation audit coverage | [Per-file audit](DOCS_AUDIT.md) |
 | Read release/project history | [Changelog](../CHANGELOG.md), [Journey](JOURNEY.md) |
 
 Design principles are aspirations, not measured guarantees. Dated specifications and plans under `superpowers/` retain historical proposals/tasks and may name removed files or deployment tooling. They are not current operational instructions. Built-in skill Markdown is model-facing procedure content; changes to it need replay/behavior validation, not just spelling review.

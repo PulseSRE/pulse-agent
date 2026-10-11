@@ -2,6 +2,18 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## Unreleased
+
+### Fixed
+- Preserve approval, caller identity and mutation preconditions across supported chat, plan, monitor and MCP paths; stop alternative writes after a policy denial within one invocation.
+- Require affirmative workload recovery evidence, preserve action-linked audit/outcome records, and correct persisted monitor queries, learned-weight/eval SQL schemas and recovery timestamp precision.
+- Keep incident diagnosis requests out of plan authoring when unrelated words accidentally match a broad trigger; retain explicit plan-building requests.
+- Repair simulator resource translation and argument-aware replay state; widget completion now requires an observed action and final state rather than a favorable judge score alone.
+
+### Documentation and verification
+- Audit Markdown and Pages guidance, document current API routes and installation/evaluation limits, and distinguish synthetic/isolated checks from real-cluster acceptance.
+- Bound Kubernetes client compatibility and add production container build checks. These changes are unreleased; deployed acceptance and image publication remain separate requirements.
+
 ## v2.31.0 (2026-09-01)
 
 ### The interpreter executes the whole plan language

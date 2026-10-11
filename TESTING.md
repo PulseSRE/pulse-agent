@@ -702,7 +702,7 @@ python -m sre_agent.evals.cli --suite release --save-baseline
 Version mismatch: pyproject.toml=1.16.0, Chart.yaml version=1.15.0
 ```
 
-Run `make release VERSION=<correct>` or set `[project].version` in `pyproject.toml` directly.
+Follow [RELEASE](RELEASE.md) to synchronize versions; `scripts/bump-version.sh <version>` edits this repository only. Do not invoke `make release` merely to fix a version mismatch: it also runs provider-backed replay and creates a commit/tag.
 
 **Docs consistency failure**
 
@@ -872,6 +872,10 @@ is optional: the September 30 nightly run scored 90/100 but failed solely for
 omitting that redundant call. Content/judge requirements, forbidden writes,
 and the tool-call budget remain enforced. The recording still supplies raw
 events when the model chooses to inspect them.
+
+## Build and source-query evidence
+
+The separate [Container Build workflow](.github/workflows/container-build.yml) builds the original Dockerfile and checks installed entry points. It does not publish an image or establish product health. Query/schema regressions are covered by `tests/test_monitor_finding_queries.py`: actual PostgreSQL, monitor-to-inbox persistence, category/count/time-window semantics, async projection and phase audit persistence. Recovery timing tests cover millisecond timestamps and a stale PostgreSQL transaction clock. These use a destructive disposable test database, not the deployment database.
 
 ## Mandatory safety and observed outcome acceptance
 
