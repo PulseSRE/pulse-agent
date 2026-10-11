@@ -76,7 +76,42 @@ class _SimBackedTool:
             if "name" in args and args["name"] != args["pod_name"]:
                 raise ValueError("conflicting pod identity in simulation input")
             args["name"] = args.pop("pod_name")
-        return json.dumps(self._backend.call(self.name, **args))
+        if self.name == "list_resources":
+            # Keep the production schema: the simulator's canonical list API
+            # calls this selector kind, while Pulse calls it resource.
+            from sre_agent.k8s_tools.generic import _SHORT_NAMES
+
+            resource = args.pop("resource", None)
+            if not isinstance(resource, str) or not resource.strip():
+                raise ValueError("simulation list_resources requires a resource selector")
+            resource = resource.strip().lower()
+            kind = _SHORT_NAMES.get(resource, (resource, ""))[0]
+            if "kind" in args and args["kind"] != kind:
+                raise ValueError("conflicting resource selector in simulation input")
+            args["kind"] = kind
+        result = self._backend.call(self.name, **args)
+        if self.name == "list_resources" and args.get("namespace") not in (None, "", "ALL"):
+            # The benchmark's generic listing does not scope returned rows.
+            # Match Kubernetes namespace selection without changing observations
+            # or manufacturing evidence. Cluster-scoped nodes stay unscoped.
+            kind = args["kind"]
+            cluster_scoped = {
+                "nodes",
+                "namespaces",
+                "persistentvolumes",
+                "clusterroles",
+                "clusterrolebindings",
+                "storageclasses",
+                "customresourcedefinitions",
+            }
+            if kind not in cluster_scoped and isinstance(result.get(kind), list):
+                result = dict(result)
+                result[kind] = [
+                    row
+                    for row in result[kind]
+                    if (row.get("namespace") or row.get("metadata", {}).get("namespace")) == args["namespace"]
+                ]
+        return json.dumps(result)
 
 
 class PulseAgentAdapter:
