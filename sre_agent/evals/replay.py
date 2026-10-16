@@ -242,6 +242,9 @@ class ReplayHarness:
         """
         self.tool_calls = []
         tool_attempts: list[dict] = []
+        # Widget kinds the model asked for through emit_component. Data tools
+        # add their own widgets; this records the ones it chose directly.
+        emitted_kinds: list[str] = []
 
         cfg = config or build_replay_config(
             prompt,
@@ -266,6 +269,10 @@ class ReplayHarness:
 
         async def _on_tool_result(event: dict) -> None:
             tool_attempts.append(_tool_diagnostic(event))
+            if event.get("tool_name") == "emit_component":
+                kind = (event.get("input") or {}).get("kind")
+                if isinstance(kind, str):
+                    emitted_kinds.append(kind)
 
         start = time.monotonic()
         kwargs: dict[str, Any] = {
@@ -290,6 +297,7 @@ class ReplayHarness:
             "response": response,
             "tool_calls": list(self.tool_calls),
             "tool_attempts": tool_attempts,
+            "emitted_kinds": emitted_kinds,
             "fixture_state": _fixture_state(effective_map),
             "duration_ms": elapsed_ms,
             "mode": cfg["mode"],
@@ -618,6 +626,8 @@ def score_replay(result: dict, expected: dict) -> dict:
         - ``should_use_tools`` : list[str] -- tools that must be called
         - ``should_not_use_tools`` : list[str] -- tools that must NOT be called
         - ``max_tool_calls``   : int -- upper bound on total tool calls
+        - ``should_emit_kinds`` : list[str] -- widget kinds that must be emitted
+          via ``emit_component`` (checks the call's ``kind`` argument)
 
     Returns
     -------
@@ -672,6 +682,18 @@ def score_replay(result: dict, expected: dict) -> dict:
             {
                 "check": f"tool calls <= {max_calls} (actual: {len(called_tools)})",
                 "passed": within,
+                "weight": 1,
+                "kind": "structure",
+            }
+        )
+
+    # 5. Widget kinds chosen through emit_component
+    emitted = result.get("emitted_kinds", [])
+    for kind in expected.get("should_emit_kinds", []):
+        checks.append(
+            {
+                "check": f"emitted widget '{kind}'",
+                "passed": kind in emitted,
                 "weight": 1,
                 "kind": "structure",
             }

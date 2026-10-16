@@ -262,7 +262,14 @@ def _expected_for(expected: dict, dry_run: bool) -> dict:
     """
     if not dry_run:
         return expected
-    mock_determined = {"should_mention", "overall_should_mention", "should_use_tools_in_order", "final_state"}
+    mock_determined = {
+        "should_mention",
+        "overall_should_mention",
+        "should_use_tools_in_order",
+        "final_state",
+        # The mock calls emit_component with synthesized input, not a widget choice.
+        "should_emit_kinds",
+    }
     trimmed = {k: v for k, v in expected.items() if k not in mock_determined}
     if "per_turn" in trimmed:
         trimmed["per_turn"] = [{k: v for k, v in t.items() if k not in mock_determined} for t in trimmed["per_turn"]]

@@ -42,6 +42,7 @@ requires_tools:
   - create_live_table
   - emit_component
   - optimize_view
+  - get_resource_relationships
 handoff_to:
   sre: [remediate, scale, restart, drain, cordon, apply, delete, fix pod, fix deployment, fix node]
   security: [scan rbac, scan security, vulnerability, compliance, audit security]
@@ -92,10 +93,9 @@ supported_components:
   - badge_list
   - bar_list
   - progress_list
-  - donut_chart
+  - stat_card
   - node_map
   - resource_counts
-  - summary_bar
   - key_value
   - relationship_tree
   - tabs
@@ -148,6 +148,7 @@ Every dashboard should be **shaped by its topic**, not a fixed template. Never d
 | Incident triage | `get_firing_alerts()`, `get_pod_logs()`, `get_events()`, `describe_pod()` | Don't use `cluster_metrics` |
 | Security posture | `get_security_summary()`, `scan_pod_security()`, `scan_rbac_risks()` | Don't use `namespace_summary` |
 | Capacity planning | `get_node_metrics()`, `get_prometheus_query()` with predict_linear | Don't use `cluster_metrics` |
+| Workload dependencies | `get_resource_relationships()` (renders a `relationship_tree`) | Don't flatten an ownership chain into a table |
 
 ## Modifying Existing Dashboards
 
@@ -169,6 +170,30 @@ Every dashboard should be **shaped by its topic**, not a fixed template. Never d
 | `stacked_area` | Breakdown | `sum by (label)` 3+ series |
 
 **Key rule:** Donut/bar = instant (no `time_range`). Line/area = range (with `time_range="1h"`).
+
+## Widget Palette
+
+Data tools add their own widget. For the rest, call `emit_component(kind, spec_json)` with the tool data you already gathered. Pick the widget that fits the shape of the data, not the first one that works:
+
+| Widget | Use for | How to get it |
+|--------|---------|---------------|
+| `metric_card` | One headline number, optionally with a sparkline `query` | `cluster_metrics`, `namespace_summary`, or emit |
+| `stat_card` | One number with a trend arrow (error rate, p99 latency) | emit: `title`, `value`, `unit`, `trend`, `trendValue` |
+| `info_card_grid` | 3-6 related headline facts read side by side | emit: `cards: [{label, value, sub}]` |
+| `resource_counts` | Object counts per kind, each linking to its list | `namespace_summary` |
+| `chart` | Trends over time (`line`/`area`), shares of a whole (`chartType: "donut"`) | `get_prometheus_query` |
+| `bar_list` | A ranking: top N pods by memory, noisiest namespaces | emit: `items: [{label, value}]`, sorted, at most 10 |
+| `progress_list` | Usage against a limit per item: node CPU %, quota used, PVC fill | emit: `items: [{label, value, max, unit}]` |
+| `node_map` | Node health at a glance | `visualize_nodes` |
+| `data_table` | Many rows with several attributes to sort and scan | list tools, `get_events` |
+| `status_list` | Items whose statuses differ (alerts, failing checks) | `get_firing_alerts` |
+| `badge_list` | Short tags: labels, taints, feature flags | `describe_pod` / `describe_resource` |
+| `key_value` | One object's fields | `describe_pod` / `describe_resource` |
+| `relationship_tree` | Ownership or dependency chains (Deployment → ReplicaSet → Pod) | `get_resource_relationships` |
+| `tabs` | Two or more groups a reader views one at a time (Logs / Config / Events) | emit: `tabs: [{label, components: [...]}]` |
+| `grid` / `section` | Group related widgets under one heading | emit, wrapping other specs |
+
+Prefer `bar_list` over a bar `chart` for rankings, `progress_list` over a table for "used vs limit", and `tabs` over a long column of detail widgets.
 
 ## Component Selection Rules
 
