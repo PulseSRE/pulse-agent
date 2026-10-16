@@ -18,6 +18,10 @@ MAX_TAIL_LINES = 1000
 def list_pods(namespace: str = "default", label_selector: str = "", field_selector: str = ""):
     """List pods in a namespace with their status, restarts, and age.
 
+    Status is the pod phase: a crash-looping pod still reports Running, so
+    check Restarts, or use list_resources('pods'), whose STATUS column shows
+    the container reason (CrashLoopBackOff, ImagePullBackOff, OOMKilled).
+
     Args:
         namespace: Kubernetes namespace. Use 'ALL' to list across all namespaces.
         label_selector: Label selector to filter pods, e.g. 'app=nginx'.

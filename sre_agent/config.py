@@ -30,6 +30,10 @@ class AgentConfig(BaseModel):
     # regardless of which model is configured or what a chat approver clicks.
     protected_namespaces: str = "production,openshift-*,kube-system"
     allow_node_ops: bool = False
+    # Grammar-constrained (strict) inputs for write tools. Off until verified
+    # against the configured provider: an API that rejects a strict schema
+    # fails every turn that offers a write tool.
+    strict_write_tools: bool = False
 
 
 class DatabaseConfig(BaseModel):
@@ -175,6 +179,7 @@ class PulseAgentSettings(BaseSettings):
     token_forwarding: bool = True
     protected_namespaces: str = "production,openshift-*,kube-system"
     allow_node_ops: bool = False
+    strict_write_tools: bool = False
 
     # Database
     database_url: str = ""
@@ -270,6 +275,7 @@ class PulseAgentSettings(BaseSettings):
             token_forwarding=self.token_forwarding,
             protected_namespaces=self.protected_namespaces,
             allow_node_ops=self.allow_node_ops,
+            strict_write_tools=self.strict_write_tools,
         )
         self.database = DatabaseConfig(
             url=self.database_url,

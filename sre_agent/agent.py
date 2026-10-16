@@ -384,6 +384,47 @@ def _redact_input(name: str, input_data: dict) -> dict:
 MAX_TOOL_RESULT_LENGTH = 50_000  # ~50KB cap to prevent WebSocket overflow
 
 
+# Strict tool use limits (Anthropic API): at most 20 strict tools per request
+# and 24 optional parameters across all strict schemas. Pulse's 19 write tools
+# fit; MCP or future tools could push past it, so check rather than assume.
+_STRICT_MAX_TOOLS = 20
+_STRICT_MAX_OPTIONAL = 24
+
+
+def apply_strict_write_tools(tool_defs: list[dict], write_tools: set[str]) -> list[dict]:
+    """Return tool_defs with ``strict: true`` on write tools, when within limits.
+
+    Strict mode guarantees a valid tool name and schema-typed arguments, so a
+    mutation cannot receive ``replicas: "2"`` or omit a required field. It needs
+    ``additionalProperties: false`` on the input schema. Tool definitions are
+    copied, never mutated, because they are shared module-level objects.
+    If the write tools would exceed the API's strict limits, none are made
+    strict and a warning is logged; a 400 would fail the whole turn.
+    """
+    targets = [d for d in tool_defs if d.get("name") in write_tools and "input_schema" in d]
+    optional = sum(
+        len(set(d["input_schema"].get("properties", {})) - set(d["input_schema"].get("required", []))) for d in targets
+    )
+    if not targets:
+        return tool_defs
+    if len(targets) > _STRICT_MAX_TOOLS or optional > _STRICT_MAX_OPTIONAL:
+        logger.warning(
+            "strict_write_tools skipped: %d write tools / %d optional params exceed API limits (%d / %d)",
+            len(targets),
+            optional,
+            _STRICT_MAX_TOOLS,
+            _STRICT_MAX_OPTIONAL,
+        )
+        return tool_defs
+    strict_names = {d["name"] for d in targets}
+    out = []
+    for d in tool_defs:
+        if d.get("name") in strict_names and "input_schema" in d:
+            d = {**d, "strict": True, "input_schema": {**d["input_schema"], "additionalProperties": False}}
+        out.append(d)
+    return out
+
+
 def _execute_tool(
     name: str,
     input_data: dict,
@@ -718,7 +759,11 @@ async def run_agent_streaming(
                     max_tokens=max_tokens,
                     system=effective_system,
                     thinking=effective_thinking,
-                    tools=tool_defs,
+                    tools=(
+                        apply_strict_write_tools(tool_defs, write_tools)
+                        if settings.agent.strict_write_tools
+                        else tool_defs
+                    ),
                     messages=messages,
                 )
                 break
@@ -807,6 +852,9 @@ async def run_agent_streaming(
             read_blocks = [b for b in tool_blocks if b.name not in write_tools]
             write_blocks = [b for b in tool_blocks if b.name in write_tools]
             results_map: dict[str, tuple[str, dict | None]] = {}
+            # tool_use ids whose result is an error or a denial. Sent back as
+            # is_error so the model can tell a failed call from a result.
+            failed_ids: set[str] = set()
 
             # Execute read tools in parallel via shared pool
             if read_blocks:
@@ -828,6 +876,7 @@ async def run_agent_streaming(
                     block = task_to_block[p]
                     elapsed_ms = int((time.time() - start_time) * 1000)
                     results_map[block.id] = (f"Error: {block.name} timed out", None)
+                    failed_ids.add(block.id)
                     await event_bus.on_tool_result(
                         {
                             "tool_name": block.name,
@@ -848,6 +897,8 @@ async def run_agent_streaming(
                     try:
                         text, component, exec_meta = task.result()
                         results_map[block.id] = (text, component)
+                        if exec_meta["status"] != "success":
+                            failed_ids.add(block.id)
                         await event_bus.on_tool_result(
                             {
                                 "tool_name": block.name,
@@ -863,6 +914,7 @@ async def run_agent_streaming(
                         )
                     except Exception:
                         results_map[block.id] = (f"Error executing {block.name}", None)
+                        failed_ids.add(block.id)
                         await event_bus.on_tool_result(
                             {
                                 "tool_name": block.name,
@@ -885,6 +937,7 @@ async def run_agent_streaming(
                 if policy_denied_write:
                     reason = "Operation blocked: a write was denied by policy in this turn. Diagnose or propose an alternative for a new user request; do not substitute another mutation."
                     results_map[block.id] = (reason, None)
+                    failed_ids.add(block.id)
                     await event_bus.on_tool_result(
                         {
                             "tool_name": block.name,
@@ -902,6 +955,7 @@ async def run_agent_streaming(
                 confirmed = await event_bus.on_confirm(block.name, block.input)
                 if not is_explicit_approval(confirmed):
                     results_map[block.id] = ("Operation denied. No confirmation callback or user rejected.", None)
+                    failed_ids.add(block.id)
                     await event_bus.on_tool_result(
                         {
                             "tool_name": block.name,
@@ -933,6 +987,8 @@ async def run_agent_streaming(
                     policy_denied_write = True
                 write_elapsed_ms = int((time.time() - write_start) * 1000)
                 results_map[block.id] = (text, component)
+                if exec_meta["status"] != "success":
+                    failed_ids.add(block.id)
                 await event_bus.on_tool_result(
                     {
                         "tool_name": block.name,
@@ -949,14 +1005,17 @@ async def run_agent_streaming(
 
             # Assemble results in original order
             for block in tool_blocks:
+                if block.id not in results_map:
+                    failed_ids.add(block.id)
                 text, component = results_map.get(block.id, (f"Error: no result for {block.name}", None))
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": text,
-                    }
-                )
+                result_block: dict[str, Any] = {
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": text,
+                }
+                if block.id in failed_ids:
+                    result_block["is_error"] = True
+                tool_results.append(result_block)
                 if component:
                     await event_bus.on_component(block.name, component)
 

@@ -868,3 +868,98 @@ async def test_policy_refusal_stops_alternate_writes_but_keeps_diagnostics_and_n
             on_confirm=confirm,
         )
     tools[alternate].call.assert_called_once()
+
+
+@patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
+class TestToolResultIsError:
+    """Failed and denied calls must reach the model flagged is_error.
+
+    Without the flag the model only sees error text in a normal result and has
+    to infer from wording that the call failed.
+    """
+
+    async def _run(self, blocks, tool_map, **kwargs):
+        tool_use = SimpleNamespace(stop_reason="tool_use", content=blocks)
+        final = SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text="Done.")])
+        client = MagicMock()
+        client.messages.stream = MagicMock(side_effect=[_MockAsyncStream(tool_use), _MockAsyncStream(final)])
+        messages = [{"role": "user", "content": "go"}]
+        await run_agent_streaming(
+            client=client, messages=messages, system_prompt="test", tool_defs=[], tool_map=tool_map, **kwargs
+        )
+        results = next(m["content"] for m in messages if m["role"] == "user" and isinstance(m["content"], list))
+        return {r["tool_use_id"]: r for r in results}
+
+    @pytest.mark.asyncio
+    async def test_success_not_flagged_and_failure_flagged(self):
+        ok = MagicMock()
+        ok.call.return_value = "pod-1 Running"
+        results = await self._run(
+            [
+                SimpleNamespace(type="tool_use", id="ok", name="list_pods", input={}),
+                SimpleNamespace(type="tool_use", id="bad", name="no_such_tool", input={}),
+            ],
+            {"list_pods": ok},
+        )
+        assert "is_error" not in results["ok"]
+        assert results["bad"]["is_error"] is True
+
+    @pytest.mark.asyncio
+    async def test_denied_write_flagged(self):
+        results = await self._run(
+            [SimpleNamespace(type="tool_use", id="w", name="delete_pod", input={"pod_name": "x"})],
+            {"delete_pod": MagicMock()},
+            write_tools={"delete_pod"},
+            on_confirm=AsyncMock(return_value=False),
+        )
+        assert results["w"]["is_error"] is True
+
+
+class TestStrictWriteTools:
+    def _def(self, name, props, required):
+        return {
+            "name": name,
+            "description": "d",
+            "input_schema": {
+                "type": "object",
+                "properties": {p: {"type": "string"} for p in props},
+                "required": required,
+            },
+        }
+
+    def test_only_write_tools_made_strict_without_mutating_input(self):
+        from sre_agent.agent import apply_strict_write_tools
+
+        read = self._def("list_pods", ["namespace"], [])
+        write = self._def("delete_pod", ["pod_name", "namespace"], ["pod_name"])
+        out = apply_strict_write_tools([read, write], {"delete_pod"})
+        assert "strict" not in out[0]
+        assert out[1]["strict"] is True
+        assert out[1]["input_schema"]["additionalProperties"] is False
+        assert "strict" not in write and "additionalProperties" not in write["input_schema"]
+
+    def test_skipped_when_over_api_limits(self):
+        from sre_agent.agent import apply_strict_write_tools
+
+        defs = [self._def(f"w{i}", ["a", "b"], []) for i in range(13)]  # 26 optional params > 24
+        out = apply_strict_write_tools(defs, {d["name"] for d in defs})
+        assert all("strict" not in d for d in out)
+
+    def test_real_write_tools_fit_strict_limits(self):
+        """All registered write tools must stay inside the strict limits, or the
+        flag silently stops applying. Fails when a new write tool would break it."""
+        from sre_agent.agent import _STRICT_MAX_OPTIONAL, _STRICT_MAX_TOOLS, TOOL_MAP
+        from sre_agent.security_agent import TOOL_MAP as SEC
+        from sre_agent.tool_registry import get_write_tools
+        from sre_agent.view_designer import TOOL_MAP as VD
+
+        all_tools = {**TOOL_MAP, **SEC, **VD}
+        defs = [all_tools[n].to_dict() for n in get_write_tools() if n in all_tools]
+        optional = sum(
+            len(set(d["input_schema"].get("properties", {})) - set(d["input_schema"].get("required", []))) for d in defs
+        )
+        assert len(defs) <= _STRICT_MAX_TOOLS
+        assert optional <= _STRICT_MAX_OPTIONAL
+        for d in defs:
+            for prop in d["input_schema"].get("properties", {}).values():
+                assert not {"minimum", "maximum", "minLength", "maxLength"} & prop.keys()

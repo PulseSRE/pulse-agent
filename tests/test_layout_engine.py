@@ -7,7 +7,7 @@ class TestSingleComponents:
     def test_single_chart_default_width(self):
         components = [{"kind": "chart"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 2  # charts default to half-width
+        assert layout[0]["w"] == 4  # a lone half-width chart stretches to fill its row
         assert layout[0]["x"] == 0
 
     def test_single_table_full_width(self):
@@ -83,7 +83,8 @@ class TestChartPacking:
         assert layout[1]["w"] == 2
         assert layout[0]["y"] == layout[1]["y"]
         # 3rd on next row (bin-packed, stays w=2)
-        assert layout[2]["w"] == 2
+        assert layout[2]["w"] == 4  # orphan in the last row fills it
+        assert layout[2]["x"] == 0
         assert layout[2]["y"] > layout[0]["y"]
 
     def test_node_map_full_width(self):
@@ -206,7 +207,7 @@ class TestNewComponentTypes:
         components = [{"kind": "stat_card", "title": "CPU", "value": "42%"}]
         layout = compute_layout(components)
         assert layout[0]["w"] == 4
-        assert layout[0]["h"] == 4
+        assert layout[0]["h"] == 3
 
     def test_stat_cards_pack_like_metric_cards(self):
         """stat_card has kpi role, so 4 should pack in a row."""
@@ -249,7 +250,7 @@ class TestLayoutHints:
     def test_height_hint_compact(self):
         components = [{"kind": "chart", "layout": {"h": "compact"}}]
         layout = compute_layout(components)
-        assert layout[0]["h"] < 12  # default chart height is 12
+        assert layout[0]["h"] < 10  # default chart height is 10
 
     def test_height_hint_tall(self):
         components = [
@@ -279,7 +280,7 @@ class TestLayoutHints:
     def test_no_hints_uses_defaults(self):
         components = [{"kind": "chart"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 2  # default for chart
+        assert layout[0]["w"] == 4  # lone chart fills its row
         assert layout[0]["h"] == 4  # empty chart — compact (no series)
 
     def test_chart_with_series_gets_full_height(self):
@@ -290,7 +291,7 @@ class TestLayoutHints:
     def test_chart_multi_series_gets_tall(self):
         components = [{"kind": "chart", "series": [{"label": "a"}, {"label": "b"}, {"label": "c"}]}]
         layout = compute_layout(components)
-        assert layout[0]["h"] == 12  # multi-series — full default
+        assert layout[0]["h"] == 10  # sized to the rendered card (~360px)
 
     def test_content_aware_table_height(self):
         components = [{"kind": "data_table", "rows": [{}] * 8}]
@@ -518,3 +519,22 @@ class TestContainerHeights:
         components = [deep]
         layout = compute_layout(components)
         assert layout[0]["h"] > 0, "Deeply nested components should not error"
+
+
+class TestOrphanRowFill:
+    def test_fifth_kpi_fills_row(self):
+        layout = compute_layout([{"kind": "metric_card", "title": f"M{i}"} for i in range(5)])
+        assert layout[4] == {**layout[4], "x": 0, "w": 4}
+
+    def test_six_kpis_split_last_row_evenly(self):
+        layout = compute_layout([{"kind": "metric_card", "title": f"M{i}"} for i in range(6)])
+        assert [(layout[i]["x"], layout[i]["w"]) for i in (4, 5)] == [(0, 2), (2, 2)]
+
+    def test_three_kpis_remainder_to_last(self):
+        layout = compute_layout([{"kind": "metric_card", "title": f"M{i}"} for i in range(3)])
+        assert [layout[i]["w"] for i in range(3)] == [1, 1, 2]
+
+    def test_explicit_kpi_width_hints_untouched(self):
+        comps = [{"kind": "metric_card", "layout": {"w": "half"}}, {"kind": "metric_card"}]
+        layout = compute_layout(comps)
+        assert [layout[0]["w"], layout[1]["w"]] == [2, 1]
