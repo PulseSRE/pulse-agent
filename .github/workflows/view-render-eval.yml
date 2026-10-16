@@ -1,0 +1,182 @@
+name: View Render Eval
+
+# Nightly, non-gating: does the view designer build dashboards that look right?
+# The live agent answers real dashboard requests, its real tools read a mock
+# cluster with a coherent incident, pulse-ui renders each saved view, and a
+# vision judge scores the screenshot. The report and screenshots are the
+# output; nothing here blocks a merge. See sre_agent/evals/view_render_eval.py.
+#
+# Pull requests that touch the eval run it against a scripted model instead,
+# so a broken harness is caught before the nightly needs it.
+
+on:
+  schedule:
+    - cron: "37 7 * * *"
+  workflow_dispatch:
+    inputs:
+      scripted:
+        description: "Use the scripted model (no API calls; checks the pipeline only)"
+        type: boolean
+        default: false
+      judge_samples:
+        description: "Judge samples per page (median per dimension)"
+        type: number
+        default: 3
+  pull_request:
+    branches: [main]
+    paths:
+      - "sre_agent/evals/view_render_eval.py"
+      - "sre_agent/evals/mock_cluster/**"
+      - ".github/workflows/view-render-eval.yml"
+
+concurrency:
+  group: view-render-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  render-eval:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pulse
+          POSTGRES_PASSWORD: pulse
+          POSTGRES_DB: pulse_render_eval
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      WS_TOKEN: render-eval-token
+      PULSE_AGENT_MODEL: claude-sonnet-5
+      JUDGE_MODEL: claude-sonnet-5
+      ART: artifacts/view-render
+    steps:
+      - name: Checkout agent
+        uses: actions/checkout@v4
+
+      - name: Checkout UI
+        uses: actions/checkout@v4
+        with:
+          repository: PulseSRE/pulse-ui
+          path: ui
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install agent and eval dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[render-eval]"
+          python -m playwright install --with-deps chromium
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ui/package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: pnpm install --frozen-lockfile
+
+      - name: Choose model
+        id: mode
+        env:
+          ANTHROPIC_VERTEX_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ inputs.scripted }}" = "true" ]; then
+            echo "scripted=true" >> "$GITHUB_OUTPUT"
+          elif [ -z "$ANTHROPIC_VERTEX_PROJECT_ID" ] || [ -z "$GCP_SA_KEY" ]; then
+            echo "::warning::Vertex AI credentials are not configured; running the scripted model. Scores will not reflect the model."
+            echo "scripted=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "scripted=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Start mock cluster, agent and UI
+        env:
+          ANTHROPIC_VERTEX_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
+          CLOUD_ML_REGION: ${{ secrets.VERTEX_REGION }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          mkdir -p "$ART/logs"
+          python -m sre_agent.evals.mock_cluster.server --k8s-port 18001 --prom-port 18002 \
+            --kubeconfig "$RUNNER_TEMP/mock-kubeconfig" > "$ART/logs/mock-cluster.log" 2>&1 &
+
+          # The agent reads only the mock: its kubeconfig and Prometheus URL point there.
+          # The UI opens the monitor socket, so the monitor scans the scenario too; with
+          # auto-fix off and no investigation budget it reports findings without acting
+          # on them or spending model calls on them.
+          agent_env=(
+            PULSE_AGENT_HOST=127.0.0.1 PULSE_AGENT_PORT=8080 PULSE_AGENT_WS_TOKEN="$WS_TOKEN"
+            PULSE_AGENT_DATABASE_URL=postgresql://pulse:pulse@localhost:5433/pulse_render_eval
+            PULSE_AGENT_MEMORY=0 PULSE_AGENT_AUTOFIX_ENABLED=false PULSE_AGENT_TOKEN_FORWARDING=false
+            PULSE_AGENT_MAX_DAILY_INVESTIGATIONS=0
+            KUBECONFIG="$RUNNER_TEMP/mock-kubeconfig"
+            PULSE_AGENT_THANOS_URL=http://127.0.0.1:18002 PULSE_AGENT_PROMETHEUS_INSECURE=true
+          )
+          if [ "${{ steps.mode.outputs.scripted }}" = "true" ]; then
+            python -m sre_agent.evals.mock_cluster.scripted_model --port 18003 > "$ART/logs/scripted-model.log" 2>&1 &
+            agent_env+=(ANTHROPIC_API_KEY=scripted ANTHROPIC_BASE_URL=http://127.0.0.1:18003)
+          else
+            echo "$GCP_SA_KEY" > "$RUNNER_TEMP/gcp-sa-key.json"
+            agent_env+=(GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/gcp-sa-key.json"
+                        ANTHROPIC_VERTEX_PROJECT_ID="$ANTHROPIC_VERTEX_PROJECT_ID" CLOUD_ML_REGION="$CLOUD_ML_REGION")
+          fi
+          env "${agent_env[@]}" pulse-agent-api > "$ART/logs/agent.log" 2>&1 &
+
+          # The UI reads the same mock, so its live widgets show the numbers the agent saw.
+          (cd ui && K8S_API_URL=http://127.0.0.1:18001 THANOS_URL=http://127.0.0.1:18002 \
+             PULSE_AGENT_URL=http://127.0.0.1:8080 PULSE_AGENT_WS_TOKEN="$WS_TOKEN" \
+             pnpm dev > "../$ART/logs/ui.log" 2>&1 &)
+
+          for i in $(seq 1 90); do
+            if curl -sf -o /dev/null http://127.0.0.1:8080/healthz && curl -sf -o /dev/null http://127.0.0.1:9000/; then
+              echo "ready after $((i * 2))s"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::agent or UI did not start"; tail -50 "$ART"/logs/*.log; exit 1
+
+      - name: Run eval
+        env:
+          ANTHROPIC_VERTEX_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
+          CLOUD_ML_REGION: ${{ secrets.VERTEX_REGION }}
+        run: |
+          args=(--agent-url ws://127.0.0.1:8080 --ui-url http://127.0.0.1:9000 --token "$WS_TOKEN" --out "$ART")
+          if [ "${{ steps.mode.outputs.scripted }}" = "true" ]; then
+            args+=(--scripted --timeout 120)
+          else
+            export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/gcp-sa-key.json"
+            args+=(--model "$PULSE_AGENT_MODEL" --judge-model "$JUDGE_MODEL" --judge-samples "${{ inputs.judge_samples || 3 }}")
+          fi
+          python -m sre_agent.evals.view_render_eval "${args[@]}"
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f "$ART/report.md" ]; then cat "$ART/report.md" >> "$GITHUB_STEP_SUMMARY"; fi
+          rm -f "$RUNNER_TEMP/gcp-sa-key.json"
+
+      - name: Upload screenshots and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: view-render-eval
+          path: artifacts/view-render
+          retention-days: 14
