@@ -204,10 +204,6 @@ def _fetch_table_rows(
     or an error string on failure.  Reusable by ``list_resources`` and
     ``create_live_table``.
     """
-    import ssl
-    import urllib.parse
-    import urllib.request
-
     resource, group = _resolve_short_name(resource, group)
     gvr = f"{group}~{version}~{resource}" if group else f"{version}~{resource}"
 
@@ -224,35 +220,19 @@ def _fetch_table_rows(
         params["fieldSelector"] = field_selector
     params["limit"] = str(MAX_RESULTS)
 
-    url = f"https://kubernetes.default.svc{path}"
-    if params:
-        url += "?" + urllib.parse.urlencode(params)
-
-    try:
-        with open("/var/run/secrets/kubernetes.io/serviceaccount/token") as f:
-            token = f.read().strip()
-    except FileNotFoundError:
-        return "Error: Not running in-cluster (no service account token)."
-
-    ctx = ssl.create_default_context()
-    try:
-        ctx.load_verify_locations("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
-    except Exception as e:
-        return f"Error: Cannot load cluster CA certificate ({e}). Refusing to connect without TLS verification."
-
-    req = urllib.request.Request(
-        url,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json;as=Table;g=meta.k8s.io;v=v1",
-        },
+    # Through the shared client: the request user's token when token
+    # forwarding is on (so their RBAC applies), the kubeconfig out of cluster.
+    # This used to read the pod's service-account token and CA from disk and
+    # call kubernetes.default.svc directly, which listed every resource with
+    # the agent's own permissions and failed anywhere but in-cluster.
+    data = _kc.get_raw_json(
+        path,
+        f"listing {resource}",
+        query=params,
+        accept="application/json;as=Table;g=meta.k8s.io;v=v1",
     )
-
-    try:
-        resp = urllib.request.urlopen(req, context=ctx, timeout=15)
-        data = json.loads(resp.read())
-    except Exception as e:
-        return f"Error listing {resource}: {e}"
+    if isinstance(data, ToolError):
+        return f"Error listing {resource}: {data}"
 
     col_defs_raw = data.get("columnDefinitions", [])
     table_rows = data.get("rows", [])
