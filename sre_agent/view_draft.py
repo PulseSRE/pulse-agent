@@ -70,8 +70,12 @@ _BLOCKING_WARNING_PREFIXES = ("Empty widget",)
 _ADVISORY_ERROR_MARKERS = ("must have at least", "must have at most")
 
 
-def precheck(components: list[dict]) -> tuple[list[str], list[str]]:
-    """Return ``(blocking, advisory)`` findings for a draft dashboard."""
+def precheck(components: list[dict], check_data: bool = False) -> tuple[list[str], list[str]]:
+    """Return ``(blocking, advisory)`` findings for a draft dashboard.
+
+    With ``check_data``, each widget's live query is also run once
+    (``check_widget_data``) and a query that fails or returns nothing blocks.
+    """
     from .quality_engine import evaluate_components
 
     if not components:
@@ -85,4 +89,115 @@ def precheck(components: list[dict]) -> tuple[list[str], list[str]]:
     for warning in result.warnings:
         (blocking if warning.startswith(_BLOCKING_WARNING_PREFIXES) else advisory).append(warning)
     advisory.extend(result.suggestions)
+    if check_data:
+        blocking.extend(check_widget_data(components))
     return blocking, advisory
+
+
+# --- Live data check -------------------------------------------------------
+#
+# The structural check above sees a widget's spec, not what it will show.
+# Charts and metric cards with a ``query`` are re-run by the UI on every
+# refresh, so a query that errors or matches no series renders as an error
+# box or "No data" no matter how good the spec looks. Running each query once
+# before saving lets the model fix it while it still can.
+
+_MAX_QUERIES = 16
+_QUERY_TIMEOUT_S = 5
+_CONTAINER_KEYS = ("items", "components")
+
+
+def widget_queries(components: list[dict]) -> list[tuple[str, str]]:
+    """``(widget title, PromQL)`` for every widget with a live query, nested ones included."""
+    found: list[tuple[str, str]] = []
+
+    def walk(items: list, parent: str) -> None:
+        for comp in items or []:
+            if not isinstance(comp, dict):
+                continue
+            title = (comp.get("title") or comp.get("label") or parent or comp.get("kind") or "widget").strip()
+            query = comp.get("query")
+            if isinstance(query, str) and query.strip():
+                found.append((title, query.strip()))
+            for key in _CONTAINER_KEYS:
+                if isinstance(comp.get(key), list):
+                    walk(comp[key], title)
+            for tab in comp.get("tabs") or []:
+                if isinstance(tab, dict):
+                    walk(tab.get("components") or [], tab.get("label") or title)
+
+    walk(components, "")
+    return found
+
+
+def _run_query(query: str) -> tuple[str, str]:
+    """``(outcome, detail)``: outcome is ok, empty, invalid, error or unreachable."""
+    import math
+    import urllib.error
+
+    from .prometheus import PrometheusConfigError, prometheus_request
+
+    try:
+        data = prometheus_request("api/v1/query", {"query": query}, timeout=_QUERY_TIMEOUT_S)
+    except PrometheusConfigError as e:
+        return "unreachable", str(e)
+    except urllib.error.HTTPError as e:
+        # Prometheus answers a bad query with 400 and a JSON error body.
+        try:
+            import json
+
+            detail = json.loads(e.read() or b"{}").get("error", "")
+        except Exception:
+            detail = ""
+        return ("error", detail or f"HTTP {e.code}") if e.code in (400, 422) else ("unreachable", f"HTTP {e.code}")
+    except Exception as e:  # connection refused, DNS, timeout: the backend, not the query
+        return "unreachable", type(e).__name__
+    if data.get("status") != "success":
+        return "error", str(data.get("error") or "query failed")
+    result = (data.get("data") or {}).get("result")
+    kind = (data.get("data") or {}).get("resultType")
+    if kind == "scalar" or kind == "string":
+        return "ok", ""
+    if not result:
+        return "empty", ""
+    values = []
+    for series in result:
+        try:
+            values.append(float((series.get("value") or [0, "nan"])[1]))
+        except (TypeError, ValueError):
+            values.append(math.nan)
+    if not any(math.isfinite(v) for v in values):
+        return "invalid", ""
+    return "ok", ""
+
+
+def check_widget_data(components: list[dict]) -> list[str]:
+    """Blocking findings for widgets whose live query would render broken or empty.
+
+    Best effort: when Prometheus cannot be reached (or is not configured) the
+    check reports nothing, so a monitoring outage never holds a save.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    pairs = widget_queries(components)
+    if not pairs:
+        return []
+    unique = list(dict.fromkeys(q for _, q in pairs))[:_MAX_QUERIES]
+    with ThreadPoolExecutor(max_workers=min(6, len(unique))) as pool:
+        outcomes = dict(zip(unique, pool.map(_run_query, unique), strict=True))
+    if any(outcome == "unreachable" for outcome, _ in outcomes.values()):
+        return []
+
+    findings: list[str] = []
+    for title, query in pairs:
+        outcome, detail = outcomes.get(query, ("ok", ""))
+        if outcome == "error":
+            findings.append(f"Query failed for '{title}': {detail[:200]} — fix the PromQL or leave the widget out")
+        elif outcome == "empty":
+            findings.append(
+                f"No data for '{title}': its query matches no series right now "
+                "(check the metric name and label values against get_prometheus_query results)"
+            )
+        elif outcome == "invalid":
+            findings.append(f"No usable data for '{title}': its query returns only NaN/Inf (e.g. division by zero)")
+    return findings
