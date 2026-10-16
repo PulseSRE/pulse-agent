@@ -130,15 +130,19 @@ jobs:
             KUBECONFIG="$RUNNER_TEMP/mock-kubeconfig"
             PULSE_AGENT_THANOS_URL=http://127.0.0.1:18002 PULSE_AGENT_PROMETHEUS_INSECURE=true
           )
+          # The agent gets a key file, never the raw key in its environment.
+          unset_env=(-u GCP_SA_KEY)
           if [ "${{ steps.mode.outputs.scripted }}" = "true" ]; then
             python -m sre_agent.evals.mock_cluster.scripted_model --port 18003 > "$ART/logs/scripted-model.log" 2>&1 &
+            # The secrets are in this step's environment on same-repo PRs too, and the
+            # agent prefers Vertex whenever a project and region are set.
+            unset_env+=(-u ANTHROPIC_VERTEX_PROJECT_ID -u CLOUD_ML_REGION)
             agent_env+=(ANTHROPIC_API_KEY=scripted ANTHROPIC_BASE_URL=http://127.0.0.1:18003)
           else
             echo "$GCP_SA_KEY" > "$RUNNER_TEMP/gcp-sa-key.json"
-            agent_env+=(GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/gcp-sa-key.json"
-                        ANTHROPIC_VERTEX_PROJECT_ID="$ANTHROPIC_VERTEX_PROJECT_ID" CLOUD_ML_REGION="$CLOUD_ML_REGION")
+            agent_env+=(GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/gcp-sa-key.json")
           fi
-          env "${agent_env[@]}" pulse-agent-api > "$ART/logs/agent.log" 2>&1 &
+          env "${unset_env[@]}" "${agent_env[@]}" pulse-agent-api > "$ART/logs/agent.log" 2>&1 &
 
           # The UI reads the same mock, so its live widgets show the numbers the agent saw.
           (cd ui && K8S_API_URL=http://127.0.0.1:18001 THANOS_URL=http://127.0.0.1:18002 \
