@@ -418,6 +418,32 @@ def render_markdown(results: list[CaseResult], meta: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def calibrate(report: dict[str, Any], ratings: dict[str, dict[str, float]]) -> dict[str, Any]:
+    """How far the judge is from a person, per dimension.
+
+    ``ratings`` maps request id to a person's 1-5 score per dimension, for the
+    screenshots of the run in ``report``. Before the judge gates anything, its
+    scores should land within a point of a person's on most pages.
+    """
+    judged = {r["id"]: r.get("judge") or {} for r in report.get("results", [])}
+    out: dict[str, Any] = {"pages": 0, "dimensions": {}}
+    for dim in JUDGE_DIMENSIONS:
+        pairs = [
+            (float(ratings[cid][dim]), float(judged[cid][dim]))
+            for cid in ratings
+            if cid in judged and isinstance(judged[cid].get(dim), (int, float)) and dim in ratings[cid]
+        ]
+        if pairs:
+            out["dimensions"][dim] = {
+                "pages": len(pairs),
+                "mean_abs_error": round(statistics.mean(abs(h - j) for h, j in pairs), 2),
+                "within_one": round(sum(abs(h - j) <= 1 for h, j in pairs) / len(pairs), 2),
+                "judge_minus_human": round(statistics.mean(j - h for h, j in pairs), 2),
+            }
+            out["pages"] = max(out["pages"], len(pairs))
+    return out
+
+
 async def run(args: argparse.Namespace) -> list[CaseResult]:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -490,7 +516,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--judge-samples", type=int, default=1)
     parser.add_argument("--model", default=os.environ.get("PULSE_AGENT_MODEL", ""), help="recorded in the report")
     parser.add_argument("--scripted", action="store_true", help="the agent is on the scripted model; mark the report")
+    parser.add_argument(
+        "--calibrate",
+        metavar="RATINGS_JSON",
+        default="",
+        help="compare the judge in OUT/report.json with a person's scores ({request id: {dimension: 1-5}}) and exit",
+    )
     args = parser.parse_args(argv)
+
+    if args.calibrate:
+        report = json.loads((Path(args.out) / "report.json").read_text())
+        result = calibrate(report, json.loads(Path(args.calibrate).read_text()))
+        print(json.dumps(result, indent=2))
+        return 0 if result["dimensions"] else 1
 
     results = asyncio.run(run(args))
     meta = {

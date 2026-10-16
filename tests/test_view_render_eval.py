@@ -262,3 +262,23 @@ class TestConversations:
         assert reply["spec"]["id"] == "cv-1"
         assert reply["tools"] == ["namespace_summary", "update_view_widgets"]
         assert reply["text"] == "turn 3" and reply["error"] == ""
+
+
+def test_calibration_measures_the_judge_against_a_person():
+    report = {
+        "results": [
+            {"id": "a", "judge": {"layout": 4, "integrity": 5}},
+            {"id": "b", "judge": {"layout": 2, "integrity": 5}},
+            {"id": "c", "judge": {}},  # judge failed on this page: not counted
+        ]
+    }
+    ratings = {"a": {"layout": 4, "integrity": 3}, "b": {"layout": 3, "integrity": 5}, "c": {"layout": 1}}
+    out = vre.calibrate(report, ratings)
+    assert out["dimensions"]["layout"] == {
+        "pages": 2,
+        "mean_abs_error": 0.5,
+        "within_one": 1.0,
+        "judge_minus_human": -0.5,
+    }
+    assert out["dimensions"]["integrity"]["within_one"] == 0.5  # the judge was 2 points generous on page a
+    assert out["dimensions"]["integrity"]["judge_minus_human"] == 1.0
