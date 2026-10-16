@@ -47,5 +47,7 @@
   "view_incident_triage",
   "view_investigation_components",
   "view_manage_openshiftpulse",
-  "view_namespace_dashboard"
+  "view_namespace_dashboard",
+  "view_widget_rankings",
+  "view_workload_tabs"
 ]
