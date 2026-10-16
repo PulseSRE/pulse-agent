@@ -14,9 +14,9 @@ _ROLE_ORDER = ["kpi_group", "kpi", "status", "chart", "detail", "table", "contai
 
 # kind -> (role, default_w, default_h)
 _KIND_MAP: dict[str, tuple[str, int, int]] = {
-    "metric_card": ("kpi", 1, 4),
+    "metric_card": ("kpi", 1, 3),
     "info_card_grid": ("kpi_group", 4, 5),
-    "chart": ("chart", 2, 12),
+    "chart": ("chart", 2, 10),
     "node_map": ("chart", 4, 12),
     "data_table": ("table", 4, 12),
     "status_list": ("status", 4, 6),
@@ -134,11 +134,13 @@ def _resolve_height(hint: str | None, default: int, component: dict) -> int:
         series = component.get("series", [])
         if not series and not component.get("query"):
             default = 4
-        elif len(series) <= 1:
+        else:
+            # Rendered chart card (header + 240px plot + legend) is ~360px;
+            # 10 units = 392px at rowHeight 32 / margin 8. 12 left ~120px empty.
             default = 10
-        # else: keep default 12 for multi-series
     elif kind in ("metric_card", "stat_card"):
-        default = 6 if component.get("query") else 4
+        # Without a sparkline the card is ~92px; 3 units = 112px (4 left ~60px empty).
+        default = 6 if component.get("query") else 3
     elif kind == "info_card_grid":
         cards = len(component.get("cards", []))
         default = max(4, 2 + min(math.ceil(cards * 1.5), 6))
@@ -297,6 +299,27 @@ def _pack_group(
     return y
 
 
+def _fill_last_row(positions: dict[int, dict], row: list[int]) -> None:
+    """Widen a partially filled final row so it spans all 4 columns.
+
+    A 5th KPI card used to sit alone at 1/4 width, and a 3rd chart at 1/2,
+    leaving a visible hole in the grid. Split the row evenly when the item
+    count divides 4; otherwise give the remainder to the last item.
+    """
+    if not row:
+        return
+    used = sum(positions[i]["w"] for i in row)
+    if used >= 4:
+        return
+    if 4 % len(row) == 0:
+        w = 4 // len(row)
+        for n, i in enumerate(row):
+            positions[i]["x"] = n * w
+            positions[i]["w"] = w
+    else:
+        positions[row[-1]]["w"] += 4 - used
+
+
 def _pack_kpi(
     items: list[tuple[int, str, int, int]],
     positions: dict[int, dict],
@@ -324,14 +347,19 @@ def _pack_kpi(
     x = 0
     y = start_y
     row_h = items[0][3] if items else 4
+    row: list[int] = []
     for orig_idx, _kind, w, h in items:
         actual_w = card_w if card_w is not None else w
         if x + actual_w > 4:
             x = 0
             y += row_h
+            row = []
         positions[orig_idx] = {"x": x, "y": y, "w": actual_w, "h": h}
+        row.append(orig_idx)
         row_h = max(row_h, h)
         x += actual_w
+    if card_w is not None:  # never override explicit width hints
+        _fill_last_row(positions, row)
 
 
 def _pack_charts(
@@ -344,14 +372,20 @@ def _pack_charts(
     x = 0
     row_h = 0
 
+    row: list[int] = []
     for orig_idx, _kind, w, h in items:
         if x + w > 4:
             y += row_h
             x = 0
             row_h = 0
+            row = []
         positions[orig_idx] = {"x": x, "y": y, "w": w, "h": h}
+        row.append(orig_idx)
         row_h = max(row_h, h)
         x += w
+    # Only default half-width charts; explicit width hints are respected.
+    if all(positions[i]["w"] == 2 for i in row):
+        _fill_last_row(positions, row)
 
     if row_h > 0:
         y += row_h
