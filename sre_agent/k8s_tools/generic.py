@@ -364,6 +364,10 @@ def list_resources(
     Uses the Kubernetes Table API to get the same columns as 'kubectl get'.
     Works for ANY resource type including CRDs with custom printer columns.
     Accepts short names (po, svc, deploy, cm, ds, sts, hpa, cj, ing, etc.).
+    Use for any kind without a dedicated tool (nodes, services, routes,
+    configmaps, CRDs), and for pods when you need the kubectl STATUS reason
+    (CrashLoopBackOff, ImagePullBackOff). To inspect one object's status,
+    conditions and events use describe_resource.
 
     Args:
         resource: Resource type — plural, singular, or short name (e.g. 'pods', 'svc', 'deploy', 'cm').

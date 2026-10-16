@@ -182,7 +182,12 @@ def get_persistent_volume_claims(namespace: str = "default"):
 
 @beta_tool
 def get_cluster_version():
-    """Get the Kubernetes/OpenShift cluster version information."""
+    """Get the cluster's Kubernetes version and, on OpenShift, the OCP version, update channel and ClusterVersion conditions (Available, Progressing, Failing).
+
+    Use for "what version are we on", upgrade questions, and checking whether an
+    upgrade is in progress or stuck. For per-operator health use
+    get_cluster_operators; for node kubelet versions use list_resources('nodes').
+    """
     result = _kc.safe(lambda: _kc.get_version_client().get_code())
     if isinstance(result, ToolError):
         return str(result)

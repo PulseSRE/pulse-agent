@@ -94,7 +94,13 @@ def _proxy_apps_client(cluster_name: str):
 
 @beta_tool
 def fleet_list_clusters():
-    """List all managed clusters in the fleet with their availability status."""
+    """List every ACM/MCE managed (spoke) cluster with its availability.
+
+    Use first for fleet questions ("which clusters are down", "how many spokes")
+    to see which clusters exist and are reachable. The other fleet_* tools query
+    all managed clusters at once. Only works when ACM or MCE is installed on this
+    hub; for the current cluster alone use the non-fleet tools.
+    """
     clusters = _get_managed_clusters()
     if not clusters:
         return "No managed clusters found. ACM/MCE may not be installed, or no spoke clusters registered."
