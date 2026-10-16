@@ -761,17 +761,17 @@ def critique_view(view_id: str) -> str:
     issues: list[str] = list(result.errors)
     if not positions:
         issues.append("NO LAYOUT: Positions not computed — this may indicate a save error")
-    for w in result.warnings:
-        if w.startswith("Duplicate query"):
-            issues.append(f"DUPLICATE QUERY: {w}")
-        elif w.startswith("Empty widget"):
-            label = "EMPTY CHART" if _warning_kind(w, layout) == "chart" else "EMPTY WIDGET"
-            issues.append(f"{label}: {w}")
+    for warning in result.warnings:
+        if warning.startswith("Duplicate query"):
+            issues.append(f"DUPLICATE QUERY: {warning}")
+        elif warning.startswith("Empty widget"):
+            label = "EMPTY CHART" if _warning_kind(warning, layout) == "chart" else "EMPTY WIDGET"
+            issues.append(f"{label}: {warning}")
         else:
-            issues.append(f"STALE DATA: {w}" if "will not refresh" in w else w)
-    for w in _flatten_widgets(layout):
-        w_title = w.get("title", "")
-        if w_title and is_generic_title(w_title, w.get("kind", "")):
+            issues.append(f"STALE DATA: {warning}" if "will not refresh" in warning else warning)
+    for widget in _flatten_widgets(layout):
+        w_title = widget.get("title", "")
+        if w_title and is_generic_title(w_title, widget.get("kind", "")):
             issues.append(f"GENERIC TITLE: '{w_title}' — provide a descriptive, specific title")
     untitled = sum(1 for w in layout if _title_required(w) and not w.get("title"))
     if untitled:
