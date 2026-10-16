@@ -35,6 +35,10 @@ class TestPromQL:
         assert scalar("count(kube_pod_status_phase{phase='Running'} == 1)") == running
         assert scalar("count(ALERTS{alertstate='firing'}) or vector(0)") == len(sc.ALERTS)
 
+    def test_metrics_real_exporters_do_not_publish_are_absent(self):
+        # A modelled-but-fictional metric hides queries that read 0 on real clusters.
+        assert promql.evaluate("kube_event_count", T) == ("vector", [])
+
     def test_rate_of_a_counter_is_its_modelled_rate(self):
         cores = scalar('sum(rate(container_cpu_usage_seconds_total{namespace="production"}[5m]))')
         expected = sum(p[7] for p in sc.PODS if p[2] == "production" and p[4] == "Running")

@@ -6,7 +6,10 @@ anticipated, so this evaluates the expression: selectors, ``rate``/``increase``
 and the ``*_over_time`` family, aggregations with ``by``/``without``,
 ``topk``/``bottomk``, arithmetic, comparisons and set operators, with
 ``on``/``ignoring`` matching. A metric the scenario does not model returns no
-series, as a real Prometheus would for a metric that does not exist.
+series, as a real Prometheus would for a metric that does not exist. Model
+only metrics real exporters publish: modelling ``kube_event_count`` (which
+kube-state-metrics does not export) once hid a dashboard card that read 0 on
+every real cluster.
 
 Counters are modelled by their per-second rate; a bare counter selector returns
 rate x uptime. Gauges drift gently over time (``scenario.wave``) so trend charts
@@ -247,8 +250,6 @@ def _series_for(name: str, t: float) -> list[Sample]:
             )
             for a in sc.ALERTS
         ]
-    if name == "kube_event_count":
-        return [_gauge({"namespace": e[0], "reason": e[3], "type": e[2]}, float(e[5])) for e in sc.EVENTS]
     if name == "cluster_operator_up":
         ops = ["authentication", "console", "dns", "ingress", "monitoring", "network", "storage"]
         return [_gauge({"name": op}, 1.0) for op in ops]
@@ -685,7 +686,6 @@ KNOWN_METRICS = [
     "kube_deployment_status_replicas",
     "kube_deployment_status_replicas_available",
     "kube_deployment_status_replicas_unavailable",
-    "kube_event_count",
     "kube_horizontalpodautoscaler_spec_max_replicas",
     "kube_horizontalpodautoscaler_status_current_replicas",
     "kube_namespace_status_phase",
