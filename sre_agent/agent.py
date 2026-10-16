@@ -7,6 +7,7 @@ import atexit
 import concurrent.futures
 import contextlib
 import contextvars
+import functools
 import json
 import logging
 import os
@@ -97,10 +98,18 @@ _tool_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_pr
 atexit.register(_tool_pool.shutdown, wait=False)
 
 
-def _ctx_run(fn, *args):
-    """Run fn in a copy of the current context (propagates request_id to tool threads)."""
-    ctx = contextvars.copy_context()
-    return ctx.run(fn, *args)
+def _in_caller_context(fn):
+    """Bind ``fn`` to a copy of the *calling* context, for running in a tool thread.
+
+    Call this where the work is submitted, not inside the worker. The previous
+    helper copied the context inside the pool thread, which is the worker's own
+    empty context: ``run_in_executor`` does not carry context variables across.
+    So tools never saw what the request had set, despite the docstring promising
+    it. ``get_current_user()`` returned "anonymous" in every tool (the agent's
+    view tools looked up and edited dashboards under the wrong owner) and
+    request_id never reached tool logs.
+    """
+    return functools.partial(contextvars.copy_context().run, fn)
 
 
 async def _invoke(callback, *args, **kwargs):
@@ -554,7 +563,7 @@ def _execute_tool_with_timeout(
 ) -> tuple[str, dict | None, dict]:
     """Execute a tool with a timeout guard."""
     timeout = timeout or TOOL_TIMEOUT
-    future = _tool_pool.submit(_ctx_run, _execute_tool, name, input_data, tool_map, user_token, abort_event)
+    future = _tool_pool.submit(_in_caller_context(_execute_tool), name, input_data, tool_map, user_token, abort_event)
     try:
         return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
@@ -864,7 +873,13 @@ async def run_agent_streaming(
                 for b in read_blocks:
                     task = asyncio.ensure_future(
                         loop.run_in_executor(
-                            _tool_pool, _ctx_run, _execute_tool, b.name, b.input, tool_map, user_token, _abort_401
+                            _tool_pool,
+                            _in_caller_context(_execute_tool),
+                            b.name,
+                            b.input,
+                            tool_map,
+                            user_token,
+                            _abort_401,
                         )
                     )
                     task_to_block[task] = b
@@ -974,8 +989,7 @@ async def run_agent_streaming(
                 loop = asyncio.get_running_loop()
                 text, component, exec_meta = await loop.run_in_executor(
                     _tool_pool,
-                    _ctx_run,
-                    _execute_tool_with_timeout,
+                    _in_caller_context(_execute_tool_with_timeout),
                     block.name,
                     block.input,
                     tool_map,
