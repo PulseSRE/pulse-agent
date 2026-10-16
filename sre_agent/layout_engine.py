@@ -192,15 +192,102 @@ def _classify(component: dict) -> tuple[str, int, int]:
     return role, w, h
 
 
-def compute_layout(components: list[dict]) -> dict[int, dict]:
+def parse_rows(rows: str | list | None) -> list[list[str]]:
+    """Parse planned rows: one row per line, widget titles separated by ``|``.
+
+    Also accepts an already-parsed list of lists. Blank entries are dropped.
+    """
+    if not rows:
+        return []
+    if isinstance(rows, list):
+        parsed = [[str(t).strip() for t in row if str(t).strip()] for row in rows if isinstance(row, list)]
+    else:
+        parsed = [[t.strip() for t in line.split("|") if t.strip()] for line in str(rows).splitlines()]
+    return [row for row in parsed if row]
+
+
+def _even_widths(count: int) -> list[int]:
+    """Column widths that fill a 4-column row with ``count`` items (count <= 4)."""
+    if count <= 0:
+        return []
+    if 4 % count == 0:
+        return [4 // count] * count
+    return [1] * (count - 1) + [4 - (count - 1)]
+
+
+def _layout_planned_rows(components: list[dict], rows: list[list[str]]) -> dict[int, dict]:
+    """Place widgets in the rows the agent planned, in reading order.
+
+    Each planned row shares the width evenly (up to 4 per line). A widget that
+    is full width by default (tables, topology, tabs, ...) takes its own line
+    at its place in the row. Widgets not named in any row are laid out after
+    the planned rows with the usual role-based packing. Titles match
+    case-insensitively; unknown titles are ignored.
+    """
+    by_title: dict[str, int] = {}
+    for i, comp in enumerate(components):
+        title = str(comp.get("title") or "").strip().lower()
+        if title and title not in by_title:
+            by_title[title] = i
+
+    positions: dict[int, dict] = {}
+    placed: set[int] = set()
+    y = 0
+
+    def flush(line: list[int]) -> None:
+        nonlocal y
+        for start in range(0, len(line), 4):
+            chunk = line[start : start + 4]
+            widths = _even_widths(len(chunk))
+            heights = [_classify(components[i])[2] for i in chunk]
+            x = 0
+            for idx, w, h in zip(chunk, widths, heights, strict=True):
+                # Own height: a metric card beside a chart stays card-sized.
+                positions[idx] = {"x": x, "y": y, "w": w, "h": h}
+                x += w
+            y += max(heights)
+
+    for row in rows:
+        line: list[int] = []
+        for title in row:
+            idx = by_title.get(title.strip().lower())
+            if idx is None or idx in placed:
+                continue
+            placed.add(idx)
+            _role, w, h = _classify(components[idx])
+            if w >= 4:
+                flush(line)
+                line = []
+                positions[idx] = {"x": 0, "y": y, "w": 4, "h": h}
+                y += h
+            else:
+                line.append(idx)
+        flush(line)
+
+    remaining = [i for i in range(len(components)) if i not in placed]
+    if remaining:
+        rest = compute_layout([components[i] for i in remaining])
+        for sub_idx, pos in rest.items():
+            positions[remaining[sub_idx]] = {**pos, "y": pos["y"] + y}
+    return positions
+
+
+def compute_layout(components: list[dict], rows: str | list | None = None) -> dict[int, dict]:
     """Compute grid positions for a list of components.
 
     Returns ``{original_index: {"x": int, "y": int, "w": int, "h": int}}``.
     Uses a 4-column grid with role-based priority packing.
     Respects layout hints (w, h, group, priority) from components.
+
+    ``rows`` is the order the agent planned (see ``parse_rows``). When given,
+    planned widgets are placed in that order instead of being regrouped by
+    widget type, which used to discard the plan's narrative.
     """
     if not components:
         return {}
+    planned = parse_rows(rows)
+    if planned:
+        return _layout_planned_rows(components, planned)
 
     # Classify each component
     classified: list[tuple[int, str, str, int, int, str]] = []

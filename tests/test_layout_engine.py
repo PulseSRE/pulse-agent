@@ -538,3 +538,47 @@ class TestOrphanRowFill:
         comps = [{"kind": "metric_card", "layout": {"w": "half"}}, {"kind": "metric_card"}]
         layout = compute_layout(comps)
         assert [layout[0]["w"], layout[1]["w"]] == [2, 1]
+
+
+_PLANNED_COMPS = (
+    {"kind": "data_table", "title": "Pods", "rows": [{}] * 3},
+    {"kind": "metric_card", "title": "CPU"},
+    {"kind": "metric_card", "title": "Mem"},
+    {"kind": "chart", "title": "Trend", "series": [{"data": [[1, 2]]}]},
+    {"kind": "status_list", "title": "Alerts", "items": [{}]},
+)
+
+
+class TestPlannedRows:
+    COMPS = _PLANNED_COMPS
+
+    def _order(self, positions):
+        return [self.COMPS[i]["title"] for i, _ in sorted(positions.items(), key=lambda kv: (kv[1]["y"], kv[1]["x"]))]
+
+    def test_follows_planned_order_not_widget_type(self):
+        pos = compute_layout(list(self.COMPS), rows="Alerts\nCPU | Mem | Trend\nPods")
+        assert self._order(pos) == ["Alerts", "CPU", "Mem", "Trend", "Pods"]
+
+    def test_row_shares_width_and_keeps_own_heights(self):
+        pos = compute_layout(list(self.COMPS), rows="CPU | Mem | Trend")
+        assert [pos[i]["w"] for i in (1, 2, 3)] == [1, 1, 2]
+        assert pos[1]["h"] < pos[3]["h"]  # metric card not stretched to chart height
+
+    def test_unplanned_widgets_follow_planned_rows(self):
+        pos = compute_layout(list(self.COMPS), rows="Trend")
+        trend_bottom = pos[3]["y"] + pos[3]["h"]
+        assert all(pos[i]["y"] >= trend_bottom for i in (0, 1, 2, 4))
+
+    def test_titles_match_case_insensitively_and_unknowns_are_ignored(self):
+        pos = compute_layout(list(self.COMPS), rows="alerts | Nonexistent\nPODS")
+        assert self._order(pos)[:2] == ["Alerts", "Pods"]
+        assert set(pos) == set(range(len(self.COMPS)))
+
+    def test_no_rows_keeps_role_based_packing(self):
+        assert compute_layout(list(self.COMPS)) == compute_layout(list(self.COMPS), rows="")
+
+    def test_parse_rows_accepts_lists(self):
+        from sre_agent.layout_engine import parse_rows
+
+        assert parse_rows([["A", " B "], [], ["C"]]) == [["A", "B"], ["C"]]
+        assert parse_rows("A | B\n\nC") == [["A", "B"], ["C"]]

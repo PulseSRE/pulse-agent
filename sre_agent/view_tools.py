@@ -59,10 +59,12 @@ def create_dashboard(
     trigger_source: str = "user",
     finding_id: str = "",
     visibility: str = "",
+    rows: str = "",
 ):
     """Create a custom dashboard view. Quality is auto-validated on save — no need to call critique_view.
 
-    Layout is computed automatically based on component types.
+    Pass `rows` with the order you planned so the layout follows it; without
+    it, widgets are grouped by type (KPIs, status, charts, details, tables).
 
     Args:
         title: Name for the dashboard (e.g. "SRE Overview", "Incident — payment-api").
@@ -71,6 +73,10 @@ def create_dashboard(
         trigger_source: Who created it: user, monitor, or agent.
         finding_id: Monitor finding ID that triggered this view (for dedup).
         visibility: private (default for custom) or team (default for incident/plan/assessment).
+        rows: Planned rows, top to bottom: one line per row, widget titles separated by "|",
+            e.g. "Firing Alerts\nCPU Usage | Memory Usage | Restarts\nPods in production".
+            Widgets in a row share its width; tables and other full-width widgets get their own line.
+            Widgets not listed are placed after the planned rows.
     """
     view_id = f"cv-{uuid.uuid4().hex[:12]}"
     status = _INITIAL_STATUS.get(view_type, "active")
@@ -90,6 +96,7 @@ def create_dashboard(
         trigger_source=trigger_source,
         finding_id=finding_id or None,
         visibility=visibility,
+        rows=rows,
     )
 
 

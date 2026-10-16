@@ -90,3 +90,38 @@ async def test_replay_records_kinds_requested_through_emit_component():
     with patch("sre_agent.evals.replay.run_agent_streaming", side_effect=_agent_emitting):
         result = await ReplayHarness({}, stub_config=True).run_async(None, "synthetic")
     assert result["emitted_kinds"] == ["bar_list", "progress_list"]
+
+
+class TestExplicitDashboardRouting:
+    """An explicit "build a dashboard" request reaches the view designer even
+    when it describes an incident. These prompts used to route to the SRE skill
+    via its pod-crash trigger, where create_dashboard is not offered."""
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "Create an incident triage dashboard for the api-server pod that's been crashing",
+            "Create an incident investigation dashboard for the payment-api pod that's crashlooping.",
+            "Build me a capacity dashboard for production",
+            "Pods look bad. Build a dashboard for them.",
+        ],
+    )
+    def test_routes_to_view_designer(self, query):
+        from sre_agent.skill_router import classify_query, offline_routing
+
+        with offline_routing():
+            assert classify_query(query).name == "view_designer"
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "why is my pod crashlooping?",
+            "The build failed, view the logs",
+            "I want to make sure the pods view is right before deploy",
+            "create a plan to fix the crashlooping pod",
+        ],
+    )
+    def test_incidental_words_do_not_trigger(self, query):
+        from sre_agent.skill_router import is_dashboard_request
+
+        assert not is_dashboard_request(query)

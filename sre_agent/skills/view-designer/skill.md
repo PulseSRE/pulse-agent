@@ -48,7 +48,7 @@ handoff_to:
   security: [scan rbac, scan security, vulnerability, compliance, audit security]
 route_priority: 20
 trigger_patterns:
-  - "(create|build|make|design)\\s+(me\\s+)?(a\\s+)?(\\w+\\s+)?(dashboard|view|live\\s+table)"
+  - "(create|build|make|design)\\s+(me\\s+)?(an?\\s+)?([\\w-]+\\s+){0,3}(dashboard|view|live\\s+table)"
   - "(edit|update|modify|fix|optimize)\\s+(the\\s+)?(dashboard|view|layout|widget)"
   - "add\\s+(a\\s+)?(chart|table|widget|metric|column)"
   - "(remove|hide|show|rename|reorder)\\s+.{0,30}(column|widget|chart)"
@@ -134,7 +134,7 @@ Every dashboard should be **shaped by its topic**, not a fixed template. Never d
 1. **INVESTIGATE** — `list_resources()`, `get_events()`, `discover_metrics()`, `get_prometheus_query()` to understand what data exists.
 2. **PLAN** — `plan_dashboard(title, rows)` with findings. Wait for approval. Skip only when user says "just build it" or adding to existing view.
 3. **BUILD** — Call data tools matching the topic. Each tool auto-adds its component.
-4. **SAVE** — `create_dashboard(title)`. Auto-validates and auto-computes layout.
+4. **SAVE** — `create_dashboard(title, rows=...)` with the rows you planned, as widget titles: one line per row, `|` between widgets in a row. Without `rows`, widgets are regrouped by type and the plan's order is lost.
 5. **PRESENT** — Describe what was built, offer changes.
 
 **Topic -> Tools mapping:**

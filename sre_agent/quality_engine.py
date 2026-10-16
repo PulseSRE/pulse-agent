@@ -266,34 +266,11 @@ def evaluate_components(
     # Phase 2: Per-component schema validation (from validator)
     # ------------------------------------------------------------------
     all_titles: list[str] = []
-    has_metric_source = False
-    has_chart = False
-    has_table = False
-
     for comp in deduped:
         _validate_component(comp, result)
         title = comp.get("title", "")
-        kind = comp.get("kind", "")
-
         if title:
             all_titles.append(title.lower())
-
-        if kind in METRIC_SOURCE_KINDS:
-            has_metric_source = True
-        if kind == "chart":
-            has_chart = True
-        if kind == "data_table":
-            has_table = True
-
-        if kind == "grid":
-            for item in comp.get("items", []):
-                ik = item.get("kind", "")
-                if ik in METRIC_SOURCE_KINDS:
-                    has_metric_source = True
-                if ik == "chart":
-                    has_chart = True
-                if ik == "data_table":
-                    has_table = True
 
     # ------------------------------------------------------------------
     # Phase 3: Widget count (from both)
@@ -312,135 +289,80 @@ def evaluate_components(
             result.errors.append(f"Duplicate title '{t}' — each widget must have a unique title.")
         seen_titles.add(t)
 
-    # ------------------------------------------------------------------
-    # Phase 5: Required structure (from validator)
-    # ------------------------------------------------------------------
-    if not has_metric_source:
-        result.errors.append(
-            "Dashboard must include a metric source (metric_card, info_card_grid, or grid with metrics)."
-        )
-    if not has_chart:
-        result.errors.append("Dashboard must include at least one chart.")
-    if not has_table:
-        result.errors.append("Dashboard must include at least one data_table.")
+    # No required mix of widget kinds. This used to reject any dashboard
+    # without a metric card, a chart and a data_table, which forced one
+    # template onto every topic and contradicted the skill's "shaped by its
+    # topic" rule. A dashboard is judged on whether each widget fits its data.
 
     # ------------------------------------------------------------------
-    # Phase 6: PromQL checks — warnings only (from validator)
+    # Phase 5: PromQL checks — warnings only (from validator)
     # ------------------------------------------------------------------
     _check_promql_all(deduped, result)
 
     # ------------------------------------------------------------------
-    # Phase 7: Quality scoring rubric (from critic)
+    # Phase 6: Score — start from full marks, deduct for real problems
     # ------------------------------------------------------------------
-    score = 0
+    score = result.max_score
+    flat = _flatten_widgets(deduped)
 
-    # R1. Has metric cards or info cards? (2 points)
-    if has_metric_source:
-        score += 2
-
-    # R2. Has charts with data? (2 points)
-    charts = [w for w in deduped if w.get("kind") == "chart"]
-    if len(charts) >= 2:
-        score += 2
-    elif len(charts) == 1:
-        score += 1
-        result.suggestions.append("Add a second chart (e.g., memory trend alongside CPU)")
-
-    # R3. Has data table? (1 point)
-    if has_table:
-        score += 1
-
-    # R4. Layout positions computed? (2 points)
-    if positions and len(positions) > 0:
-        score += 2
-
-    # R5. All widgets have titles? (1 point)
-    titled = sum(1 for w in deduped if w.get("title"))
-    if titled == len(deduped) and len(deduped) > 0:
-        score += 1
-
-    # R6. Charts have descriptions? (1 point)
-    if charts:
-        described = sum(1 for c in charts if c.get("description"))
-        if described == len(charts):
-            score += 1
-        else:
-            result.suggestions.append("Add descriptions to charts explaining what to watch for")
-
-    # R7. Metric cards have PromQL queries? (1 point)
-    metric_cards = [w for w in deduped if w.get("kind") == "metric_card"]
-    for w in deduped:
-        if w.get("kind") == "grid":
-            metric_cards.extend(item for item in w.get("items", []) if item.get("kind") == "metric_card")
-    cards_with_query = [m for m in metric_cards if m.get("query")]
-    if metric_cards and len(cards_with_query) >= len(metric_cards) * 0.5:
-        score += 1
-    elif metric_cards:
-        result.suggestions.append("Add PromQL queries to metric cards for live sparkline charts")
-
-    # ------------------------------------------------------------------
-    # Phase 8: Penalty deductions (from critic)
-    # ------------------------------------------------------------------
-
-    # Too many widgets penalty
     if len(deduped) > max_widgets:
-        score = max(0, score - 2)
-    elif len(deduped) >= 6:
-        result.suggestions.append("Consider using tabs to organize 6+ widgets into logical groups")
+        score -= 2
+
+    # Empty widgets render as blank boxes.
+    for w in flat:
+        reason = _empty_reason(w)
+        if reason:
+            result.warnings.append(f"Empty widget '{w.get('title') or w.get('kind')}': {reason}")
+            score -= 2
+
+    # Widgets whose kind does not fit the shape of their data.
+    for w in flat:
+        misfit = _shape_misfit(w)
+        if misfit:
+            result.suggestions.append(misfit)
+            score -= 1
+    loose_cards = sum(1 for w in deduped if w.get("kind") == "metric_card")
+    if loose_cards >= 5:
+        result.suggestions.append(
+            f"{loose_cards} separate metric cards — group related ones in a grid, or use a data_table "
+            "when they are the same measure per item"
+        )
+        score -= 1
+
+    # Titles: every widget that should have one, and none generic.
+    untitled = [w for w in deduped if _title_required(w) and not w.get("title")]
+    if untitled:
+        result.suggestions.append(f"{len(untitled)} widget(s) have no title")
+        score -= 1
+    for w in flat:
+        if w.get("title") and is_generic_title(w["title"], w.get("kind", "")):
+            score -= 1
+    if any(c > 1 for c in Counter(all_titles).values()):
+        score -= 1
 
     # Duplicate queries — check the ORIGINAL list so duplicates that were
-    # removed by dedup still penalise the score (matches old critic behaviour).
-    queries = [w.get("query", "") for w in components if w.get("query")]
-    for w in components:
-        if w.get("kind") == "grid":
-            queries.extend(item.get("query", "") for item in w.get("items", []) if item.get("query"))
-    query_counts: Counter[str] = Counter(q for q in queries if q)
-    for q, count in query_counts.items():
+    # removed by dedup still count (matches old critic behaviour).
+    queries = [w.get("query", "") for w in _flatten_widgets(components) if w.get("query")]
+    for q, count in Counter(queries).items():
         if count > 1:
-            extras = count - 1
-            score -= extras
+            score -= count - 1
             result.warnings.append(f"Duplicate query '{q[:60]}' appears {count} times")
 
-    # Empty charts
-    for w in deduped:
-        if w.get("kind") == "chart":
-            series = w.get("series", [])
-            total_points = sum(len(s.get("data", [])) for s in series)
-            has_query = bool(w.get("query"))
-            if total_points == 0 and not has_query:
-                chart_title = w.get("title", "untitled")
-                result.warnings.append(f"Empty chart '{chart_title}' has no data and no query")
-                score -= 1
-
-    # Generic title penalty (affects score too)
-    for w in deduped:
-        w_title = w.get("title", "")
-        w_kind = w.get("kind", "")
-        if w_title and w_kind and is_generic_title(w_title, w_kind):
-            score -= 1
-        if w_kind == "grid":
-            for item in w.get("items", []):
-                it = item.get("title", "")
-                ik = item.get("kind", "")
-                if it and ik and is_generic_title(it, ik):
-                    score -= 1
-
-    # Component balance
-    if len(deduped) >= 3:
-        kind_counts = Counter(w.get("kind", "") for w in deduped)
-        most_common_kind, most_common_count = kind_counts.most_common(1)[0]
-        if most_common_count / len(deduped) > 0.8:
-            result.suggestions.append(
-                f"{most_common_count}/{len(deduped)} widgets are '{most_common_kind}'"
-                " — mix metric cards, charts, and tables"
-            )
-            score -= 1
-
-    # Duplicate titles penalty (case-insensitive, from critic)
-    title_counts = Counter(all_titles)
-    dup_titles = [t for t, c in title_counts.items() if c > 1]
-    if dup_titles:
+    # Live data: time-sensitive widgets without a query freeze at save time.
+    static = [w for w in flat if w.get("kind") in _LIVE_KINDS and not w.get("query")]
+    if static:
+        names = ", ".join(f"'{w.get('title') or w.get('kind')}'" for w in static[:4])
+        result.warnings.append(
+            f"{len(static)} time-sensitive widget(s) have no PromQL query and will not refresh: {names}"
+        )
         score -= 1
+
+    # Advice that costs nothing when ignored.
+    charts = [w for w in flat if w.get("kind") == "chart"]
+    if charts and not all(c.get("description") for c in charts):
+        result.suggestions.append("Add descriptions to charts saying what to watch for")
+    if len(deduped) >= 6:
+        result.suggestions.append("Consider using tabs to organize 6+ widgets into logical groups")
 
     # ------------------------------------------------------------------
     # Finalize
@@ -455,6 +377,81 @@ def evaluate_components(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+# Kinds whose value goes stale when saved without a query.
+_LIVE_KINDS = frozenset({"chart", "metric_card", "stat_card"})
+
+_LIST_FIELDS = {
+    "status_list": "items",
+    "bar_list": "items",
+    "progress_list": "items",
+    "badge_list": "badges",
+    "key_value": "pairs",
+    "info_card_grid": "cards",
+    "node_map": "nodes",
+}
+
+
+def _flatten_widgets(components: list[dict]) -> list[dict]:
+    """Leaf widgets, including those nested in grids, sections and tabs."""
+    out: list[dict] = []
+    for c in components:
+        kind = c.get("kind", "")
+        if kind == "grid":
+            out.extend(_flatten_widgets(c.get("items", [])))
+        elif kind == "section":
+            out.extend(_flatten_widgets(c.get("components", [])))
+        elif kind == "tabs":
+            for tab in c.get("tabs", []):
+                out.extend(_flatten_widgets(tab.get("components", [])))
+            out.append(c)
+        else:
+            out.append(c)
+    return out
+
+
+def _empty_reason(w: dict) -> str:
+    kind = w.get("kind", "")
+    if kind == "chart":
+        points = sum(len(s.get("data", [])) for s in w.get("series", []) or [])
+        if points == 0 and not w.get("query"):
+            return "no data and no query"
+    elif kind == "data_table":
+        if not w.get("rows") and not w.get("datasources"):
+            return "no rows and no datasource"
+    elif kind in _LIST_FIELDS:
+        if not w.get(_LIST_FIELDS[kind]):
+            return f"no {_LIST_FIELDS[kind]}"
+    return ""
+
+
+def _shape_misfit(w: dict) -> str:
+    """A suggestion when the widget kind does not suit its data, else ''."""
+    kind = w.get("kind", "")
+    title = w.get("title") or kind
+    if kind == "chart" and w.get("chartType", "line") in ("line", "area"):
+        series = w.get("series", []) or []
+        # Points may be [timestamp, value] pairs or bare values; only pairs carry time.
+        stamps = {pt[0] for s in series for pt in s.get("data", []) if isinstance(pt, (list, tuple)) and pt}
+        if series and all(len(s.get("data", [])) <= 1 for s in series) and len(stamps) == 1:
+            return f"'{title}' plots a single instant as a {w.get('chartType', 'line')} chart — use a bar_list for a ranking"
+    if kind == "status_list":
+        statuses = {i.get("status") for i in w.get("items", [])}
+        if len(w.get("items", [])) >= 3 and len(statuses) == 1:
+            return f"'{title}': every item has the same status — a data_table shows the differences better"
+    if kind == "data_table" and "top" in title.lower() and len(w.get("rows", [])) > 20:
+        return f"'{title}' is a Top-N table with {len(w.get('rows', []))} rows — limit it to 20"
+    if kind == "tabs" and any(not t.get("components") for t in w.get("tabs", [])):
+        return "tabs widget has an empty tab — drop tabs with nothing in them"
+    return ""
+
+
+def _title_required(w: dict) -> bool:
+    from .component_registry import get_component
+
+    comp = get_component(w.get("kind", ""))
+    return comp.title_required if comp else True
 
 
 def _deduplicate(components: list[dict]) -> list[dict]:
@@ -720,6 +717,15 @@ def _check_promql(query: str, result: QualityResult) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _warning_kind(warning: str, layout: list[dict]) -> str:
+    """Kind of the widget an "Empty widget '<title>'" warning names."""
+    name = warning.split("'", 2)[1] if warning.count("'") >= 2 else ""
+    for w in _flatten_widgets(layout):
+        if (w.get("title") or w.get("kind")) == name:
+            return w.get("kind", "")
+    return ""
+
+
 @beta_tool
 def critique_view(view_id: str) -> str:
     """Critique a view's design quality against best practices. Returns a score
@@ -749,71 +755,30 @@ def critique_view(view_id: str) -> str:
         f"Template: {'applied' if positions else 'NONE'}",
     ]
 
-    # Combine errors + warnings into issues for display
+    # Issues come from the engine's own result, so critique and save-time
+    # validation apply one rubric. (This used to add its own checks that
+    # demanded metric cards, two charts and a table on every dashboard.)
     issues: list[str] = list(result.errors)
-
-    # Add critic-style issue labels for missing structure
-    if not any(w.get("kind") in ("metric_card", "info_card_grid", "grid") for w in layout):
-        issues.append("NO METRIC CARDS: Add cluster_metrics() or namespace_summary() for KPI row at top")
-    charts = [w for w in layout if w.get("kind") == "chart"]
-    if len(charts) == 1:
-        issues.append("ONLY 1 CHART: Add a second chart (e.g., memory trend alongside CPU)")
-    elif len(charts) == 0:
-        issues.append("NO CHARTS: Call get_prometheus_query(query, time_range='1h') for trend visualizations")
-    if not any(w.get("kind") == "data_table" for w in layout):
-        issues.append("NO TABLE: Add a data_table for drill-down (list_pods, list_nodes, etc.)")
     if not positions:
         issues.append("NO LAYOUT: Positions not computed — this may indicate a save error")
-
-    # Untitled widgets
-    titled = sum(1 for w in layout if w.get("title"))
-    if titled < len(layout) and len(layout) > 0:
-        untitled = len(layout) - titled
-        issues.append(f"UNTITLED WIDGETS: {untitled} widget(s) missing titles — add descriptive names")
-
-    # Too few / too many
-    if len(layout) < 3:
-        issues.append(f"TOO FEW WIDGETS: Only {len(layout)} widgets. Minimum 3 (metrics + chart + table)")
-    elif len(layout) > 8:
-        issues.append(f"TOO MANY WIDGETS: {len(layout)} widgets — reorganize into tabs or remove duplicates")
-
-    # Duplicate queries (from warnings)
     for w in result.warnings:
         if w.startswith("Duplicate query"):
             issues.append(f"DUPLICATE QUERY: {w}")
-
-    # Empty charts (from warnings)
-    for w in result.warnings:
-        if w.startswith("Empty chart"):
-            issues.append(f"EMPTY CHART: {w}")
-
-    # Generic titles
-    for w in layout:
+        elif w.startswith("Empty widget"):
+            label = "EMPTY CHART" if _warning_kind(w, layout) == "chart" else "EMPTY WIDGET"
+            issues.append(f"{label}: {w}")
+        else:
+            issues.append(f"STALE DATA: {w}" if "will not refresh" in w else w)
+    for w in _flatten_widgets(layout):
         w_title = w.get("title", "")
-        w_kind = w.get("kind", "")
-        if w_title and w_kind and is_generic_title(w_title, w_kind):
+        if w_title and is_generic_title(w_title, w.get("kind", "")):
             issues.append(f"GENERIC TITLE: '{w_title}' — provide a descriptive, specific title")
-        if w_kind == "grid":
-            for item in w.get("items", []):
-                it = item.get("title", "")
-                ik = item.get("kind", "")
-                if it and ik and is_generic_title(it, ik):
-                    issues.append(f"GENERIC TITLE: '{it}' — provide a descriptive, specific title")
-
-    # Component balance
-    if len(layout) >= 3:
-        kind_counts = Counter(w.get("kind", "") for w in layout)
-        most_common_kind, most_common_count = kind_counts.most_common(1)[0]
-        if most_common_count / len(layout) > 0.8:
-            issues.append(
-                f"IMBALANCED: {most_common_count}/{len(layout)} widgets are '{most_common_kind}'"
-                " — mix metric cards, charts, and tables"
-            )
-
-    # Duplicate titles
-    all_titles = [w.get("title", "").lower() for w in layout if w.get("title")]
-    title_counts = Counter(all_titles)
-    dup_titles = [t for t, c in title_counts.items() if c > 1]
+    untitled = sum(1 for w in layout if _title_required(w) and not w.get("title"))
+    if untitled:
+        issues.append(f"UNTITLED WIDGETS: {untitled} widget(s) missing titles — add descriptive names")
+    if len(layout) > 8:
+        issues.append(f"TOO MANY WIDGETS: {len(layout)} widgets — reorganize into tabs or remove duplicates")
+    dup_titles = [t for t, c in Counter(w.get("title", "").lower() for w in layout if w.get("title")).items() if c > 1]
     if dup_titles:
         issues.append(
             f"DUPLICATE TITLES: {', '.join(repr(t) for t in dup_titles)} — each widget must have a unique title"
@@ -844,6 +809,6 @@ def critique_view(view_id: str) -> str:
     elif result.score >= 5:
         lines.append("\n⚠️ View needs improvements. Fix the issues above, then critique again.")
     else:
-        lines.append("\n❌ View quality is low. Add missing components (metrics, charts, table) and re-critique.")
+        lines.append("\n❌ View quality is low. Fix the issues above so each widget fits its data, then re-critique.")
 
     return "\n".join(lines)

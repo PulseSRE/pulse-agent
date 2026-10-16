@@ -278,53 +278,38 @@ class TestWidgetCount:
 # ---------------------------------------------------------------------------
 
 
-class TestRequiredStructure:
-    def test_requires_metric_source(self):
+class TestNoRequiredTemplate:
+    """No mix of widget kinds is required: a dashboard is shaped by its topic.
+
+    These used to be rejected for lacking a metric card, a chart or a table.
+    """
+
+    def test_dashboard_without_metric_cards_is_valid(self):
         components = [
             {"kind": "chart", "title": "A Chart", "query": "up"},
             {"kind": "chart", "title": "B Chart", "query": "up2"},
-            {"kind": "data_table", "title": "A Table", "columns": [{"id": "x"}], "rows": []},
+            {"kind": "data_table", "title": "A Table", "columns": [{"id": "x"}], "rows": [{"x": 1}]},
         ]
         result = validate_components(components)
-        assert result.valid is False
-        assert any("metric" in e.lower() for e in result.errors)
+        assert not any("metric" in e.lower() for e in result.errors)
 
-    def test_requires_chart(self):
+    def test_dashboard_without_charts_is_valid(self):
         components = [
-            {
-                "kind": "grid",
-                "title": "KPIs",
-                "items": [
-                    {"kind": "metric_card", "title": "M1", "value": "1"},
-                ],
-            },
-            {"kind": "metric_card", "title": "M2", "value": "2"},
-            {"kind": "data_table", "title": "A Table", "columns": [{"id": "x"}], "rows": []},
+            {"kind": "status_list", "title": "Alerts", "items": [{"name": "a", "status": "error"}]},
+            {"kind": "key_value", "title": "Pod", "pairs": [{"key": "Node", "value": "w1"}]},
+            {"kind": "data_table", "title": "Events", "columns": [{"id": "x"}], "rows": [{"x": 1}]},
         ]
         result = validate_components(components)
-        assert result.valid is False
-        assert any("chart" in e.lower() for e in result.errors)
+        assert result.valid is True, result.errors
 
-    def test_requires_table(self):
+    def test_dashboard_without_tables_is_valid(self):
         components = [
-            {
-                "kind": "grid",
-                "title": "KPIs",
-                "items": [
-                    {"kind": "metric_card", "title": "M1", "value": "1"},
-                ],
-            },
-            {"kind": "chart", "title": "A Chart", "query": "up"},
-            {"kind": "chart", "title": "B Chart", "query": "up2"},
+            {"kind": "metric_card", "title": "CPU", "value": "1", "query": "cpu"},
+            {"kind": "chart", "title": "CPU Trend", "query": "rate(cpu[5m])"},
+            {"kind": "bar_list", "title": "Top Pods", "items": [{"label": "a", "value": 3}]},
         ]
         result = validate_components(components)
-        assert result.valid is False
-        assert any("table" in e.lower() or "data_table" in e.lower() for e in result.errors)
-
-
-# ---------------------------------------------------------------------------
-# PromQL validation (warnings only)
-# ---------------------------------------------------------------------------
+        assert result.valid is True, result.errors
 
 
 class TestPromQL:
