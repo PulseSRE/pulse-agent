@@ -40,18 +40,25 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+# One coherent mock incident (see mock_cluster/scenario.py): a crash-looping
+# cache, a CPU-throttled checkout-api, worker-0 under memory pressure and an
+# unschedulable staging pod. "followups" are edits sent on the same session
+# after the dashboard is built; the page is judged after the last one.
 PROMPTS: list[dict[str, Any]] = [
     {
         "id": "namespace_overview",
         "prompt": "Build me a dashboard for the production namespace: health, resource usage and anything that needs attention.",
+        "followups": ["Move the firing alerts to the top."],
     },
     {
         "id": "node_capacity",
         "prompt": "Create a node capacity dashboard showing CPU and memory per node and which nodes are under pressure.",
+        "followups": ["Remove anything that isn't about nodes."],
     },
     {
         "id": "top_consumers",
         "prompt": "Make a dashboard of the pods using the most memory and CPU in production, with trends over the last hour.",
+        "followups": ["Make the memory chart a bar chart of the current top 5 instead of a trend."],
     },
     {
         "id": "incident_board",
@@ -60,6 +67,29 @@ PROMPTS: list[dict[str, Any]] = [
     {
         "id": "workload_status",
         "prompt": "Create a dashboard of deployment status in production: ready vs desired replicas, restarts, and pod health.",
+        "followups": ["Add a table of pods with their restart counts, sorted by restarts."],
+    },
+    {
+        "id": "cpu_throttling",
+        "prompt": "Build a dashboard to investigate CPU throttling in checkout-api: usage against limits and throttled periods over time.",
+    },
+    {
+        "id": "memory_pressure",
+        "prompt": "Make a dashboard for worker-0's memory pressure: node memory over time and which pods on it use the most.",
+    },
+    {
+        "id": "compare_namespaces",
+        "prompt": "Create a dashboard comparing production and staging: pod counts, CPU and memory usage side by side.",
+    },
+    {
+        "id": "pending_pods",
+        "prompt": "Build a dashboard showing pods that can't be scheduled and why, with node allocatable CPU for context.",
+    },
+    {
+        # The mock cluster has no HTTP request metrics. A good page says so rather than
+        # saving an empty latency chart.
+        "id": "missing_metric",
+        "prompt": "Create a dashboard of p99 HTTP request latency per service in production.",
     },
 ]
 
@@ -68,7 +98,8 @@ EMPTY_PATTERNS = re.compile(r"No data|No resources found|No results", re.I)
 BROKEN_PATTERNS = re.compile(r"failed to render|Query failed|Something went wrong", re.I)
 
 JUDGE_RUBRIC = """You are reviewing a dashboard an AI agent built for an SRE in response to a request.
-Judge only what the screenshot shows. Score each dimension 1-5 (5 = excellent):
+The request may be followed by edits ("Then: ..."); the screenshot shows the page after the last one, so
+judge it against all of them. Judge only what the screenshot shows. Score each dimension 1-5 (5 = excellent):
 
 - answers_request: does the page show what was asked for, and nothing irrelevant dominating it?
 - widget_fit: is each widget the right kind for its data (trends as line charts, rankings as bars or tables, a few headline numbers as stat cards, lists as tables)?
@@ -101,6 +132,9 @@ class CaseResult:
     page_errors: list[str] = field(default_factory=list)
     render_error: str = ""
     judge: dict[str, Any] = field(default_factory=dict)
+    followups: list[str] = field(default_factory=list)
+    # Follow-up edits after which the view did not change (no view_updated / view_spec).
+    edit_failures: list[str] = field(default_factory=list)
 
     @property
     def judge_score(self) -> float | None:
@@ -127,41 +161,57 @@ def _kinds(layout: list[dict]) -> list[str]:
     return out
 
 
-async def ask_agent(agent_url: str, token: str, user: str, prompt: str, timeout: float) -> dict[str, Any]:
-    """Send one request; return the last saved view spec, tools used and any error."""
+async def ask_agent(agent_url: str, token: str, user: str, prompt: str | list[str], timeout: float) -> dict[str, Any]:
+    """Run a conversation on one session; return the last view spec, tools used, per-turn results, any error.
+
+    ``prompt`` may be a list: the first message builds a dashboard, later ones
+    edit it. A turn that saves or updates a view is marked ``updated``.
+    """
     import websockets
 
+    prompts = [prompt] if isinstance(prompt, str) else list(prompt)
     url = f"{agent_url.rstrip('/')}/ws/agent?token={token}"
     headers = {"X-Forwarded-Access-Token": user}
-    result: dict[str, Any] = {"spec": None, "tools": [], "error": "", "text": ""}
+    result: dict[str, Any] = {"spec": None, "tools": [], "error": "", "text": "", "turns": []}
     started = time.monotonic()
     try:
         async with websockets.connect(url, additional_headers=headers, max_size=2**24, open_timeout=30) as ws:
-            await ws.send(json.dumps({"type": "message", "content": prompt}))
-            while True:
-                remaining = timeout - (time.monotonic() - started)
-                if remaining <= 0:
-                    result["error"] = f"timed out after {timeout:.0f}s"
-                    break
-                raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
-                event = json.loads(raw)
-                kind = event.get("type")
-                if kind == "view_spec":
-                    result["spec"] = event.get("spec")
-                elif kind == "tool_use":
-                    result["tools"].append(event.get("tool") or event.get("name", ""))
-                elif kind == "confirm_request":
-                    # A dashboard request should never need a write. Refuse it and record that it asked.
-                    result["tools"].append(f"CONFIRM:{event.get('tool', '')}")
-                    await ws.send(
-                        json.dumps({"type": "confirm_response", "approved": False, "nonce": event.get("nonce", "")})
-                    )
-                elif kind == "error":
-                    # The turn is over: the agent does not send "done" after an error.
-                    result["error"] = str(event.get("message", "error"))
-                    break
-                elif kind == "done":
-                    result["text"] = event.get("full_response", "")
+            for message in prompts:
+                turn: dict[str, Any] = {"prompt": message, "tools": [], "updated": False, "text": "", "error": ""}
+                result["turns"].append(turn)
+                turn_started = time.monotonic()
+                await ws.send(json.dumps({"type": "message", "content": message}))
+                while True:
+                    remaining = timeout - (time.monotonic() - turn_started)
+                    if remaining <= 0:
+                        turn["error"] = f"timed out after {timeout:.0f}s"
+                        break
+                    event = json.loads(await asyncio.wait_for(ws.recv(), timeout=remaining))
+                    kind = event.get("type")
+                    if kind == "view_spec":
+                        result["spec"] = event.get("spec")
+                        turn["updated"] = True
+                    elif kind == "view_updated":
+                        turn["updated"] = True
+                    elif kind == "tool_use":
+                        turn["tools"].append(event.get("tool") or event.get("name", ""))
+                    elif kind == "confirm_request":
+                        # Building or editing a dashboard never needs a cluster write. Refuse and record it.
+                        turn["tools"].append(f"CONFIRM:{event.get('tool', '')}")
+                        await ws.send(
+                            json.dumps({"type": "confirm_response", "approved": False, "nonce": event.get("nonce", "")})
+                        )
+                    elif kind == "error":
+                        # The turn is over: the agent does not send "done" after an error.
+                        turn["error"] = str(event.get("message", "error"))
+                        break
+                    elif kind == "done":
+                        turn["text"] = event.get("full_response", "")
+                        break
+                result["tools"].extend(turn["tools"])
+                result["text"] = turn["text"]
+                if turn["error"]:
+                    result["error"] = turn["error"]
                     break
     except TimeoutError:
         result["error"] = f"timed out after {timeout:.0f}s"
@@ -281,6 +331,13 @@ def _parse_json(text: str) -> dict[str, Any]:
         return {"error": f"judge JSON invalid: {e}"}
 
 
+def conversation_text(case: dict[str, Any]) -> str:
+    """The request as the judge sees it: the first message, then each edit in order."""
+    lines = [case["prompt"]]
+    lines += [f"Then: {f}" for f in case.get("followups", [])]
+    return "\n".join(lines)
+
+
 def judge_screenshot(image: Path, prompt: str, kinds: list[str], model: str, samples: int = 1) -> dict[str, Any]:
     """Vision-judge the page; with several samples, take each dimension's median."""
     from ..agent import create_client
@@ -336,14 +393,17 @@ def render_markdown(results: list[CaseResult], meta: dict[str, Any]) -> str:
     lines += [
         f"Model `{meta.get('model', '?')}` · {len(results)} requests · judge `{meta.get('judge_model') or 'off'}`",
         "",
-        "| Request | Widgets | Broken | Empty | Overflow | Page errors | Judge (1-5) | Notes |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Request | Widgets | Edits | Broken | Empty | Overflow | Page errors | Judge (1-5) | Notes |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
         note = r.agent_error or r.render_error or r.judge.get("summary", "") or r.judge.get("error", "")
+        if r.edit_failures:
+            note = f"edit not applied: {r.edit_failures[0][:60]}" + (f"; {note}" if note else "")
+        edits = f"{len(r.followups) - len(r.edit_failures)}/{len(r.followups)}" if r.followups else "—"
         score = r.judge_score if r.judge_score is not None else "—"
         lines.append(
-            f"| {r.id} | {r.cells} ({', '.join(sorted(set(r.kinds)))}) | {len(r.broken_cells)} | "
+            f"| {r.id} | {r.cells} ({', '.join(sorted(set(r.kinds)))}) | {edits} | {len(r.broken_cells)} | "
             f"{len(r.empty_cells)} | {len(r.overflowing_cells)} | {len(r.page_errors)} | {score} | "
             f"{note.replace('|', '/')[:140]} |"
         )
@@ -364,9 +424,13 @@ async def run(args: argparse.Namespace) -> list[CaseResult]:
     cases = [c for c in PROMPTS if not args.only or c["id"] in args.only]
     results: list[CaseResult] = []
     for case in cases:
-        result = CaseResult(id=case["id"], prompt=case["prompt"])
+        followups = list(case.get("followups", []))
+        result = CaseResult(id=case["id"], prompt=case["prompt"], followups=followups)
         print(f"[{case['id']}] asking the agent…", file=sys.stderr)
-        reply = await ask_agent(args.agent_url, args.token, args.user, case["prompt"], args.timeout)
+        reply = await ask_agent(args.agent_url, args.token, args.user, [case["prompt"], *followups], args.timeout)
+        for turn in reply.get("turns", [])[1:]:
+            if not turn["updated"] and not turn["error"]:
+                result.edit_failures.append(turn["prompt"])
         result.agent_seconds = reply.get("seconds", 0.0)
         result.tools = [t for t in reply["tools"] if t]
         spec = reply.get("spec")
@@ -396,7 +460,7 @@ async def run(args: argparse.Namespace) -> list[CaseResult]:
             print(f"[{case['id']}] judging…", file=sys.stderr)
             try:
                 result.judge = judge_screenshot(
-                    shot, case["prompt"], result.kinds, args.judge_model, args.judge_samples
+                    shot, conversation_text(case), result.kinds, args.judge_model, args.judge_samples
                 )
             except Exception as e:
                 result.judge = {"error": f"{type(e).__name__}: {e}"}
