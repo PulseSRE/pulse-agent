@@ -11,6 +11,7 @@ Guide to checks and their evidence limits. The checked-in workflows and commands
 | Scenario suite reports | Scoring of supplied fixture data | Not a live-agent quality test |
 | Live judged replay | Real model behavior against recorded tool results | Provider credentials/API cost; no live cluster |
 | SRE-Bench simulation | Real agent behavior against an observing simulated backend | Provider credentials; checked-in simulation fixtures |
+| View render eval (nightly, non-gating) | What the view designer's dashboards look like when rendered: broken or empty widgets, overflow, a vision judge's score | Provider credentials, pulse-ui checkout, Chromium; `--scripted` checks the pipeline without them |
 | Cluster acceptance | Actual proxy/RBAC/API/network/persistence/action behavior | Disposable OpenShift test environment |
 
 Offline fixture scores do not establish model quality. Unit tests commonly mock Kubernetes and, without provider credentials, use a stub async model. They do not prove deployment or authorization correctness on a cluster.
@@ -413,6 +414,41 @@ effective safety posture — the failure that motivated `sre_agent/policy.py`.
 sre-bench run --adapter sre_agent.evals.srebench_adapter:factory --all --sim --out sim.json
 sre-bench verify sim.json --all
 sre-bench score sim.json --suite core --fail-on-gate
+```
+
+### View render eval (nightly, non-gating)
+
+Every other view-designer check scores tool calls or the saved spec; this one
+looks at the page. `view-render-eval.yml` sends real dashboard requests to the
+agent's `/ws/agent` API, lets its real tools read a mock cluster, opens each
+saved view in pulse-ui and screenshots it, then:
+
+- checks each grid cell for a crashed widget, a failed or empty query, and
+  content cut off without a scrollbar, and collects page errors
+- has a vision judge score the screenshot (answers the request, widget fit,
+  readability, layout, integrity), median of several samples
+
+The mock cluster (`sre_agent/evals/mock_cluster/`) is one coherent incident: a
+crash-looping cache, a CPU-throttled API, a node under memory pressure and a
+pending pod. It serves the Kubernetes API (including the Table API) and a
+Prometheus API that *evaluates* PromQL over series derived from that scenario,
+so a query the model writes itself returns numbers that agree with every other
+widget, and a metric that does not exist returns nothing, as it would on a
+real cluster. The UI is pointed at the same mock, so live widgets match too.
+
+Its report (`report.md`, in the job summary) and screenshots are the output;
+nothing is gated on them. Pull requests that touch the eval run it against
+`mock_cluster.scripted_model`, a stand-in Messages API that plays a fixed
+tool-call script, so a broken harness is caught before the nightly needs it.
+
+```bash
+pip install -e ".[render-eval]" && python -m playwright install chromium
+python -m sre_agent.evals.mock_cluster.server --kubeconfig /tmp/mock-kubeconfig &
+# agent: KUBECONFIG=/tmp/mock-kubeconfig PULSE_AGENT_THANOS_URL=http://127.0.0.1:18002
+#        PULSE_AGENT_PROMETHEUS_INSECURE=true PULSE_AGENT_MAX_DAILY_INVESTIGATIONS=0 pulse-agent-api
+# ui:    K8S_API_URL=http://127.0.0.1:18001 THANOS_URL=http://127.0.0.1:18002 pnpm dev
+python -m sre_agent.evals.view_render_eval --token "$PULSE_AGENT_WS_TOKEN" \
+  --judge-model claude-sonnet-5 --out artifacts/view-render
 ```
 
 ## Skill-Bundled Evals
