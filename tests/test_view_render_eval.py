@@ -215,9 +215,70 @@ class TestReport:
         bad = vre.CaseResult(id="b", prompt="p", agent_error="no dashboard was saved")
         md = vre.render_markdown([good, bad], {"scripted": True, "model": "scripted", "judge_model": ""})
         assert "Scripted model" in md
-        assert "| b | 0 () |" in md and "no dashboard was saved" in md
+        assert "| b | 0 () | — |" in md and "no dashboard was saved" in md
         assert "Mean judge score: **4.00**" in md and "axis unit wrong" in md
 
     def test_judge_json_is_extracted_from_prose(self):
         assert vre._parse_json('Here you go: {"layout": 3}')["layout"] == 3
         assert "error" in vre._parse_json("no json here")
+
+
+class TestConversations:
+    def test_judge_sees_every_message_in_order(self):
+        case = {"prompt": "Build X", "followups": ["Move A up", "Drop B"]}
+        assert vre.conversation_text(case) == "Build X\nThen: Move A up\nThen: Drop B"
+
+    def test_an_edit_that_changed_nothing_is_reported(self):
+        r = vre.CaseResult(id="e", prompt="p", followups=["Move alerts up", "Drop B"], cells=2, kinds=["chart"])
+        r.edit_failures = ["Drop B"]
+        md = vre.render_markdown([r], {"scripted": False, "model": "m", "judge_model": ""})
+        assert "| e | 2 (chart) | 1/2 |" in md and "edit not applied: Drop B" in md
+
+    def test_session_records_which_turns_updated_the_view(self):
+        import asyncio
+
+        import websockets
+
+        async def agent(ws):
+            turn = 0
+            async for raw in ws:
+                assert json.loads(raw)["type"] == "message"
+                turn += 1
+                if turn == 1:
+                    await ws.send(json.dumps({"type": "tool_use", "tool": "namespace_summary"}))
+                    await ws.send(json.dumps({"type": "view_spec", "spec": {"id": "cv-1", "title": "T", "layout": []}}))
+                elif turn == 2:
+                    await ws.send(json.dumps({"type": "tool_use", "tool": "update_view_widgets"}))
+                    await ws.send(json.dumps({"type": "view_updated", "view_id": "cv-1"}))
+                await ws.send(json.dumps({"type": "done", "full_response": f"turn {turn}"}))
+
+        async def scenario():
+            async with websockets.serve(agent, "127.0.0.1", 0) as server:
+                port = server.sockets[0].getsockname()[1]
+                return await vre.ask_agent(f"ws://127.0.0.1:{port}", "t", "u", ["build", "move", "noop"], 10)
+
+        reply = asyncio.run(scenario())
+        assert [t["updated"] for t in reply["turns"]] == [True, True, False]
+        assert reply["spec"]["id"] == "cv-1"
+        assert reply["tools"] == ["namespace_summary", "update_view_widgets"]
+        assert reply["text"] == "turn 3" and reply["error"] == ""
+
+
+def test_calibration_measures_the_judge_against_a_person():
+    report = {
+        "results": [
+            {"id": "a", "judge": {"layout": 4, "integrity": 5}},
+            {"id": "b", "judge": {"layout": 2, "integrity": 5}},
+            {"id": "c", "judge": {}},  # judge failed on this page: not counted
+        ]
+    }
+    ratings = {"a": {"layout": 4, "integrity": 3}, "b": {"layout": 3, "integrity": 5}, "c": {"layout": 1}}
+    out = vre.calibrate(report, ratings)
+    assert out["dimensions"]["layout"] == {
+        "pages": 2,
+        "mean_abs_error": 0.5,
+        "within_one": 1.0,
+        "judge_minus_human": -0.5,
+    }
+    assert out["dimensions"]["integrity"]["within_one"] == 0.5  # the judge was 2 points generous on page a
+    assert out["dimensions"]["integrity"]["judge_minus_human"] == 1.0
