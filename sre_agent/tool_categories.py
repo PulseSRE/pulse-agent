@@ -288,6 +288,7 @@ TOOL_CATEGORIES = {
             "plan_dashboard",
             "get_topology_graph",
             "create_dashboard",
+            "preview_dashboard",
             "namespace_summary",
             "cluster_metrics",
             "list_saved_views",

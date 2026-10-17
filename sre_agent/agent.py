@@ -501,6 +501,11 @@ def _execute_tool(
                     "result_bytes": len(err.message),
                 }
                 return str(err), None, meta
+            # An attached screenshot (tool_images) is not text: keep it out of the
+            # length cap, which would cut the base64 and break the image.
+            from .tool_images import attach_image, split_image
+
+            image, text = split_image(text)
             result_bytes = len(text)
             if len(text) > MAX_TOOL_RESULT_LENGTH:
                 original_len = len(text)
@@ -518,6 +523,8 @@ def _execute_tool(
                 )
             )
             meta = {"status": "success", "error_message": None, "error_category": None, "result_bytes": result_bytes}
+            if image is not None:
+                text = attach_image(text, image["data"], image["media_type"])
             return text, component, meta
         except Exception as e:
             from .error_tracker import get_tracker
@@ -657,6 +664,7 @@ async def run_agent_streaming(
     policy_denied_write = False
 
     from .loop_budget import LoopBudget, compact_tool_results
+    from .tool_images import drop_stale_images, result_content
 
     budget = LoopBudget(max_iterations=MAX_ITERATIONS)
 
@@ -755,6 +763,8 @@ async def run_agent_streaming(
         _compacted, _reclaimed = compact_tool_results(messages)
         if _reclaimed:
             messages[:] = _compacted
+        # A screenshot the model already acted on is only history; keep the newest.
+        drop_stale_images(messages)
 
         max_retries = 3
         retry_delays = [1, 3, 8]
@@ -1025,7 +1035,7 @@ async def run_agent_streaming(
                 result_block: dict[str, Any] = {
                     "type": "tool_result",
                     "tool_use_id": block.id,
-                    "content": text,
+                    "content": result_content(text),
                 }
                 if block.id in failed_ids:
                     result_block["is_error"] = True

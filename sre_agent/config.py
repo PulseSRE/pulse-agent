@@ -34,6 +34,10 @@ class AgentConfig(BaseModel):
     # against the configured provider: an API that rejects a strict schema
     # fails every turn that offers a write tool.
     strict_write_tools: bool = False
+    # Render service (pulse-ui render/) the view designer uses to see a draft
+    # dashboard before saving it. Empty disables preview_dashboard.
+    render_url: str = ""
+    render_token: str = ""
 
 
 class DatabaseConfig(BaseModel):
@@ -180,6 +184,8 @@ class PulseAgentSettings(BaseSettings):
     protected_namespaces: str = "production,openshift-*,kube-system"
     allow_node_ops: bool = False
     strict_write_tools: bool = False
+    render_url: str = ""
+    render_token: str = ""
 
     # Database
     database_url: str = ""
@@ -276,6 +282,8 @@ class PulseAgentSettings(BaseSettings):
             protected_namespaces=self.protected_namespaces,
             allow_node_ops=self.allow_node_ops,
             strict_write_tools=self.strict_write_tools,
+            render_url=self.render_url,
+            render_token=self.render_token,
         )
         self.database = DatabaseConfig(
             url=self.database_url,
