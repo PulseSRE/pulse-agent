@@ -164,3 +164,41 @@ def test_real_resource_context_prefix_is_stripped():
     )
     assert prefix.startswith("[UI Context:")
     assert latest_user_text([{"role": "user", "content": prefix + "restart it"}]) == "restart it"
+
+
+async def _offered(prompt: str):
+    """The tools and system prompt the model is given on its first call."""
+    client = _client(SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text="ok")]))
+    defs = [{"name": "delete_pod", "input_schema": {}}, {"name": "list_pods", "input_schema": {}}]
+    await run_agent_streaming(
+        client=client,
+        messages=[{"role": "user", "content": prompt}],
+        system_prompt="test",
+        tool_defs=defs,
+        tool_map={"delete_pod": MagicMock(), "list_pods": MagicMock()},
+        write_tools={"delete_pod"},
+        on_confirm=AsyncMock(return_value=True),
+    )
+    kwargs = client.messages.stream.call_args_list[0].kwargs
+    return [d["name"] for d in kwargs["tools"]], str(kwargs["system"])
+
+
+@pytest.mark.asyncio
+@patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
+async def test_plan_turn_is_not_offered_write_tools():
+    """Refusing at call time kept the cluster safe, but the model still reached for delete_pod."""
+    from sre_agent.agent import PLAN_ONLY_SYSTEM_NOTE
+
+    names, system = await _offered(PLAN_ONLY[0])
+    assert names == ["list_pods"]
+    assert PLAN_ONLY_SYSTEM_NOTE in system
+
+
+@pytest.mark.asyncio
+@patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
+async def test_request_to_act_keeps_its_write_tools():
+    from sre_agent.agent import PLAN_ONLY_SYSTEM_NOTE
+
+    names, system = await _offered("Clean up the completed job pods in team-alpha and fix the quota.")
+    assert names == ["delete_pod", "list_pods"]
+    assert PLAN_ONLY_SYSTEM_NOTE not in system

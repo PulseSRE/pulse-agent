@@ -406,6 +406,20 @@ _STRICT_MAX_TOOLS = 20
 _STRICT_MAX_OPTIONAL = 24
 
 
+PLAN_ONLY_SYSTEM_NOTE = (
+    "This request asks for a plan or advice, not for changes. Investigate with read-only tools, then present "
+    "the plan: each step, what it changes, why, and how to undo it. Tools that change the cluster are not "
+    "available in this turn; the user approves the plan in their next message."
+)
+
+
+def _with_system_note(system, note: str):
+    """``system`` (a string or a list of text blocks) with ``note`` appended after the cached prefix."""
+    if isinstance(system, list):
+        return [*system, {"type": "text", "text": note}]
+    return f"{system}\n\n{note}" if system else note
+
+
 def apply_strict_write_tools(tool_defs: list[dict], write_tools: set[str]) -> list[dict]:
     """Return tool_defs with ``strict: true`` on write tools, when within limits.
 
@@ -760,6 +774,15 @@ async def run_agent_streaming(
         effective_system = (
             system_prompt if isinstance(system_prompt, list) else build_cached_system_prompt(system_prompt, "")
         )
+
+    # A plan-only turn is not offered write tools at all. Refusing them at call
+    # time (below) kept the cluster safe but still let the model reach for
+    # delete_pod in a "propose a recovery plan" turn; removing them makes the
+    # refusal's own wording ("writes are not offered") true. The call-time
+    # check stays, for a write the model names anyway.
+    if plan_only and write_tools:
+        tool_defs = [d for d in tool_defs if d.get("name") not in write_tools]
+        effective_system = _with_system_note(effective_system, PLAN_ONLY_SYSTEM_NOTE)
 
     while iterations < MAX_ITERATIONS:
         iterations += 1
