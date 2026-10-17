@@ -657,6 +657,41 @@ class TestNamespaceSummary:
         metric_cards = [i for i in component["items"] if i["kind"] == "metric_card"]
         assert len(metric_cards) == 4
 
+    def test_live_cards_get_state_from_thresholds_not_a_snapshot(self, mock_k8s):
+        """A card that re-runs its query must not carry a color fixed when it was built.
+
+        Restart Rate was colored red at build time if anything was crash looping,
+        and stayed red after the fix; its value was restarts per second (0.0013).
+        """
+        from tests.conftest import _make_pod
+
+        mock_k8s["core"].list_namespaced_pod.return_value = SimpleNamespace(items=[_make_pod(name="p1")])
+        for api, method in (
+            ("apps", "list_namespaced_deployment"),
+            ("apps", "list_namespaced_stateful_set"),
+            ("apps", "list_namespaced_daemon_set"),
+            ("core", "list_namespaced_service"),
+            ("core", "list_namespaced_config_map"),
+            ("core", "list_namespaced_event"),
+        ):
+            getattr(mock_k8s[api], method).return_value = SimpleNamespace(items=[])
+
+        from sre_agent.view_tools import namespace_summary
+
+        _, component = namespace_summary.call({"namespace": "default"})
+        cards = {c["title"]: c for c in component["items"] if c["kind"] == "metric_card"}
+
+        restarts = cards["Restarts (last hour)"]
+        assert "increase(" in restarts["query"] and "[1h]" in restarts["query"]
+        assert restarts["thresholds"] == {"warning": 1, "critical": 6}
+        assert "status" not in restarts
+
+        # kube_event_count is not a kube-state-metrics metric; with "or vector(0)"
+        # the card read 0 everywhere. It now shows the events API count, statically.
+        events = cards["Warning Events"]
+        assert "query" not in events
+        assert all("kube_event_count" not in (c.get("query") or "") for c in cards.values())
+
     def test_cluster_metrics_columns_capped(self, mock_k8s):
         """cluster_metrics grid should cap columns at 4 to avoid cramped cards."""
         from sre_agent.view_tools import cluster_metrics

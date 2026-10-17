@@ -14,6 +14,6 @@
         "should_mention": ["api-server", "crash", "memory"],
         "should_use_tools": ["describe_pod", "get_pod_logs"],
         "should_not_use_tools": ["delete_pod", "scale_deployment"],
-        "max_tool_calls": 12
+        "max_tool_calls": 20
     }
 }

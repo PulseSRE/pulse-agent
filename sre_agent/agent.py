@@ -18,7 +18,13 @@ from typing import Any
 
 import anthropic
 
-from .action_policy import effective_write_tools, is_explicit_approval
+from .action_policy import (
+    PLAN_ONLY_REFUSAL,
+    effective_write_tools,
+    is_explicit_approval,
+    latest_user_text,
+    requests_plan_only,
+)
 from .config import get_settings
 
 # Import tool modules to trigger @beta_tool auto-registration in TOOL_REGISTRY.
@@ -616,6 +622,7 @@ async def run_agent_streaming(
     thinking: dict | None = None,
     user_token: str | None = None,
     event_bus=None,
+    honor_plan_requests: bool = True,
 ) -> str:
     """Run an agent turn with streaming, handling the tool loop manually.
 
@@ -639,6 +646,9 @@ async def run_agent_streaming(
         event_bus: Optional EventBus instance. If provided, replaces individual
             callbacks. If None, an EventBus is auto-constructed from the individual
             callback parameters.
+        honor_plan_requests: When the person's latest message asks only for a
+            plan or advice, refuse writes before confirmation. Callers whose
+            messages are generated prompts rather than a person's words pass False.
 
     Returns the full final text response.
     """
@@ -662,6 +672,11 @@ async def run_agent_streaming(
     full_text_parts = []
     iterations = 0
     policy_denied_write = False
+    # Asked for a plan, not a change: writes are refused before anyone is asked
+    # to confirm them (see action_policy.requests_plan_only).
+    # Only for turns a person wrote: callers that build their own prompts (plan
+    # phases, monitor investigations) pass honor_plan_requests=False.
+    plan_only = honor_plan_requests and requests_plan_only(latest_user_text(messages))
 
     from .loop_budget import LoopBudget, compact_tool_results
     from .tool_images import drop_stale_images, result_content
@@ -972,6 +987,23 @@ async def run_agent_streaming(
                             "error_category": "forbidden",
                             "duration_ms": 0,
                             "result_bytes": len(reason),
+                            "was_confirmed": False,
+                            "turn_number": iterations,
+                        },
+                    )
+                    continue
+                if plan_only:
+                    results_map[block.id] = (PLAN_ONLY_REFUSAL, None)
+                    failed_ids.add(block.id)
+                    await event_bus.on_tool_result(
+                        {
+                            "tool_name": block.name,
+                            "input": block.input,
+                            "status": "denied",
+                            "error_message": PLAN_ONLY_REFUSAL,
+                            "error_category": "plan_only",
+                            "duration_ms": 0,
+                            "result_bytes": len(PLAN_ONLY_REFUSAL),
                             "was_confirmed": False,
                             "turn_number": iterations,
                         },
