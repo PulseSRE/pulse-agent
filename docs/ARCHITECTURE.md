@@ -41,7 +41,7 @@ Safety controls include a per-scan cap, per-resource cooldown/attempt tracking, 
 
 ## Persistence and learning
 
-`db.py`, `db_schema.py`, and `db_migrations.py` provide PostgreSQL persistence, currently through migration **036**. Connections use configured pooling; see [DATABASE](../DATABASE.md). Memory, findings/actions/investigations, views/chat, analytics, episodes, learned candidates, and runtime artifacts are persisted in distinct tables.
+`db.py`, `db_schema.py`, and `db_migrations.py` provide PostgreSQL persistence, currently through migration **037**. Connections use configured pooling; see [DATABASE](../DATABASE.md). Memory, findings/actions/investigations, views/chat, analytics, episodes, learned candidates, and runtime artifacts are persisted in distinct tables.
 
 `artifact_store.py` writes runtime-authored skill/plan/eval documents and their versions to the database and restores them at startup. `trajectory.py` and related learning modules gate promotion on verified outcomes. A preserved artifact or score is not by itself proof of a safe or useful learned procedure.
 
