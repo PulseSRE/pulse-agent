@@ -804,6 +804,12 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "view_designer",
         "Pure view_designer query should stay single-skill",
     ),
+    (
+        "build a polished capacity dashboard for production and check how it looks before you save it",
+        ["preview_dashboard", "create_dashboard"],
+        "view_designer",
+        "Asked for a polished page, the designer previews the draft before saving it",
+    ),
 ]
 
 # Tools that are internal/meta and don't need user-facing eval prompts
