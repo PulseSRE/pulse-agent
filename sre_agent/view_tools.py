@@ -60,8 +60,14 @@ def create_dashboard(
     finding_id: str = "",
     visibility: str = "",
     rows: str = "",
+    exclude: str = "",
 ):
-    """Create a custom dashboard view. Quality is auto-validated on save — no need to call critique_view.
+    """Create a custom dashboard view from the widgets gathered this turn.
+
+    The draft is checked before saving. If a widget would render empty or
+    broken, nothing is saved yet and the problems are returned: fix them
+    (gather the data again, emit a corrected widget, or drop it with
+    `exclude`) and call create_dashboard again. A second call always saves.
 
     Pass `rows` with the order you planned so the layout follows it; without
     it, widgets are grouped by type (KPIs, status, charts, details, tables).
@@ -77,17 +83,48 @@ def create_dashboard(
             e.g. "Firing Alerts\nCPU Usage | Memory Usage | Restarts\nPods in production".
             Widgets in a row share its width; tables and other full-width widgets get their own line.
             Widgets not listed are placed after the planned rows.
+        exclude: Titles of gathered widgets to leave out, separated by "|"
+            (e.g. a widget the check reported empty, after you have added a replacement).
     """
+    from . import view_draft
+
+    draft = view_draft.current()
+    advisory: list[str] = []
+    excluded: set[str] = view_draft.parse_titles(exclude)
+    if draft is not None:
+        draft.excluded |= excluded
+        excluded = set(draft.excluded)
+        widgets = view_draft.apply_exclusions(draft.components, excluded)
+        blocking, advisory = view_draft.precheck(widgets)
+        if blocking and draft.held == 0:
+            draft.held += 1
+            issues = "\n".join(f"- {b}" for b in blocking)
+            return (
+                f"Not saved yet: {len(blocking)} problem(s) would show as broken or empty widgets:\n{issues}\n"
+                "Fix them, then call create_dashboard again with the same arguments: gather the data again, "
+                "emit a corrected widget with emit_component, or leave a widget out with "
+                'exclude="Widget Title". Do not tell the user the dashboard is ready until it is saved.'
+            )
+
     view_id = f"cv-{uuid.uuid4().hex[:12]}"
     status = _INITIAL_STATUS.get(view_type, "active")
     if not visibility:
         visibility = "team" if view_type != "custom" else "private"
 
-    return _signal(
-        "view_spec",
+    message = (
         f"Created view '{title}' with ID {view_id}. "
         f"The dashboard is now saved and visible to the user. "
-        f"Tell the user: 'Here is your dashboard. Would you like any changes?'",
+        f"Tell the user: 'Here is your dashboard. Would you like any changes?'"
+    )
+    if advisory:
+        notes = "\n".join(f"- {a}" for a in advisory[:6])
+        message += (
+            f"\nQuality notes (not blocking; mention any the user should know, or offer to address them):\n{notes}"
+        )
+
+    return _signal(
+        "view_spec",
+        message,
         view_id=view_id,
         title=title,
         description=description,
@@ -97,6 +134,7 @@ def create_dashboard(
         finding_id=finding_id or None,
         visibility=visibility,
         rows=rows,
+        exclude=sorted(excluded),
     )
 
 

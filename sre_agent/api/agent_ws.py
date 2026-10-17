@@ -149,17 +149,24 @@ class SkillExecutor:
             on_usage=on_usage,
         )
 
-        full_response = await run_agent_streaming(
-            client=client,
-            messages=messages if not skill_tag else list(messages),
-            system_prompt=effective_system,
-            tool_defs=config["tool_defs"],
-            tool_map=config["tool_map"],
-            write_tools=write_tools,
-            event_bus=bus,
-            mode=skill_tag or mode,
-            user_token=self._user_token,
-        )
+        # Let create_dashboard check this turn's widgets before it saves.
+        from .. import view_draft
+
+        draft_token = view_draft.bind(components)
+        try:
+            full_response = await run_agent_streaming(
+                client=client,
+                messages=messages if not skill_tag else list(messages),
+                system_prompt=effective_system,
+                tool_defs=config["tool_defs"],
+                tool_map=config["tool_map"],
+                write_tools=write_tools,
+                event_bus=bus,
+                mode=skill_tag or mode,
+                user_token=self._user_token,
+            )
+        finally:
+            view_draft.unbind(draft_token)
 
         text = full_response if isinstance(full_response, str) else full_response[0]
 
@@ -402,6 +409,14 @@ async def _run_agent_ws_inner(
             from ..quality_engine import evaluate_components
 
             _sanitize_components(session_components)
+
+            # Widgets the agent chose to leave out after the pre-save check.
+            from ..view_draft import apply_exclusions
+
+            session_components = apply_exclusions(session_components, set(sig.get("exclude") or []))
+            if not session_components:
+                logger.info("Every widget was excluded; nothing to save for view_spec")
+                continue
 
             # Validate and deduplicate components before saving
             qr = evaluate_components(session_components, positions=None)
