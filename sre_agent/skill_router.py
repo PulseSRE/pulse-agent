@@ -113,6 +113,25 @@ _NEGATED_PLAN_AUTHORING = re.compile(
 )
 
 
+# An explicit request to build a dashboard is a view-designer task even when
+# it describes an incident. Trigger patterns run in route_priority order, so
+# "Create an incident triage dashboard for the pod that's been crashing" was
+# taken by the SRE skill's pod-crash pattern first, and the SRE skill is not
+# offered create_dashboard. Anchored to the start of a sentence so incidental
+# words ("the build failed, view the logs") do not trigger it.
+_DASHBOARD_REQUEST = re.compile(
+    r"(?:^|[.!?]\s+)(?:please\s+|can\s+you\s+|could\s+you\s+)?"
+    r"(?:create|build|make|design)\s+(?:me\s+|us\s+)?(?:an?\s+|the\s+|my\s+|new\s+)?"
+    r"(?:[\w-]+\s+){0,4}(?:dashboard|view)\b",
+    re.IGNORECASE,
+)
+
+
+def is_dashboard_request(query: str) -> bool:
+    """Whether the turn explicitly asks to build a dashboard or view."""
+    return bool(_DASHBOARD_REQUEST.search(query or ""))
+
+
 def _routing_query(query: str) -> str:
     # The original prompt still reaches the agent; a negated authoring clause
     # must not vote for the plan builder through keyword or hard-route channels.
@@ -128,6 +147,12 @@ def _hard_pre_route(query: str):
         _init_hard_pre_route()
 
     from .skill_loader import get_skill
+
+    if is_dashboard_request(query):
+        designer = get_skill("view_designer")
+        if designer and designer.reviewed and not designer.quarantined:
+            logger.info("Hard pre-route: '%s' → view_designer (explicit dashboard request)", query[:60])
+            return designer
 
     for pattern, skill_name in _HARD_PRE_ROUTE:
         if pattern.search(_routing_query(query)):

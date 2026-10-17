@@ -182,10 +182,11 @@ class TestScoring:
         r = evaluate_components(GOLDEN, positions={0: {"x": 0, "y": 0, "w": 12, "h": 2}})
         assert r.score >= 8
 
-    def test_golden_without_positions_loses_2_points(self):
+    def test_positions_do_not_earn_points(self):
+        """Layout is always computed; it used to be worth 2 free points."""
         with_pos = evaluate_components(GOLDEN, positions={0: {"x": 0}})
         without_pos = evaluate_components(GOLDEN, positions={})
-        assert with_pos.score - without_pos.score == 2
+        assert with_pos.score == without_pos.score
 
     def test_score_clamped_0_to_10(self):
         bad = [
@@ -314,3 +315,54 @@ class TestNormalizeLayout:
         assert items[0]["name"] == "ClusterRole: admin bound to user foo"
         assert items[1]["name"] == "Exposed NodePort: my-svc"
         assert items[2]["name"] == "Already has name"  # untouched
+
+
+class TestFitRubric:
+    """The rubric judges whether each widget fits its data, not the widget mix."""
+
+    def _score(self, comps):
+        return evaluate_components(comps, positions={0: {"x": 0}}, min_widgets=1)
+
+    def _ok(self, title="Restarts"):
+        return {"kind": "data_table", "title": title, "columns": [{"id": "x"}], "rows": [{"x": 1}]}
+
+    def test_empty_widget_costs_two_points(self):
+        r = self._score([self._ok(), {"kind": "status_list", "title": "Alerts", "items": []}])
+        assert any("Empty widget 'Alerts'" in w for w in r.warnings)
+        assert r.score <= r.max_score - 2
+
+    def test_single_instant_line_chart_is_a_misfit(self):
+        chart = {
+            "kind": "chart",
+            "chartType": "line",
+            "title": "Restarts by Pod",
+            "query": "topk(5, x)",
+            "series": [{"name": "a", "data": [[100, 3]]}, {"name": "b", "data": [[100, 1]]}],
+        }
+        r = self._score([chart])
+        assert any("bar_list" in s for s in r.suggestions)
+
+    def test_bar_chart_of_an_instant_is_fine(self):
+        chart = {
+            "kind": "chart",
+            "chartType": "bar",
+            "title": "Restarts by Pod",
+            "query": "topk(5, x)",
+            "series": [{"name": "a", "data": [[100, 3]]}, {"name": "b", "data": [[100, 1]]}],
+        }
+        assert not any("bar_list" in s for s in self._score([chart]).suggestions)
+
+    def test_uniform_status_list_suggests_table(self):
+        items = [{"name": f"n{i}", "status": "healthy"} for i in range(3)]
+        r = self._score([{"kind": "status_list", "title": "Node Ready", "items": items}])
+        assert any("same status" in s for s in r.suggestions)
+
+    def test_static_time_series_warned(self):
+        chart = {"kind": "chart", "title": "CPU", "series": [{"name": "a", "data": [[1, 2], [2, 3]]}]}
+        r = self._score([chart])
+        assert any("will not refresh" in w for w in r.warnings)
+
+    def test_widget_mix_is_not_required(self):
+        r = evaluate_components([self._ok("A"), self._ok("B"), self._ok("C")], positions={0: {"x": 0}})
+        assert r.valid is True, r.errors
+        assert r.score == r.max_score

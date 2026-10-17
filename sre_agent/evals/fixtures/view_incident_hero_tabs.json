@@ -15,6 +15,6 @@
         "should_mention": ["payment-api", "OOM", "investigation", "hero", "tabs"],
         "should_use_tools": ["describe_pod", "get_pod_logs", "create_dashboard"],
         "should_not_use_tools": ["delete_pod", "drain_node"],
-        "max_tool_calls": 12
+        "max_tool_calls": 20
     }
 }

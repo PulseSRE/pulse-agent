@@ -740,7 +740,7 @@ class TestCritiqueView:
 
         result = critique_view.call({"view_id": "cv-crit1"})
         assert "0/" in result or "1/" in result or "2/" in result
-        assert "NO METRIC CARDS" in result
+        assert "at least 1 component" in result
 
     def test_full_view_scores_high(self):
         layout = [
@@ -763,7 +763,8 @@ class TestCritiqueView:
         result = critique_view.call({"view_id": "cv-crit2"})
         assert "passes quality" in result.lower() or "/10" in result
 
-    def test_missing_charts(self):
+    def test_empty_widgets_flagged_not_missing_charts(self):
+        """Its problem is two empty widgets; lacking a chart is not one."""
         layout = [
             {"kind": "info_card_grid", "title": "Summary", "cards": []},
             {"kind": "data_table", "title": "Pods", "columns": [], "rows": []},
@@ -772,7 +773,8 @@ class TestCritiqueView:
         from sre_agent.quality_engine import critique_view
 
         result = critique_view.call({"view_id": "cv-crit3"})
-        assert "NO CHART" in result
+        assert result.count("EMPTY WIDGET") == 2
+        assert "NO CHART" not in result
 
     def test_nonexistent_view(self):
         from sre_agent.quality_engine import critique_view

@@ -443,8 +443,10 @@ async def _run_agent_ws_inner(
 
             if view_type != "custom":
                 session_components = build_view_layout(session_components, view_type, view_status)
-
-            positions = compute_layout(session_components)
+                positions = compute_layout(session_components)
+            else:
+                # Follow the order the agent planned, when it passed one.
+                positions = compute_layout(session_components, rows=sig.get("rows") or None)
 
             # Dedup: session view (same title) > finding_id > title match
             existing = None

@@ -143,7 +143,9 @@ class TestGoldenAndBad:
     def test_bad_duplicates_scores_low(self):
         result = _save_and_critique(BAD_DUPLICATES, view_id="cv-dups")
         score = _extract_score(result)
-        assert score < 5
+        # Fails the 7/10 bar. It no longer also loses points for its widget mix,
+        # so it lands at "needs improvements" rather than below 5.
+        assert score < 7
         assert "DUPLICATE" in result
 
     def test_bad_generic_scores_low(self):
@@ -311,16 +313,16 @@ class TestCheckCEmptyCharts:
 
 
 class TestCheckDBalance:
-    def test_balance_penalty(self):
-        """All charts, no tables or metrics -> imbalanced."""
+    def test_single_kind_dashboard_not_penalized(self):
+        """Four charts is a fine answer to a trends question; mix is not a rule."""
         layout = [
-            {"kind": "chart", "title": "Chart A", "series": [{"data": [1]}]},
-            {"kind": "chart", "title": "Chart B", "series": [{"data": [2]}]},
-            {"kind": "chart", "title": "Chart C", "series": [{"data": [3]}]},
-            {"kind": "chart", "title": "Chart D", "series": [{"data": [4]}]},
+            {"kind": "chart", "title": "CPU by Pod", "description": "d", "query": "a", "series": [{"data": [1]}]},
+            {"kind": "chart", "title": "Memory by Pod", "description": "d", "query": "b", "series": [{"data": [2]}]},
+            {"kind": "chart", "title": "Network In", "description": "d", "query": "c", "series": [{"data": [3]}]},
+            {"kind": "chart", "title": "Network Out", "description": "d", "query": "d", "series": [{"data": [4]}]},
         ]
         result = _save_and_critique(layout, view_id="cv-bal")
-        assert "IMBALANCED" in result
+        assert "IMBALANCED" not in result
 
 
 class TestCheckEDuplicateTitles:
@@ -379,58 +381,24 @@ class TestEdgeCases:
 
 
 class TestExistingChecksPreserved:
-    """Verify original checks 1-7 still work (no regression)."""
+    """Checks that still apply, and template checks that must stay gone."""
 
-    def test_no_metric_cards_detected(self):
+    def test_no_template_labels_for_topic_shaped_dashboard(self):
         layout = [
-            {"kind": "chart", "title": "CPU", "description": "d", "query": "q1", "series": [{"data": [1]}]},
-            {"kind": "chart", "title": "Mem", "description": "d", "query": "q2", "series": [{"data": [2]}]},
-            {"kind": "data_table", "title": "Pods", "columns": [{"id": "n"}], "rows": []},
-        ]
-        result = _save_and_critique(layout, view_id="cv-nometrics")
-        assert "NO METRIC CARDS" in result
-
-    def test_only_one_chart_detected(self):
-        layout = [
-            {
-                "kind": "grid",
-                "title": "KPIs",
-                "items": [
-                    {"kind": "metric_card", "title": "CPU", "value": "5%", "query": "cpu"},
-                ],
-            },
-            {"kind": "chart", "title": "CPU Trend", "description": "d", "query": "q", "series": [{"data": [1]}]},
-            {"kind": "data_table", "title": "Pods", "columns": [{"id": "n"}], "rows": []},
-        ]
-        result = _save_and_critique(layout, view_id="cv-1chart")
-        assert "ONLY 1 CHART" in result
-
-    def test_no_table_detected(self):
-        layout = [
-            {
-                "kind": "grid",
-                "title": "KPIs",
-                "items": [
-                    {"kind": "metric_card", "title": "CPU", "value": "5%", "query": "cpu"},
-                ],
-            },
             {"kind": "chart", "title": "CPU Trend", "description": "d", "query": "q1", "series": [{"data": [1]}]},
-            {"kind": "chart", "title": "Mem Trend", "description": "d", "query": "q2", "series": [{"data": [2]}]},
+            {"kind": "status_list", "title": "Alerts", "items": [{"name": "a", "status": "error"}]},
+            {"kind": "key_value", "title": "Pod", "pairs": [{"key": "Node", "value": "w1"}]},
         ]
-        result = _save_and_critique(layout, view_id="cv-notable")
-        assert "NO TABLE" in result
+        result = _save_and_critique(layout, view_id="cv-topic")
+        for label in ("NO METRIC CARDS", "ONLY 1 CHART", "NO CHARTS", "NO TABLE", "IMBALANCED"):
+            assert label not in result
 
     def test_untitled_widgets_detected(self):
         layout = [
-            {
-                "kind": "grid",
-                "items": [
-                    {"kind": "metric_card", "title": "CPU", "value": "5%", "query": "cpu"},
-                ],
-            },
+            # data_table requires a title (component registry); grids do not.
+            {"kind": "data_table", "columns": [{"id": "n"}], "rows": [{"n": 1}]},
             {"kind": "chart", "title": "CPU Trend", "description": "d", "query": "q1", "series": [{"data": [1]}]},
             {"kind": "chart", "title": "Mem Trend", "description": "d", "query": "q2", "series": [{"data": [2]}]},
-            {"kind": "data_table", "title": "Pods", "columns": [{"id": "n"}], "rows": []},
         ]
         result = _save_and_critique(layout, view_id="cv-untitled")
         assert "UNTITLED WIDGETS" in result
