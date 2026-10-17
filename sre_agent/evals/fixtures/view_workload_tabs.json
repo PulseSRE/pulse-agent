@@ -1,0 +1,33 @@
+{
+  "name": "view_workload_tabs",
+  "prompt": "Make a dashboard for the checkout-api deployment in production that shows what it owns and depends on, plus its recent logs and its config, with the logs and config kept separate so I can flip between them. No need to check the plan with me.",
+  "recorded_responses": {
+    "get_resource_relationships": "{\"root\": \"Deployment/checkout-api\", \"nodes\": [{\"id\": \"1\", \"kind\": \"Deployment\", \"name\": \"checkout-api\"}, {\"id\": \"2\", \"kind\": \"ReplicaSet\", \"name\": \"checkout-api-5d8f\", \"parentId\": \"1\"}, {\"id\": \"3\", \"kind\": \"Pod\", \"name\": \"checkout-api-5d8f-x2k\", \"parentId\": \"2\"}, {\"id\": \"4\", \"kind\": \"Pod\", \"name\": \"checkout-api-5d8f-p9q\", \"parentId\": \"2\"}, {\"id\": \"5\", \"kind\": \"Service\", \"name\": \"checkout-api\", \"relation\": \"selects\"}]}",
+    "list_pods": "production/checkout-api-5d8f-x2k  Status=Running  Restarts=0  Age=2d\nproduction/checkout-api-5d8f-p9q  Status=Running  Restarts=1  Age=2d",
+    "get_pod_logs": "2026-10-16T14:02:11Z INFO  started on :8080\n2026-10-16T14:05:40Z WARN  upstream payments slow (1.8s)\n2026-10-16T14:06:02Z ERROR payment call timed out after 2s",
+    "describe_resource": "Name: checkout-api\nNamespace: production\nReplicas: 2 desired | 2 available\nImage: quay.io/shop/checkout:v2.4.1\nLimits: cpu 2, memory 2Gi\nEnv: PAYMENTS_URL=http://payments:8080, TIMEOUT_MS=2000\nStrategy: RollingUpdate 25% max unavailable",
+    "get_events": "LAST SEEN  TYPE     REASON            OBJECT\n5m         Normal   ScalingReplicaSet deployment/checkout-api",
+    "emit_component": "Component emitted successfully",
+    "plan_dashboard": "Dashboard plan: checkout-api\nRow 1: Ownership and dependencies\nRow 2: Logs and config, switchable",
+    "create_dashboard": "Dashboard 'checkout-api' created"
+  },
+  "expected": {
+    "should_mention": [
+      "checkout-api"
+    ],
+    "should_use_tools": [
+      "get_resource_relationships",
+      "emit_component",
+      "create_dashboard"
+    ],
+    "should_emit_kinds": [
+      "tabs"
+    ],
+    "should_not_use_tools": [
+      "delete_pod",
+      "restart_deployment",
+      "scale_deployment"
+    ],
+    "max_tool_calls": 14
+  }
+}

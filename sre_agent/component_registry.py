@@ -281,9 +281,24 @@ register_component(
         example={
             "kind": "node_map",
             "title": "Cluster Nodes",
-            "nodes": [{"name": "worker-1", "status": "ready", "cpuPct": 45.2}],
+            # Every field the UI's node map reads. The example used to carry
+            # only name/status/cpuPct; specs copied from it crashed the widget.
+            "nodes": [
+                {
+                    "name": "worker-1",
+                    "status": "ready",
+                    "roles": ["worker"],
+                    "cpuPct": 45.2,
+                    "memPct": 61.0,
+                    "podCount": 38,
+                    "podCap": 110,
+                }
+            ],
         },
-        prompt_hint="node_map — Cluster node topology. Use visualize_nodes() for pre-built maps.",
+        prompt_hint=(
+            "node_map — Cluster node topology. Use visualize_nodes() for pre-built maps. "
+            "Each node needs name, status (ready|not-ready|pressure|cordoned), roles (list), podCount, podCap."
+        ),
     )
 )
 

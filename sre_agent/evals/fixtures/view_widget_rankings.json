@@ -1,0 +1,33 @@
+{
+  "name": "view_widget_rankings",
+  "prompt": "Build me a capacity dashboard for the production namespace. I want to see which pods use the most memory, ranked, and how much of each node's CPU is in use compared with what it has. No need to check the plan with me.",
+  "recorded_responses": {
+    "namespace_summary": "{\"namespace\": \"production\", \"pods\": {\"total\": 42, \"running\": 40, \"pending\": 1, \"failed\": 1}, \"deployments\": {\"total\": 9, \"available\": 8}, \"warning_events\": 6}",
+    "get_prometheus_query": "Query: topk(10, sum by (pod) (container_memory_working_set_bytes{namespace=\"production\",container!=\"\"}))\nResults (6 series):\n  checkout-api-5d8f-x2k: 1992294400 (1.86Gi)\n  payments-6c4-zz1: 1258291200 (1.17Gi)\n  search-indexer-0: 1073741824 (1.00Gi)\n  frontend-77a-k1m: 671088640 (640Mi)\n  cache-7f9-h3j: 536870912 (512Mi)\n  worker-2b1-qq8: 325058560 (310Mi)",
+    "get_node_metrics": "Node metrics (metrics.k8s.io):\n  worker-0: CPU 6.6/8 cores (82%), memory 26.1/32Gi (81%)\n  worker-1: CPU 4.6/8 cores (57%), memory 17.9/32Gi (56%)\n  worker-2: CPU 2.5/8 cores (31%), memory 11.2/32Gi (35%)\n  master-0: CPU 1.5/4 cores (38%), memory 9.8/16Gi (61%)",
+    "cluster_metrics": "{\"nodes\": {\"total\": 4, \"ready\": 4}, \"cpu\": {\"pct\": 55}, \"memory\": {\"pct\": 58}}",
+    "emit_component": "Component emitted successfully",
+    "plan_dashboard": "Dashboard plan: Production Capacity\nRow 1: KPI cards\nRow 2: Pods ranked by memory, node CPU usage vs capacity\nRow 3: Supporting detail",
+    "create_dashboard": "Dashboard 'Production Capacity' created"
+  },
+  "expected": {
+    "should_mention": [
+      "memory",
+      "CPU"
+    ],
+    "should_use_tools": [
+      "emit_component",
+      "create_dashboard"
+    ],
+    "should_emit_kinds": [
+      "bar_list",
+      "progress_list"
+    ],
+    "should_not_use_tools": [
+      "delete_pod",
+      "drain_node",
+      "scale_deployment"
+    ],
+    "max_tool_calls": 14
+  }
+}
