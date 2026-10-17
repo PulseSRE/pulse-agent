@@ -138,6 +138,94 @@ def create_dashboard(
     )
 
 
+MAX_PREVIEWS_PER_TURN = 2
+
+
+@beta_tool
+def preview_dashboard(title: str, description: str = "", rows: str = "", exclude: str = ""):
+    """See the dashboard you are building before saving it: a screenshot of the page exactly as the user will see it, with their live data, plus a list of widgets that render empty, broken or cut off.
+
+    Use it before create_dashboard for dashboards with six or more widgets, or when the user asks for a
+    polished or presentable page. Look at the image: fix empty or broken widgets, half-empty rows,
+    cramped charts and tables that are cut off (emit corrected widgets, or plan different rows), then
+    call create_dashboard with the same title and rows. At most two previews per turn.
+
+    Args:
+        title: The dashboard title you will save it with.
+        description: The description you will save it with.
+        rows: The same planned rows you will pass to create_dashboard (one line per row, "|" between widgets).
+        exclude: Widget titles to leave out, as for create_dashboard.
+    """
+    from . import view_draft, view_render
+    from .k8s_client import get_current_user_token
+    from .layout_engine import compute_layout
+    from .tool_images import attach_image
+
+    if not view_render.configured():
+        return "Preview is not available on this deployment (no render service). Save with create_dashboard."
+    draft = view_draft.current()
+    if draft is None:
+        return "Nothing to preview: no dashboard is being built in this turn."
+    if draft.previews >= MAX_PREVIEWS_PER_TURN:
+        return "Preview limit reached for this turn. Apply what the last preview showed and save with create_dashboard."
+    widgets = view_draft.apply_exclusions(draft.components, draft.excluded | view_draft.parse_titles(exclude))
+    if not widgets:
+        return "Nothing to preview yet: gather the data for the dashboard first."
+    token = get_current_user_token()
+    if not token:
+        return "Preview needs the user's session, which this request does not have. Save with create_dashboard."
+
+    # Same layout the save will compute (agent_ws), so the preview is the page the user gets.
+    positions = compute_layout(widgets, rows=rows or None)
+    spec = {"title": title, "description": description, "layout": widgets, "positions": positions}
+    draft.previews += 1
+    try:
+        result = view_render.render_draft(spec, token)
+    except view_render.RenderUnavailableError as e:
+        return f"Preview failed ({e}). Save with create_dashboard."
+
+    notes = _preview_findings(result)
+    text = (
+        f"Screenshot of the draft '{title}' as the user will see it "
+        f"({result.get('width', 1440)}x{result.get('height', '?')}px, {len(widgets)} widgets, live data)."
+    )
+    if result.get("truncated"):
+        text += " The page is taller than the screenshot; the bottom is cut off."
+    text += (
+        ("\nFound on the page:\n" + "\n".join(f"- {n}" for n in notes))
+        if notes
+        else "\nNo widget rendered empty, broken or cut off."
+    )
+    text += (
+        "\nLook for half-empty rows, cramped or oversized widgets, and whether the most important "
+        "information is at the top. Fix what you see, then call create_dashboard."
+    )
+    image = result.get("image")
+    return attach_image(text, image) if image else text + "\n(The render returned no image.)"
+
+
+_EMPTY_TEXT = ("No data", "No resources found", "No results")
+_BROKEN_TEXT = ("failed to render", "Query failed", "Something went wrong")
+
+
+def _preview_findings(result: dict) -> list[str]:
+    notes = []
+    if result.get("error"):
+        notes.append(f"the page did not render ({result['error']})")
+    for i, cell in enumerate(result.get("cells") or []):
+        label = cell.get("title") or f"widget {i + 1}"
+        text = cell.get("text") or ""
+        if any(t.lower() in text.lower() for t in _BROKEN_TEXT):
+            notes.append(f"'{label}' shows an error")
+        elif not text.strip() or any(t.lower() in text.lower() for t in _EMPTY_TEXT):
+            notes.append(f"'{label}' is empty")
+        if cell.get("clipped") and not cell.get("scrolls"):
+            notes.append(f"'{label}' is cut off (its cell is too small for its content)")
+    for err in (result.get("pageErrors") or [])[:3]:
+        notes.append(f"page error: {err[:160]}")
+    return notes
+
+
 @beta_tool
 def namespace_summary(namespace: str):
     """Get a high-level summary of a namespace: pod counts by status, deployment health, warning events, and resource usage. Use this as the first tool when the user asks for an overview of a namespace.
@@ -825,6 +913,7 @@ def clone_dashboard(view_id: str, new_title: str = ""):
 register_tool(delete_dashboard, is_write=False)
 register_tool(clone_dashboard, is_write=False)
 register_tool(create_dashboard, is_write=False)
+register_tool(preview_dashboard, is_write=False)
 register_tool(namespace_summary, is_write=False)
 register_tool(cluster_metrics, is_write=False)
 register_tool(list_saved_views, is_write=False)
@@ -1133,6 +1222,7 @@ register_tool(get_topology_graph, is_write=False)
 
 VIEW_TOOLS = [
     create_dashboard,
+    preview_dashboard,
     delete_dashboard,
     clone_dashboard,
     namespace_summary,

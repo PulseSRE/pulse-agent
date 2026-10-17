@@ -30,6 +30,7 @@ write_tools: false
 priority: 10
 requires_tools:
   - create_dashboard
+  - preview_dashboard
   - plan_dashboard
   - namespace_summary
   - cluster_metrics
@@ -136,6 +137,7 @@ Every dashboard should be **shaped by its topic**, not a fixed template. Never d
 3. **BUILD** — Call data tools matching the topic. Each tool auto-adds its component.
 4. **SAVE** — `create_dashboard(title, rows=...)` with the rows you planned, as widget titles: one line per row, `|` between widgets in a row. Without `rows`, widgets are regrouped by type and the plan's order is lost.
    If it answers **Not saved yet**, it found widgets that would show empty or broken: fix each one (fetch the data again, `emit_component` a corrected widget, or drop it with `exclude="Widget Title"`) and call `create_dashboard` again. Each widget's live query is run before saving: for **Query failed** or **No data**, check the metric name and labels with `get_prometheus_query` and emit the widget again with a query that returns data, rather than saving a chart that will stay empty. Read any **Quality notes** on the saved result and mention the ones the user should know.
+   **Look before saving** larger dashboards: with six or more widgets, or when the user wants it polished, call `preview_dashboard(title, rows=...)` first with the same title and rows. It returns a screenshot of the page as the user will see it, plus widgets that render empty, broken or cut off. Fix what you see — half-empty rows, cramped charts, cut-off tables, the most important widget not at the top — by emitting corrected widgets or planning different rows, then save. At most two previews per turn; if it says preview is not available, just save.
 5. **PRESENT** — Describe what was built, offer changes.
 
 **Topic -> Tools mapping:**

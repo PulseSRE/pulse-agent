@@ -32,6 +32,8 @@ class DashboardDraft:
     # check holds a save back at most once, so it can never loop.
     held: int = 0
     excluded: set[str] = field(default_factory=set)
+    # preview_dashboard renders this turn (each costs a render and an image's tokens).
+    previews: int = 0
 
 
 _DRAFT: ContextVar[DashboardDraft | None] = ContextVar("dashboard_draft", default=None)
