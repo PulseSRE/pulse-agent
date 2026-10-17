@@ -464,9 +464,9 @@ class TestLayoutEngine:
         pos = compute_layout(components)
         assert len(pos) == 4
         assert pos[0]["y"] == 0
-        assert pos[0]["w"] == 4
-        assert pos[1]["w"] == 2
-        assert pos[2]["w"] == 2
+        assert pos[0]["w"] == 12
+        assert pos[1]["w"] == 6
+        assert pos[2]["w"] == 6
         assert pos[1]["y"] == pos[2]["y"]
         assert pos[3]["y"] > pos[1]["y"]
 

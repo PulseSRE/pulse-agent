@@ -1,33 +1,33 @@
 """Tests for the semantic layout engine."""
 
-from sre_agent.layout_engine import compute_layout
+from sre_agent.layout_engine import GRID_COLS, compute_layout
 
 
 class TestSingleComponents:
     def test_single_chart_default_width(self):
         components = [{"kind": "chart"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4  # a lone half-width chart stretches to fill its row
+        assert layout[0]["w"] == 12  # a lone half-width chart stretches to fill its row
         assert layout[0]["x"] == 0
 
     def test_single_table_full_width(self):
         components = [{"kind": "data_table"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4
+        assert layout[0]["w"] == 12
 
     def test_single_metric_card(self):
         components = [{"kind": "metric_card"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4  # Single card fills full width
+        assert layout[0]["w"] == 12  # Single card fills full width
         assert layout[0]["x"] == 0
 
     def test_two_metric_cards_half_width(self):
         components = [{"kind": "metric_card"}, {"kind": "metric_card"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 2
-        assert layout[1]["w"] == 2
+        assert layout[0]["w"] == 6
+        assert layout[1]["w"] == 6
         assert layout[0]["x"] == 0
-        assert layout[1]["x"] == 2
+        assert layout[1]["x"] == 6
 
     def test_empty_list(self):
         assert compute_layout([]) == {}
@@ -35,7 +35,7 @@ class TestSingleComponents:
     def test_unknown_kind_full_width(self):
         components = [{"kind": "foobar"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4
+        assert layout[0]["w"] == 12
 
 
 class TestKPIPacking:
@@ -45,19 +45,19 @@ class TestKPIPacking:
         ys = {layout[i]["y"] for i in range(4)}
         assert len(ys) == 1, "All 4 cards should share the same y"
         xs = sorted(layout[i]["x"] for i in range(4))
-        assert xs == [0, 1, 2, 3]
+        assert xs == [0, 3, 6, 9]
         for i in range(4):
-            assert layout[i]["w"] == 1
+            assert layout[i]["w"] == 3
 
     def test_grid_kpi_group_full_width(self):
         components = [{"kind": "grid", "items": [{"kind": "metric_card"}, {"kind": "metric_card"}]}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4
+        assert layout[0]["w"] == 12
 
     def test_info_card_grid_full_width(self):
         components = [{"kind": "info_card_grid"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4
+        assert layout[0]["w"] == 12
 
     def test_kpi_before_charts(self):
         components = [{"kind": "chart"}, {"kind": "metric_card"}]
@@ -70,48 +70,52 @@ class TestChartPacking:
     def test_two_charts_side_by_side(self):
         components = [{"kind": "chart"}, {"kind": "chart"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 2
-        assert layout[1]["w"] == 2
+        assert layout[0]["w"] == 6
+        assert layout[1]["w"] == 6
         assert layout[0]["y"] == layout[1]["y"]
         assert layout[0]["x"] != layout[1]["x"]
 
     def test_three_charts(self):
+        """Three charts share one row as thirds, not two halves and a lone full-width one."""
         components = [{"kind": "chart"}, {"kind": "chart"}, {"kind": "chart"}]
         layout = compute_layout(components)
-        # First 2 side-by-side (w=2 each fills row)
-        assert layout[0]["w"] == 2
-        assert layout[1]["w"] == 2
-        assert layout[0]["y"] == layout[1]["y"]
-        # 3rd on next row (bin-packed, stays w=2)
-        assert layout[2]["w"] == 4  # orphan in the last row fills it
-        assert layout[2]["x"] == 0
-        assert layout[2]["y"] > layout[0]["y"]
+        assert [(layout[i]["x"], layout[i]["w"]) for i in range(3)] == [(0, 4), (4, 4), (8, 4)]
+        assert len({layout[i]["y"] for i in range(3)}) == 1
+
+    def test_five_charts_end_in_a_row_of_thirds(self):
+        layout = compute_layout([{"kind": "chart"} for _ in range(5)])
+        assert [layout[i]["w"] for i in range(5)] == [6, 6, 4, 4, 4]
+        assert layout[0]["y"] == layout[1]["y"] < layout[2]["y"] == layout[4]["y"]
+
+    def test_four_charts_are_two_rows_of_halves(self):
+        layout = compute_layout([{"kind": "chart"} for _ in range(4)])
+        assert [layout[i]["w"] for i in range(4)] == [6, 6, 6, 6]
 
     def test_node_map_full_width(self):
         components = [{"kind": "node_map"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4
+        assert layout[0]["w"] == 12
 
 
 class TestDetailPairing:
     def test_log_viewer_key_value_paired(self):
         components = [{"kind": "log_viewer"}, {"kind": "key_value"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 2
-        assert layout[1]["w"] == 2
+        assert layout[0]["w"] == 6
+        assert layout[1]["w"] == 6
         assert layout[0]["y"] == layout[1]["y"]
 
     def test_key_value_relationship_tree_paired(self):
         components = [{"kind": "key_value"}, {"kind": "relationship_tree"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 2
-        assert layout[1]["w"] == 2
+        assert layout[0]["w"] == 6
+        assert layout[1]["w"] == 6
         assert layout[0]["y"] == layout[1]["y"]
 
     def test_unpaired_detail_full_width(self):
         components = [{"kind": "log_viewer"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4
+        assert layout[0]["w"] == 12
 
 
 class TestFullDashboards:
@@ -146,8 +150,8 @@ class TestFullDashboards:
         detail_y = layout[1]["y"]
         assert detail_y > status_y
         assert layout[1]["y"] == layout[2]["y"]  # paired
-        assert layout[1]["w"] == 2
-        assert layout[2]["w"] == 2
+        assert layout[1]["w"] == 6
+        assert layout[2]["w"] == 6
         # table last
         assert layout[3]["y"] > detail_y
 
@@ -173,19 +177,24 @@ class TestFullDashboards:
 
 
 class TestEdgeCases:
-    def test_five_metric_cards_wrap(self):
-        """5 metric cards: 4 in first row, 1 in second."""
-        components = [{"kind": "metric_card"} for _ in range(5)]
-        layout = compute_layout(components)
-        first_row_y = layout[0]["y"]
-        assert sum(1 for i in range(5) if layout[i]["y"] == first_row_y) == 4
-        assert sum(1 for i in range(5) if layout[i]["y"] > first_row_y) == 1
+    def test_five_metric_cards_share_a_row(self):
+        """Up to six cards fit one row; five fill it as evenly as the grid allows."""
+        layout = compute_layout([{"kind": "metric_card"} for _ in range(5)])
+        assert len({layout[i]["y"] for i in range(5)}) == 1
+        assert [layout[i]["w"] for i in range(5)] == [2, 2, 2, 3, 3]
+
+    def test_seven_metric_cards_balance_two_rows(self):
+        """Seven cards are rows of four and three, not six and a lone one."""
+        layout = compute_layout([{"kind": "metric_card"} for _ in range(7)])
+        first = layout[0]["y"]
+        assert [layout[i]["w"] for i in range(7)] == [3, 3, 3, 3, 4, 4, 4]
+        assert sum(1 for i in range(7) if layout[i]["y"] == first) == 4
 
     def test_grid_without_metric_items_is_container(self):
         """grid with non-metric items → container role, w=4."""
         components = [{"kind": "grid", "items": [{"kind": "chart"}]}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4
+        assert layout[0]["w"] == 12
 
 
 class TestNewComponentTypes:
@@ -193,20 +202,20 @@ class TestNewComponentTypes:
         """Single detail-role component gets full width."""
         components = [{"kind": "bar_list", "items": [{"label": "a", "value": 1}]}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4
+        assert layout[0]["w"] == 12
         assert layout[0]["h"] == 3  # content-aware: 2 + min(1, 8)
 
     def test_progress_list_full_width_when_alone(self):
         components = [{"kind": "progress_list", "items": [{"label": "a", "value": 50, "max": 100}]}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4
+        assert layout[0]["w"] == 12
         assert layout[0]["h"] == 4  # content-aware: 2 + ceil(1*1.2) = 4
 
     def test_stat_card_full_width_when_alone(self):
         """Single kpi-role component gets full width."""
         components = [{"kind": "stat_card", "title": "CPU", "value": "42%"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4
+        assert layout[0]["w"] == 12
         assert layout[0]["h"] == 3
 
     def test_stat_cards_pack_like_metric_cards(self):
@@ -227,7 +236,7 @@ class TestNewComponentTypes:
     def test_timeline_full_width(self):
         components = [{"kind": "timeline"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4
+        assert layout[0]["w"] == 12
         assert layout[0]["h"] == 10
 
 
@@ -235,17 +244,17 @@ class TestLayoutHints:
     def test_width_hint_half(self):
         components = [{"kind": "data_table", "layout": {"w": "half"}}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 2
+        assert layout[0]["w"] == 6
 
     def test_width_hint_full(self):
         components = [{"kind": "chart", "layout": {"w": "full"}}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4
+        assert layout[0]["w"] == 12
 
     def test_width_hint_quarter(self):
         components = [{"kind": "chart", "layout": {"w": "quarter"}}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 1
+        assert layout[0]["w"] == 3
 
     def test_height_hint_compact(self):
         components = [{"kind": "chart", "layout": {"h": "compact"}}]
@@ -280,7 +289,7 @@ class TestLayoutHints:
     def test_no_hints_uses_defaults(self):
         components = [{"kind": "chart"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4  # lone chart fills its row
+        assert layout[0]["w"] == 12  # lone chart fills its row
         assert layout[0]["h"] == 4  # empty chart — compact (no series)
 
     def test_chart_with_series_gets_full_height(self):
@@ -333,7 +342,7 @@ class TestTopologyLayout:
     def test_topology_full_width(self):
         components = [{"kind": "topology"}]
         layout = compute_layout(components)
-        assert layout[0]["w"] == 4
+        assert layout[0]["w"] == 12
 
     def test_topology_height(self):
         components = [{"kind": "topology"}]
@@ -349,7 +358,7 @@ class TestTopologyLayout:
         """Topology should never be half-width paired with another chart."""
         components = [{"kind": "chart"}, {"kind": "topology"}]
         layout = compute_layout(components)
-        assert layout[1]["w"] == 4
+        assert layout[1]["w"] == 12
 
 
 class TestNamespaceDashboard:
@@ -522,22 +531,31 @@ class TestContainerHeights:
 
 
 class TestOrphanRowFill:
-    def test_fifth_kpi_fills_row(self):
-        layout = compute_layout([{"kind": "metric_card", "title": f"M{i}"} for i in range(5)])
-        assert layout[4] == {**layout[4], "x": 0, "w": 4}
-
-    def test_six_kpis_split_last_row_evenly(self):
+    def test_six_kpis_share_one_row(self):
         layout = compute_layout([{"kind": "metric_card", "title": f"M{i}"} for i in range(6)])
-        assert [(layout[i]["x"], layout[i]["w"]) for i in (4, 5)] == [(0, 2), (2, 2)]
+        assert [(layout[i]["x"], layout[i]["w"]) for i in range(6)] == [(i * 2, 2) for i in range(6)]
 
-    def test_three_kpis_remainder_to_last(self):
+    def test_three_kpis_are_thirds(self):
         layout = compute_layout([{"kind": "metric_card", "title": f"M{i}"} for i in range(3)])
-        assert [layout[i]["w"] for i in range(3)] == [1, 1, 2]
+        assert [layout[i]["w"] for i in range(3)] == [4, 4, 4]
+
+    def test_every_row_spans_the_grid(self):
+        for n in range(1, 13):
+            layout = compute_layout([{"kind": "metric_card"} for _ in range(n)])
+            rows: dict[int, int] = {}
+            for pos in layout.values():
+                rows[pos["y"]] = rows.get(pos["y"], 0) + pos["w"]
+            assert set(rows.values()) == {GRID_COLS}, n
 
     def test_explicit_kpi_width_hints_untouched(self):
         comps = [{"kind": "metric_card", "layout": {"w": "half"}}, {"kind": "metric_card"}]
         layout = compute_layout(comps)
-        assert [layout[0]["w"], layout[1]["w"]] == [2, 1]
+        assert [layout[0]["w"], layout[1]["w"]] == [6, 3]
+
+    def test_third_width_hints(self):
+        comps = [{"kind": "chart", "layout": {"w": "third"}}, {"kind": "chart", "layout": {"w": "two_thirds"}}]
+        layout = compute_layout(comps)
+        assert [(layout[i]["x"], layout[i]["w"]) for i in range(2)] == [(0, 4), (4, 8)]
 
 
 _PLANNED_COMPS = (
@@ -561,7 +579,7 @@ class TestPlannedRows:
 
     def test_row_shares_width_and_keeps_own_heights(self):
         pos = compute_layout(list(self.COMPS), rows="CPU | Mem | Trend")
-        assert [pos[i]["w"] for i in (1, 2, 3)] == [1, 1, 2]
+        assert [pos[i]["w"] for i in (1, 2, 3)] == [4, 4, 4]  # thirds, not 1/4, 1/4, 1/2
         assert pos[1]["h"] < pos[3]["h"]  # metric card not stretched to chart height
 
     def test_unplanned_widgets_follow_planned_rows(self):

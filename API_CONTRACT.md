@@ -1244,6 +1244,8 @@ Source-derived paths below supplement the table above. Authentication names iden
 | `POST` | `/views/{view_id}/claim` | `get_owner` | Claim a team view. |
 | `DELETE` | `/views/{view_id}/claim` | `get_owner` | Release a claim on a view. |
 
+View `positions` map widget index to `{x, y, w, h}` on a 12-column grid (`layout_engine.GRID_COLS`). Views saved on the earlier 4-column grid were rescaled by migration 037; an agent and UI must be upgraded together.
+
 ## Version Compatibility
 
 The UI checks `GET /version` before connecting. The current agent protocol is `2`; the current pulse-ui client accepts protocols `1` and `2` and refuses a connection when a returned protocol is unsupported. A failed HTTP version response has a legacy fallback in the client; it does not prove compatibility. Use a matched agent/UI release and verify the specific deployed feature contracts.

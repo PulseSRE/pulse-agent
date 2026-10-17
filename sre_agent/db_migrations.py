@@ -286,6 +286,65 @@ def _migrate_036_runtime_artifacts(db: Database) -> None:
     db.execute("DROP TABLE IF EXISTS user_skills")
 
 
+# Dashboards were laid out on 4 columns; the grid is now 12 (layout_engine.GRID_COLS).
+_OLD_GRID_COLS = 4
+_GRID_SCALE = 12 // _OLD_GRID_COLS
+
+
+def _rescale_cell(cell: object) -> bool:
+    """Scale one {x, y, w, h} cell from the 4-column grid in place. True if changed."""
+    if not isinstance(cell, dict):
+        return False
+    x, w = cell.get("x"), cell.get("w")
+    if not isinstance(x, int) or not isinstance(w, int) or isinstance(x, bool) or isinstance(w, bool):
+        return False
+    cell["x"] = min(x * _GRID_SCALE, 12 - 1)
+    cell["w"] = max(1, min(w * _GRID_SCALE, 12 - cell["x"]))
+    return True
+
+
+def _rescale_view_json(positions_text: str | None, layout_text: str | None) -> tuple[str | None, str | None]:
+    """Rescaled (positions, layout) JSON, or None for a field that did not change.
+
+    Positions are what the UI renders. Layout widgets can also carry x/w,
+    which optimize_view merges into them, so those are scaled too and
+    a later repack or export reads one consistent grid.
+    """
+    import json
+
+    new_positions = new_layout = None
+    try:
+        positions = json.loads(positions_text) if positions_text else None
+    except (TypeError, ValueError):
+        positions = None
+    if isinstance(positions, dict) and sum(_rescale_cell(c) for c in positions.values()):
+        new_positions = json.dumps(positions)
+    try:
+        layout = json.loads(layout_text) if layout_text else None
+    except (TypeError, ValueError):
+        layout = None
+    if isinstance(layout, list) and sum(_rescale_cell(c) for c in layout if isinstance(c, dict) and "y" in c):
+        new_layout = json.dumps(layout)
+    return new_positions, new_layout
+
+
+def _migrate_037_grid_12(db: Database) -> None:
+    """Rescale saved dashboard positions from the 4-column grid to 12 columns.
+
+    Covers live views and their version history, so restoring an older
+    version (undo) does not bring back a 4-column layout. Runs in the
+    migration's transaction with its schema_migrations row, so it applies
+    exactly once: a partial run rolls back and is retried whole.
+    """
+    for table, key in (("views", "id"), ("view_versions", "id")):
+        for row in db.fetchall(f"SELECT {key} AS k, positions, layout FROM {table}"):
+            positions, layout = _rescale_view_json(row["positions"], row["layout"])
+            if positions is not None:
+                db.execute(f"UPDATE {table} SET positions = ? WHERE {key} = ?", (positions, row["k"]))
+            if layout is not None:
+                db.execute(f"UPDATE {table} SET layout = ? WHERE {key} = ?", (layout, row["k"]))
+
+
 # Open statuses, spelled the same way the inbox module does.
 _OPEN_STATUSES = "('new', 'triaged', 'claimed', 'in_progress', 'agent_reviewing')"
 
@@ -527,4 +586,5 @@ MIGRATIONS = [
     (34, "action_snapshots", _migrate_034_action_snapshots),
     (35, "user_skills", _migrate_035_user_skills),
     (36, "runtime_artifacts", _migrate_036_runtime_artifacts),
+    (37, "grid_12", _migrate_037_grid_12),
 ]
