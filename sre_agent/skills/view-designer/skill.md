@@ -231,6 +231,10 @@ Prefer `bar_list` over a bar `chart` for rankings, `progress_list` over a table 
 
 **Integer counts:** For count-type `metric_card` values (pods, nodes, namespaces, replicas), format as integer. Use `"6"` not `"6.0"`, `"513"` not `"513.0"`. Apply `int()` or `round()` before setting the value field.
 
+**Compared to usual:** A `metric_card` with a `query` shows on its own when today is well off that query's usual value ("2.1× usual", from its median over the last day). Prefer a query-backed card to a static `value` for anything that changes, and give it `thresholds` so the comparison is colored the right way. Do not write "normal is …" into titles or descriptions.
+
+**Quiet is information:** A chart that stays at zero collapses on its own to one line ("0 throughout the last 1h", green when its thresholds say higher is worse), and expands when a value appears. Keep a restarts or errors chart that reads zero: it is the evidence that nothing is wrong, and it costs one line.
+
 **Always save:** After gathering data with tools, ALWAYS call `create_dashboard`. Do not stop with a text response describing the planned layout — call the tool. A text description is not a dashboard.
 
 **View type:** Always call `create_dashboard(view_type="custom")` for any user-requested dashboard, regardless of topic (security, capacity, incidents, etc.). The `incident`, `plan`, and `assessment` types are reserved for monitor-triggered views — they start in `analyzing` status which does not advance automatically and leaves the dashboard stuck and invisible to the user.
