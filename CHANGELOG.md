@@ -2,7 +2,26 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
-## Unreleased
+## v2.32.0 (2026-10-17)
+
+Paired with pulse-ui v2.32.0 and pulse-operator v0.9.0. Migration 037 rescales saved dashboards to the 12-column grid. Upgrade agent and UI together; migrations are forward-only.
+
+### The view designer sees what it builds
+- `preview_dashboard` renders the draft through the new render service (pulse-ui `render/`, deployed by pulse-operator `spec.render`). It hands the model a screenshot plus the widgets that rendered empty, broken or cut off, and the model fixes them before saving. Off unless `PULSE_AGENT_RENDER_URL` is set. It never runs without a user token, and it renders with that user's permissions only. Tool results can now carry one image; older screenshots are dropped from history (#152)
+- Before saving, every widget's live query runs. "Query failed" and "No data" hold the save with the reason, instead of a chart that stays empty (#148). The draft is checked before saving, and the model is told what to fix (#144)
+- The designer is taught every widget kind and judged on fit, not a template. It follows the row order it planned, and dashboard requests route to it (#141, #142)
+- Dashboards lay out on a 12-column grid, so a planned row of three is three thirds, up to six KPI cards share a row, and larger sets split into balanced rows. Migration 037 rescales saved views and their version history (#154)
+- Namespace cards take live state from thresholds, not a snapshot (#149)
+- Every agent edit to a dashboard is snapshotted first, so each one can be undone (#150)
+- Guidance for query-backed cards that compare to usual and for charts that read zero (#155)
+
+### Agent behavior
+- A turn that asks for a plan does not change the cluster. Writes are refused before anyone is asked to confirm them (#147), and are no longer offered to the model at all in that turn. This fixes a quota-exhaustion "propose a recovery plan" turn that reached for `delete_pod` (#156)
+- Tools run in the caller's context, so they act as the requesting user (#143). `list_resources` honors the user's token and works outside the cluster (#145)
+
+### Evals
+- A nightly rendered-page eval scores what the view designer saves as a person would see it. A mock cluster with a PromQL evaluator, a scripted model and a vision judge cover edits, harder requests and judge calibration (#146, #151)
+- The incident-dashboard replay fixtures budget for investigating and building (20 calls), now that those requests reach the designer. `critique_view` no longer tells the model to call it right after saving
 
 ### Fixed
 - Preserve approval, caller identity and mutation preconditions across supported chat, plan, monitor and MCP paths; stop alternative writes after a policy denial within one invocation.
@@ -12,7 +31,7 @@ All notable changes to Pulse Agent are documented in this file.
 
 ### Documentation and verification
 - Audit Markdown and Pages guidance, document current API routes and installation/evaluation limits, and distinguish synthetic/isolated checks from real-cluster acceptance.
-- Bound Kubernetes client compatibility and add production container build checks. These changes are unreleased; deployed acceptance and image publication remain separate requirements.
+- Bound Kubernetes client compatibility and add production container build checks. Deployed acceptance and image publication remain separate requirements.
 
 ## v2.31.0 (2026-09-01)
 
