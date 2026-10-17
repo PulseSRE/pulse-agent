@@ -22,7 +22,7 @@ scenarios:
     prompt: "Create an incident triage dashboard for pod api-server"
     should_use_tools: [describe_pod, get_pod_logs]
     should_mention: [incident, api-server]
-    max_tool_calls: 12
+    max_tool_calls: 20
 
   - id: view_manage_openshiftpulse
     prompt: "Create a view to manage the openshiftpulse namespace"

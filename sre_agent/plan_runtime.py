@@ -387,6 +387,9 @@ class PlanRuntime:
                     on_tool_use=on_tool,
                     on_tool_result=on_tool_result,
                     mode=phase.skill_name,
+                    # The prompt is generated from the plan, not written by a person;
+                    # phase writes are governed by _phase_write_guard instead.
+                    honor_plan_requests=False,
                 )
 
             # Try to extract structured SkillOutput from response

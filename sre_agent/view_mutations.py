@@ -27,6 +27,27 @@ def get_current_user() -> str:
     return _get_current_user()
 
 
+def _snapshot_before_edit(view_id: str, action: str) -> None:
+    """Keep a restorable copy of the view before an agent edit.
+
+    Only the agent's whole-view update and add/remove-widget used to snapshot.
+    Typed mutations (rename, move, change chart type, update query...) and
+    optimize_view did not, so "move alerts to the top" had nothing to undo to,
+    and undo jumped back to an older version, silently discarding every edit
+    in between. A failed snapshot must not block the edit itself.
+    """
+    from . import db
+
+    try:
+        db.snapshot_view(view_id, action)
+    except Exception:
+        import logging
+
+        logging.getLogger("pulse_agent.views").warning(
+            "Could not snapshot view %s before %s", view_id, action, exc_info=True
+        )
+
+
 def _resolve_view(view_id: str) -> tuple[dict | None, str]:
     """Look up view scoped to the current user. No ownerless fallback (IDOR prevention)."""
     from . import db
@@ -94,6 +115,7 @@ def update_view_widgets(
     if error:
         return error
 
+    _snapshot_before_edit(view_id, f"agent:{action}")
     result = mutation.apply(ctx)
     if result.success:
         return _signal("view_updated", result.message, view_id=view_id)
@@ -245,6 +267,7 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
     if strategy == "reflow":
         # Just re-run layout engine on existing widgets
         positioned, positions = _apply_positions(layout)
+        _snapshot_before_edit(view_id, "agent:optimize_view")
         db.update_view(view_id, actual_owner, layout=positioned, positions=positions)
         return _signal(
             "view_updated",
@@ -256,6 +279,7 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
         # Strip positions and let the engine repack from scratch
         stripped = [{k: v for k, v in w.items() if k not in ("x", "y", "w", "h")} for w in layout]
         positioned, positions = _apply_positions(stripped)
+        _snapshot_before_edit(view_id, "agent:optimize_view")
         db.update_view(view_id, actual_owner, layout=positioned, positions=positions)
         return _signal(
             "view_updated",
@@ -310,6 +334,7 @@ def optimize_view(view_id: str, strategy: str = "group") -> str:
         reordered.extend(group_widgets)
 
     positioned, positions = _apply_positions(reordered)
+    _snapshot_before_edit(view_id, "agent:optimize_view")
     db.update_view(view_id, actual_owner, layout=positioned, positions=positions)
 
     group_summary = ", ".join(f"{name} ({len(ws)})" for name, ws in groups.items() if ws)

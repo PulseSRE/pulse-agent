@@ -728,9 +728,10 @@ def _warning_kind(warning: str, layout: list[dict]) -> str:
 
 @beta_tool
 def critique_view(view_id: str) -> str:
-    """Critique a view's design quality against best practices. Returns a score
-    (0-10) and specific improvement suggestions. Call this AFTER create_dashboard
-    to verify the view meets quality standards before showing to the user.
+    """Critique a saved view's design quality against best practices. Returns a
+    score (0-10) and specific improvement suggestions. Use it when the user asks
+    to review or improve an existing dashboard. Not after create_dashboard in the
+    same turn: saving already checks quality and reports what it found.
 
     Args:
         view_id: The view ID to critique (e.g. 'cv-abc123').
