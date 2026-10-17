@@ -95,7 +95,7 @@ def create_dashboard(
         draft.excluded |= excluded
         excluded = set(draft.excluded)
         widgets = view_draft.apply_exclusions(draft.components, excluded)
-        blocking, advisory = view_draft.precheck(widgets)
+        blocking, advisory = view_draft.precheck(widgets, check_data=True)
         if blocking and draft.held == 0:
             draft.held += 1
             issues = "\n".join(f"- {b}" for b in blocking)

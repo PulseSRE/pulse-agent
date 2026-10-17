@@ -135,7 +135,7 @@ Every dashboard should be **shaped by its topic**, not a fixed template. Never d
 2. **PLAN** — `plan_dashboard(title, rows)` with findings. Wait for approval. Skip only when user says "just build it" or adding to existing view.
 3. **BUILD** — Call data tools matching the topic. Each tool auto-adds its component.
 4. **SAVE** — `create_dashboard(title, rows=...)` with the rows you planned, as widget titles: one line per row, `|` between widgets in a row. Without `rows`, widgets are regrouped by type and the plan's order is lost.
-   If it answers **Not saved yet**, it found widgets that would show empty or broken: fix each one (fetch the data again, `emit_component` a corrected widget, or drop it with `exclude="Widget Title"`) and call `create_dashboard` again. Read any **Quality notes** on the saved result and mention the ones the user should know.
+   If it answers **Not saved yet**, it found widgets that would show empty or broken: fix each one (fetch the data again, `emit_component` a corrected widget, or drop it with `exclude="Widget Title"`) and call `create_dashboard` again. Each widget's live query is run before saving: for **Query failed** or **No data**, check the metric name and labels with `get_prometheus_query` and emit the widget again with a query that returns data, rather than saving a chart that will stay empty. Read any **Quality notes** on the saved result and mention the ones the user should know.
 5. **PRESENT** — Describe what was built, offer changes.
 
 **Topic -> Tools mapping:**

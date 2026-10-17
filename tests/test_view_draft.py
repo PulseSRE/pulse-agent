@@ -14,6 +14,13 @@ from sre_agent import view_draft
 from sre_agent.view_tools import SIGNAL_PREFIX, create_dashboard
 
 
+@pytest.fixture(autouse=True)
+def _queries_return_data():
+    """These tests cover the structural check; live queries are covered in test_view_widget_data."""
+    with patch.object(view_draft, "_run_query", return_value=("ok", "")):
+        yield
+
+
 def _chart(title, points=3, query=""):
     series = [{"name": "a", "data": [[i, i] for i in range(points)]}] if points else []
     spec = {"kind": "chart", "title": title, "series": series}
