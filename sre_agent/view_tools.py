@@ -253,22 +253,29 @@ def namespace_summary(namespace: str):
             "unit": " Gi",
         },
         {
+            # Live: the card re-runs its query on every refresh, so its state comes
+            # from thresholds on that value. A color or status computed here would
+            # stay red after the crash loop was fixed.
             "kind": "metric_card",
-            "title": "Restart Rate",
+            "title": "Restarts (last hour)",
             "value": str(crashloop),
-            "status": "healthy" if crashloop == 0 else "error",
             "description": f"{failed} failed" if failed else "none",
-            "query": f'sum(rate(kube_pod_container_status_restarts_total{{namespace="{namespace}"}}[5m]))',
-            "color": "#ef4444" if crashloop > 0 else "#10b981",
+            "query": f'sum(increase(kube_pod_container_status_restarts_total{{namespace="{namespace}"}}[1h]))',
+            "color": "#3b82f6",
+            # One restart in an hour is worth a look; one every ten minutes is a
+            # crash loop (CrashLoopBackOff caps the back-off at five minutes).
+            "thresholds": {"warning": 1, "critical": 6},
             "link": f"/r/v1~pods?ns={namespace}",
         },
         {
+            # Static: the count comes from the events API above. It had a query on
+            # kube_event_count, which kube-state-metrics does not export as far as
+            # we know; with "or vector(0)" the card would read 0 on any cluster.
             "kind": "metric_card",
             "title": "Warning Events",
             "value": str(warning_count),
             "status": "healthy" if warning_count == 0 else "warning",
-            "description": "active",
-            "query": f"count(kube_event_count{{namespace=\"{namespace}\",type='Warning'}}) or vector(0)",
+            "description": "when this dashboard was built",
             "color": "#f59e0b" if warning_count > 0 else "#10b981",
             "link": f"/r/v1~events?ns={namespace}",
         },

@@ -23,7 +23,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8.0", "pytest-asyncio>=0.23.0", "pytest-timeout>=2.3.0", "ruff>=0.4.0", "mypy>=1.0", "types-PyYAML>=6.0"]
+test = ["pytest>=8.0", "pytest-asyncio>=0.23.0", "pytest-timeout>=2.3.0", "ruff>=0.4.0", "mypy>=1.0", "types-PyYAML>=6.0", "promql-parser>=0.5"]
+# Nightly rendered-page eval (sre_agent.evals.view_render_eval): the mock cluster
+# evaluates PromQL, and pages are rendered with Playwright.
+render-eval = ["promql-parser>=0.5", "playwright>=1.45"]
 
 [project.scripts]
 sre-agent = "sre_agent.main:main"

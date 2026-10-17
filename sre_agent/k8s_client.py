@@ -246,7 +246,7 @@ def get_apis_client() -> client.ApisApi:
     return _clients["apis"]
 
 
-def get_raw_json(path: str, operation: str = "") -> Any:
+def get_raw_json(path: str, operation: str = "", *, query: dict[str, str] | None = None, accept: str = "") -> Any:
     """GET an arbitrary API server path and return the decoded JSON body.
 
     Returns a ToolError on failure.
@@ -258,6 +258,11 @@ def get_raw_json(path: str, operation: str = "") -> Any:
     site caught it and returned its own "Error fetching ..." string, which is
     how kubectl-explain, API group discovery and the generic describe tool
     could all be dead at once without a single log line saying so.
+
+    Goes through ``get_core_client()``, so it uses the request user's token
+    when token forwarding is on and the kubeconfig out of cluster. ``query``
+    adds query parameters; ``accept`` sets the Accept header (for example the
+    Table API's ``application/json;as=Table;g=meta.k8s.io;v=v1``).
     """
     import json
 
@@ -266,6 +271,8 @@ def get_raw_json(path: str, operation: str = "") -> Any:
         resp = api_client.call_api(
             path,
             "GET",
+            query_params=list((query or {}).items()),
+            header_params={"Accept": accept} if accept else None,
             auth_settings=["BearerToken"],
             _preload_content=False,
         )

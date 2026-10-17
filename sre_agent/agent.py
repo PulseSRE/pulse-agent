@@ -7,6 +7,7 @@ import atexit
 import concurrent.futures
 import contextlib
 import contextvars
+import functools
 import json
 import logging
 import os
@@ -17,7 +18,13 @@ from typing import Any
 
 import anthropic
 
-from .action_policy import effective_write_tools, is_explicit_approval
+from .action_policy import (
+    PLAN_ONLY_REFUSAL,
+    effective_write_tools,
+    is_explicit_approval,
+    latest_user_text,
+    requests_plan_only,
+)
 from .config import get_settings
 
 # Import tool modules to trigger @beta_tool auto-registration in TOOL_REGISTRY.
@@ -97,10 +104,18 @@ _tool_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_pr
 atexit.register(_tool_pool.shutdown, wait=False)
 
 
-def _ctx_run(fn, *args):
-    """Run fn in a copy of the current context (propagates request_id to tool threads)."""
-    ctx = contextvars.copy_context()
-    return ctx.run(fn, *args)
+def _in_caller_context(fn):
+    """Bind ``fn`` to a copy of the *calling* context, for running in a tool thread.
+
+    Call this where the work is submitted, not inside the worker. The previous
+    helper copied the context inside the pool thread, which is the worker's own
+    empty context: ``run_in_executor`` does not carry context variables across.
+    So tools never saw what the request had set, despite the docstring promising
+    it. ``get_current_user()`` returned "anonymous" in every tool (the agent's
+    view tools looked up and edited dashboards under the wrong owner) and
+    request_id never reached tool logs.
+    """
+    return functools.partial(contextvars.copy_context().run, fn)
 
 
 async def _invoke(callback, *args, **kwargs):
@@ -554,7 +569,7 @@ def _execute_tool_with_timeout(
 ) -> tuple[str, dict | None, dict]:
     """Execute a tool with a timeout guard."""
     timeout = timeout or TOOL_TIMEOUT
-    future = _tool_pool.submit(_ctx_run, _execute_tool, name, input_data, tool_map, user_token, abort_event)
+    future = _tool_pool.submit(_in_caller_context(_execute_tool), name, input_data, tool_map, user_token, abort_event)
     try:
         return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
@@ -600,6 +615,7 @@ async def run_agent_streaming(
     thinking: dict | None = None,
     user_token: str | None = None,
     event_bus=None,
+    honor_plan_requests: bool = True,
 ) -> str:
     """Run an agent turn with streaming, handling the tool loop manually.
 
@@ -623,6 +639,9 @@ async def run_agent_streaming(
         event_bus: Optional EventBus instance. If provided, replaces individual
             callbacks. If None, an EventBus is auto-constructed from the individual
             callback parameters.
+        honor_plan_requests: When the person's latest message asks only for a
+            plan or advice, refuse writes before confirmation. Callers whose
+            messages are generated prompts rather than a person's words pass False.
 
     Returns the full final text response.
     """
@@ -646,6 +665,11 @@ async def run_agent_streaming(
     full_text_parts = []
     iterations = 0
     policy_denied_write = False
+    # Asked for a plan, not a change: writes are refused before anyone is asked
+    # to confirm them (see action_policy.requests_plan_only).
+    # Only for turns a person wrote: callers that build their own prompts (plan
+    # phases, monitor investigations) pass honor_plan_requests=False.
+    plan_only = honor_plan_requests and requests_plan_only(latest_user_text(messages))
 
     from .loop_budget import LoopBudget, compact_tool_results
 
@@ -864,7 +888,13 @@ async def run_agent_streaming(
                 for b in read_blocks:
                     task = asyncio.ensure_future(
                         loop.run_in_executor(
-                            _tool_pool, _ctx_run, _execute_tool, b.name, b.input, tool_map, user_token, _abort_401
+                            _tool_pool,
+                            _in_caller_context(_execute_tool),
+                            b.name,
+                            b.input,
+                            tool_map,
+                            user_token,
+                            _abort_401,
                         )
                     )
                     task_to_block[task] = b
@@ -952,6 +982,23 @@ async def run_agent_streaming(
                         },
                     )
                     continue
+                if plan_only:
+                    results_map[block.id] = (PLAN_ONLY_REFUSAL, None)
+                    failed_ids.add(block.id)
+                    await event_bus.on_tool_result(
+                        {
+                            "tool_name": block.name,
+                            "input": block.input,
+                            "status": "denied",
+                            "error_message": PLAN_ONLY_REFUSAL,
+                            "error_category": "plan_only",
+                            "duration_ms": 0,
+                            "result_bytes": len(PLAN_ONLY_REFUSAL),
+                            "was_confirmed": False,
+                            "turn_number": iterations,
+                        },
+                    )
+                    continue
                 confirmed = await event_bus.on_confirm(block.name, block.input)
                 if not is_explicit_approval(confirmed):
                     results_map[block.id] = ("Operation denied. No confirmation callback or user rejected.", None)
@@ -974,8 +1021,7 @@ async def run_agent_streaming(
                 loop = asyncio.get_running_loop()
                 text, component, exec_meta = await loop.run_in_executor(
                     _tool_pool,
-                    _ctx_run,
-                    _execute_tool_with_timeout,
+                    _in_caller_context(_execute_tool_with_timeout),
                     block.name,
                     block.input,
                     tool_map,

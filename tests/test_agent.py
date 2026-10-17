@@ -963,3 +963,44 @@ class TestStrictWriteTools:
         for d in defs:
             for prop in d["input_schema"].get("properties", {}).values():
                 assert not {"minimum", "maximum", "minLength", "maxLength"} & prop.keys()
+
+
+@patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
+class TestToolsRunInCallerContext:
+    """Tools must see context set by the request (user identity, request id).
+
+    The pool helper used to copy the context inside the worker thread, which
+    is the worker's own empty context, so every view tool ran as "anonymous"
+    and looked up dashboards under the wrong owner.
+    """
+
+    async def _run(self, name, write_tools=None, on_confirm=None):
+        from sre_agent.view_tools import get_current_user, set_current_user
+
+        tool_use = SimpleNamespace(
+            stop_reason="tool_use", content=[SimpleNamespace(type="tool_use", id="t1", name=name, input={})]
+        )
+        final = SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text="Done.")])
+        client = MagicMock()
+        client.messages.stream = MagicMock(side_effect=[_MockAsyncStream(tool_use), _MockAsyncStream(final)])
+        tool = MagicMock()
+        tool.call.side_effect = lambda _input: f"user={get_current_user()}"
+        set_current_user("alice")
+        messages = [{"role": "user", "content": "go"}]
+        kwargs = {"write_tools": write_tools} if write_tools else {}
+        if on_confirm:
+            kwargs["on_confirm"] = on_confirm
+        await run_agent_streaming(
+            client=client, messages=messages, system_prompt="t", tool_defs=[], tool_map={name: tool}, **kwargs
+        )
+        results = next(m["content"] for m in messages if m["role"] == "user" and isinstance(m["content"], list))
+        return results[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_read_tool_sees_request_user(self):
+        assert await self._run("list_saved_views") == "user=alice"
+
+    @pytest.mark.asyncio
+    async def test_write_tool_sees_request_user(self, mock_k8s):
+        result = await self._run("delete_pod", write_tools={"delete_pod"}, on_confirm=AsyncMock(return_value=True))
+        assert "user=alice" in result
