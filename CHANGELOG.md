@@ -4,6 +4,9 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## Unreleased
 
+### Added
+- "What changed" is read from the cluster and ranked. An episode's change list used to come only from audit rows that happened to reach the inbox, oldest first. It now reads, for the hour before the condition began: Deployment rollouts (with the image change), StatefulSet/DaemonSet revisions, ConfigMap edits (who and when, from managedFields), Argo CD syncs into the affected namespaces, and cluster upgrades. Each change says how it relates — the same workload, a ConfigMap an affected workload mounts, the same namespace, or cluster-wide — and the list is most relevant first. Rollouts carry a `rollback` suggestion (the previous revision). Investigations get the top five in their prompt
+
 ### Fixed
 - Rollouts are not incidents. A Deployment mid-rollout (Progressing, `ReplicaSetUpdated`/`NewReplicaSetCreated`) is not flagged, and any Deployment or DaemonSet short of desired gets 10 minutes to settle; a rollout past its progress deadline is flagged at once. A new 0/1 Deployment used to be a critical finding with a webhook and, at trust 3, an auto-fix
 - Init containers are scanned: one stuck in CrashLoopBackOff or ImagePullBackOff, which keeps the whole pod from starting, produced no finding

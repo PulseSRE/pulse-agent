@@ -96,7 +96,8 @@ def _change(key, title, created_at, namespace="demo"):
     }
 
 
-def test_changes_before_the_episode_are_reported_oldest_first(repo):
+def test_changes_are_most_relevant_first_then_nearest_the_onset(repo):
+    """Oldest-first put the change that broke it below everything before it."""
     started = 1_786_000_000
     repo.get.return_value = _episode("ep-1", started)
     rows = [
@@ -106,7 +107,7 @@ def test_changes_before_the_episode_are_reported_oldest_first(repo):
     with patch("sre_agent.repositories.inbox_repo.get_inbox_repo") as g:
         g.return_value.fetch_items_by_category_window.return_value = rows
         changes = changes_around("ep-1")
-    assert [c["title"] for c in changes] == ["settings changed", "ocm-controller rolled out"]
+    assert [c["title"] for c in changes] == ["ocm-controller rolled out", "settings changed"]
 
 
 def test_each_change_says_how_long_before_it_happened(repo):

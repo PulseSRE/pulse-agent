@@ -380,7 +380,7 @@ def recurrence_summary(episode_id: str) -> dict[str, Any]:
 # How far before an episode started to look for changes. A rollout or a config
 # edit that preceded the damage by more than this is unlikely to be the reason,
 # and widening it turns "what changed" into "everything that ever changed".
-_CHANGE_LOOKBACK_SECONDS = 30 * 60
+_CHANGE_LOOKBACK_SECONDS = 60 * 60
 
 
 def changes_around(episode_id: str) -> list[dict[str, Any]]:
@@ -419,9 +419,31 @@ def changes_around(episode_id: str) -> list[dict[str, Any]]:
         logger.exception("Could not read change history for episode %s", episode_id)
         return []
 
-    changes = []
+    # The cluster's own record first: rollouts, ConfigMap edits, GitOps syncs
+    # and upgrades, ranked by how close they sit to what broke. The audit rows
+    # below fill in what the cluster no longer shows (an RBAC grant, a change
+    # whose object has since been deleted).
+    keys = [str(episode.get("correlation_key") or "")]
+    symptom_namespaces: list[str] = []
+    try:
+        for sym in repo.symptoms(episode_id):
+            keys.append(str(sym.get("correlation_key") or ""))
+            symptom_namespaces.append(str(sym.get("namespace") or ""))
+    except Exception:
+        logger.debug("Could not read symptoms for episode %s", episode_id, exc_info=True)
+    try:
+        from .change_correlation import ranked_changes
+
+        changes = ranked_changes(keys, symptom_namespaces, started, lookback=_CHANGE_LOOKBACK_SECONDS)
+    except Exception:
+        logger.exception("Could not read live changes for episode %s", episode_id)
+        changes = []
+
+    seen = {c["title"] for c in changes}
     for row in rows or []:
         created = int(row["created_at"])
+        if row["title"] in seen:
+            continue
         changes.append(
             {
                 # The correlation key is built as category:namespace:resource,
@@ -431,9 +453,12 @@ def changes_around(episode_id: str) -> list[dict[str, Any]]:
                 "namespace": row["namespace"] or "",
                 "at": created,
                 "seconds_before": started - created,
+                "relevance": "recorded by audit",
+                "score": 0.5,
             }
         )
-    changes.sort(key=lambda c: c["at"])
+    # Most relevant first; the UI shows this list before anything else.
+    changes.sort(key=lambda c: (-float(c.get("score", 0)), c["seconds_before"]))
     return changes
 
 
