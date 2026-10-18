@@ -34,6 +34,10 @@ _current_scanner: ContextVar[str | None] = ContextVar("current_scanner", default
 # Failures reported during the scan currently in flight, name -> message.
 _failures_this_cycle: dict[str, str] = {}
 
+# Inside optional_access(), a 403 is an expected gap rather than a failure.
+_optional_access: ContextVar[bool] = ContextVar("optional_access", default=False)
+_logged_optional_gaps: set[str] = set()
+
 # How many consecutive failed runs before a scanner is reported as broken.
 # One failure is a blip — an API timeout, a rolling apiserver. Three in a row
 # across three scan cycles is a scanner that is not working.
@@ -57,6 +61,24 @@ INVESTIGATION_RATE_THRESHOLD = 0.5
 
 
 @contextlib.contextmanager
+def optional_access():
+    """Mark a sub-check whose permission the default install does not grant.
+
+    A scanner that is entirely blind without a permission should fail loudly
+    (see report_api_error). One extra check inside an otherwise working
+    scanner — the SA-token look in audit_auth, which needs Secret access the
+    operator only grants on opt-in — should not mark the whole scanner
+    failed: a failed scanner cannot resolve its findings, so the other checks'
+    findings would stand forever.
+    """
+    token = _optional_access.set(True)
+    try:
+        yield
+    finally:
+        _optional_access.reset(token)
+
+
+@contextlib.contextmanager
 def scanning(name: str):
     """Mark which scanner is running, so report_failure knows who called it."""
     token = _current_scanner.set(name)
@@ -64,6 +86,31 @@ def scanning(name: str):
         yield
     finally:
         _current_scanner.reset(token)
+
+
+def report_api_error(err: Any) -> None:
+    """Record a Kubernetes API error the running scanner received, if any.
+
+    Called by ``safe()``/``safe_async()`` for every error they turn into a
+    ``ToolError``. Scanners answered those with ``return findings`` — an
+    empty list, which is what a clean scan returns — so a 403 from RBAC the
+    operator never granted (secrets, clusteroperators, CRDs) showed as
+    "clean" forever. A 404 is not blindness: the API is simply not served
+    here (no ClusterOperators on vanilla Kubernetes), so it is not reported.
+    """
+    if _current_scanner.get() is None:
+        return
+    category = getattr(err, "category", "") or "error"
+    if category == "not_found":
+        return
+    if category == "forbidden" and _optional_access.get():
+        key = f"{_current_scanner.get()}:{getattr(err, 'operation', '')}"
+        if key not in _logged_optional_gaps:
+            _logged_optional_gaps.add(key)
+            logger.info("Scanner %s skips a check it has no permission for: %s", _current_scanner.get(), err)
+        return
+    message = getattr(err, "message", None) or str(err)
+    report_failure(f"{category}: {message}")
 
 
 def report_failure(exc: BaseException | str) -> None:

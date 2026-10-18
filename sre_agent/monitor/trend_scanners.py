@@ -25,12 +25,15 @@ def _query_prometheus(query: str) -> list[dict]:
         data = get_prometheus_client().query(query, timeout=15)
         if data.get("status") != "success":
             logger.debug("Prometheus query failed: %s", data.get("error", "unknown"))
+            # Without this the scanner reported "clean" with Prometheus down.
+            report_failure(f"Prometheus query failed: {data.get('error', 'unknown')}")
             return []
         _prometheus_degraded = False
         return data.get("data", {}).get("result", [])
     except PrometheusConfigError as e:
         logger.warning("Prometheus config error: %s", e)
         _prometheus_degraded = True
+        report_failure(f"Prometheus not configured: {e}")
         return []
     except Exception as e:
         now = time.time()
@@ -40,6 +43,7 @@ def _query_prometheus(query: str) -> list[dict]:
         else:
             logger.debug("Prometheus query error (suppressed): %s", e)
         _prometheus_degraded = True
+        report_failure(f"Prometheus unreachable: {e}")
         return []
 
 

@@ -119,8 +119,11 @@ class SLORegistry:
         """
         results: list[SLOStatus] = []
         for key, slo in self._slos.items():
-            value = current_values.get(key, slo.target)  # Assume target if no data
-            results.append(self.check_burn_rate(slo, value))
+            # No measurement is no verdict. Assuming the target here reported
+            # every unmeasured SLO as healthy.
+            if key not in current_values:
+                continue
+            results.append(self.check_burn_rate(slo, current_values[key]))
         return results
 
     def query_prometheus_values(self) -> dict[str, float]:
@@ -133,25 +136,36 @@ class SLORegistry:
 
         values: dict[str, float] = {}
         try:
-            from .k8s_tools.monitoring import get_prometheus_query
+            from .prometheus import get_prometheus_client
 
-            for key, slo in self._slos.items():
-                query = self._build_prom_query(slo)
-                if not query:
-                    continue
-                result = get_prometheus_query.func(query)
-                if isinstance(result, str) and "error" not in result.lower():
-                    # Parse the value from the result
-                    try:
-                        import json
+            client = get_prometheus_client()
+        except Exception as e:
+            _report_scan_failure(f"Prometheus not available for SLO queries: {e}")
+            return values
 
-                        data = json.loads(result) if result.startswith("{") else {}
-                        val = data.get("value", slo.target)
-                        values[key] = float(val)
-                    except (ValueError, TypeError):
-                        logger.debug("Failed to parse SLO query result for %s", key, exc_info=True)
-        except Exception:
-            logger.debug("Prometheus SLO query failed", exc_info=True)
+        for key, slo in self._slos.items():
+            query = self._build_prom_query(slo)
+            if not query:
+                continue
+            # The raw API result, not the get_prometheus_query tool: that
+            # returns a (text, component) tuple for the chat UI, which this
+            # parser never matched — every SLO fell back to its target and
+            # read "ok", so the burn-rate scanner could not fire.
+            try:
+                data = client.query(query, timeout=15)
+            except Exception as e:
+                _report_scan_failure(f"SLO query failed for {key}: {e}")
+                continue
+            if data.get("status") != "success":
+                _report_scan_failure(f"SLO query failed for {key}: {data.get('error', 'unknown')}")
+                continue
+            series = data.get("data", {}).get("result", [])
+            if not series:
+                continue  # no data for this service: no verdict, not a pass
+            try:
+                values[key] = float(series[0]["value"][1])
+            except (KeyError, IndexError, TypeError, ValueError):
+                logger.debug("Unparseable SLO query result for %s: %r", key, series[0])
 
         return values
 
@@ -313,3 +327,14 @@ def query_slo_burn_rate(slo_id: str) -> dict | None:
         "window_days": slo.window_days,
         "budget_remaining_hours": slo.window_days * 24 * (1.0 - slo.target),
     }
+
+
+def _report_scan_failure(message: str) -> None:
+    """Mark the running scanner degraded (no-op outside a monitor scan)."""
+    logger.debug(message)
+    try:
+        from .monitor.scanner_health import report_failure
+
+        report_failure(message)
+    except Exception:
+        logger.debug("Could not report SLO scan failure", exc_info=True)

@@ -96,7 +96,11 @@ async def safe_async(coro: Any) -> Any:
     try:
         return await coro
     except Exception as e:
-        return classify_api_error(e)
+        err = classify_api_error(e)
+        from .monitor.scanner_health import report_api_error
+
+        report_api_error(err)
+        return err
 
 
 async def close_async_clients() -> None:

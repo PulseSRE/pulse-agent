@@ -1045,7 +1045,9 @@ def scan_slo_burn_rate() -> list[dict]:
             )
 
         return findings
-    except Exception:
+    except Exception as e:
+        logger.warning("SLO burn-rate scan failed: %s", e)
+        report_failure(e)
         return []
 
 

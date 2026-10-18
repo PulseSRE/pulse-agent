@@ -15,7 +15,7 @@ from .errors import ToolError
 from .k8s_client import get_apps_client, get_core_client, get_custom_client, get_rbac_client, safe
 from .monitor import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING, _make_finding, _skip_namespace
 from .monitor.baseline import occurred_since_reset
-from .monitor.scanner_health import report_failure
+from .monitor.scanner_health import optional_access, report_failure
 
 logger = logging.getLogger("pulse_agent")
 
@@ -406,7 +406,8 @@ def scan_auth_events() -> list[dict]:
         # 1. Check for kubeadmin user (should be removed post-install)
         try:
             custom = get_custom_client()
-            users = safe(lambda: custom.list_cluster_custom_object("user.openshift.io", "v1", "users"))
+            with optional_access():
+                users = safe(lambda: custom.list_cluster_custom_object("user.openshift.io", "v1", "users"))
             if not isinstance(users, ToolError):
                 for user in users.get("items", []):
                     if user.get("metadata", {}).get("name") == "kubeadmin":
@@ -460,11 +461,12 @@ def scan_auth_events() -> list[dict]:
             logger.debug("openshift-authentication namespace not available (non-OCP cluster): %s", e)
 
         # 3. Check for recently created ServiceAccount tokens (potential token theft vector)
-        secrets = safe(
-            lambda: core.list_secret_for_all_namespaces(
-                field_selector="type=kubernetes.io/service-account-token",
+        with optional_access():  # Secret read is opt-in (spec.agent.allowSecretAccess)
+            secrets = safe(
+                lambda: core.list_secret_for_all_namespaces(
+                    field_selector="type=kubernetes.io/service-account-token",
+                )
             )
-        )
         if not isinstance(secrets, ToolError):
             cutoff = datetime.now(UTC) - timedelta(hours=24)
             recent_tokens = []
@@ -500,7 +502,10 @@ def scan_auth_events() -> list[dict]:
         # 4. Check for new OAuthClient registrations (OpenShift)
         try:
             custom = get_custom_client()
-            oauth_clients = safe(lambda: custom.list_cluster_custom_object("oauth.openshift.io", "v1", "oauthclients"))
+            with optional_access():  # oauthclients carry client secrets; not granted by default
+                oauth_clients = safe(
+                    lambda: custom.list_cluster_custom_object("oauth.openshift.io", "v1", "oauthclients")
+                )
             if not isinstance(oauth_clients, ToolError):
                 cutoff = datetime.now(UTC) - timedelta(hours=24)
                 for oc in oauth_clients.get("items", []):
