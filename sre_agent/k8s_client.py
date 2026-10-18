@@ -288,7 +288,11 @@ def safe(fn) -> Any:
     try:
         return fn()
     except ApiException as e:
-        return classify_api_error(e)
+        err = classify_api_error(e)
+        from .monitor.scanner_health import report_api_error
+
+        report_api_error(err)
+        return err
 
 
 def safe_list(list_all_fn, list_namespaced_fn, namespace: str = "ALL", **kwargs):

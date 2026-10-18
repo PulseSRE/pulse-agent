@@ -15,6 +15,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from ..config import get_settings
+from ..errors import ToolError
 from ..k8s_client import get_core_client
 from ..repositories.monitor_repo import get_monitor_repo
 from .actions import mark_finding_actions_resolved, save_action
@@ -1068,7 +1069,10 @@ class ClusterMonitor:
 
             async_core = await get_async_core_client()
             shared_pods = await safe_async(async_core.list_pod_for_all_namespaces())
-            if shared_pods is not None and not isinstance(shared_pods, str):
+            # A ToolError is not a str. Passing one on made crashloop, oom and
+            # image_pull see "no pods" and report clean; leaving it out makes
+            # each of them list pods itself, and report the error if it recurs.
+            if shared_pods is not None and not isinstance(shared_pods, (str, ToolError)):
                 shared_resources["pods"] = shared_pods
         except Exception as e:
             logger.error("Failed to fetch shared pod list: %s", e)
