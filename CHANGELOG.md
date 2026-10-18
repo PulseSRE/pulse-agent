@@ -2,7 +2,9 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
-## Unreleased
+## v2.33.0 (2026-10-18)
+
+Paired with pulse-ui v2.33.0 and pulse-operator v0.10.0. No new migrations. Upgrade the operator too: v0.10.0 grants the read-only RBAC the new scanners and the "what changed" list use (without it they report the 403 and skip that source). Monitor connections now need a forwarded user identity to answer fix proposals; behind the operator's OAuth proxy they always have one. Pull requests #158–#165.
 
 ### Added
 - Four scanners for what SREs get paged for and Pulse could not see. **Storage**: PVCs Pending over 5 minutes, pods stuck on FailedMount/FailedAttachVolume (with the reason), volumes over 90% full (critical at 97%). **Routes & DNS**: routes answering over 5% 5xx at the router (works for apps that export no metrics; needs at least 0.5 req/s so one failed request is not "100% errors") and cluster DNS answering SERVFAIL. **Admission webhooks**: webhooks the API server cannot reach, or slow past 5s at p99. **Maintenance blockers**: PodDisruptionBudgets that allow no disruption while every pod is healthy (a drain or upgrade will hang on them), and MachineConfigPools that are degraded or updating for over an hour
