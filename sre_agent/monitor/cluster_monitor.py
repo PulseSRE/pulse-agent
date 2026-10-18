@@ -248,11 +248,7 @@ class ClusterMonitor:
                 len(self._subscribers),
                 client.trust_level,
             )
-            standing = [
-                f
-                for f in self._last_findings.values()
-                if f.get("noiseScore", 0.0) < self._noise_threshold
-            ]
+            standing = [f for f in self._last_findings.values() if f.get("noiseScore", 0.0) < self._noise_threshold]
         # Findings are broadcast once, when they first appear, and the next
         # findings_snapshot prunes the UI to the ids it lists. A dashboard
         # opened after that first broadcast never saw them, so a standing
