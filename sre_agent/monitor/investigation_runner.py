@@ -160,8 +160,12 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
         # Spawn plan-based investigation as background task
         try:
             from ..plan_templates import match_template
+            from .alert_plans import plan_category_for
 
-            template = match_template(category=finding.get("category", ""))
+            # The same mapping plan_executor uses to pick the plan. With the raw
+            # category, an alert finding ("alerts") matched no template, so
+            # firing alerts never started a plan-based investigation.
+            template = match_template(category=plan_category_for(finding))
             if template:
                 monitor._investigation_tasks = [t for t in monitor._investigation_tasks if not t.done()]
                 if len(monitor._investigation_tasks) >= get_settings().monitor.max_concurrent_investigations:

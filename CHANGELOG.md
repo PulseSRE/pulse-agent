@@ -5,6 +5,15 @@ All notable changes to Pulse Agent are documented in this file.
 ## Unreleased
 
 ### Fixed
+- Rollouts are not incidents. A Deployment mid-rollout (Progressing, `ReplicaSetUpdated`/`NewReplicaSetCreated`) is not flagged, and any Deployment or DaemonSet short of desired gets 10 minutes to settle; a rollout past its progress deadline is flagged at once. A new 0/1 Deployment used to be a critical finding with a webhook and, at trust 3, an auto-fix
+- Init containers are scanned: one stuck in CrashLoopBackOff or ImagePullBackOff, which keeps the whole pod from starting, produced no finding
+- OOM findings age out after 6 hours (one kill three weeks ago stayed critical forever), and a Job container killed in its only run (`state.terminated`, restartPolicy Never) is reported
+- Alerts name their resource: StatefulSet, DaemonSet, Job, PVC, HPA and ClusterOperator labels map to resources, and other alerts are told apart by `job`/`instance`/`mountpoint`/... So ClusterOperatorDegraded for two operators, or one filesystem alert on two mounts, are two findings instead of one
+- Firing alerts start plan-based investigations: the runner matched templates on the raw category ("alerts"), which matched nothing. Plan scaffolding is keyed on the template that ran, so it no longer writes an unreviewed copy that shadowed the reviewed plan on the next match
+- Warning-event groups are warnings unless 5x over the threshold; every group reached here at the threshold, so all of them were critical
+- RBAC audit: a cluster-admin grant made with `kubectl apply` (`kubectl-client-side-apply`) is flagged, and the `admin` RoleBinding `oc new-project` gives its requester is not. The kubeadmin check reads the `kube-system/kubeadmin` Secret (with Secret access); it looked for a User OpenShift never creates
+- Two security-posture lines under one heading are two findings, and posture findings no longer get the no-resource confidence penalty
+- Error-rate acceleration needs at least 1% of requests failing and more than double yesterday's share; any upward slope used to count
 - A scanner that cannot see no longer reports "clean". Every Kubernetes API error a scanner swallowed (`safe()`/`safe_async()`) and every failed Prometheus query now marks that scanner failed for the cycle, with the reason. On a default install the operator grants no Secrets, ClusterOperators or CRDs, so the cert, operators and stuck-CRD scanners were permanently blind while showing clean; they now show the 403. A 404 (API not served, e.g. no ClusterOperators on vanilla Kubernetes) is not a failure, and the opt-in sub-checks in `audit_auth` (SA-token Secrets, users, OAuth clients) skip quietly instead of failing the whole scanner
 - The SLO burn-rate scanner can fire. It parsed the chat tool's `(text, component)` tuple as a string, never matched, and evaluated every SLO at its own target — 50% measured availability read "ok". It now reads the Prometheus API result, and an SLO with no data has no verdict instead of a pass
 - A failed shared pod list is no longer handed to crashloop/oom/image_pull as "no pods"; each lists pods itself and reports if that fails too

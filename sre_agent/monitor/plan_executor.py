@@ -156,10 +156,16 @@ async def try_plan_execution(monitor: ClusterMonitor, finding: dict) -> bool:
                 save_scaffolded_skill(skill_content, skill_name)
 
                 phase_ids = [p.id for p in template.phases]
+                # Keyed on the template that just ran, never the raw finding
+                # category. "alerts" or "workloads" never matched a reviewed
+                # template by name, so each run wrote an unreviewed copy keyed
+                # on the raw category — and the next match_template() found it
+                # first, shadowing the reviewed plan from then on. The template
+                # that ran already exists, so this no longer duplicates it.
                 scaffold_plan_template(
                     skill_name=skill_name,
                     plan_phases=phase_ids,
-                    incident_type=finding.get("category", "unknown"),
+                    incident_type=template.incident_type,
                     confidence=conf,
                 )
 

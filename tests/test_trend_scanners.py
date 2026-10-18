@@ -156,7 +156,7 @@ def test_scan_error_rate_acceleration_detects_increasing_errors(mock_prometheus_
                 "service": "api-service",
                 "code": "500",
             },
-            "value": [1234567890, "0.005"],
+            "value": [1234567890, "0.05"],
         }
     ]
 
@@ -168,28 +168,20 @@ def test_scan_error_rate_acceleration_detects_increasing_errors(mock_prometheus_
         assert findings[0]["category"] == "errors"
         assert findings[0]["findingType"] == "trend"
         assert "api-service" in findings[0]["title"]
-        assert "increasing" in findings[0]["summary"]
-        assert "24 hours" in findings[0]["summary"]
+        assert "5.0% of requests" in findings[0]["summary"]
+        assert "double" in findings[0]["summary"]
         assert findings[0]["confidence"] == 0.70
 
 
 def test_scan_error_rate_acceleration_no_findings_stable_rate(mock_prometheus_response):
-    """Test error rate acceleration ignores stable or decreasing error rates."""
-    results = [
-        {
-            "metric": {
-                "namespace": "default",
-                "service": "api-service",
-                "code": "500",
-            },
-            "value": [1234567890, "-0.001"],
-        }
-    ]
+    """Stable or slowly rising errors are filtered in PromQL, so nothing comes back."""
+    from sre_agent.monitor.trend_scanners import _ERROR_ACCELERATION_QUERY
 
-    with _patch_prom(mock_prometheus_response(results)):
-        findings = scan_error_rate_acceleration()
-
-        assert len(findings) == 0
+    with _patch_prom(mock_prometheus_response([])):
+        assert scan_error_rate_acceleration() == []
+    # Any upward slope used to count; now it needs a real share and a real jump.
+    assert "> 0.01" in _ERROR_ACCELERATION_QUERY
+    assert "offset 1d" in _ERROR_ACCELERATION_QUERY
 
 
 def test_all_scanners_handle_prometheus_errors():
