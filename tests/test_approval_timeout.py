@@ -225,3 +225,59 @@ class TestApprovalWaitDoesNotBlockTheScan:
         assert [r["status"] for r in saved] == ["expired"]
         assert "never attempted" in saved[0]["error"]
         assert monitor._proposals_awaiting_approval == set()
+
+
+class TestApprovalIsReCheckedWhenItArrives:
+    """An answer can arrive minutes after the question; act only if it still applies."""
+
+    async def _approve(self, monitor, subscriber, saved, *, standing: bool):
+        import contextlib
+
+        from sre_agent.monitor.confidence import _finding_key
+
+        patches = _autofix_patches(monitor, saved)
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            execute = stack.enter_context(patch.object(monitor, "_execute_fix", new=AsyncMock(return_value=True)))
+            subscriber._approvers = {}
+            await asyncio.wait_for(monitor.auto_fix([dict(FINDING)]), timeout=5)
+            if standing:
+                monitor._last_findings[_finding_key(FINDING)] = dict(FINDING)
+            action_id, future = next(iter(subscriber._pending_action_approvals.items()))
+            subscriber._approvers[action_id] = "alice"
+            future.set_result(True)
+            for task in list(monitor._approval_tasks):
+                await asyncio.wait_for(task, timeout=5)
+            return execute
+
+    @pytest.mark.asyncio
+    async def test_approval_for_a_condition_that_cleared_changes_nothing(self):
+        monitor, subscriber, saved = _ask_first_monitor()
+        execute = await self._approve(monitor, subscriber, saved, standing=False)
+        execute.assert_not_awaited()
+        assert [r["status"] for r in saved] == ["expired"]
+        assert "cleared before the approval" in saved[0]["error"]
+        assert saved[0]["approvedBy"] == "alice"
+
+    @pytest.mark.asyncio
+    async def test_approval_for_a_standing_condition_executes_and_names_the_approver(self):
+        monitor, subscriber, saved = _ask_first_monitor()
+        execute = await self._approve(monitor, subscriber, saved, standing=True)
+        execute.assert_awaited_once()
+        assert execute.await_args.kwargs["action_report"]["approvedBy"] == "alice"
+
+    @pytest.mark.asyncio
+    async def test_an_observe_only_dashboard_is_nobody_to_ask(self):
+        import contextlib
+
+        monitor, subscriber, saved = _ask_first_monitor()
+        subscriber.can_approve = False
+        patches = _autofix_patches(monitor, saved)
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            await asyncio.wait_for(monitor.auto_fix([dict(FINDING)]), timeout=5)
+        assert subscriber._pending_action_approvals == {}, "it must not be handed the approval"
+        assert monitor._approval_tasks == set()
+        assert [r["status"] for r in saved] == ["proposed"]

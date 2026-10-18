@@ -664,7 +664,9 @@ class ClusterMonitor:
             if trust_level == 2:
                 corr_key = _finding_corr_key(finding)
                 async with self._subscribers_lock:
-                    nobody_to_ask = not self._subscribers
+                    # Only a client that may answer counts: an observe-mode or
+                    # anonymous dashboard being open is still "nobody to ask".
+                    nobody_to_ask = not any(getattr(c, "can_approve", True) for c in self._subscribers)
                 if nobody_to_ask and get_monitor_repo().check_pending_proposal(corr_key):
                     # Already asked, still unanswered. Asking again every scan
                     # is a flood, not persistence — measured on the reference
@@ -702,10 +704,11 @@ class ClusterMonitor:
                 await self._broadcast_raw(action_report)
                 loop = asyncio.get_running_loop()
                 approval_future = loop.create_future()
-                # Register the pending approval on ALL subscribers
+                # Register the pending approval on every subscriber that may answer it
                 async with self._subscribers_lock:
                     for client in self._subscribers:
-                        client._pending_action_approvals[action_report["id"]] = approval_future
+                        if getattr(client, "can_approve", True):
+                            client._pending_action_approvals[action_report["id"]] = approval_future
 
                 # The wait happens OFF the scan path (see
                 # _await_approval_then_execute). A dispatched proposal still
@@ -780,9 +783,28 @@ class ClusterMonitor:
                 timed_out = True
             finally:
                 # Clean up from all subscribers
+                approver = ""
                 async with self._subscribers_lock:
                     for client in self._subscribers:
                         client._pending_action_approvals.pop(action_report["id"], None)
+                        approvers = getattr(client, "_approvers", None)
+                        if isinstance(approvers, dict):
+                            approver = approvers.pop(action_report["id"], "") or approver
+            if approver:
+                action_report["approvedBy" if approved else "rejectedBy"] = approver
+
+            if approved:
+                # The answer can arrive minutes after the question. Act on it
+                # only if it still describes the cluster: the condition is
+                # still standing and the server still allows ask-first fixes.
+                stale_reason = self._approval_is_stale(finding)
+                if stale_reason:
+                    approved = False
+                    action_report["status"] = "expired"
+                    action_report["error"] = stale_reason
+                    await self._broadcast_raw(action_report)
+                    save_action(action_report, category=category, resources=resources, finding=finding)
+                    return
 
             if not approved:
                 status, error = _proposal_outcome(timed_out, timeout_s)
@@ -813,6 +835,16 @@ class ClusterMonitor:
             logger.exception("Approval wait for action %s crashed", action_report.get("id", ""))
         finally:
             self._proposals_awaiting_approval.discard(corr_key)
+
+    def _approval_is_stale(self, finding: dict) -> str:
+        """Why an approval that just arrived should not be acted on, or ""."""
+        if int(get_settings().monitor.max_trust_level) < 2:
+            return "Approval arrived after the server stopped allowing ask-first fixes"
+        if not get_settings().monitor.autofix_enabled:
+            return "Approval arrived after auto-fix was turned off"
+        if _finding_key(finding) not in self._last_findings:
+            return "The condition cleared before the approval arrived — nothing was changed"
+        return ""
 
     async def _dispatch_durable_fix(
         self,
@@ -858,7 +890,16 @@ class ClusterMonitor:
                 require_approval=False,
                 recurrence_window_seconds=int(settings.monitor.recurrence_window),
             )
-        except Exception:
+        except Exception as e:
+            if type(e).__name__ == "WorkflowAlreadyStartedError":
+                # One fix workflow per finding is the point of the id scheme.
+                # Falling back to inline here would apply the same fix a
+                # second time beside the run that is already doing it.
+                action_report["status"] = "skipped"
+                action_report["error"] = "A durable fix for this finding is already running"
+                save_action(action_report, category=category, resources=resources, finding=finding)
+                logger.info("Durable auto-fix already running for %s; not dispatching again", finding.get("id"))
+                return True
             logger.warning(
                 "Durable auto-fix dispatch failed for %s; running inline instead",
                 finding.get("id"),
@@ -912,6 +953,12 @@ class ClusterMonitor:
             finding=finding,
             category=category,
         ):
+            # Same cooldown and attempt accounting as the inline path. Without
+            # it every scan re-dispatched for a finding still firing while its
+            # workflow ran.
+            if resource_key:
+                self._recent_fixes[resource_key] = time.time()
+                self._fix_attempt_counts[resource_key] = self._fix_attempt_counts.get(resource_key, 0) + 1
             return True
 
         succeeded = False

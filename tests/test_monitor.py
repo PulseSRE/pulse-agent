@@ -235,7 +235,7 @@ class TestMonitorSessionApprovals:
             async def send_json(self, _data):
                 return None
 
-        session = MonitorSession(DummySocket(), trust_level=2, auto_fix_categories=[])
+        session = MonitorSession(DummySocket(), trust_level=2, auto_fix_categories=[], user="alice")
         loop = asyncio.new_event_loop()
         fut = loop.create_future()
         session._pending_action_approvals["a-1"] = fut

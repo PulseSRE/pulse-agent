@@ -903,7 +903,15 @@ async def websocket_monitor(websocket: WebSocket):
     except (TimeoutError, Exception):
         logger.debug("Monitor subscribe handshake failed, using defaults", exc_info=True)
 
-    client = MonitorClient(websocket, trust_level, auto_fix_categories)
+    try:
+        monitor_user: str | None = _get_current_user(
+            x_forwarded_access_token=websocket.headers.get("x-forwarded-access-token"),
+            x_forwarded_user=websocket.headers.get("x-forwarded-user"),
+        )
+    except HTTPException:
+        monitor_user = None  # may watch, may not answer proposals
+
+    client = MonitorClient(websocket, trust_level, auto_fix_categories, user=monitor_user)
     ws_id = str(uuid.uuid4())
     _ws_alive[ws_id] = True
     _active_monitor_sessions[ws_id] = client
@@ -965,13 +973,22 @@ async def websocket_monitor(websocket: WebSocket):
                 if not isinstance(approved, bool):
                     await websocket.send_json({"type": "error", "message": "approved must be a boolean"})
                     continue
+                if not client.can_approve:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "message": "This session cannot answer fix proposals: it needs a signed-in user "
+                            "and ask-first trust (level 2 or higher).",
+                        }
+                    )
+                    continue
                 handled = client.resolve_action_response(action_id, approved)
                 logger.info("Action response: id=%s approved=%s handled=%s", action_id, approved, handled)
                 if handled:
                     from ..inbox import record_interaction
 
                     record_interaction(
-                        actor="monitor_user",
+                        actor=client.user or "monitor_user",
                         interaction_type="approve_fix" if approved else "reject_fix",
                         action_id=action_id,
                         decision="approved" if approved else "rejected",

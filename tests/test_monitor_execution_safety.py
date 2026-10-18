@@ -382,3 +382,77 @@ async def test_legacy_missing_recurrence_evidence_records_unverifiable_not_succe
     result = await module.IncidentWorkflow().run(module.IncidentInput("legacy-finding", require_approval=False))
     assert result["verdict"] == "unverifiable"
     assert records[0][:2] == ["legacy-finding", "unverifiable"]
+
+
+def test_restart_controller_deletes_with_the_normal_grace_period():
+    """Grace 0 let a replacement start before the old process was gone."""
+    pod = SimpleNamespace(
+        metadata=SimpleNamespace(
+            uid="pod-uid",
+            resource_version="8",
+            owner_references=[SimpleNamespace(kind="StatefulSet", name="owner", controller=True, uid="owner-uid")],
+        ),
+        status=SimpleNamespace(phase="Running", container_statuses=[]),
+    )
+    core = MagicMock()
+    core.read_namespaced_pod.return_value = pod
+    apps = MagicMock()
+    apps.read_namespaced_stateful_set.return_value = SimpleNamespace(metadata=SimpleNamespace(uid="owner-uid"))
+    with (
+        patch("sre_agent.monitor.fix_planner.get_core_client", return_value=core),
+        patch("sre_agent.monitor.fix_planner.get_apps_client", return_value=apps),
+    ):
+        fix_planner.execute_fix_with_snapshot(plan("restart_controller", "pod", "Pod"))
+    assert "grace_period_seconds" not in core.delete_namespaced_pod.call_args.kwargs
+
+
+def _durable_settings():
+    return SimpleNamespace(
+        monitor=SimpleNamespace(durable_autofix=True, recurrence_window=0), temporal=SimpleNamespace(host="t:7233")
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_durable_fix_already_running_is_not_repeated_inline():
+    from temporalio.exceptions import WorkflowAlreadyStartedError
+
+    monitor = ClusterMonitor()
+    monitor._broadcast_raw = AsyncMock()
+    saved = []
+    finding = {"id": "f-1", "category": "crashloop", "resources": [{"kind": "Pod", "name": "p", "namespace": "a"}]}
+    with (
+        patch("sre_agent.config.get_settings", return_value=_durable_settings()),
+        patch("sre_agent.monitor.cluster_monitor.save_action", side_effect=lambda r, **kw: saved.append(dict(r))),
+        patch(
+            "sre_agent.temporal.client.start_incident_run",
+            new=AsyncMock(side_effect=WorkflowAlreadyStartedError("incident-f-1", "IncidentWorkflow")),
+        ),
+    ):
+        dispatched = await monitor._dispatch_durable_fix(
+            action_report={"id": "a-2", "status": "proposed"},
+            targeted_plan=plan("restart_controller", "p", "Pod"),
+            resources=finding["resources"],
+            finding=finding,
+            category="crashloop",
+        )
+    assert dispatched is True, "False would make the caller apply the same fix inline"
+    assert saved[-1]["status"] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_a_durable_dispatch_starts_the_resource_cooldown():
+    monitor = ClusterMonitor()
+    monitor._broadcast_raw = AsyncMock()
+    monitor._dispatch_durable_fix = AsyncMock(return_value=True)
+    finding = {"id": "f-1", "category": "crashloop", "resources": [{"kind": "Pod", "name": "p", "namespace": "a"}]}
+    await monitor._execute_fix(
+        action_report={"id": "a-1"},
+        targeted_plan=plan("restart_controller", "p", "Pod"),
+        category="crashloop",
+        resources=finding["resources"],
+        resource_key="Pod:a:p",
+        finding=finding,
+        verify_resources=None,
+    )
+    assert "Pod:a:p" in monitor._recent_fixes, "without it every scan re-dispatched the same fix"
+    assert monitor._fix_attempt_counts["Pod:a:p"] == 1

@@ -43,6 +43,27 @@ class TestClassifyRootCause:
     def test_empty_cause(self):
         assert classify_root_cause("") == "unknown"
 
+    @pytest.mark.parametrize(
+        ("cause", "category"),
+        [
+            # Generic words used to send all of these to an image patch.
+            ('secret "db-creds" does not exist', "missing_config"),
+            ("CreateContainerConfigError: couldn't find key DB_URL in ConfigMap app/cfg", "missing_config"),
+            ("Back-off pulling image quay.io/acme/api:v9: ErrImagePull manifest unknown", "bad_image"),
+            ("OOMKilled, exit code 137", "oom"),
+            ("Process exits immediately with exit code 1", "crash_exit"),
+            ("lookup postgres: no such host", "dependency"),
+        ],
+    )
+    def test_specific_evidence_decides(self, cause, category):
+        assert classify_root_cause(cause) == category
+
+    def test_two_specific_causes_is_not_a_guess(self):
+        # The pull fails because its pull secret is missing: an image patch
+        # and a config fix are both writes, and only one is right.
+        cause = "ImagePullBackOff: secret regcred not found"
+        assert classify_root_cause(cause) == "unknown"
+
 
 class TestPlanFix:
     def test_bad_image_returns_patch_strategy(self):
