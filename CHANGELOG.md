@@ -4,7 +4,11 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## Unreleased
 
+### Added
+- Pulse says what it cannot see, and how to fix it. A scanner failing several runs in a row becomes a finding titled in plain words ("Certificate Expiry checks are off: Pulse is not allowed to list secrets"), listing the checks that are off and carrying a `remedy`: the opt-in switch to flip (`spec.agent.allowSecretAccess` for Secrets), the resource the agent's role is missing, or what to check when Prometheus or the API server is the problem
+
 ### Fixed
+- A dashboard opened after a finding first appeared now sees it: new monitor subscribers receive every standing finding on connect. Findings are only broadcast when they first appear, so after a reload a standing problem — including "Pulse cannot see X" — was invisible
 - A scanner that cannot see no longer reports "clean". Every Kubernetes API error a scanner swallowed (`safe()`/`safe_async()`) and every failed Prometheus query now marks that scanner failed for the cycle, with the reason. On a default install the operator grants no Secrets, ClusterOperators or CRDs, so the cert, operators and stuck-CRD scanners were permanently blind while showing clean; they now show the 403. A 404 (API not served, e.g. no ClusterOperators on vanilla Kubernetes) is not a failure, and the opt-in sub-checks in `audit_auth` (SA-token Secrets, users, OAuth clients) skip quietly instead of failing the whole scanner
 - The SLO burn-rate scanner can fire. It parsed the chat tool's `(text, component)` tuple as a string, never matched, and evaluated every SLO at its own target — 50% measured availability read "ok". It now reads the Prometheus API result, and an SLO with no data has no verdict instead of a pass
 - A failed shared pod list is no longer handed to crashloop/oom/image_pull as "no pods"; each lists pods itself and reports if that fails too

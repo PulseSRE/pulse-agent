@@ -240,13 +240,26 @@ class ClusterMonitor:
 
     async def subscribe(self, client: MonitorClient) -> None:
         async with self._subscribers_lock:
-            if client not in self._subscribers:
-                self._subscribers.append(client)
-                logger.info(
-                    "ClusterMonitor: client subscribed (total=%d, trust=%d)",
-                    len(self._subscribers),
-                    client.trust_level,
-                )
+            if client in self._subscribers:
+                return
+            self._subscribers.append(client)
+            logger.info(
+                "ClusterMonitor: client subscribed (total=%d, trust=%d)",
+                len(self._subscribers),
+                client.trust_level,
+            )
+            standing = [
+                f
+                for f in self._last_findings.values()
+                if f.get("noiseScore", 0.0) < self._noise_threshold
+            ]
+        # Findings are broadcast once, when they first appear, and the next
+        # findings_snapshot prunes the UI to the ids it lists. A dashboard
+        # opened after that first broadcast never saw them, so a standing
+        # problem — including "Pulse cannot see X" — was invisible to anyone
+        # who reloaded the page.
+        for f in standing:
+            await client.on_event(f)
 
     async def unsubscribe(self, client: MonitorClient) -> None:
         async with self._subscribers_lock:
