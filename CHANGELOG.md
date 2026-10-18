@@ -11,6 +11,14 @@ All notable changes to Pulse Agent are documented in this file.
 - Pod-name stripping only removes generated suffixes: `redis-master-0` and `redis-replica-0` no longer share an inbox item
 - Two reports of one condition in one cycle become one finding instead of two fix attempts
 
+### Security
+- Only a signed-in user on an ask-first (trust 2+) monitor session can answer a fix proposal. Every subscriber used to be handed every pending approval, so an observe-mode dashboard or any holder of the shared WS token could approve a write with no name attached. The approver is recorded on the action and in the audit trail; an observe-only or anonymous dashboard counts as "nobody to ask"
+- An approval is re-checked when it arrives: if the condition has cleared, or the server no longer allows ask-first fixes, nothing is changed and the proposal is recorded as expired
+- Auto-fix pod restarts use the normal grace period instead of 0, so a replacement cannot start while the old process still holds its volume or identity
+- Root-cause classification no longer lets generic words decide. Specific evidence wins, and two specific causes at once fall back to the reviewed default plan instead of guessing between two writes. `secret ... does not exist` used to get an image patch
+- Durable plans: a write phase does not run when a phase it depends on did not complete, matching the in-process engine, and an approved write phase is attempted once instead of being retried after a worker dies (both behind `workflow.patched`, so histories in flight replay unchanged)
+- Durable auto-fix starts the same per-resource cooldown as the inline path, and a dispatch that finds the finding's workflow already running no longer falls back to applying the fix inline a second time
+
 Inbox items for resource-less findings and for pods with hand-written names get a new correlation key once on upgrade; the first scan's reconcile closes the old item and opens the new one.
 
 ## v2.32.0 (2026-10-17)

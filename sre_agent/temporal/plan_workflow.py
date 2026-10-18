@@ -183,16 +183,22 @@ class PlanWorkflow:
         skill_override = resolve_branch(phase, self._outputs)
         timeout = timedelta(seconds=int(phase.get("timeout_seconds", 120) * _PHASE_TIMEOUT_MARGIN))
         args = [plan, phase["id"], params.incident, self._outputs, skill_override]
+        may_write = bool(phase.get("approval_required") and self._approvals.get(phase["id"]))
         if workflow.patched("explicit-plan-write-approval"):
-            args.append(bool(phase.get("approval_required") and self._approvals.get(phase["id"])))
+            args.append(may_write)
+        # The engine already retries a failed contract internally; activity
+        # retry only covers a dead worker. A read-only phase can safely run
+        # once more. An approved write phase cannot: the worker may have died
+        # after the write, and a second attempt would apply it again on the
+        # strength of an approval given for one run.
+        attempts = 2
+        if may_write and workflow.patched("no-retry-approved-writes"):
+            attempts = 1
         return await workflow.execute_activity(
             run_plan_phase,
             args=args,
             start_to_close_timeout=timeout,
-            # The engine already retries a failed contract internally;
-            # activity-level retry only covers a dead worker, and an
-            # agent phase is not safe to blindly re-run more than once.
-            retry_policy=RetryPolicy(maximum_attempts=2, non_retryable_error_types=["ValueError"]),
+            retry_policy=RetryPolicy(maximum_attempts=attempts, non_retryable_error_types=["ValueError"]),
         )
 
     @workflow.run
@@ -230,6 +236,28 @@ class PlanWorkflow:
             runnable: list[dict] = []
             for phase in ready:
                 self._current_phase = phase["id"]
+
+                if phase.get("approval_required") and workflow.patched("writes-need-settled-deps"):
+                    # A gated phase is the one that writes. The in-process
+                    # engine never reaches it unless every dependency came back
+                    # complete or partial; here a failed diagnosis still
+                    # unblocked remediation, and the human was asked to approve
+                    # a fix for a cause nobody found.
+                    unsettled = [
+                        dep
+                        for dep in phase.get("depends_on", [])
+                        if self._outputs.get(dep, {}).get("status") not in ("complete", "partial")
+                    ]
+                    if unsettled:
+                        self._outputs[phase["id"]] = {
+                            **_escalation_output(
+                                phase,
+                                f"Phase '{phase['id']}' not run: {', '.join(unsettled)} did not complete, "
+                                "so there is nothing verified to act on",
+                            ),
+                            "status": "failed",
+                        }
+                        continue
 
                 if phase.get("approval_required"):
                     # Gates are walked in declared order; approvals are keyed
