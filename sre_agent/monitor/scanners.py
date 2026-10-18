@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -13,6 +14,7 @@ from ..k8s_client import get_apps_client, get_autoscaling_client, get_core_clien
 from ..prometheus import PrometheusBackend, PrometheusConfigError, get_prometheus_client
 from .alert_layers import alert_layer, is_posture_alert
 from .baseline import occurred_since_reset, restarts_since_reset
+from .confidence import _stable_title
 from .findings import _make_finding, _skip_namespace
 from .registry import SEVERITY_CRITICAL, SEVERITY_INFO, SEVERITY_WARNING
 from .scanner_health import report_failure
@@ -43,6 +45,62 @@ _BURST_MIN_PODS = 5  # below this, individual findings are still the clearer for
 # lifetime count says. Pods whose last-restart time is unknown are still
 # reported: absence of evidence is not evidence of recovery.
 _STABILISED_AFTER_SECONDS = 6 * 3600
+
+
+# A workload below its desired count is normal for the length of a rollout or
+# a scale-up. Flagging it at once made every deploy a finding — a new 0/1
+# Deployment a critical one, with a webhook and, at trust 3, an auto-fix.
+_SETTLE_GRACE_SECONDS = 600
+_unready_since: dict[str, float] = {}
+_ROLLOUT_IN_PROGRESS = {"ReplicaSetUpdated", "NewReplicaSetCreated", "FoundNewReplicaSet"}
+
+
+def _still_settling(kind: str, ns: str, name: str, now: float, *, stuck: bool = False) -> bool:
+    """Whether a short-of-desired workload is still inside its grace period.
+
+    ``stuck`` is the workload's own verdict that it has given up (a
+    Deployment's ProgressDeadlineExceeded): no grace for that.
+    """
+    key = f"{kind}/{ns}/{name}"
+    since = _unready_since.setdefault(key, now)
+    return not stuck and (now - since) < _SETTLE_GRACE_SECONDS
+
+
+def _forget_settled(kind: str, unhealthy: set[str]) -> None:
+    for key in [k for k in _unready_since if k.startswith(f"{kind}/") and k not in unhealthy]:
+        del _unready_since[key]
+
+
+def _deployment_verdict(d: Any) -> tuple[bool, bool]:
+    """(rolling out, stuck) from the Deployment's Progressing condition."""
+    for cond in getattr(d.status, "conditions", None) or []:
+        if cond.type == "Progressing":
+            if cond.status == "False":
+                return False, True  # ProgressDeadlineExceeded
+            return cond.reason in _ROLLOUT_IN_PROGRESS, False
+    return False, False
+
+
+def _all_container_statuses(pod: Any) -> list[Any]:
+    """Init containers first, then app containers.
+
+    Only ``container_statuses`` was read, so an init container stuck in
+    CrashLoopBackOff or ImagePullBackOff — which keeps the whole pod from
+    starting — produced no finding at all.
+    """
+    status = getattr(pod, "status", None)
+    if status is None:
+        return []
+    return list(getattr(status, "init_container_statuses", None) or []) + list(
+        getattr(status, "container_statuses", None) or []
+    )
+
+
+def _epoch(ts: Any) -> int | None:
+    try:
+        return int(ts.timestamp()) if ts is not None else None
+    except (AttributeError, OSError, ValueError):
+        return None
 
 
 def _last_restart_epoch(cs: Any) -> int | None:
@@ -92,7 +150,7 @@ def scan_crashlooping_pods(pods=None) -> list[dict]:
             # Skip system namespaces
             if _skip_namespace(ns):
                 continue
-            for cs in pod.status.container_statuses or []:
+            for cs in _all_container_statuses(pod):
                 # After a reset, only restarts since that moment count. The
                 # lifetime figure is what makes an inbox say "122x" about a
                 # workload that has restarted twice today.
@@ -107,7 +165,8 @@ def scan_crashlooping_pods(pods=None) -> list[dict]:
                         # Crossed the threshold before the reset and has not
                         # restarted since. Historical, not active.
                         continue
-                    waiting = cs.state.waiting
+                    # A container with no state yet must not abort the scan.
+                    waiting = cs.state.waiting if cs.state else None
                     candidates.append(
                         {
                             "ns": ns,
@@ -229,6 +288,8 @@ def scan_failed_deployments() -> list[dict]:
         deploys = safe(lambda: apps.list_deployment_for_all_namespaces())
         if isinstance(deploys, ToolError):
             return findings
+        now = time.time()
+        unhealthy: set[str] = set()
         for d in deploys.items:
             ns = d.metadata.namespace
             name = d.metadata.name
@@ -237,6 +298,10 @@ def scan_failed_deployments() -> list[dict]:
             desired = d.spec.replicas or 0
             available = d.status.available_replicas or 0
             if desired > 0 and available < desired:
+                unhealthy.add(f"Deployment/{ns}/{name}")
+                rolling, stuck = _deployment_verdict(d)
+                if (rolling and not stuck) or _still_settling("Deployment", ns, name, now, stuck=stuck):
+                    continue
                 findings.append(
                     _make_finding(
                         severity=SEVERITY_WARNING if available > 0 else SEVERITY_CRITICAL,
@@ -248,6 +313,7 @@ def scan_failed_deployments() -> list[dict]:
                         runbook_id="deployment-degraded",
                     )
                 )
+        _forget_settled("Deployment", unhealthy)
     except Exception as e:
         logger.error("Deployment scan failed: %s", e)
         report_failure(e)
@@ -410,6 +476,41 @@ def _alert_is_fixable(alertname: str, resources: list[dict]) -> bool:
     return bool(resources) and resources[0].get("kind") == "Pod"
 
 
+# Alert label -> the resource kind it names, most specific first.
+_ALERT_RESOURCE_LABELS = (
+    ("pod", "Pod"),
+    ("deployment", "Deployment"),
+    ("statefulset", "StatefulSet"),
+    ("daemonset", "DaemonSet"),
+    ("job_name", "Job"),
+    ("persistentvolumeclaim", "PersistentVolumeClaim"),
+    ("horizontalpodautoscaler", "HorizontalPodAutoscaler"),
+    ("node", "Node"),
+)
+# Labels that tell two firings of one alert apart when no resource label does.
+_ALERT_DISCRIMINATORS = ("name", "job", "service", "instance", "container", "mountpoint", "device")
+
+
+def _alert_resources(alertname: str, labels: dict, ns: str) -> list[dict]:
+    """The resource an alert is about, specific enough to tell firings apart.
+
+    Only pod/deployment/node were mapped, so a finding was keyed on the alert
+    name alone for everything else: ClusterOperatorDegraded for two operators,
+    NodeFilesystemSpaceFillingUp on two mounts, TargetDown for two jobs, and
+    any StatefulSet/PVC/Job alert all collapsed into whichever fired first.
+    """
+    for label, kind in _ALERT_RESOURCE_LABELS:
+        if labels.get(label):
+            if kind == "Node":
+                return [{"kind": "Node", "name": labels[label]}]
+            return [{"kind": kind, "name": labels[label], "namespace": ns}]
+    if alertname.startswith("ClusterOperator") and labels.get("name"):
+        return [{"kind": "ClusterOperator", "name": labels["name"]}]
+    parts = [f"{k}={labels[k]}" for k in _ALERT_DISCRIMINATORS if labels.get(k)]
+    name = f"{alertname}{{{','.join(parts)}}}" if parts else alertname
+    return [{"kind": "Alert", "name": name, "namespace": ns}]
+
+
 def scan_firing_alerts() -> list[dict]:
     """Check Prometheus for firing alerts."""
     findings: list[dict[str, Any]] = []
@@ -441,15 +542,7 @@ def scan_firing_alerts() -> list[dict]:
                     summary = alert.get("annotations", {}).get(
                         "summary", alert.get("annotations", {}).get("message", "")
                     )
-                    resources = []
-                    if labels.get("pod"):
-                        resources.append({"kind": "Pod", "name": labels["pod"], "namespace": ns})
-                    elif labels.get("deployment"):
-                        resources.append({"kind": "Deployment", "name": labels["deployment"], "namespace": ns})
-                    elif labels.get("node"):
-                        resources.append({"kind": "Node", "name": labels["node"]})
-                    if not resources:
-                        resources.append({"kind": "Alert", "name": alertname, "namespace": ns})
+                    resources = _alert_resources(alertname, labels, ns)
                     findings.append(
                         _make_finding(
                             severity=sev,
@@ -503,24 +596,42 @@ def scan_oom_killed_pods(pods=None) -> list[dict]:
             pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
         if isinstance(pods, ToolError):
             return findings
+        now_epoch = int(datetime.now(UTC).timestamp())
         for pod in pods.items:
             ns = pod.metadata.namespace
             name = pod.metadata.name
             if _skip_namespace(ns):
                 continue
-            for cs in pod.status.container_statuses or []:
-                last = cs.last_state
-                if last and last.terminated and last.terminated.reason == "OOMKilled":
-                    findings.append(
-                        _make_finding(
-                            severity=SEVERITY_CRITICAL,
-                            category="oom",
-                            title=f"Pod {name} OOMKilled",
-                            summary=f"Container '{cs.name}' was OOMKilled (exit code {last.terminated.exit_code})",
-                            resources=[{"kind": "Pod", "name": name, "namespace": ns}],
-                            auto_fixable=True,
-                        )
+            for cs in _all_container_statuses(pod):
+                # The current state holds the kill for a container that is not
+                # restarted (a Job with restartPolicy Never); last_state holds
+                # it for one that was. Only last_state was read.
+                term = None
+                for st in (cs.state, cs.last_state):
+                    t = getattr(st, "terminated", None) if st else None
+                    if t is not None and t.reason == "OOMKilled":
+                        term = t
+                        break
+                if term is None:
+                    continue
+                killed_at = _epoch(getattr(term, "finished_at", None))
+                if killed_at is not None and (now_epoch - killed_at) > _STABILISED_AFTER_SECONDS:
+                    # last_state keeps the last kill forever: a container that
+                    # was OOMKilled once three weeks ago and has run fine
+                    # since stayed a critical finding for all of it.
+                    continue
+                if not occurred_since_reset(killed_at):
+                    continue
+                findings.append(
+                    _make_finding(
+                        severity=SEVERITY_CRITICAL,
+                        category="oom",
+                        title=f"Pod {name} OOMKilled",
+                        summary=f"Container '{cs.name}' was OOMKilled (exit code {term.exit_code})",
+                        resources=[{"kind": "Pod", "name": name, "namespace": ns}],
+                        auto_fixable=True,
                     )
+                )
     except Exception as e:
         logger.error("OOMKilled scan failed: %s", e)
         report_failure(e)
@@ -540,7 +651,7 @@ def scan_image_pull_errors(pods=None) -> list[dict]:
             name = pod.metadata.name
             if _skip_namespace(ns):
                 continue
-            for cs in pod.status.container_statuses or []:
+            for cs in _all_container_statuses(pod):
                 waiting = cs.state.waiting if cs.state else None
                 if waiting and waiting.reason in ("ImagePullBackOff", "ErrImagePull"):
                     findings.append(
@@ -601,6 +712,8 @@ def scan_daemonset_gaps() -> list[dict]:
         dsets = safe(lambda: apps.list_daemon_set_for_all_namespaces())
         if isinstance(dsets, ToolError):
             return findings
+        now = time.time()
+        unhealthy: set[str] = set()
         for ds in dsets.items:
             ns = ds.metadata.namespace
             name = ds.metadata.name
@@ -609,6 +722,9 @@ def scan_daemonset_gaps() -> list[dict]:
             desired = ds.status.desired_number_scheduled or 0
             ready = ds.status.number_ready or 0
             if desired > 0 and ready < desired:
+                unhealthy.add(f"DaemonSet/{ns}/{name}")
+                if _still_settling("DaemonSet", ns, name, now):
+                    continue
                 findings.append(
                     _make_finding(
                         severity=SEVERITY_WARNING if ready > 0 else SEVERITY_CRITICAL,
@@ -618,6 +734,7 @@ def scan_daemonset_gaps() -> list[dict]:
                         resources=[{"kind": "DaemonSet", "name": name, "namespace": ns}],
                     )
                 )
+        _forget_settled("DaemonSet", unhealthy)
     except Exception as e:
         logger.error("DaemonSet gap scan failed: %s", e)
         report_failure(e)
@@ -780,6 +897,8 @@ class AsyncFailedDeploymentsScanner(AsyncScanner):
             deploys = await safe_async(apps.list_deployment_for_all_namespaces())
             if isinstance(deploys, ToolError):
                 return findings
+            now = time.time()
+            unhealthy: set[str] = set()
             for d in deploys.items:
                 ns = d.metadata.namespace
                 name = d.metadata.name
@@ -788,6 +907,10 @@ class AsyncFailedDeploymentsScanner(AsyncScanner):
                 desired = d.spec.replicas or 0
                 available = d.status.available_replicas or 0
                 if desired > 0 and available < desired:
+                    unhealthy.add(f"Deployment/{ns}/{name}")
+                    rolling, stuck = _deployment_verdict(d)
+                    if (rolling and not stuck) or _still_settling("Deployment", ns, name, now, stuck=stuck):
+                        continue
                     findings.append(
                         _make_finding(
                             severity=SEVERITY_WARNING if available > 0 else SEVERITY_CRITICAL,
@@ -799,6 +922,7 @@ class AsyncFailedDeploymentsScanner(AsyncScanner):
                             runbook_id="deployment-degraded",
                         )
                     )
+            _forget_settled("Deployment", unhealthy)
         except Exception as e:
             logger.error("Async deployment scan failed: %s", e)
             report_failure(e)
@@ -898,6 +1022,8 @@ class AsyncDaemonsetGapsScanner(AsyncScanner):
             dsets = await safe_async(apps.list_daemon_set_for_all_namespaces())
             if isinstance(dsets, ToolError):
                 return findings
+            now = time.time()
+            unhealthy: set[str] = set()
             for ds in dsets.items:
                 ns = ds.metadata.namespace
                 name = ds.metadata.name
@@ -906,6 +1032,9 @@ class AsyncDaemonsetGapsScanner(AsyncScanner):
                 desired = ds.status.desired_number_scheduled or 0
                 ready = ds.status.number_ready or 0
                 if desired > 0 and ready < desired:
+                    unhealthy.add(f"DaemonSet/{ns}/{name}")
+                    if _still_settling("DaemonSet", ns, name, now):
+                        continue
                     findings.append(
                         _make_finding(
                             severity=SEVERITY_WARNING if ready > 0 else SEVERITY_CRITICAL,
@@ -915,6 +1044,7 @@ class AsyncDaemonsetGapsScanner(AsyncScanner):
                             resources=[{"kind": "DaemonSet", "name": name, "namespace": ns}],
                         )
                     )
+            _forget_settled("DaemonSet", unhealthy)
         except Exception as e:
             logger.error("Async daemonset gap scan failed: %s", e)
             report_failure(e)
@@ -1103,7 +1233,10 @@ def scan_security_posture() -> list[dict]:
                     category="security",
                     title=f"Security: {category}",
                     summary=detail,
-                    resources=[],
+                    # Two lines under one heading ("Pod Security: privileged",
+                    # "Pod Security: hostPath") are two problems; with no
+                    # resource they shared a key and only the first was kept.
+                    resources=[{"kind": "SecurityCheck", "name": _stable_title(f"{category}: {detail}")[:120]}],
                     auto_fixable=False,
                 )
             )

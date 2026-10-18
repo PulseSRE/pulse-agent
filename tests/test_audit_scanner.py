@@ -11,6 +11,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from kubernetes.client.rest import ApiException
+
 from sre_agent.audit_scanner import (
     scan_config_changes,
     scan_rbac_changes,
@@ -324,10 +326,30 @@ class TestScanAuthEvents:
             }
             core.return_value.list_namespaced_event.return_value = SimpleNamespace(items=[])
             core.return_value.list_secret_for_all_namespaces.return_value = SimpleNamespace(items=[])
+            core.return_value.read_namespaced_secret.side_effect = ApiException(status=404, reason="Not Found")
             findings = scan_auth_events()
 
         kubeadmin_findings = [f for f in findings if "kubeadmin" in f.get("title", "")]
         assert len(kubeadmin_findings) == 0
+
+    def test_detects_kubeadmin_from_its_secret(self):
+        """kubeadmin is the kube-system/kubeadmin Secret; OpenShift has no kubeadmin User."""
+        from sre_agent.audit_scanner import scan_auth_events
+
+        with (
+            patch("sre_agent.audit_scanner.get_core_client") as core,
+            patch("sre_agent.audit_scanner.get_custom_client") as custom,
+        ):
+            custom.return_value.list_cluster_custom_object.return_value = {"items": []}
+            core.return_value.list_namespaced_event.return_value = SimpleNamespace(items=[])
+            core.return_value.list_secret_for_all_namespaces.return_value = SimpleNamespace(items=[])
+            core.return_value.read_namespaced_secret.return_value = SimpleNamespace(
+                metadata=SimpleNamespace(name="kubeadmin")
+            )
+            findings = scan_auth_events()
+
+        assert [f["title"] for f in findings if "kubeadmin" in f["title"]] == ["kubeadmin account still exists"]
+        core.return_value.read_namespaced_secret.assert_called_with("kubeadmin", "kube-system")
 
     def test_detects_auth_failures(self):
         from sre_agent.audit_scanner import scan_auth_events
@@ -360,6 +382,7 @@ class TestScanAuthEvents:
             role_ref=SimpleNamespace(name="admin", kind="ClusterRole"),
             subjects=[SimpleNamespace(kind="User", name="dev-user")],
         )
+        rb.metadata.managed_fields = [SimpleNamespace(manager="kubectl-client-side-apply")]
         with patch("sre_agent.audit_scanner.get_rbac_client") as rbac:
             rbac.return_value.list_cluster_role_binding.return_value = SimpleNamespace(items=[])
             rbac.return_value.list_role_binding_for_all_namespaces.return_value = SimpleNamespace(items=[rb])
@@ -368,3 +391,46 @@ class TestScanAuthEvents:
         assert findings[0]["severity"] == "warning"
         assert "admin" in findings[0]["title"]
         assert "staging" in findings[0]["title"]
+
+
+class TestRbacBindingsMadeByPeople:
+    def _binding(self, manager, *, name="admin", role="admin"):
+        return SimpleNamespace(
+            metadata=SimpleNamespace(
+                name=name,
+                namespace="team-a",
+                creation_timestamp=_ts(1),
+                managed_fields=[SimpleNamespace(manager=manager)],
+            ),
+            role_ref=SimpleNamespace(name=role, kind="ClusterRole"),
+            subjects=[SimpleNamespace(kind="User", name="alice")],
+        )
+
+    def test_the_admin_binding_oc_new_project_creates_is_not_flagged(self):
+        from sre_agent.audit_scanner import scan_rbac_changes
+
+        with patch("sre_agent.audit_scanner.get_rbac_client") as rbac:
+            rbac.return_value.list_cluster_role_binding.return_value = SimpleNamespace(items=[])
+            rbac.return_value.list_role_binding_for_all_namespaces.return_value = SimpleNamespace(
+                items=[self._binding("openshift-apiserver")]
+            )
+            assert scan_rbac_changes() == []
+
+    def test_cluster_admin_granted_with_kubectl_apply_is_flagged(self):
+        """kubectl-client-side-apply was missing from the human-manager list."""
+        from sre_agent.audit_scanner import scan_rbac_changes
+
+        crb = SimpleNamespace(
+            metadata=SimpleNamespace(
+                name="oops",
+                creation_timestamp=_ts(1),
+                managed_fields=[SimpleNamespace(manager="kubectl-client-side-apply")],
+            ),
+            role_ref=SimpleNamespace(name="cluster-admin"),
+            subjects=[SimpleNamespace(kind="User", name="mallory")],
+        )
+        with patch("sre_agent.audit_scanner.get_rbac_client") as rbac:
+            rbac.return_value.list_cluster_role_binding.return_value = SimpleNamespace(items=[crb])
+            rbac.return_value.list_role_binding_for_all_namespaces.return_value = SimpleNamespace(items=[])
+            findings = scan_rbac_changes()
+        assert [f["severity"] for f in findings] == ["critical"]

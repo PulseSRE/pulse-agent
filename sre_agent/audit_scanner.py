@@ -103,6 +103,21 @@ def scan_config_changes() -> list[dict]:
     return findings
 
 
+# Field managers that mean a person ran a client. kubectl names its manager
+# per verb (kubectl-create, kubectl-edit, kubectl-client-side-apply, ...), so
+# match the family; a fixed list missed `kubectl apply`, the common one.
+_HUMAN_MANAGERS = {"oc", "helm"}
+_HUMAN_MANAGER_PREFIXES = ("kubectl", "oc-")
+
+
+def _made_by_a_person(obj: Any) -> bool:
+    for mf in getattr(obj.metadata, "managed_fields", None) or []:
+        manager = mf.manager or ""
+        if manager in _HUMAN_MANAGERS or manager.startswith(_HUMAN_MANAGER_PREFIXES):
+            return True
+    return False
+
+
 def scan_rbac_changes() -> list[dict]:
     """Detect new or modified RBAC bindings that may represent privilege escalation."""
     findings: list[dict] = []
@@ -126,9 +141,7 @@ def scan_rbac_changes() -> list[dict]:
                 continue
 
             # Only flag bindings created by humans (kubectl, oc, helm), not system controllers
-            managers = {mf.manager or "" for mf in (crb.metadata.managed_fields or [])}
-            user_managers = {"kubectl", "oc", "helm", "kubectl-edit", "kubectl-create"}
-            if not managers & user_managers:
+            if not _made_by_a_person(crb):
                 continue  # Created by a controller/operator — expected on managed clusters
 
             subjects = crb.subjects or []
@@ -168,6 +181,11 @@ def scan_rbac_changes() -> list[dict]:
             ):
                 continue
 
+            # `oc new-project` gives its requester an "admin" RoleBinding,
+            # written by the API server on their behalf. That is the platform
+            # working, not a grant somebody made.
+            if not _made_by_a_person(rb):
+                continue
             role_name = rb.role_ref.name if rb.role_ref else ""
             # Check for bindings to cluster-admin or admin roles
             if role_name in ("cluster-admin", "admin", "edit") and rb.role_ref.kind == "ClusterRole":
@@ -377,7 +395,9 @@ def scan_warning_events() -> list[dict]:
 
             findings.append(
                 _make_finding(
-                    severity=SEVERITY_WARNING if total_count < 50 else SEVERITY_CRITICAL,
+                    # Groups only reach here at >= threshold (50 by default),
+                    # so "< 50 is a warning" made every one of them critical.
+                    severity=SEVERITY_CRITICAL if total_count >= threshold * 5 else SEVERITY_WARNING,
                     category="audit_events",
                     title=f"High-frequency '{reason}' events in {ns} ({total_count}x)",
                     summary=(
@@ -403,31 +423,28 @@ def scan_auth_events() -> list[dict]:
     try:
         core = get_core_client()
 
-        # 1. Check for kubeadmin user (should be removed post-install)
-        try:
-            custom = get_custom_client()
-            with optional_access():
-                users = safe(lambda: custom.list_cluster_custom_object("user.openshift.io", "v1", "users"))
-            if not isinstance(users, ToolError):
-                for user in users.get("items", []):
-                    if user.get("metadata", {}).get("name") == "kubeadmin":
-                        findings.append(
-                            _make_finding(
-                                severity=SEVERITY_WARNING,
-                                category="audit_auth",
-                                title="kubeadmin account still exists",
-                                summary=(
-                                    "The emergency kubeadmin account has not been removed. "
-                                    "This is a security risk — anyone with the kubeadmin password "
-                                    "has full cluster access. Remove with: oc delete secret kubeadmin -n kube-system"
-                                ),
-                                resources=[{"kind": "User", "name": "kubeadmin", "namespace": ""}],
-                                confidence=0.98,
-                            )
-                        )
-                        break
-        except Exception as e:
-            logger.debug("user.openshift.io lookup skipped (non-OCP cluster): %s", e)
+        # 1. Check for kubeadmin (should be removed post-install). kubeadmin
+        # is the kube-system/kubeadmin Secret, not a User object — OpenShift
+        # never creates a "kubeadmin" User, so the old users lookup never
+        # fired. Reading one named Secret needs Secret access, which is opt-in.
+        with optional_access():
+            kubeadmin = safe(lambda: core.read_namespaced_secret("kubeadmin", "kube-system"))
+        if not isinstance(kubeadmin, ToolError) and kubeadmin is not None:
+            findings.append(
+                _make_finding(
+                    severity=SEVERITY_WARNING,
+                    category="audit_auth",
+                    title="kubeadmin account still exists",
+                    summary=(
+                        "The emergency kubeadmin account has not been removed. "
+                        "This is a security risk — anyone with the kubeadmin password "
+                        "has full cluster access. Once another cluster-admin can log in, "
+                        "remove it with: oc delete secret kubeadmin -n kube-system"
+                    ),
+                    resources=[{"kind": "Secret", "name": "kubeadmin", "namespace": "kube-system"}],
+                    confidence=0.98,
+                )
+            )
 
         # 2. Check for failed auth events in openshift-authentication namespace
         try:

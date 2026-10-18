@@ -328,6 +328,18 @@ class TestScanPendingPods:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+@pytest.fixture
+def no_settle_grace(monkeypatch):
+    """These tests are about detection, not about the rollout grace period."""
+    from sre_agent.monitor import scanners
+
+    monkeypatch.setattr(scanners, "_SETTLE_GRACE_SECONDS", 0)
+    scanners._unready_since.clear()
+    yield
+    scanners._unready_since.clear()
+
+
+@pytest.mark.usefixtures("no_settle_grace")
 class TestScanFailedDeployments:
     def test_detects_degraded_deployment(self):
         dep = _make_deployment(name="api", namespace="prod", replicas=3, available=1)
@@ -968,6 +980,7 @@ class TestScanDegradedOperators:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.usefixtures("no_settle_grace")
 class TestScanDaemonsetGaps:
     def test_detects_gap(self):
         ds = _make_daemonset(name="fluentd", namespace="logging", desired=5, ready=3)
@@ -1354,3 +1367,101 @@ class TestStabilisedPodsStopAlerting:
         """Absence of evidence is not evidence of recovery."""
         findings = self._scan([self._pod("mystery-abc-123", 9, None)])
         assert len(findings) == 1, "an unknown last-restart time must not be treated as recovered"
+
+
+class TestRolloutsAreNotIncidents:
+    """A workload short of desired is normal while it rolls out or scales."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self):
+        from sre_agent.monitor import scanners
+
+        scanners._unready_since.clear()
+        yield
+        scanners._unready_since.clear()
+
+    def _scan(self, dep):
+        with patch("sre_agent.monitor.scanners.get_apps_client") as mock_apps:
+            mock_apps.return_value.list_deployment_for_all_namespaces.return_value = _list_result([dep])
+            return scan_failed_deployments()
+
+    def test_a_brand_new_deployment_is_given_time(self):
+        dep = _make_deployment(name="api", namespace="prod", replicas=1, available=0)
+        assert self._scan(dep) == []
+
+    def test_a_rolling_update_is_not_flagged(self, monkeypatch):
+        from sre_agent.monitor import scanners
+
+        monkeypatch.setattr(scanners, "_SETTLE_GRACE_SECONDS", 0)
+        dep = _make_deployment(name="api", namespace="prod", replicas=3, available=2)
+        dep.status.conditions = [SimpleNamespace(type="Progressing", status="True", reason="ReplicaSetUpdated")]
+        assert self._scan(dep) == []
+
+    def test_a_stuck_rollout_is_flagged_at_once(self):
+        dep = _make_deployment(name="api", namespace="prod", replicas=3, available=0)
+        dep.status.conditions = [SimpleNamespace(type="Progressing", status="False", reason="ProgressDeadlineExceeded")]
+        assert [f["severity"] for f in self._scan(dep)] == [SEVERITY_CRITICAL]
+
+    def test_still_short_after_the_grace_period_is_flagged(self, monkeypatch):
+        from sre_agent.monitor import scanners
+
+        dep = _make_deployment(name="api", namespace="prod", replicas=3, available=1)
+        assert self._scan(dep) == []
+        monkeypatch.setattr(scanners.time, "time", lambda: 10**10)
+        assert len(self._scan(dep)) == 1
+
+    def test_recovering_resets_the_clock(self):
+        from sre_agent.monitor import scanners
+
+        self._scan(_make_deployment(name="api", namespace="prod", replicas=3, available=1))
+        assert "Deployment/prod/api" in scanners._unready_since
+        self._scan(_make_deployment(name="api", namespace="prod", replicas=3, available=3))
+        assert scanners._unready_since == {}
+
+
+def _pod_with(init=(), containers=()):
+    return SimpleNamespace(
+        metadata=SimpleNamespace(name="web-5f58f69bd6-w4x22", namespace="prod"),
+        status=SimpleNamespace(init_container_statuses=list(init), container_statuses=list(containers)),
+    )
+
+
+def _waiting(name, reason, restarts=0):
+    return SimpleNamespace(
+        name=name,
+        restart_count=restarts,
+        state=SimpleNamespace(waiting=SimpleNamespace(reason=reason, message=reason), terminated=None),
+        last_state=None,
+    )
+
+
+class TestInitContainers:
+    def test_an_init_container_that_cannot_pull_is_found(self):
+        pod = _pod_with(init=[_waiting("migrate", "ImagePullBackOff")])
+        findings = scan_image_pull_errors(_list_result([pod]))
+        assert [f["category"] for f in findings] == ["image_pull"]
+        assert "migrate" in findings[0]["summary"]
+
+
+class TestOomAge:
+    def _oom(self, *, minutes_ago, where="last_state"):
+        term = SimpleNamespace(
+            reason="OOMKilled", exit_code=137, finished_at=datetime.now(UTC) - timedelta(minutes=minutes_ago)
+        )
+        cs = SimpleNamespace(
+            name="app",
+            restart_count=1,
+            state=SimpleNamespace(waiting=None, terminated=term if where == "state" else None),
+            last_state=SimpleNamespace(terminated=term) if where == "last_state" else None,
+        )
+        return _pod_with(containers=[cs])
+
+    def test_a_recent_kill_is_reported(self):
+        assert len(scan_oom_killed_pods(_list_result([self._oom(minutes_ago=5)]))) == 1
+
+    def test_a_kill_from_weeks_ago_is_history(self):
+        assert scan_oom_killed_pods(_list_result([self._oom(minutes_ago=60 * 24 * 20)])) == []
+
+    def test_a_job_killed_in_its_only_run_is_reported(self):
+        """restartPolicy Never: the kill is in state, not last_state."""
+        assert len(scan_oom_killed_pods(_list_result([self._oom(minutes_ago=5, where="state")]))) == 1
