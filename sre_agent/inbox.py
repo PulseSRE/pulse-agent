@@ -1335,7 +1335,9 @@ def _finding_corr_key(finding: dict[str, Any]) -> str:
         return f"{category}:{namespace}:{kind}/{name}"
     title = finding.get("title", "")
     if title:
-        return f"{category}:{namespace}:{title}"
+        from .monitor.confidence import _stable_title
+
+        return f"{category}:{namespace}:{_stable_title(title)}"
     return f"{category}:{namespace}"
 
 

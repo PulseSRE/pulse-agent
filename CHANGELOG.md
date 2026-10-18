@@ -2,6 +2,17 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## Unreleased
+
+### Fixed
+- A finding keeps its identity while its numbers move. Titles carry live counts ("5 restarts", "pending for 12m", "(2/3)"), and keying on the raw title made every change look like a resolve plus a new finding: fixes were credited that never happened, learning was promoted or discarded on noise, inbox items churned and critical webhooks re-fired every scan. Keys now mask measurements, and a recreated pod named in the title keeps its key
+- Only a scanner that ran cleanly this cycle can resolve its findings. Scanners on `scan_every > 1` (nodes, operators, certs, audit, the self-check) and ones that errored had their findings closed as "self-healed" between runs; after a few flaps the noise score hid them for good
+- A standing finding keeps its id across scans, so investigations, proposals, auto-fix credit and the UI's `findings_snapshot` all keep pointing at it. The snapshot now lists every standing finding, not only this cycle's output
+- Pod-name stripping only removes generated suffixes: `redis-master-0` and `redis-replica-0` no longer share an inbox item
+- Two reports of one condition in one cycle become one finding instead of two fix attempts
+
+Inbox items for resource-less findings and for pods with hand-written names get a new correlation key once on upgrade; the first scan's reconcile closes the old item and opens the new one.
+
 ## v2.32.0 (2026-10-17)
 
 Paired with pulse-ui v2.32.0 and pulse-operator v0.9.0. Migration 037 rescales saved dashboards to the 12-column grid. Upgrade agent and UI together; migrations are forward-only.

@@ -686,10 +686,10 @@ class TestFindingCorrKey:
         finding = {
             "category": "crashloop",
             "namespace": "prod",
-            "resources": [{"kind": "Pod", "name": "web-abc123-xyz", "namespace": "prod"}],
+            "resources": [{"kind": "Pod", "name": "web-5f58f69bd6-w4x22", "namespace": "prod"}],
         }
         key = _finding_corr_key(finding)
-        assert "abc123-xyz" not in key
+        assert "5f58f69bd6-w4x22" not in key
         assert "crashloop:prod:Pod/" in key
 
     def test_no_resources_with_title(self):
@@ -907,13 +907,13 @@ class TestInboxStalenessAndCorrelation:
         a = _finding_corr_key(
             {
                 "category": "crashloop",
-                "resources": [{"kind": "Pod", "name": "controller-manager-abc12-x9f2j", "namespace": "ns-a"}],
+                "resources": [{"kind": "Pod", "name": "controller-manager-7d9f8b6c5-x9f2j", "namespace": "ns-a"}],
             }
         )
         b = _finding_corr_key(
             {
                 "category": "crashloop",
-                "resources": [{"kind": "Pod", "name": "controller-manager-abc12-q4t7z", "namespace": "ns-b"}],
+                "resources": [{"kind": "Pod", "name": "controller-manager-7d9f8b6c5-q4t7z", "namespace": "ns-b"}],
             }
         )
         assert a != b, "same workload name in different namespaces must not share a correlation key"

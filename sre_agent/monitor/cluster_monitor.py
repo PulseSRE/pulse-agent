@@ -190,6 +190,9 @@ class ClusterMonitor:
 
         # Scan state — previously owned by MonitorSession
         self._last_findings: dict[str, dict] = {}
+        # finding key -> name of the scanner that reported it, so resolution
+        # can tell "gone" from "its scanner did not run this cycle".
+        self._finding_scanner: dict[str, str] = {}
         self._recent_fixes: dict[str, float] = {}
         self._fix_attempt_counts: dict[str, int] = {}
         self._MAX_FIX_ATTEMPTS = 2
@@ -1134,19 +1137,54 @@ class ClusterMonitor:
 
         reset_reported_failures()
         parallel_results = await asyncio.gather(*[_run_scanner(s) for s in active_scanners])
+        # Only a scanner that ran this cycle and did not fail can say that one
+        # of its findings has gone away. One on a slower schedule (scan_every
+        # > 1) or one that errored simply has no news — reading its silence as
+        # "resolved" closed nodes/operators/cert findings on every skipped
+        # cycle, re-raised them on the next run, and after a few flaps the
+        # noise score hid them for good.
+        scanners_reporting: set[str] = set()
+        finding_scanner: dict[int, str] = {}
         for pr in parallel_results:
             scanner_results.append(pr["result"])
+            name = pr["result"]["name"]
+            if pr["result"].get("status") != "error":
+                scanners_reporting.add(name)
+            for f in pr["findings"]:
+                finding_scanner[id(f)] = name
             all_findings.extend(pr["findings"])
             if _METRICS_AVAILABLE:
-                SCANNER_RUNS_TOTAL.labels(scanner=pr["result"]["name"]).inc()
+                SCANNER_RUNS_TOTAL.labels(scanner=name).inc()
+        scheduled = {s.meta.name for s in get_all_scanner_instances()}
 
         # Deduplicate
         current_keys = set()
         new_findings = []
+        unique_findings: list[dict] = []
         for f in all_findings:
             key = _finding_key(f)
+            if key in current_keys:
+                # Two reports of one condition in one cycle: they would now
+                # share an id, and the fix path would act on it twice.
+                continue
             current_keys.add(key)
-            if key not in self._last_findings:
+            unique_findings.append(f)
+            scanner_name = finding_scanner.get(id(f))
+            if scanner_name:
+                self._finding_scanner[key] = scanner_name
+            existing = self._last_findings.get(key)
+            if existing is not None:
+                # Same condition as last cycle: keep its identity. The id is
+                # what investigations, proposals, auto-fix credit and the UI's
+                # findings_snapshot all refer to; minting a fresh one every
+                # scan orphaned all of them. Content is refreshed so the
+                # stored copy shows the latest numbers and severity.
+                f["id"] = existing.get("id", f["id"])
+                for carried in ("noiseScore", "confidence"):
+                    if carried in existing and carried not in f:
+                        f[carried] = existing[carried]
+                self._last_findings[key] = f
+            else:
                 transient_count = self._transient_counts.get(key, 0)
                 if transient_count >= 3:
                     noise_score = min(1.0, round(transient_count * 0.2, 2))
@@ -1171,12 +1209,14 @@ class ClusterMonitor:
                 new_findings.append(f)
                 self._last_findings[key] = f
                 self._first_seen.setdefault(key, int(time.time()))
+        all_findings = unique_findings
 
         if len(self._last_findings) > self._MAX_FINDINGS:
             excess = len(self._last_findings) - self._MAX_FINDINGS
             oldest_keys = list(self._last_findings.keys())[:excess]
             for k in oldest_keys:
                 del self._last_findings[k]
+                self._finding_scanner.pop(k, None)
 
         # Episode correlation. Runs on every finding still standing this cycle,
         # not just the new ones: a cause detected three cycles ago must still
@@ -1191,8 +1231,19 @@ class ClusterMonitor:
             logger.exception("Episode correlation failed")
 
         # Resolution events
-        stale_keys = set(self._last_findings.keys()) - current_keys
+        stale_keys = {
+            key
+            for key in set(self._last_findings.keys()) - current_keys
+            # Unknown owner (finding from before this was tracked), a scanner
+            # that reported cleanly, or a scanner that no longer runs at all
+            # (disabled or removed — nobody will ever report it again).
+            if (owner := self._finding_scanner.get(key)) is None
+            or owner in scanners_reporting
+            or owner not in scheduled
+            or owner in globally_disabled
+        }
         for key in stale_keys:
+            self._finding_scanner.pop(key, None)
             resolved_finding = self._last_findings.pop(key)
             resolved_by = "self-healed"
             finding_id = resolved_finding.get("id", "")
@@ -1334,7 +1385,10 @@ class ClusterMonitor:
             if f.get("severity") == SEVERITY_CRITICAL:
                 await _send_webhook(f)
 
-        active_ids = [f["id"] for f in all_findings][:500]
+        # Every finding still standing, including those whose scanner skipped
+        # this cycle — a snapshot of only this cycle's output made the UI drop
+        # standing findings from slower scanners between their runs.
+        active_ids = [f["id"] for f in self._last_findings.values() if f.get("id")][:500]
         await self._broadcast_raw(
             {
                 "type": "findings_snapshot",
