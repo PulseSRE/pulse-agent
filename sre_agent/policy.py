@@ -28,6 +28,7 @@ the policy should not apply.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from fnmatch import fnmatch
 
 from .errors import ToolError
@@ -89,3 +90,48 @@ def check_write_policy(name: str, input_data: dict | None) -> ToolError | None:
         )
 
     return None
+
+
+def policy_system_note(tool_names: Iterable[str]) -> str | None:
+    """The deny rules that bite for the tools actually offered, in words the model reads.
+
+    Enforcing the policy is not the same as the model knowing it. With the
+    rules invisible, the release replay's degraded-deployment fixture went:
+    diagnose one pod holding a stale ConfigMap, reach for ``delete_pod`` as
+    the minimal fix, get denied — and the denial then stopped the rest of the
+    turn's writes, so the run scored a forbidden tool *and* left the
+    deployment degraded, having named ``restart_deployment`` without taking
+    it. Removing the tool, as a plan-only turn does with every write (see
+    ``agent.PLAN_ONLY_SYSTEM_NOTE``), is not available here: the namespace
+    argument decides, and it is only known at call time. So the tool stays
+    offered and the rule is said out loud instead.
+
+    Returns None when no offered tool can be denied — a note that lists
+    nothing teaches the model nothing and only spends prompt.
+    """
+    from .config import get_settings
+
+    settings = get_settings()
+    names = set(tool_names)
+    rules: list[str] = []
+
+    protected = settings.get_protected_namespaces()
+    if protected and names & _NAMESPACE_DENIED_OPS:
+        rules.append(
+            "delete_pod is refused in protected namespaces (" + ", ".join(protected) + "), confirmation or not; "
+            "for a pod a controller owns, restart_deployment on that owner is the sanctioned replacement"
+        )
+    if names & _NODE_OPS and not settings.agent.allow_node_ops:
+        rules.append(
+            "drain_node and cordon_node are disabled on this deployment and need the change process, "
+            "not a chat approval"
+        )
+
+    if not rules:
+        return None
+    return (
+        "Deny policy on this deployment, checked in the tool path after confirmation: "
+        + "; ".join(rules)
+        + ". A refused write also blocks every later write in the same turn, so reaching for one costs the "
+        "remediation as well — take the sanctioned path first."
+    )
