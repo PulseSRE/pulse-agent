@@ -835,6 +835,16 @@ from .registry import SCANNER_REGISTRY
 from .scanner_protocol import AsyncScanner, FunctionScanner, ScannerMeta
 
 
+def _blind_spot(name: str) -> Callable[..., list[dict]]:
+    def run(*args: Any) -> list[dict]:
+        from . import blind_spot_scanners
+
+        return getattr(blind_spot_scanners, name)(*args)
+
+    run.__name__ = name
+    return run
+
+
 def _scan_workload_anomalies() -> list[dict]:
     from .baselines import scan_workload_anomalies
 
@@ -1142,6 +1152,10 @@ def get_all_scanner_instances() -> list[FunctionScanner]:
         FunctionScanner(_meta("trend_degraded"), get_trend_degraded_finding),
         FunctionScanner(_meta("stuck"), scan_stuck_deletions, accepts_pods=True),
         FunctionScanner(_meta("anomaly"), _scan_workload_anomalies),
+        FunctionScanner(_meta("storage"), _blind_spot("scan_storage"), accepts_pods=True),
+        FunctionScanner(_meta("ingress"), _blind_spot("scan_ingress")),
+        FunctionScanner(_meta("webhooks"), _blind_spot("scan_webhooks")),
+        FunctionScanner(_meta("maintenance"), _blind_spot("scan_maintenance_blockers")),
         FunctionScanner(_meta("hot_loop"), scan_hot_reconcile_loops),
         FunctionScanner(_meta("control_plane"), scan_control_plane_stalls),
         FunctionScanner(_meta("degraded"), scan_degraded_capabilities),

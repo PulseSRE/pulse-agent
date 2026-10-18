@@ -171,6 +171,52 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "auto_fixable": False,
         "scan_every": 5,
     },
+    "storage": {
+        "displayName": "Storage",
+        "description": "Volumes that never bind, will not mount, or are nearly full",
+        "category": "availability",
+        "checks": [
+            "PVC Pending > 5 minutes",
+            "pod stuck on FailedMount / FailedAttachVolume > 5 minutes",
+            "volume used > 90% (critical > 97%)",
+        ],
+        "auto_fixable": False,
+        "scan_every": 2,
+    },
+    "ingress": {
+        "displayName": "Routes & DNS",
+        "description": "Routes answering errors at the router, and cluster DNS failing lookups",
+        "category": "availability",
+        "checks": [
+            "route 5xx share > 5% at >= 0.5 req/s (router metrics)",
+            "DNS SERVFAIL share > 1%",
+        ],
+        "auto_fixable": False,
+        "scan_every": 2,
+    },
+    "webhooks": {
+        "displayName": "Admission Webhooks",
+        "description": "Webhooks the API server cannot reach or that answer slowly, stalling creates and updates",
+        "category": "liveness",
+        "checks": [
+            "webhook call failures > 0.1/s",
+            "webhook admission p99 > 5s",
+        ],
+        "auto_fixable": False,
+        "scan_every": 2,
+    },
+    "maintenance": {
+        "displayName": "Maintenance Blockers",
+        "description": "What will make the next node drain or upgrade hang",
+        "category": "infrastructure",
+        "checks": [
+            "PodDisruptionBudget allows 0 disruptions with all pods healthy",
+            "MachineConfigPool Degraded",
+            "MachineConfigPool updating > 1 hour",
+        ],
+        "auto_fixable": False,
+        "scan_every": 5,
+    },
     "anomaly": {
         "displayName": "Unusual For This Workload",
         "description": "Pods well outside their own workload's normal memory, CPU or restart rate",
