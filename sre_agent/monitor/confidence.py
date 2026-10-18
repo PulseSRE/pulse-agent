@@ -9,11 +9,41 @@ from typing import Any
 
 from .registry import SEVERITY_CRITICAL, SEVERITY_INFO
 
+# Kubernetes generates pod-name suffixes from this alphabet (no vowels, no
+# 0/1/3), which is what lets a generated suffix be told apart from a name.
+_K8S_RAND = "bcdfghjklmnpqrstvwxz2456789"
+_REPLICASET_POD = re.compile(rf"^(.+)-[{_K8S_RAND}]{{6,10}}-[{_K8S_RAND}]{{5}}$")
+_GENERATED_POD = re.compile(rf"^(.+)-[{_K8S_RAND}]{{5}}$")
+
 
 def _strip_pod_hash(name: str) -> str:
-    """Strip ReplicaSet hash suffix from pod name (e.g. 'web-5f58f69bd6-w4x22' → 'web')."""
-    parts = name.rsplit("-", 2)
-    return parts[0] if len(parts) >= 3 else name
+    """Strip generated suffixes so recreated pods share a key.
+
+    'web-5f58f69bd6-w4x22' → 'web' (Deployment), 'node-exporter-x7k9p' →
+    'node-exporter' (DaemonSet/Job). StatefulSet pods are left alone:
+    'redis-master-0' and 'redis-replica-0' are different pods, and stripping
+    the last two dash segments used to collapse both to 'redis'.
+    """
+    m = _REPLICASET_POD.match(name) or _GENERATED_POD.match(name)
+    return m.group(1) if m else name
+
+
+# A number that is a measurement rather than part of a name: preceded by a
+# space or punctuation (not a letter, digit, dash or dot) and not followed by
+# one. Matches "5", "12m", "99.5%", both sides of "(2/3)" and a port after ":";
+# leaves "redis-0", "v4.14", "5f58f69bd6" and dotted IPs intact.
+_MEASUREMENT = re.compile(r"(?<![\w.-])\d[\w%]*(?:\.\d[\w%]*)?(?![\w.-])")
+
+
+def _stable_title(title: str) -> str:
+    """A finding title with its measurements masked, for use as identity.
+
+    Scanners put live numbers in titles ("restarted 5 times", "pending for
+    12m", "(2/3) ready"). Keyed on the raw title, the same condition looked
+    like a new finding every time a number moved — the old one counted as
+    resolved, a fix got credit it never earned, and the webhook re-fired.
+    """
+    return _MEASUREMENT.sub("#", title)
 
 
 def _estimate_finding_confidence(finding: dict) -> float:
@@ -84,16 +114,21 @@ def _estimate_auto_fix_confidence(finding: dict, recent_fixes: dict[str, float] 
 def _finding_key(finding: dict) -> str:
     resources = finding.get("resources", [])
     resource_part = "_"
+    title = str(finding.get("title", ""))
     if resources:
         r = resources[0]
         name = r.get("name", "")
         kind = r.get("kind", "")
         # Strip ReplicaSet hash suffix so recreated pods share the same key
-        # e.g. "operator-5f58f69bd6-w4x22" → "operator"
+        # e.g. "operator-5f58f69bd6-w4x22" → "operator". The title usually
+        # names the pod too, so strip it there as well or the key still moves.
         if kind == "Pod":
-            name = _strip_pod_hash(name)
+            stripped = _strip_pod_hash(name)
+            if name and stripped != name:
+                title = title.replace(name, stripped)
+            name = stripped
         resource_part = f"{kind}:{r.get('namespace', '')}:{name}"
-    return f"{finding.get('category', '')}:{finding.get('title', '')}:{resource_part}"
+    return f"{finding.get('category', '')}:{_stable_title(title)}:{resource_part}"
 
 
 def _finding_content_hash(finding: dict) -> str:

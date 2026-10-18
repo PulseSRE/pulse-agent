@@ -26,7 +26,9 @@ FINDING = {
     "id": "f-new",
     "category": "crashloop",
     "title": "Pod cluster-proxy-addon-manager crash-looping (5 restarts)",
-    "resources": [{"kind": "Pod", "namespace": "multicluster-engine", "name": "cluster-proxy-addon-manager-abc"}],
+    "resources": [
+        {"kind": "Pod", "namespace": "multicluster-engine", "name": "cluster-proxy-addon-manager-6c5d9f7b8-x9f2j"}
+    ],
 }
 
 
@@ -149,7 +151,7 @@ async def test_the_lookup_is_bounded_by_the_recurrence_window(wired):
     await process_recurrences(wired.monitor, [dict(FINDING)])
     corr_key, since_ms = wired.repo.find_recent_verified_actions.call_args[0]
     # Pod-hash stripped, so a recreated pod still matches its predecessor's fix.
-    assert corr_key == "crashloop:multicluster-engine:Pod/cluster-proxy-addon"
+    assert corr_key == "crashloop:multicluster-engine:Pod/cluster-proxy-addon-manager"
     from sre_agent.config import get_settings
 
     window_ms = get_settings().monitor.recurrence_window * 1000

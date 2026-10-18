@@ -45,7 +45,7 @@ class TestCandidateKey:
 
     def test_replicaset_hash_is_stripped_so_recreated_pods_match(self):
         before = candidate_key("crashloop", [{"kind": "Pod", "namespace": "p", "name": "api-5f58f69bd6-w4x22"}])
-        after = candidate_key("crashloop", [{"kind": "Pod", "namespace": "p", "name": "api-7d9f8c1a2b-zz999"}])
+        after = candidate_key("crashloop", [{"kind": "Pod", "namespace": "p", "name": "api-7d9f8c6b2b-zz999"}])
         assert before == after
 
     def test_no_resources_still_produces_a_key(self):
