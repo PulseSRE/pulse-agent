@@ -36,6 +36,18 @@ def _changes_section(finding: dict) -> str:
     )
 
 
+def _baseline_section(resources: list[dict]) -> str:
+    """What normal looks like for the workloads involved, so evidence can say "3x normal"."""
+    try:
+        from .baselines import baseline_context
+
+        text = baseline_context(resources)
+    except Exception:
+        logger.debug("Baseline context unavailable", exc_info=True)
+        return ""
+    return f"Normal for these workloads (7-day):\n{_sanitize_for_prompt(text)}\n" if text else ""
+
+
 def _build_investigation_prompt(finding: dict) -> str:
     resources = finding.get("resources", [])
     sanitized_resources = []
@@ -109,6 +121,7 @@ def _build_investigation_prompt(finding: dict) -> str:
         f"Summary: {_sanitize_for_prompt(finding.get('summary', ''))}\n"
         f"Resources: {json.dumps(sanitized_resources)}\n"
         f"{_changes_section(finding)}"
+        f"{_baseline_section(resources)}"
         "--- END CLUSTER DATA ---\n\n"
         "Return schema:\n"
         "{\n"
