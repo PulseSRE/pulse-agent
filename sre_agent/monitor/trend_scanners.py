@@ -187,41 +187,49 @@ def scan_hpa_exhaustion_trend() -> list[dict]:
     return findings
 
 
+_ERROR_SHARE = (
+    'sum by (namespace, service, job) (rate(http_requests_total{code=~"5.."}[1h]))'
+    " / sum by (namespace, service, job) (rate(http_requests_total[1h]))"
+)
+# At least 1% of requests failing, and more than double the share at this time
+# yesterday. The old query, deriv(...) > 0, fired on any upward slope at all —
+# 0.001 errors/s becoming 0.002 was "accelerating".
+_ERROR_ACCELERATION_QUERY = f"({_ERROR_SHARE} > 0.01) and ({_ERROR_SHARE} > 2 * ({_ERROR_SHARE} offset 1d))"
+
+
 def scan_error_rate_acceleration() -> list[dict]:
-    """Detect accelerating HTTP 5xx error rates over 24 hours."""
+    """Detect services whose share of 5xx responses has jumped since yesterday."""
     findings: list[dict[str, Any]] = []
     try:
-        # Query for services with increasing error rates
-        query = 'deriv(rate(http_requests_total{code=~"5.."}[1h])[24h:]) > 0'
-        results = _query_prometheus(query)
+        results = _query_prometheus(_ERROR_ACCELERATION_QUERY)
 
         for result in results:
             metric = result.get("metric", {})
             namespace = metric.get("namespace", "")
             service = metric.get("service", metric.get("job", ""))
-            code = metric.get("code", "5xx")
             value = result.get("value", [None, None])[1]
-
-            if value is not None:
-                try:
-                    derivative = float(value)
-                    if derivative > 0:
-                        findings.append(
-                            _make_finding(
-                                severity=SEVERITY_WARNING,
-                                category="errors",
-                                title=f"Service {service} error rate accelerating",
-                                summary=f"HTTP {code} error rate has been increasing over 24 hours. Derivative: {derivative:.6f} errors/sec².",
-                                resources=[
-                                    {"kind": "Service", "name": service, "namespace": namespace},
-                                ],
-                                auto_fixable=False,
-                                confidence=0.70,
-                                finding_type="trend",
-                            )
-                        )
-                except (ValueError, TypeError):
-                    logger.debug("Failed to parse error rate derivative value", exc_info=True)
+            if value is None or not service:
+                continue
+            try:
+                share = float(value)
+            except (ValueError, TypeError):
+                logger.debug("Failed to parse error share value", exc_info=True)
+                continue
+            findings.append(
+                _make_finding(
+                    severity=SEVERITY_WARNING,
+                    category="errors",
+                    title=f"Service {service} error rate accelerating",
+                    summary=(
+                        f"{share:.1%} of requests to {service} returned 5xx over the last hour, "
+                        "more than double the share at the same time yesterday."
+                    ),
+                    resources=[{"kind": "Service", "name": service, "namespace": namespace}],
+                    auto_fixable=False,
+                    confidence=0.70,
+                    finding_type="trend",
+                )
+            )
     except Exception as e:
         logger.error("Error rate acceleration scan failed: %s", e)
         report_failure(e)
