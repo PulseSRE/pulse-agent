@@ -4,6 +4,9 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## Unreleased
 
+### Added
+- Workloads are measured against their own normal. Baselines (`workload_baselines`, migration 032) were never recorded; every 6 hours Pulse now computes each workload's 7-day median and p95 for memory, CPU and restarts per hour from Prometheus, folding replicas and recreated pods into one row. A new `anomaly` scanner flags a pod above its workload's p95 *and* at least 2x its median ("Pod api-… is at 3.2 GiB, 3.2x this workload's normal (1.0 GiB; its usual peak is 1.5 GiB)"), with floors so tiny values never page and no verdict on fewer than 20 samples. Investigations are told what normal is for the workloads involved
+
 ### Fixed
 - Rollouts are not incidents. A Deployment mid-rollout (Progressing, `ReplicaSetUpdated`/`NewReplicaSetCreated`) is not flagged, and any Deployment or DaemonSet short of desired gets 10 minutes to settle; a rollout past its progress deadline is flagged at once. A new 0/1 Deployment used to be a critical finding with a webhook and, at trust 3, an auto-fix
 - Init containers are scanned: one stuck in CrashLoopBackOff or ImagePullBackOff, which keeps the whole pod from starting, produced no finding
