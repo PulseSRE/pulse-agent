@@ -13,6 +13,29 @@ from .confidence import _extract_json_object, _sanitize_for_prompt
 logger = logging.getLogger("pulse_agent.monitor")
 
 
+def _changes_section(finding: dict) -> str:
+    """What changed shortly before this began, most relevant first — the first question."""
+    try:
+        import time
+
+        from ..inbox import _finding_corr_key
+        from .change_correlation import ranked_changes
+
+        onset = int((finding.get("startedAt") or 0) / 1000) or int(time.time())
+        changes = ranked_changes([_finding_corr_key(finding)], [], onset)[:5]
+    except Exception:
+        logger.debug("Change context unavailable", exc_info=True)
+        return ""
+    if not changes:
+        return ""
+    lines = [f"- {c['title']} ({c['relevance']}, {c['seconds_before'] // 60}m before)" for c in changes]
+    return (
+        "Changed shortly before this began (not necessarily the cause):\n"
+        + _sanitize_for_prompt("\n".join(lines))
+        + "\n"
+    )
+
+
 def _baseline_section(resources: list[dict]) -> str:
     """What normal looks like for the workloads involved, so evidence can say "3x normal"."""
     try:
@@ -97,6 +120,7 @@ def _build_investigation_prompt(finding: dict) -> str:
         f"Title: {_sanitize_for_prompt(finding.get('title', ''))}\n"
         f"Summary: {_sanitize_for_prompt(finding.get('summary', ''))}\n"
         f"Resources: {json.dumps(sanitized_resources)}\n"
+        f"{_changes_section(finding)}"
         f"{_baseline_section(resources)}"
         "--- END CLUSTER DATA ---\n\n"
         "Return schema:\n"
