@@ -4,6 +4,9 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## Unreleased
 
+### Added
+- Four scanners for what SREs get paged for and Pulse could not see. **Storage**: PVCs Pending over 5 minutes, pods stuck on FailedMount/FailedAttachVolume (with the reason), volumes over 90% full (critical at 97%). **Routes & DNS**: routes answering over 5% 5xx at the router (works for apps that export no metrics; needs at least 0.5 req/s so one failed request is not "100% errors") and cluster DNS answering SERVFAIL. **Admission webhooks**: webhooks the API server cannot reach, or slow past 5s at p99. **Maintenance blockers**: PodDisruptionBudgets that allow no disruption while every pod is healthy (a drain or upgrade will hang on them), and MachineConfigPools that are degraded or updating for over an hour
+
 ### Fixed
 - Rollouts are not incidents. A Deployment mid-rollout (Progressing, `ReplicaSetUpdated`/`NewReplicaSetCreated`) is not flagged, and any Deployment or DaemonSet short of desired gets 10 minutes to settle; a rollout past its progress deadline is flagged at once. A new 0/1 Deployment used to be a critical finding with a webhook and, at trust 3, an auto-fix
 - Init containers are scanned: one stuck in CrashLoopBackOff or ImagePullBackOff, which keeps the whole pod from starting, produced no finding

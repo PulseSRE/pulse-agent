@@ -213,6 +213,17 @@ def get_networking_client() -> client.NetworkingV1Api:
     return _clients["networking"]
 
 
+def get_policy_client() -> client.PolicyV1Api:
+    token = _user_token_var.get()
+    if token:
+        return client.PolicyV1Api(api_client=_get_user_api_client(token))
+    _check_user_token_required()
+    _load_k8s()
+    if "policy" not in _clients:
+        _clients["policy"] = client.PolicyV1Api()
+    return _clients["policy"]
+
+
 def get_batch_client() -> client.BatchV1Api:
     token = _user_token_var.get()
     if token:
