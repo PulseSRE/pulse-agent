@@ -358,7 +358,7 @@ async def test_monitor_session_rejects_string_false_without_resolving():
 
     from sre_agent.monitor.session import MonitorClient
 
-    client = MonitorClient(None)
+    client = MonitorClient(None, trust_level=2, user="alice")
     future = asyncio.get_running_loop().create_future()
     client._pending_action_approvals["a"] = future
     assert not client.resolve_action_response("a", "false")
@@ -401,8 +401,8 @@ def test_monitor_websocket_string_false_cannot_execute_or_audit_approval():
         patch("sre_agent.api.ws_endpoints.get_cluster_monitor", new_callable=AsyncMock, return_value=monitor),
         patch("sre_agent.inbox.record_interaction") as audit,
     ):
-        with TestClient(app).websocket_connect("/monitor") as websocket:
-            websocket.send_json({"type": "subscribe_monitor"})
+        with TestClient(app).websocket_connect("/monitor", headers={"X-Forwarded-User": "alice"}) as websocket:
+            websocket.send_json({"type": "subscribe_monitor", "trustLevel": 2})
             assert websocket.receive_json()["type"] == "ready"
             websocket.send_json({"type": "action_response", "actionId": "a", "approved": "false"})
             assert websocket.receive_json()["type"] == "error"
@@ -413,3 +413,71 @@ def test_monitor_websocket_string_false_cannot_execute_or_audit_approval():
             assert websocket.receive_json()["type"] == "ack"
             assert pending[0].result() is False
             assert audit.call_args.kwargs["decision"] == "rejected"
+            assert audit.call_args.kwargs["actor"] == "alice"
+
+
+@pytest.mark.asyncio
+async def test_only_a_named_ask_first_client_can_answer_a_proposal():
+    """Observe-mode and anonymous dashboards used to be able to approve writes."""
+    import asyncio
+
+    from sre_agent.monitor.session import MonitorClient
+
+    loop = asyncio.get_running_loop()
+    for client in (
+        MonitorClient(None, trust_level=0, user="alice"),  # observe mode
+        MonitorClient(None, trust_level=2, user=None),  # nobody we can name
+    ):
+        future = loop.create_future()
+        client._pending_action_approvals["a"] = future
+        assert not client.can_approve
+        assert not client.resolve_action_response("a", True)
+        assert not future.done()
+
+    named = MonitorClient(None, trust_level=2, user="alice")
+    future = loop.create_future()
+    named._pending_action_approvals["a"] = future
+    assert named.resolve_action_response("a", True)
+    assert await future is True
+    assert named._approvers["a"] == "alice"
+
+
+def test_an_anonymous_monitor_socket_is_told_it_cannot_approve():
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from sre_agent.api.ws_endpoints import websocket_monitor
+
+    app = FastAPI()
+    app.websocket("/monitor")(websocket_monitor)
+    monitor = MagicMock()
+    monitor.running = True
+    monitor.subscriber_count = 1
+    monitor.unsubscribe = AsyncMock()
+
+    async def subscribe(client):
+        await client.send({"type": "ready"})
+
+    monitor.subscribe = subscribe
+    settings = SimpleNamespace(
+        server=SimpleNamespace(max_monitor_clients=100),
+        monitor=SimpleNamespace(max_trust_level=2),
+        agent=SimpleNamespace(dev_user=""),
+    )
+    with (
+        patch("sre_agent.api.ws_endpoints._verify_ws_token", return_value="test-token"),
+        patch("sre_agent.api.ws_endpoints.get_settings", return_value=settings),
+        patch("sre_agent.api.auth.get_settings", return_value=settings),
+        patch("sre_agent.api.ws_endpoints.get_cluster_monitor", new_callable=AsyncMock, return_value=monitor),
+        patch("sre_agent.inbox.record_interaction") as audit,
+    ):
+        with TestClient(app).websocket_connect("/monitor") as websocket:
+            websocket.send_json({"type": "subscribe_monitor", "trustLevel": 2})
+            assert websocket.receive_json()["type"] == "ready"
+            websocket.send_json({"type": "action_response", "actionId": "a", "approved": True})
+            reply = websocket.receive_json()
+            assert reply["type"] == "error" and "signed-in user" in reply["message"]
+            audit.assert_not_called()

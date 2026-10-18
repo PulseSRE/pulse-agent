@@ -119,7 +119,16 @@ def _ok_output(pid):
     }
 
 
-async def _run_workflow(plan_dict, params, send_approval=None, findings_by_phase=None, phase_delay=0.0):
+async def _run_workflow(
+    plan_dict,
+    params,
+    send_approval=None,
+    findings_by_phase=None,
+    phase_delay=0.0,
+    fail_phases=(),
+    crash_phases=(),
+    attempts=None,
+):
     """Execute PlanWorkflow with stub activities; optionally signal mid-run.
 
     ``plan_dict`` may be a single plan or a dict of ``incident_type -> plan``
@@ -154,6 +163,10 @@ async def _run_workflow(plan_dict, params, send_approval=None, findings_by_phase
         plan: dict, phase_id: str, incident: dict, prior: dict, skill_override=None, writes_approved=False
     ) -> dict:
         ran.append(phase_id)
+        if attempts is not None:
+            attempts[phase_id] = attempts.get(phase_id, 0) + 1
+        if phase_id in crash_phases:
+            raise RuntimeError("worker died mid-phase")
         diag["overrides"][phase_id] = skill_override
         diag.setdefault("writes_approved", {})[phase_id] = writes_approved
         diag["in_flight"] += 1
@@ -164,6 +177,8 @@ async def _run_workflow(plan_dict, params, send_approval=None, findings_by_phase
         finally:
             diag["in_flight"] -= 1
         out = _ok_output(phase_id)
+        if phase_id in fail_phases:
+            out["status"] = "failed"
         if findings_by_phase and phase_id in findings_by_phase:
             out["findings"] = dict(findings_by_phase[phase_id])
         return out
@@ -244,6 +259,58 @@ class TestPlanWorkflow:
         assert ran == []
         assert result["phase_outputs"]["remediate"]["status"] == "needs_escalation"
         assert "not approved within" in result["phase_outputs"]["remediate"]["evidence_summary"]
+
+
+class TestWritePhaseSafety:
+    def test_a_failed_diagnosis_never_reaches_the_write_phase(self):
+        """The in-process engine stops here; the durable one ran remediation anyway."""
+        from sre_agent.temporal.plan_workflow import PlanRunInput
+
+        plan = _plan([_phase("diagnose"), _phase("remediate", deps=["diagnose"], approval=True)])
+        result, ran, _, _ = asyncio.run(
+            _run_workflow(
+                plan,
+                PlanRunInput(incident_type="test", approval_timeout_seconds=3600),
+                send_approval=("remediate", True),
+                fail_phases={"diagnose"},
+            )
+        )
+        assert ran == ["diagnose"]
+        assert result["phase_outputs"]["remediate"]["status"] == "failed"
+        assert "diagnose did not complete" in result["phase_outputs"]["remediate"]["evidence_summary"]
+
+    def test_an_approved_write_phase_is_attempted_once(self):
+        """A retry after the worker dies could apply the write a second time."""
+        from temporalio.client import WorkflowFailureError
+
+        from sre_agent.temporal.plan_workflow import PlanRunInput
+
+        attempts: dict = {}
+        plan = _plan([_phase("remediate", approval=True)])
+        with pytest.raises(WorkflowFailureError):
+            asyncio.run(
+                _run_workflow(
+                    plan,
+                    PlanRunInput(incident_type="test", approval_timeout_seconds=3600),
+                    send_approval=("remediate", True),
+                    crash_phases={"remediate"},
+                    attempts=attempts,
+                )
+            )
+        assert attempts == {"remediate": 1}
+
+    def test_a_read_phase_still_gets_its_retry(self):
+        from temporalio.client import WorkflowFailureError
+
+        from sre_agent.temporal.plan_workflow import PlanRunInput
+
+        attempts: dict = {}
+        plan = _plan([_phase("triage")])
+        with pytest.raises(WorkflowFailureError):
+            asyncio.run(
+                _run_workflow(plan, PlanRunInput(incident_type="test"), crash_phases={"triage"}, attempts=attempts)
+            )
+        assert attempts == {"triage": 2}
 
 
 class TestWaveParallelism:

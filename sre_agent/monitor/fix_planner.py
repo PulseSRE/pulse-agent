@@ -31,23 +31,39 @@ def get_investigation_for_finding(finding_id: str) -> dict | None:
         return None
 
 
-# Root cause categories with keyword patterns
-_CAUSE_PATTERNS: list[tuple[str, list[str]]] = [
+# Root cause categories. Specific phrases decide; generic words only break a
+# tie when nothing specific matched.
+#
+# This used to be one first-match-wins list with generic words early: "image"
+# and "does not exist" sat in bad_image ahead of every other category, so
+# 'secret "db-creds" does not exist' and "image pull secret not found" were
+# both classified as a bad image and got an image patch.
+_SPECIFIC_PATTERNS: list[tuple[str, list[str]]] = [
+    ("oom", [r"\boom", "out of memory", "exceeded memory", "memory limit", "exit code 137"]),
+    (
+        "missing_config",
+        [
+            r"configmap\b.*\b(not found|does not exist|missing)",
+            r"secret\b.*\b(not found|does not exist|missing)",
+            "createcontainerconfigerror",
+            "couldn't find key",
+        ],
+    ),
     (
         "bad_image",
         [
-            "image",
-            "does not exist",
-            "not found in registry",
             "imagepullbackoff",
+            "errimagepull",
+            "invalidimagename",
             "pull access denied",
             "manifest unknown",
+            "not found in registry",
+            r"\bimage\b.*\b(does not exist|not found|unknown)",
         ],
     ),
-    ("missing_config", ["configmap", "not found", "missing", "secret.*not found"]),
-    ("oom", ["oom", "out of memory", "memory limit", "oomkilled", "exceeded memory"]),
-    ("probe_failure", ["readiness probe", "liveness probe", "probe failed", "connection refused"]),
-    ("quota_exceeded", ["quota", "exceeded", "forbidden", "limit reached"]),
+    ("quota_exceeded", ["quota", "resourcequota", "limit reached"]),
+    ("probe_failure", ["readiness probe", "liveness probe", "startup probe", "probe failed"]),
+    ("dependency", ["connection timed out", "no such host", r"\bdns\b", "service unavailable"]),
     (
         "crash_exit",
         [
@@ -63,22 +79,43 @@ _CAUSE_PATTERNS: list[tuple[str, list[str]]] = [
             "no foreground process",
         ],
     ),
-    ("dependency", ["connection refused", "connection timed out", "no such host", "dns", "service unavailable"]),
+]
+_GENERIC_PATTERNS: list[tuple[str, list[str]]] = [
+    ("probe_failure", ["connection refused"]),
+    ("missing_config", ["configmap", "not found", "missing"]),
+    ("bad_image", ["image", "does not exist"]),
+    ("quota_exceeded", ["exceeded", "forbidden"]),
 ]
 
 
+def _matches(patterns: list[tuple[str, list[str]]], text: str) -> list[str]:
+    return [category for category, pats in patterns if any(re.search(p, text) for p in pats)]
+
+
 def classify_root_cause(suspected_cause: str) -> str:
-    """Classify a suspected cause string into a root cause category."""
+    """Classify a suspected cause string into a root cause category.
+
+    Returns "unknown" when the text points two specific ways at once (an image
+    pull failing *because* its pull secret is missing): the targeted fixes are
+    writes, and guessing between two of them is how the wrong one gets applied.
+    "unknown" falls back to the category's reviewed default plan.
+    """
     if not suspected_cause:
         return "unknown"
 
     lower = suspected_cause.lower()
-    for category, patterns in _CAUSE_PATTERNS:
-        for pattern in patterns:
-            if re.search(pattern, lower):
-                return category
+    specific = _matches(_SPECIFIC_PATTERNS, lower)
+    # A crash with an exit code is what OOM, a missing config or a failed
+    # dependency look like from outside; it only decides on its own.
+    if len(specific) > 1 and "crash_exit" in specific:
+        specific.remove("crash_exit")
+    if len(specific) == 1:
+        return specific[0]
+    if len(specific) > 1:
+        return "unknown"
 
-    return "unknown"
+    generic = _matches(_GENERIC_PATTERNS, lower)
+    return generic[0] if generic else "unknown"
 
 
 @dataclass
@@ -610,7 +647,11 @@ def _execute_restart_controller(plan: FixPlan) -> tuple[str, str, str]:
         )
 
     before = f"Pod {pod_name} in {ns}: phase={pod.status.phase}, restarts={pod.status.container_statuses[0].restart_count if pod.status.container_statuses else 0}"
-    refused = _delete_observed_pod(pod, pod_name, ns, force=True)
+    # Normal grace period. A crash-looping container is restarting anyway, so
+    # skipping graceful shutdown buys nothing — and grace 0 lets a replacement
+    # start before the old process is gone (two writers on one volume, or two
+    # StatefulSet pods with one identity).
+    refused = _delete_observed_pod(pod, pod_name, ns)
     if refused:
         return (refused.split(":", 1)[0], before, refused)
 
