@@ -845,6 +845,12 @@ def _blind_spot(name: str) -> Callable[..., list[dict]]:
     return run
 
 
+def _scan_workload_anomalies() -> list[dict]:
+    from .baselines import scan_workload_anomalies
+
+    return scan_workload_anomalies()
+
+
 def _meta(name: str) -> ScannerMeta:
     """Build ScannerMeta from SCANNER_REGISTRY entry."""
     return ScannerMeta.from_registry(name, SCANNER_REGISTRY[name])
@@ -1145,6 +1151,7 @@ def get_all_scanner_instances() -> list[FunctionScanner]:
         FunctionScanner(_meta("trend_errors"), scan_error_rate_acceleration),
         FunctionScanner(_meta("trend_degraded"), get_trend_degraded_finding),
         FunctionScanner(_meta("stuck"), scan_stuck_deletions, accepts_pods=True),
+        FunctionScanner(_meta("anomaly"), _scan_workload_anomalies),
         FunctionScanner(_meta("storage"), _blind_spot("scan_storage"), accepts_pods=True),
         FunctionScanner(_meta("ingress"), _blind_spot("scan_ingress")),
         FunctionScanner(_meta("webhooks"), _blind_spot("scan_webhooks")),

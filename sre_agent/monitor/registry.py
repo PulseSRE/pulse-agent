@@ -217,6 +217,18 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "auto_fixable": False,
         "scan_every": 5,
     },
+    "anomaly": {
+        "displayName": "Unusual For This Workload",
+        "description": "Pods well outside their own workload's normal memory, CPU or restart rate",
+        "category": "availability",
+        "checks": [
+            "memory above the workload's 7-day p95 and 2x its median",
+            "CPU above the workload's 7-day p95 and 2x its median",
+            "restarts per hour far above the workload's usual",
+        ],
+        "auto_fixable": False,
+        "scan_every": 5,
+    },
     "hot_loop": {
         "displayName": "Hot Reconcile Loops",
         "description": "Finds controllers burning API server capacity without making progress",
