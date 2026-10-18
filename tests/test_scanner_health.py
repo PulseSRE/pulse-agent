@@ -148,7 +148,7 @@ def test_a_broken_scanner_becomes_a_finding_that_says_unwatched():
         patch(f"{MODULE}.investigation_failure_rate", return_value=(0, 0, "")),
     ):
         finding = sh.scan_degraded_capabilities()[0]
-    assert "alerts" in finding["title"]
+    assert "alerts" in finding["title"].lower()
     assert "unwatched" in finding["summary"]
     assert finding["category"] == "degraded"
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 from contextvars import ContextVar
 from typing import Any
 
@@ -125,7 +126,7 @@ def report_failure(exc: BaseException | str) -> None:
     if name is None:
         # Called outside a scan — a unit test, or a scanner invoked directly.
         return
-    _failures_this_cycle[name] = str(exc)[:200]
+    _failures_this_cycle[name] = str(exc)[:300]
 
 
 def get_failure(name: str) -> str | None:
@@ -176,7 +177,7 @@ def consecutive_failures(limit: int = 20) -> dict[str, tuple[int, str]]:
                 continue
             if entry.get("status") == "error":
                 count, _ = streaks.get(name, (0, ""))
-                streaks[name] = (count + 1, str(entry.get("error", ""))[:200])
+                streaks[name] = (count + 1, str(entry.get("error", ""))[:300])
             else:
                 # A success ends the streak. Anything counted from newer runs
                 # stays, because those are genuinely consecutive from now.
@@ -228,6 +229,68 @@ def investigation_failure_streak() -> tuple[int, str]:
     return streak, last_error
 
 
+_RBAC_DENIAL = re.compile(r'cannot (\w+) resource "([^"]+)" in API group "([^"]*)"')
+
+# Resources the default install deliberately withholds, and the switch that
+# grants them. Anything else Pulse is denied is a gap in its role.
+_OPT_IN_ACCESS = {
+    ("", "secrets"): "set spec.agent.allowSecretAccess: true on the OpenShiftPulse resource "
+    "(read-only access to Secrets)",
+}
+
+
+def explain_failure(scanner: str, error: str) -> dict[str, Any]:
+    """Say, in plain words, what a failing scanner cannot see and how to fix it.
+
+    The raw error ("forbidden: secrets is forbidden: User system:serviceaccount:…
+    cannot list resource…") is accurate and useless to most people looking at a
+    dashboard. What they need is: which checks are off, why, and the one thing
+    to change.
+    """
+    from .registry import SCANNER_REGISTRY
+
+    meta = SCANNER_REGISTRY.get(scanner, {})
+    name = meta.get("displayName") or scanner.replace("_", " ").title()
+    checks = list(meta.get("checks", []))
+    lower = error.lower()
+
+    m = _RBAC_DENIAL.search(error)
+    if m or lower.startswith("forbidden"):
+        verb, resource, group = (m.group(1), m.group(2), m.group(3)) if m else ("read", "", "")
+        what = f"{group}/{resource}" if group else resource
+        reason = f"Pulse is not allowed to {verb} {what or 'what this scanner reads'}"
+        fix = _OPT_IN_ACCESS.get((group, resource)) or (
+            f"grant Pulse read-only get/list on {what} — upgrade pulse-operator, whose agent role includes it, "
+            "or add the rule to the agent's ClusterRole"
+            if what
+            else "check the agent ServiceAccount's ClusterRole"
+        )
+    elif lower.startswith("unauthorized"):
+        reason = "the API server rejected Pulse's credentials"
+        fix = "check the agent ServiceAccount token; restarting the agent pod remounts it"
+    elif "prometheus" in lower:
+        reason = "Pulse cannot query Prometheus"
+        fix = (
+            "check that the cluster monitoring stack (thanos-querier) is up and reachable from the agent, "
+            "and that the agent may use it (cluster-monitoring-view)"
+        )
+    elif any(k in lower for k in ("timed out", "timeout", "connection refused", "unreachable", "network")):
+        reason = "the API server is not answering in time"
+        fix = "this usually clears by itself; if it persists, check API server health"
+    else:
+        reason = "the scanner hit an error"
+        fix = "see the agent logs for this scanner"
+
+    return {
+        "scanner": scanner,
+        "name": name,
+        "reason": reason,
+        "fix": fix[0].upper() + fix[1:],
+        "unwatched": checks,
+        "error": error,
+    }
+
+
 def scan_degraded_capabilities() -> list[dict]:
     """Report Pulse's own broken parts as findings, so silence is never mistaken for health.
 
@@ -242,21 +305,24 @@ def scan_degraded_capabilities() -> list[dict]:
 
     try:
         for name, (streak, error) in consecutive_failures().items():
-            findings.append(
-                _make_finding(
-                    severity=SEVERITY_WARNING,
-                    category="degraded",
-                    title=f"Scanner {name} has failed {streak} runs in a row",
-                    summary=(
-                        f"The {name} scanner has errored on its last {streak} runs and is "
-                        f"reporting nothing. Whatever it watches is currently unwatched — treat "
-                        f"the absence of {name} findings as unknown, not clear. Last error: {error}"
-                    ),
-                    resources=[{"kind": "Scanner", "name": name}],
-                    runbook_id="pulse-degraded",
-                    confidence=1.0,
-                )
+            why = explain_failure(name, error)
+            unwatched = ", ".join(why["unwatched"]) or "what it watches"
+            finding = _make_finding(
+                severity=SEVERITY_WARNING,
+                category="degraded",
+                title=f"{why['name']} checks are off: {why['reason']}",
+                summary=(
+                    f"{why['name']} has failed its last {streak} runs, so these are unwatched: "
+                    f"{unwatched}. Treat the absence of these findings as unknown, not clear. "
+                    f"To fix: {why['fix']}. Last error: {error}"
+                ),
+                resources=[{"kind": "Scanner", "name": name}],
+                runbook_id="pulse-degraded",
+                confidence=1.0,
             )
+            finding["remedy"] = why["fix"]
+            finding["unwatched"] = why["unwatched"]
+            findings.append(finding)
     except Exception as e:
         logger.error("Scanner health check failed: %s", e)
         report_failure(e)

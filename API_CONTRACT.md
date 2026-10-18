@@ -733,7 +733,9 @@ Server acknowledges with an `ack` event.
 }
 ```
 
-**Note:** `resources` is a plural array (not a single `resource` object) since a finding can span multiple resources. There is no `details` field. The optional `confidence` field (0.0–1.0) indicates how confident the scanner is that this is a real issue. The optional `noiseScore` field (0.0–1.0) indicates how likely this finding is transient noise (based on historical self-resolution patterns) -- findings with `noiseScore >= 0.5` are dimmed in the UI. `autoFixable`, `runbookId`, and `findingType` (`"current"` | predictive variants) are also present on the real payload.
+**Note:** `resources` is a plural array (not a single `resource` object) since a finding can span multiple resources. There is no `details` field. The optional `confidence` field (0.0–1.0) indicates how confident the scanner is that this is a real issue. The optional `noiseScore` field (0.0–1.0) indicates how likely this finding is transient noise (based on historical self-resolution patterns) -- findings with `noiseScore >= 0.5` are dimmed in the UI. `autoFixable`, `runbookId`, and `findingType` (`"current"` | predictive variants) are also present on the real payload. `degraded` findings about a failing scanner also carry `remedy` (one plain-English sentence: what to change so the scanner can see again) and `unwatched` (the checks that are off until then).
+
+A client that subscribes receives every standing finding at once, then new ones as they appear. Treat a `finding` whose `id` is already known as an update to it, not a second finding.
 
 #### `prediction` — Predicted future issue
 
