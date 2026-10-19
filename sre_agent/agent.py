@@ -784,6 +784,17 @@ async def run_agent_streaming(
         tool_defs = [d for d in tool_defs if d.get("name") not in write_tools]
         effective_system = _with_system_note(effective_system, PLAN_ONLY_SYSTEM_NOTE)
 
+    # The same reasoning, for the rules that outlive a plan-only turn: the deny
+    # policy was enforced in the tool path and stated nowhere the model could
+    # read, so it reached for delete_pod on a protected namespace, was refused,
+    # and lost the rest of the turn's writes with it. The namespace decides, so
+    # these tools stay offered and the policy is named instead of removed.
+    from .policy import policy_system_note
+
+    _policy_note = policy_system_note([str(d.get("name", "")) for d in tool_defs])
+    if _policy_note:
+        effective_system = _with_system_note(effective_system, _policy_note)
+
     while iterations < MAX_ITERATIONS:
         iterations += 1
         budget.record_iteration()
