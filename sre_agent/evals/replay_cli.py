@@ -488,6 +488,10 @@ def _format_text(results: list[dict]) -> str:
         turn_info = f"  ({r['turn_count']} turns)" if r.get("multi_turn") else ""
         lines.append(f"Fixture: {r['fixture']}{turn_info}  [{status}]  Score: {score['score']}/100")
         lines.append(f"Duration: {r['duration_ms']:.0f}ms")
+        attempts = r.get("attempts") or []
+        if len(attempts) > 1:
+            outcomes = ", ".join("pass" if a.get("score", {}).get("passed") else "fail" for a in attempts)
+            lines.append(f"Attempts: {len(attempts)} ({outcomes}); the last one is the verdict")
         if r.get("mode"):
             offered = r.get("offered_tool_count")
             offered_txt = f", {offered} tools offered" if offered else ""
@@ -571,18 +575,36 @@ def main() -> None:
     with offline_context(allow_llm_tool_picker=False):
         results = _execute(fixtures, _run_one, args.concurrency)
 
-    if args.format == "json":
-        print(json.dumps(results, indent=2, default=str))
-    else:
-        print(_format_text(results))
+    # One row per fixture, carrying every attempt made for it. Seeded with the
+    # first attempt here so the shape is the same whether or not retries run.
+    results = [_with_attempts(r) for r in results]
+
+    def _emit() -> None:
+        """Write the run's record once, after any confirmation re-runs.
+
+        This used to print before `_confirm_regressions`, so the artifact CI
+        keeps (`artifacts/live_judge.json`) always held attempt 1 and never the
+        retries. `acceptance_cli` reads that artifact for the mandatory
+        forbidden-tool invariants, which made the two lanes disagree in both
+        directions: a fixture this lane forgave as flaky still failed acceptance
+        on attempt 1's evidence, and a forbidden call made only on a retry was
+        invisible to it. Every attempt is recorded now, so safety is judged on
+        all of them while a merely low judge score can still be retried away.
+        """
+        if args.format == "json":
+            print(json.dumps(results, indent=2, default=str))
+        else:
+            print(_format_text(results))
 
     if args.save_baseline:
+        _emit()
         _write_baseline(results, args.save_baseline)
         return
 
     if args.baseline:
         baseline = _load_baseline(args.baseline)
         if not baseline:
+            _emit()
             print("Baseline could not be read — refusing to pass silently.", file=sys.stderr)
             sys.exit(2)
         regressed = _regressions(results, baseline)
@@ -604,21 +626,53 @@ def main() -> None:
         # passes on retry was noise; one that fails every attempt is a real
         # regression. Retries are per-fixture, so a clean run costs nothing.
         if regressed and args.confirm_retries > 0:
-            regressed, flaky = _confirm_regressions(regressed, _run_one, args.concurrency, args.confirm_retries)
+            regressed, flaky, reruns = _confirm_regressions(regressed, _run_one, args.concurrency, args.confirm_retries)
+            results = _merge_attempts(results, reruns)
             if flaky:
                 print(
                     f"FLAKY (failed once, passed on retry — not counted): {', '.join(flaky)}",
                     file=sys.stderr,
                 )
 
+        _emit()
         if regressed:
             print("REGRESSED: " + ", ".join(regressed), file=sys.stderr)
             sys.exit(1)
         return
 
+    _emit()
     # No baseline given — every fixture must pass.
     if not all(r["score"]["passed"] for r in results):
         sys.exit(1)
+
+
+def _with_attempts(result: dict) -> dict:
+    """Wrap one fixture result as a row that records the attempts made for it.
+
+    The row's own fields stay those of the attempt the verdict came from, so
+    everything that reads `row["score"]` — the CI summary, `_format_text` — sees
+    the result the gate acted on, while `attempts` keeps all of them for the
+    mandatory safety checks, which may not be told about one sample only.
+    """
+    return {**result, "attempts": [result]}
+
+
+def _merge_attempts(results: list[dict], reruns: list[dict]) -> list[dict]:
+    """Fold confirmation re-runs into their fixture's row, in attempt order."""
+    extra: dict[str, list[dict]] = {}
+    for rerun in reruns:
+        name = str(rerun.get("fixture") or "")
+        if name:
+            extra.setdefault(name, []).append(rerun)
+    merged: list[dict] = []
+    for row in results:
+        more = extra.get(str(row.get("fixture") or ""))
+        if not more:
+            merged.append(row)
+            continue
+        attempts = [*(row.get("attempts") or []), *more]
+        merged.append({**attempts[-1], "attempts": attempts})
+    return merged
 
 
 def _load_baseline(path: str) -> dict[str, bool]:
@@ -663,16 +717,24 @@ def _write_baseline(results: list[dict], path: str) -> None:
     print(f"Baseline written to {path}: {payload['passed']}/{payload['total']} passing", file=sys.stderr)
 
 
-def _confirm_regressions(suspected: list[str], run_one, concurrency: int, retries: int) -> tuple[list[str], list[str]]:
+def _confirm_regressions(
+    suspected: list[str], run_one, concurrency: int, retries: int
+) -> tuple[list[str], list[str], list[dict]]:
     """Re-run suspected regressions; keep only those that fail every attempt.
 
-    Returns (confirmed, flaky). A fixture is confirmed only if it fails the
-    original run and all ``retries`` re-runs — with a non-deterministic judge,
-    a single failure is as likely to be noise as signal.
+    Returns (confirmed, flaky, reruns). A fixture is confirmed only if it fails
+    the original run and all ``retries`` re-runs — with a non-deterministic
+    judge, a single failure is as likely to be noise as signal.
+
+    ``reruns`` is every re-run result, in the order it was produced. The caller
+    records them alongside attempt 1: forgiving a fixture's score is not the
+    same as forgiving what it did, and the mandatory safety checks downstream
+    are entitled to the whole run rather than its first sample.
     """
     from .replay_config import offline_context
 
     still_failing = list(suspected)
+    reruns: list[dict] = []
     for attempt in range(1, retries + 1):
         if not still_failing:
             break
@@ -682,11 +744,12 @@ def _confirm_regressions(suspected: list[str], run_one, concurrency: int, retrie
         )
         with offline_context(allow_llm_tool_picker=False):
             rerun = _execute(still_failing, run_one, concurrency)
+        reruns.extend(rerun)
         still_failing = [r["fixture"] for r in rerun if not r["score"]["passed"]]
 
     confirmed = [name for name in suspected if name in set(still_failing)]
     flaky = [name for name in suspected if name not in set(still_failing)]
-    return confirmed, flaky
+    return confirmed, flaky, reruns
 
 
 def _execute(fixtures: list[str], run_one, concurrency: int) -> list[dict]:
