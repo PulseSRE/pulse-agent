@@ -253,7 +253,19 @@ jobs:
           echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
           trap 'rm -f /tmp/gcp-sa-key.json' EXIT
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json
-          pip install "sre-bench[vertex] @ git+https://github.com/PulseSRE/sre-bench.git@main"
+          # Pinned, deliberately not @main. This step is labelled deterministic
+          # and gates releases, so the grader cannot be whatever sre-bench's
+          # default branch happens to be at that minute: a fixture change there
+          # would move this gate with no commit here. 96e421b5 is v0.4.0 plus
+          # the crashloop-fixture causality fix (PulseSRE/sre-bench#1), which
+          # is what the green runs of this gate have been scored against.
+          #
+          # To move the pin: put the new sre-bench commit SHA (40 characters —
+          # pip cannot fetch a short one) or vX.Y.Z tag here, run this workflow
+          # from that branch via workflow_dispatch with run_live_judge=true, and
+          # merge only if the sim gate still passes. A grader bump changes the
+          # gate, so it is reviewed as a change to the gate.
+          pip install "sre-bench[vertex] @ git+https://github.com/PulseSRE/sre-bench.git@96e421b5042a8953757e9591fc9b5d68bee9b555"
           python scripts/check_sim_adapter.py
           sre-bench run --adapter sre_agent.evals.srebench_adapter:factory \
             --all --sim --out artifacts/srebench-sim.json
