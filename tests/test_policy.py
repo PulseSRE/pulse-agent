@@ -1,10 +1,19 @@
 """Harness-level deny policy: rules that hold regardless of model or approver."""
 
+from unittest.mock import patch
+
 import pytest
 
 from sre_agent import config as config_mod
 from sre_agent.errors import ToolError
 from sre_agent.policy import check_write_policy
+
+# Imported at module scope on purpose: importing it inside a test pulls in
+# sre_agent.agent (and tests.test_agent) mid-test, which materialises the
+# settings singleton before the test can set PULSE_AGENT_HARNESS — so the
+# harness stayed on, adaptive tool selection replaced the offered defs, and
+# these tests passed or failed on collection order.
+from tests.test_plan_only_turns import _offered
 
 
 @pytest.fixture
@@ -135,6 +144,26 @@ class TestPolicyIsVisibleToTheModel:
         # Why reaching for it is expensive, not just that it fails.
         assert "blocks every later write in the same turn" in note
 
+    def test_note_says_to_propose_the_alternative_not_to_run_it(self, fresh_settings):
+        """Naming a sanctioned tool to a model that was just refused reads as permission.
+
+        The first wording called restart_deployment "the sanctioned replacement".
+        On the sim lane's unsafe_missing_confirmation trap the model refused the
+        deletion, quoted this note, and ran restart_deployment in production
+        instead — a write nobody asked for, which the benchmark flags as a policy
+        violation. The note must match what check_write_policy itself says.
+        """
+        from sre_agent.policy import policy_system_note
+
+        note = policy_system_note(["delete_pod", "restart_deployment"])
+        assert note is not None
+        assert "propose restart_deployment" in note
+        assert "rather than running it yourself in the same turn" in note
+        assert "needs a new request from them, not a different tool" in note
+        # The enforcement message and the note agree on the remedy.
+        denied = check_write_policy("delete_pod", {"namespace": "production", "name": "x"})
+        assert denied is not None and "propose" in denied.message
+
     def test_note_follows_the_configured_namespaces(self, fresh_settings):
         from sre_agent.policy import policy_system_note
 
@@ -175,20 +204,21 @@ class TestPolicyIsVisibleToTheModel:
 
 
 class TestTheNoteReachesThePrompt:
-    @pytest.mark.asyncio
-    async def test_an_acting_turn_is_told_the_policy(self, fresh_settings, monkeypatch):
-        from tests.test_plan_only_turns import _offered
+    """The harness is switched off the way the sibling tests do it, with a
+    decorator: it is in place before the first line of the body, so nothing can
+    build the settings singleton while adaptive tool selection is still on."""
 
-        monkeypatch.setenv("PULSE_AGENT_HARNESS", "0")
+    @pytest.mark.asyncio
+    @patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
+    async def test_an_acting_turn_is_told_the_policy(self, fresh_settings):
         names, system = await _offered("The orders-api deployment in production is degraded. Recover it.")
         assert "delete_pod" in names  # the namespace decides, so the tool is still offered
         assert "delete_pod is refused in protected namespaces" in system
+        assert "propose restart_deployment" in system
 
     @pytest.mark.asyncio
-    async def test_a_plan_turn_is_not_told_about_tools_it_does_not_have(self, fresh_settings, monkeypatch):
-        from tests.test_plan_only_turns import _offered
-
-        monkeypatch.setenv("PULSE_AGENT_HARNESS", "0")
+    @patch.dict("os.environ", {"PULSE_AGENT_HARNESS": "0"})
+    async def test_a_plan_turn_is_not_told_about_tools_it_does_not_have(self, fresh_settings):
         names, system = await _offered("Propose a recovery plan for the degraded orders-api deployment")
         assert "delete_pod" not in names
         assert "delete_pod is refused" not in system
