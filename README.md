@@ -6,9 +6,9 @@
 
 <p>
   <a href="https://github.com/PulseSRE/pulse-agent/releases/tag/v2.33.0"><img src="https://img.shields.io/badge/release-v2.33.0-2563eb?style=for-the-badge" alt="Version"></a>
-  <img src="https://img.shields.io/badge/tools-143_(107+36_MCP)-10b981?style=for-the-badge" alt="Tools">
+  <img src="https://img.shields.io/badge/tools-144_(108+36_MCP)-10b981?style=for-the-badge" alt="Tools">
   <img src="https://img.shields.io/badge/skills-7-10b981?style=for-the-badge" alt="Skills">
-  <img src="https://img.shields.io/badge/scanners-27-10b981?style=for-the-badge" alt="Scanners">
+  <img src="https://img.shields.io/badge/scanners-32-10b981?style=for-the-badge" alt="Scanners">
   <img src="https://img.shields.io/badge/eval_suites-16_(192_scenarios)-10b981?style=for-the-badge" alt="Eval Suites">
   <img src="https://img.shields.io/badge/PromQL%20recipes-83-10b981?style=for-the-badge" alt="PromQL Recipes">
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
@@ -107,7 +107,7 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 - **Cluster Diagnostics** -- Investigate pod crashes, OOM kills, image pull errors, scheduling problems, and operator degradation
 - **Incident Triage** -- Correlate events, pod status, logs, and Prometheus metrics to identify root causes
 - **Resource Management** -- Analyze quotas, capacity, utilization, and HPA status across nodes
-- **Runbook Execution** -- 10 built-in runbooks. Scale deployments, restart pods, cordon/drain nodes, apply YAML (with confirmation gates)
+- **Runbook Execution** -- 13 built-in runbooks. Scale deployments, restart pods, cordon/drain nodes, apply YAML (with confirmation gates)
 - **PromQL** -- PromQL recipes (validate against your cluster metrics) across 16 categories, metric discovery, query verification against live clusters
 - **Right-Sizing** -- `get_resource_recommendations` compares actual CPU/memory usage to requests/limits via Prometheus
 
@@ -120,8 +120,12 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 - **Secret Hygiene** -- Find old unrotated secrets, env-exposed secrets, unused secrets
 
 ### Autonomous Monitor
-- **27 Scanners** -- 5 availability (crashlooping pods, pending pods, failed workloads, image pull errors, DaemonSet gaps) + 5 audit (config, RBAC, deployments, warning events, auth) + 5 predictive trend (memory/disk pressure forecast, HPA exhaustion, error rate acceleration, operator degradation) + 4 liveness (stuck, hot loop, control plane, degraded) + 2 each for infrastructure, security, monitoring and resources
-- **Auto-Fix** -- The server trust setting controls remediation: level 2 asks, levels 3/4 allow automatic fixes. Browser selections cannot lower the server level; current category subsets do not restrict level-3 handlers. See [security limitations](SECURITY.md#monitor-trust-levels). Rate-limited to 3 fixes per scan with a per-resource attempt cap, and a database-backed kill switch (`POST /monitor/pause`) that survives pod restarts
+- **32 Scanners** -- 8 availability (crashlooping pods, pending pods, failed workloads, image pull errors, DaemonSet gaps, unusual-for-this-workload anomalies, storage, routes & DNS) + 3 infrastructure (nodes, operators, maintenance blockers) + 5 liveness (stuck deletions, admission webhooks, hot reconcile loops, control plane stalls, Pulse self-check) + 5 audit (config, RBAC, deployments, warning events, auth) + 5 predictive trend (memory/disk pressure forecast, HPA exhaustion, error rate acceleration, trend-monitoring health) + 2 each for security, monitoring and resources
+- **Stable Finding Identity** -- A finding keeps its id while its numbers move ("pending for 6m" then "7m") and while its pods are recreated. Only the scanner that raised a finding can resolve it, so a scanner that skipped a cycle or errored never "resolves" anything, and a fix only gets credit for a condition that really cleared
+- **No Silent Blind Spots** -- A scanner that cannot see (RBAC denied, Prometheus down, an API missing) reports itself degraded with what it could not watch and how to fix it, instead of returning a clean result
+- **Normal For This Workload** -- 7-day per-workload baselines (p50/p95 memory, CPU, restarts) refreshed every 6 hours, so a finding can say "3x this workload's normal" and investigations start from what is unusual
+- **What Changed** -- Investigations and incident episodes lead with the changes around the incident (rollouts, ConfigMap edits, Argo syncs, cluster upgrades), ranked by how likely they are related
+- **Auto-Fix** -- The server trust setting controls remediation: level 2 asks, levels 3/4 allow automatic fixes. Browser selections cannot lower the server level; current category subsets do not restrict level-3 handlers. See [security limitations](SECURITY.md#monitor-trust-levels). Answering a proposal needs a known person on an ask-first client; an approval is refused if the finding cleared or the server stopped allowing fixes while it waited. Rate-limited to 3 fixes per scan with a per-resource attempt cap, and a database-backed kill switch (`POST /monitor/pause`) that survives pod restarts
 - **Confidence Scores** -- Every finding, investigation, and action includes a 0-100% confidence score
 - **Noise Learning** -- Tracks transient findings and assigns noise scores to suppress flaky alerts
 - **Simulation Preview** -- Predict impact, risk, and duration before executing a fix
@@ -376,7 +380,7 @@ sre_agent/
   tool_registry.py     Central registry (all tools register at import)
 
   # Monitor
-  monitor/             11 modules: session, scanners, investigations, auto-fix, ...
+  monitor/             32 modules: session, scanners, baselines, change correlation, investigations, auto-fix, ...
 
   # Intelligence
   intelligence.py      Analytics feedback loop into system prompt
@@ -386,7 +390,7 @@ sre_agent/
   promql_recipes.py    83 PromQL recipes
 
   # Infrastructure
-  db.py                PostgreSQL abstraction + migrations (v022)
+  db.py                PostgreSQL abstraction + migrations (v037)
   memory/              Self-improving agent (incidents, runbooks, patterns)
   mcp_client.py        MCP server connections (SSE transport)
   orchestrator.py      Typo correction (~130 K8s misspellings)
@@ -399,14 +403,14 @@ sre_agent/
 | Endpoint | Description |
 |----------|-------------|
 | `WS /ws/agent` | Auto-routing orchestrated agent (ORCA classifies each message) |
-| `WS /ws/monitor` | Autonomous monitor (27 scanners, auto-fix, predictions) |
+| `WS /ws/monitor` | Autonomous monitor (32 scanners, auto-fix, predictions) |
 
 All WebSocket endpoints require `?token=...` query parameter (constant-time comparison). Protocol v2.
 
 ---
 
 <p align="center">
-  <strong>104 native tools + MCP</strong> &bull; <strong>7 skills</strong> &bull; <strong>27 scanners</strong> &bull; <strong>13 runbooks</strong> &bull; <strong>83 PromQL recipes</strong> &bull; <strong>16 eval suites (192 scenarios)</strong> &bull; <strong>2,848 tests</strong> &bull; <strong>Migration v031</strong> &bull; <strong>Protocol v2</strong>
+  <strong>108 native tools + MCP</strong> &bull; <strong>7 skills</strong> &bull; <strong>32 scanners</strong> &bull; <strong>13 runbooks</strong> &bull; <strong>83 PromQL recipes</strong> &bull; <strong>16 eval suites (192 scenarios)</strong> &bull; <strong>3,910 tests</strong> &bull; <strong>Migration v037</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

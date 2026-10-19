@@ -79,7 +79,10 @@ make release VERSION=X.Y.Z            # agent-only version/badge commit + tag; s
 ### Monitor System (`monitor/` package)
 - `MonitorSession` (session.py) — periodic cluster scanning (default 60s interval)
 - Scanner protocol: `ScannerMeta` dataclass + `Scanner` protocol in `scanner_protocol.py`. `FunctionScanner` wraps existing functions. `cluster_monitor._run_scan_locked()` iterates `get_all_scanner_instances()` with `shared_resources` dict for pod-sharing. Adding a scanner = adding a class, no changes to cluster_monitor.
-- Scanner inventory (inspect registry for current count): 13 reactive (crashlooping pods, pending pods, failed deployments, node pressure, expiring certs, firing alerts, OOM-killed pods, image pull errors, degraded operators, DaemonSet gaps, HPA saturation, SLO burn rate, security posture) + 5 audit (config changes, RBAC, deployments, warning events, auth) + 4 predictive trend (memory pressure forecast, disk pressure forecast, HPA exhaustion trend, error rate acceleration) using Prometheus `predict_linear()`
+- Scanner inventory (inspect `get_all_scanner_instances()` for current count; 32 at v2.33.0): 17 reactive (crashlooping pods, pending pods, failed deployments, image pull errors, DaemonSet gaps, baseline anomaly, storage, routes & DNS, node pressure, degraded operators, maintenance blockers, expiring certs, security posture, firing alerts, SLO burn rate, OOM-killed pods, HPA saturation) + 5 liveness (stuck deletions, admission webhooks, hot reconcile loops, control plane stalls, Pulse self-check `degraded`) + 5 audit (config changes, RBAC, deployments, warning events, auth) + 5 predictive trend (memory pressure, disk pressure, HPA exhaustion, error rate acceleration using Prometheus `predict_linear()`, plus `trend_degraded` health)
+- Finding identity: `_finding_key` masks measurements in titles and strips generated pod suffixes; only the owning scanner resolves a finding; a skipped or failed scanner resolves nothing
+- Scanner health (`scanner_health.py`): `safe()` reports API errors inside a scan, `optional_access()` for permitted-to-fail sub-checks, `explain_failure()` gives `remedy`/`unwatched`; blind scanners become `degraded` findings
+- `monitor/baselines.py` (7-day per-workload p50/p95, 6h refresh), `monitor/change_correlation.py` (rollouts, ConfigMap edits, Argo, ClusterVersion → `episodes.changes_around`), `monitor/blind_spot_scanners.py` (storage, ingress, webhooks, maintenance)
 - Auto-fix at trust level 3+: deletes crashlooping pods, restarts failed deployments
 - Confidence scores on all findings, investigations, and action proposals
 - `resolution` events emitted when findings resolve (auto-fix or self-healed)
@@ -173,7 +176,7 @@ Deployment is owned by the [Pulse Operator](https://github.com/PulseSRE/pulse-op
 - `config.py` — Pydantic v2 Settings (`PulseAgentSettings` with `PULSE_AGENT_` prefix)
 - `errors.py` — `ToolError` classification (7 categories + suggestions)
 - `error_tracker.py` — thread-safe ring buffer for error aggregation
-- `runbooks.py` — 10 built-in SRE runbooks injected into system prompt
+- `runbooks.py` — 13 built-in SRE runbooks injected into system prompt
 - `memory/` — self-improving agent (PostgreSQL, pattern detection, learned runbooks)
 - `memory/environment.py` — memory about *this* cluster, kept separate from memory about Kubernetes. `EnvironmentFact` (stated/established, changes rarely: ownership, retention, GitOps topology) and `WorkloadBaseline` (measured, recomputed on a window) so an observation can be reported as "3x this workload's normal" rather than a raw number. Tools: `remember_environment_fact`, `get_environment_facts`, `compare_to_baseline`, `search_conversations` (cross-session search over `chat_messages`, scoped to one owner). Migration 032
 - `view_tools.py` — `namespace_summary` + `create_dashboard` (accepts view_type, trigger_source, finding_id, visibility for agent view lifecycle) + `get_topology_graph` tools for generative views. Topology supports 5 perspectives (Physical, Logical, Network, Multi-Tenant, Helm) via `kinds`, `relationships`, `layout_hint`, `include_metrics`, `group_by` params

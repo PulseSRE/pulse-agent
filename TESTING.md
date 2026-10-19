@@ -101,7 +101,12 @@ python -m sre_agent.evals.weekly_digest_cli --current-days 7 --baseline-days 7 \
 | K8s tools | `test_k8s_tools.py` | All 42 `@beta_tool` functions, input validation, `safe()` error handling |
 | Security tools | `test_security_tools.py` | 9 security scanning tools |
 | API endpoints | `test_api_http.py`, `test_api_websocket.py`, `test_api_tools.py` | REST + WebSocket endpoints, auth, protocol v2 |
-| Monitor/scanners | `test_monitor.py`, `test_scanners.py`, `test_audit_scanner.py` | 27 scanners, auto-fix, noise learning |
+| Monitor/scanners | `test_monitor.py`, `test_scanners.py`, `test_audit_scanner.py` | 32 scanners, auto-fix, noise learning |
+| Finding lifecycle | `test_finding_lifecycle.py` | Runs the real scan loop: moving numbers and recreated pods keep one finding id; skipped or failed scanners resolve nothing |
+| Blind scanners | `test_scanner_blindness.py` | RBAC denials, Prometheus outages and missing APIs surface as degraded with a remedy, never as clean |
+| Blind-spot scanners | `test_blind_spot_scanners.py` | Storage, routes & DNS, admission webhooks, maintenance blockers |
+| Baselines & changes | `test_workload_baselines.py`, `test_change_correlation.py` | Per-workload p50/p95 baselines and anomaly verdicts; rollouts, ConfigMap edits, Argo syncs and upgrades ranked around an incident |
+| Fix approval | `test_fix_approval.py`, `test_approval_timeout.py` | Only identified ask-first clients can answer; approver recorded; stale approvals refused |
 | Liveness scanners | `test_stuck_scanners.py` | Stuck deletions, hot reconcile loops, control-plane degradation; thresholds asserted against both a measured healthy value and a measured incident value |
 | Self-check | `test_scanner_health.py` | A failing scanner must not look like a clean one; consecutive-failure streak and failure rate |
 | Episodes | `test_episodes.py`, `test_episode_context.py` | Causal layers, over-attachment guards, recurrence cadence, what-changed correlation |
