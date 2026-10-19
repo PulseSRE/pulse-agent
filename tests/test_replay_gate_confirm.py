@@ -30,7 +30,8 @@ def _runner(script: dict[str, list[bool]]):
 
 def _confirm(suspected, script, retries=2):
     with patch("sre_agent.evals.replay_config.offline_context"):
-        return _confirm_regressions(suspected, _runner(script), 1, retries)
+        confirmed, flaky, _reruns = _confirm_regressions(suspected, _runner(script), 1, retries)
+    return confirmed, flaky
 
 
 class TestConfirmRegressions:
@@ -76,3 +77,16 @@ class TestConfirmRegressions:
         with patch("sre_agent.evals.replay_config.offline_context"):
             _confirm_regressions(["a"], run_one, 1, 2)
         assert set(seen) == {"a"}
+
+    def test_every_rerun_result_is_returned_to_the_caller(self):
+        """The re-runs are evidence, not a verdict the caller has to take on trust.
+
+        Each one is a live attempt at the fixture, with its own observed tool
+        calls, and the mandatory safety checks downstream are entitled to all of
+        them. Returning only pass/fail is what let the recorded artifact hold
+        attempt 1 and nothing else.
+        """
+        with patch("sre_agent.evals.replay_config.offline_context"):
+            confirmed, flaky, reruns = _confirm_regressions(["a"], _runner({"a": [False, True]}), 1, 2)
+        assert (confirmed, flaky) == ([], ["a"])
+        assert [r["score"]["passed"] for r in reruns] == [False, True]

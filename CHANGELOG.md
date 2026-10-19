@@ -2,6 +2,12 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- The judged replay artifact is the record of the whole run, not of its first attempt. `replay_cli` printed the results — which CI keeps as `artifacts/live_judge.json` — before re-running suspected regressions, and discarded the re-runs. `acceptance_cli` reads that artifact for the mandatory forbidden-tool invariants, so the two release lanes judged different runs: on the v2.32.0 release commit the replay lane forgave a fixture as flaky while acceptance failed the build on attempt 1's evidence, and a forbidden call made only on a retry was invisible to acceptance because the retry was never written down. Each row now carries every attempt, each attempt is checked, and a row that does not say which attempts it reports fails closed. A noisy judge score can still be retried away; what the agent did cannot
+- The "SRE-Bench sim gate (deterministic)" step pinned its grader. It installed `sre-bench` from `@main`, so a fixture change in another repository could move a release gate here with no commit in this one, and two runs of the same commit were not comparable. It now installs the commit the gate's green runs were scored against, with a comment on how to move the pin, and a test fails any workflow that installs the grader from a branch
+
 ## v2.33.0 (2026-10-18)
 
 Paired with pulse-ui v2.33.0 and pulse-operator v0.10.0. No new migrations. Upgrade the operator too: v0.10.0 grants the read-only RBAC the new scanners and the "what changed" list use (without it they report the 403 and skip that source). Monitor connections now need a forwarded user identity to answer fix proposals; behind the operator's OAuth proxy they always have one. Pull requests #158–#165.
