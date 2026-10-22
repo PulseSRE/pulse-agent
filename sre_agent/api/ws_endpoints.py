@@ -37,10 +37,39 @@ _active_agent_count: int = 0
 logger = logging.getLogger("pulse_agent.api")
 
 
+def _is_turn_start(message: dict) -> bool:
+    """A message a person wrote, as opposed to a turn's tool results."""
+    if message.get("role") != "user":
+        return False
+    content = message.get("content")
+    if isinstance(content, str):
+        return True
+    return not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content or [])
+
+
 def _cap_messages(messages: list[dict], max_msgs: int) -> None:
-    """Cap conversation history to prevent unbounded memory growth."""
-    if len(messages) > max_msgs:
-        messages[:] = messages[-max_msgs:]
+    """Cap conversation history to prevent unbounded memory growth.
+
+    The cut lands on the start of a turn. A plain last-N slice could keep a
+    tool_result whose tool_use was dropped (the API rejects it) or open on an
+    assistant message; either way every later request in the session failed.
+    """
+    if len(messages) <= max_msgs:
+        return
+    start = len(messages) - max_msgs
+    while start < len(messages) and not _is_turn_start(messages[start]):
+        start += 1
+    messages[:] = messages[start:]
+
+
+def _rollback_turn(messages: list[dict], turn_start: int) -> None:
+    """Drop everything a failed turn added: its question, tool calls and results.
+
+    Popping only the last message left a half-finished turn behind (an
+    assistant tool_use with no result, or two user messages in a row), and
+    every later message in the session failed on the same invalid history.
+    """
+    del messages[turn_start:]
 
 
 async def _check_agent_limit(websocket: WebSocket) -> bool:
@@ -201,6 +230,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
             if ctx_prefix:
                 content = ctx_prefix + content
 
+            turn_start = len(messages)
             messages.append({"role": "user", "content": content})
 
             style_hint = _apply_style_hint(data)
@@ -278,8 +308,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                     logger.debug("Client disconnected before done message", exc_info=True)
             except Exception as exc:
                 logger.exception("Agent error")
-                if messages:
-                    messages.pop()
+                _rollback_turn(messages, turn_start)
                 # Build a descriptive error message
                 err_type = type(exc).__name__
                 err_msg = str(exc)[:200]
@@ -513,6 +542,7 @@ async def websocket_auto_agent(websocket: WebSocket):
             if ctx_prefix:
                 content = ctx_prefix + content
 
+            turn_start = len(messages)
             messages.append({"role": "user", "content": content})
 
             # Gather context inputs for prompt builder
@@ -800,8 +830,7 @@ async def websocket_auto_agent(websocket: WebSocket):
 
             except Exception as exc:
                 logger.exception("Agent error")
-                if messages:
-                    messages.pop()
+                _rollback_turn(messages, turn_start)
                 # Build a descriptive error message
                 err_type = type(exc).__name__
                 err_msg = str(exc)[:200]

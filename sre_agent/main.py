@@ -168,6 +168,7 @@ async def run_repl(mode: str):
                 console.print("[dim]No previous interaction to rate.[/dim]")
             continue
 
+        turn_start = len(messages)
         messages.append({"role": "user", "content": user_input})
         last_query = user_input
 
@@ -208,11 +209,13 @@ async def run_repl(mode: str):
             console.print()
         except KeyboardInterrupt:
             console.print("\n[dim]Interrupted.[/dim]")
-            messages.pop()
+            # The whole turn, not just its last message: an interrupted turn
+            # can leave a tool_use with no result, which breaks the next request.
+            del messages[turn_start:]
             continue
         except Exception as e:
             console.print(f"\n[red]Error: {type(e).__name__}: {e}[/red]")
-            messages.pop()
+            del messages[turn_start:]
             continue
 
         if full_response:
@@ -223,7 +226,7 @@ async def run_repl(mode: str):
                 console.print(f"[dim]Memory: score={result['score']:.2f}[/dim]")
         else:
             console.print("[dim]No response.[/dim]")
-            messages.pop()
+            del messages[turn_start:]
 
     if memory_mgr:
         memory_mgr.close()
