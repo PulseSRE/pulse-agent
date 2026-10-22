@@ -4,6 +4,10 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Durable approvals reach people. A plan run waiting on an approval gate becomes an inbox item (and is listed by `GET /workflow-runs/awaiting-approval`) instead of being answerable only from the panel that started it, while that panel stayed open; unanswered, such runs timed out to `needs_escalation` with nobody asked. The item auto-resolves when the gate is answered or times out, and survives a Temporal outage rather than resolving falsely
+- A durable run can be started from an inbox item (`POST /inbox/{item_id}/durable-run`, preview with `GET /inbox/{item_id}/plan`): the plan matching the finding investigates that finding. Runs started from the plan panel carried an empty incident, so the plan investigated nothing in particular
+
 ### Fixed
 - Durable execution (Temporal) checked end to end against a real server, the real worker and real plan templates, and fixed where it fell short:
   - **A stalled API server froze the whole agent.** Durable activities ran the synchronous Kubernetes client and database calls on the event loop the worker shares with the API server, WebSockets and monitor, and the Kubernetes client has no request timeout. Against an API server that accepts connections and never answers, a 45s sleep had not returned after 120s. Those calls now run on threads, as the inline auto-fix path already did; the same test shows a worst loop stall of 0.1s

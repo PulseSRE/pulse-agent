@@ -81,6 +81,9 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/plan-templates/{type}/versions` | token | Version history for one plan template |
 | `POST` | `/plan-templates/{type}/run` | admin | Start a durable run of this plan on Temporal. 503 with the reason when durable execution is not configured |
 | `GET` | `/workflow-runs` | token | Recent durable runs from Temporal's visibility store (query: `limit` 1-100). Each row carries a `memo` labelling what the run is acting on |
+| `GET` | `/workflow-runs/awaiting-approval` | token | Running plan runs parked on an approval gate: `workflow_id`, `phase_id`, `memo`, per-phase progress. 503 when Temporal is unconfigured or unreachable |
+| `GET` | `/inbox/{item_id}/plan` | token | The plan template a durable run of this inbox item would use (`incident_type`, `plan_name`, `phases` with `approval_required`); 404 when none matches |
+| `POST` | `/inbox/{item_id}/durable-run` | admin | Start a durable plan run investigating this item's finding (the standing finding when the monitor has it, else the item's own fields). 404 when no template matches; 503 when Temporal or its worker is unavailable |
 | `GET` | `/workflow-runs/{workflow_id}` | token | Status plus live progress for one run, queried from the workflow itself |
 | `POST` | `/workflow-runs/{workflow_id}/approve` | admin | Deliver a human verdict to a run waiting on approval (body: nonempty `phase_id`, explicit boolean `approved`; missing/non-boolean values return 400) |
 | `POST` | `/workflow-runs/{workflow_id}/cancel` | admin | Stop a running workflow (body: optional `reason`). Cooperative: for an incident run this rolls the fix back from its snapshot and records a `cancelled` verdict rather than merely stopping |
