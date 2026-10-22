@@ -149,7 +149,9 @@ class TestServerUnreachable:
         app.dependency_overrides[verify_token] = lambda: None
         try:
             with (
-                patch("sre_agent.temporal.client._settings", return_value=MagicMock(host="t:7233", namespace="default")),
+                patch(
+                    "sre_agent.temporal.client._settings", return_value=MagicMock(host="t:7233", namespace="default")
+                ),
                 patch("temporalio.client.Client.connect", side_effect=RuntimeError("connection refused")),
             ):
                 client = TestClient(app)
