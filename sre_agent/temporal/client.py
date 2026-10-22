@@ -113,7 +113,13 @@ async def start_plan_run(incident_type: str, incident: dict) -> dict:
         ),
         id=workflow_id,
         task_queue=cfg.task_queue,
-        memo=_memo_for("plan", resource=incident.get("resource"), incident_type=incident_type),
+        memo=_memo_for(
+            "plan",
+            # A finding names its resources as a list; a hand-built incident as one.
+            resource=incident.get("resource") or next(iter(incident.get("resources") or []), None),
+            incident_type=incident_type,
+            finding_id=str(incident.get("id") or ""),
+        ),
     )
     logger.info("Started durable plan run %s (%s)", workflow_id, incident_type)
     return {"workflow_id": workflow_id, "run_id": handle.result_run_id}
@@ -236,6 +242,44 @@ async def list_runs(limit: int = 25) -> list[dict]:
                 "started_at": wf.start_time.isoformat() if wf.start_time else "",
                 "closed_at": wf.close_time.isoformat() if wf.close_time else "",
                 "memo": {str(k): v for k, v in (memo or {}).items()},
+            }
+        )
+        if len(out) >= limit:
+            break
+    return out
+
+
+async def list_awaiting_approvals(limit: int = 50) -> list[dict]:
+    """Running plan runs parked on an approval gate, and which phase.
+
+    A durable approval can wait a day, but the only place to answer it was the
+    plan panel that started the run, while it stayed open. This is what the
+    Runs tab and the inbox generator use to put the question in front of
+    someone instead.
+    """
+    client = await _connect()
+    out: list[dict] = []
+    query = "WorkflowType = 'PulsePlanWorkflow' AND ExecutionStatus = 'Running'"
+    async for wf in client.list_workflows(query=query, page_size=limit):
+        try:
+            progress = await client.get_workflow_handle(wf.id, run_id=wf.run_id).query("progress")
+        except Exception:
+            logger.debug("progress query failed for %s", wf.id, exc_info=True)
+            continue
+        phase = (progress or {}).get("awaiting_approval") or ""
+        if not phase:
+            continue
+        try:
+            memo = await wf.memo()
+        except Exception:
+            memo = {}
+        out.append(
+            {
+                "workflow_id": wf.id,
+                "phase_id": phase,
+                "started_at": wf.start_time.isoformat() if wf.start_time else "",
+                "memo": {str(k): v for k, v in (memo or {}).items()},
+                "phases": (progress or {}).get("phases", {}),
             }
         )
         if len(out) >= limit:

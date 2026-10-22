@@ -1,4 +1,4 @@
-"""15 proactive task generators for the Ops Inbox.
+"""Proactive task generators for the Ops Inbox.
 
 Each generator is a function returning list[dict] of inbox item dicts.
 Generators are registered in TASK_GENERATORS and called each scan cycle.
@@ -665,6 +665,62 @@ def gen_skill_low_performers() -> list[dict[str, Any]]:
     return items
 
 
+#: Last successful answer, returned when Temporal cannot be asked. An empty
+#: list on an outage would auto-resolve every waiting-approval item, telling
+#: people the question went away when only the server did.
+_last_durable_approvals: list[dict[str, Any]] = []
+
+
+def gen_durable_approvals() -> list[dict[str, Any]]:
+    """A durable plan run waiting for a human becomes an inbox item.
+
+    Approval gates on Temporal wait up to a day, but the only place to answer
+    one was the plan panel that started the run, and only while it stayed
+    open. Navigate away and the run timed out to needs_escalation with nobody
+    asked. The item auto-resolves when the gate is answered or times out.
+    """
+    global _last_durable_approvals
+    from .config import get_settings
+
+    if not get_settings().temporal.host:
+        return []
+    import asyncio
+
+    from .temporal.client import list_awaiting_approvals
+
+    try:
+        # Generators run in a worker thread with no event loop of their own.
+        waiting = asyncio.run(asyncio.wait_for(list_awaiting_approvals(), timeout=10))
+    except Exception:
+        logger.debug("Could not list durable runs awaiting approval", exc_info=True)
+        return list(_last_durable_approvals)
+
+    items: list[dict[str, Any]] = []
+    for run in waiting:
+        memo = run.get("memo") or {}
+        plan = str(memo.get("incident_type") or "plan")
+        target = "/".join(str(memo[k]) for k in ("resource_namespace", "resource_name") if memo.get(k))
+        item = _make_assessment(
+            title=f"Durable {plan} run is waiting for your approval of '{run['phase_id']}'"
+            + (f" on {target}" if target else ""),
+            summary=(
+                f"Run {run['workflow_id']} reached phase '{run['phase_id']}', which needs a person to approve "
+                "before it runs. Approve or deny it here or in Toolbox → Runs. Unanswered, it times out and "
+                "the phase is recorded as needs_escalation."
+            ),
+            severity="warning",
+            urgency_hours=24,
+            generator="durable_approvals",
+            namespace=memo.get("resource_namespace") or None,
+            correlation_key=f"durable-approval:{run['workflow_id']}:{run['phase_id']}",
+            confidence=1.0,
+        )
+        item["metadata"].update(workflow_id=run["workflow_id"], phase_id=run["phase_id"])
+        items.append(item)
+    _last_durable_approvals = items
+    return items
+
+
 # -- Registry --
 
 TASK_GENERATORS: list[tuple[str, Any]] = [
@@ -684,6 +740,7 @@ TASK_GENERATORS: list[tuple[str, Any]] = [
     ("skill_gaps", gen_skill_gaps),
     ("skill_low_performers", gen_skill_low_performers),
     ("skill_curation", gen_skill_curation),
+    ("durable_approvals", gen_durable_approvals),
 ]
 
 

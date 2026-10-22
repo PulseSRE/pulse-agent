@@ -85,6 +85,17 @@ Kubernetes client has no request timeout. Phase activities and `apply_fix`
 heartbeat every 10s; a phase carries a 30s heartbeat timeout, so a worker that
 dies mid-phase is replaced in about 30s rather than at 2.5x the phase timeout.
 
+## Approvals reach people
+
+A plan run parked on an approval gate becomes an inbox item (generator
+`durable_approvals`, keyed on run and phase) that auto-resolves once the gate
+is answered or times out; while Temporal is unreachable the generator keeps
+its last answer rather than resolving the items. `GET
+/workflow-runs/awaiting-approval` lists the same runs for the Runs tab. A
+durable run can be started from an inbox item (`POST
+/inbox/{item_id}/durable-run`), so the plan investigates that finding rather
+than an empty incident.
+
 ## Phase semantics
 
 The durable interpreter follows the in-process engine's skip rules: a phase

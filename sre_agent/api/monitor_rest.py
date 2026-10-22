@@ -662,6 +662,85 @@ async def run_plan_template(incident_type: str, request: Request, _auth=Depends(
     return {"status": "started", **started}
 
 
+def _incident_for_inbox_item(item_id: str) -> dict:
+    """The incident a durable run of this inbox item should investigate.
+
+    The standing finding when the monitor still has it (it carries everything
+    the scanner saw), else what the inbox item recorded. "Run durably" from the
+    plan panel sent an empty incident, so the plan investigated nothing.
+    """
+    from ..inbox import get_inbox_item
+
+    item = get_inbox_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Inbox item not found")
+    finding_id = item.get("finding_id") or ""
+    if finding_id:
+        from ..monitor import cluster_monitor
+
+        monitor = cluster_monitor._cluster_monitor
+        if monitor is not None:
+            for finding in list(monitor._last_findings.values()):
+                if finding.get("id") == finding_id:
+                    return dict(finding)
+    metadata = item.get("metadata") or {}
+    return {
+        "id": finding_id or item_id,
+        "category": metadata.get("category") or "",
+        "title": item.get("title") or "",
+        "summary": item.get("summary") or "",
+        "severity": item.get("severity") or "warning",
+        "resources": item.get("resources") or [],
+    }
+
+
+def _template_for_incident(incident: dict):
+    from ..monitor.alert_plans import plan_category_for
+    from ..plan_templates import match_template
+
+    return match_template(category=plan_category_for(incident))
+
+
+@router.get("/inbox/{item_id}/plan")
+async def plan_for_inbox_item(item_id: str, _auth=Depends(verify_token)):
+    """Which plan a durable run of this item would use, or 404 if none fits."""
+    template = _template_for_incident(_incident_for_inbox_item(item_id))
+    if template is None:
+        raise HTTPException(status_code=404, detail="No plan template matches this item")
+    return {
+        "incident_type": template.incident_type,
+        "plan_name": template.name,
+        "phases": [{"id": p.id, "approval_required": p.approval_required} for p in template.phases],
+    }
+
+
+@router.post("/inbox/{item_id}/durable-run")
+async def start_durable_run_for_inbox_item(item_id: str, _auth=Depends(require_admin)):
+    """Start a durable plan run that investigates this item's finding."""
+    from ..temporal.client import TemporalDisabledError, TemporalUnavailableError, start_plan_run
+
+    incident = _incident_for_inbox_item(item_id)
+    template = _template_for_incident(incident)
+    if template is None:
+        raise HTTPException(status_code=404, detail="No plan template matches this item")
+    try:
+        started = await start_plan_run(template.incident_type, incident)
+    except (TemporalDisabledError, TemporalUnavailableError) as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    return {"status": "started", "plan_name": template.name, "incident_type": template.incident_type, **started}
+
+
+@router.get("/workflow-runs/awaiting-approval")
+async def runs_awaiting_approval(_auth=Depends(verify_token)):
+    """Plan runs parked on an approval gate, for the Runs tab."""
+    from ..temporal.client import TemporalDisabledError, TemporalUnavailableError, list_awaiting_approvals
+
+    try:
+        return {"runs": await list_awaiting_approvals()}
+    except (TemporalDisabledError, TemporalUnavailableError) as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+
 @router.get("/workflow-runs/{workflow_id}")
 async def get_workflow_run(workflow_id: str, _auth=Depends(verify_token)):
     """Status and live progress of a durable plan run."""
