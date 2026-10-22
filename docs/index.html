@@ -1,134 +1,132 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pulse Agent — Documentation</title>
-  <meta name="description" content="Pulse Agent: incident investigation, explicit execution approval, observed recovery and installation readiness diagnostics.">
-  <meta property="og:title" content="Pulse Agent">
-  <meta property="og:description" content="Pulse Agent: incident investigation, explicit execution approval, observed recovery and installation readiness diagnostics.">
-  <link rel="icon" href="logo.svg" type="image/svg+xml">
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --bg: #050510;
-      --surface: #0a0a1a;
-      --border: #1a1a3a;
-      --text: #e0e0f0;
-      --muted: #5a5a8a;
-      --cyan: #00f0ff;
-      --magenta: #ff00aa;
-      --violet: #8b5cf6;
-      --green: #00ff88;
-      --yellow: #ffee00;
-      --red: #ff3355;
-      --orange: #ff8800;
-      --glow-cyan: 0 0 20px rgba(0,240,255,0.3), 0 0 40px rgba(0,240,255,0.1);
-      --glow-magenta: 0 0 20px rgba(255,0,170,0.3), 0 0 40px rgba(255,0,170,0.1);
-      --glow-green: 0 0 20px rgba(0,255,136,0.3);
-    }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-system, sans-serif; line-height: 1.6; overflow-x: hidden; }
-    a { color: var(--green); text-decoration: none; }
-    a:hover { text-shadow: var(--glow-green); }
-    body::after { content: ''; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,136,0.012) 2px, rgba(0,255,136,0.012) 4px); pointer-events: none; z-index: 9999; }
-    .grid-bg { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-image: linear-gradient(rgba(0,255,136,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(0,255,136,0.02) 1px, transparent 1px); background-size: 60px 60px; pointer-events: none; z-index: -1; }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulse Agent: an SRE agent that asks before it acts</title>
+<meta name="description" content="Pulse Agent watches an OpenShift cluster, ties incidents to what changed, and changes nothing without your approval. Then it checks the fix held.">
+<meta property="og:title" content="Pulse Agent: an SRE agent that asks before it acts">
+<meta property="og:description" content="Pulse Agent watches an OpenShift cluster, ties incidents to what changed, and changes nothing without your approval. Then it checks the fix held.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 68 68'%3E%3Crect width='68' height='68' rx='10' fill='%2313222b'/%3E%3Cpath d='M4 36 H20 L24 40 L30 16 L36 52 L40 36 H50 L54 31 L58 36 H64' fill='none' stroke='%23eef2ef' stroke-width='5' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
 
-    .hero { text-align: center; padding: 100px 24px 80px; position: relative; }
-    .hero::before { content: ''; position: absolute; top: -200px; left: 50%; transform: translateX(-50%); width: 800px; height: 800px; background: radial-gradient(circle, rgba(0,255,136,0.06) 0%, rgba(139,92,246,0.04) 40%, transparent 70%); pointer-events: none; }
-    .hero .logo { font-size: 4rem; margin-bottom: 16px; filter: drop-shadow(0 0 20px rgba(0,255,136,0.5)); animation: pulse-glow 3s ease-in-out infinite; }
-    @keyframes pulse-glow { 0%, 100% { filter: drop-shadow(0 0 20px rgba(0,255,136,0.5)); } 50% { filter: drop-shadow(0 0 30px rgba(139,92,246,0.6)); } }
-    .hero h1 { font-size: 3.5rem; font-weight: 900; letter-spacing: -0.03em; background: linear-gradient(135deg, var(--green), var(--cyan), var(--violet)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-    .hero .version { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--green); border: 1px solid rgba(0,255,136,0.3); padding: 2px 10px; border-radius: 4px; margin-top: 12px; text-shadow: var(--glow-green); }
-    .hero .tagline { font-size: 1.2rem; color: var(--muted); max-width: 650px; margin: 20px auto 36px; }
-    .hero .tagline em { color: var(--green); font-style: normal; text-shadow: 0 0 10px rgba(0,255,136,0.3); }
-    .hero-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 28px; border-radius: 4px; font-weight: 700; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em; transition: all 0.2s; border: 1px solid transparent; font-family: 'JetBrains Mono', monospace; }
-    .btn-primary { background: transparent; color: var(--green); border-color: var(--green); box-shadow: var(--glow-green), inset 0 0 20px rgba(0,255,136,0.05); }
-    .btn-primary:hover { background: rgba(0,255,136,0.1); box-shadow: 0 0 30px rgba(0,255,136,0.4), inset 0 0 30px rgba(0,255,136,0.1); text-decoration: none; }
-    .btn-secondary { background: transparent; color: var(--cyan); border-color: rgba(0,240,255,0.4); }
-    .btn-secondary:hover { background: rgba(0,240,255,0.1); box-shadow: var(--glow-cyan) 0 0 20px rgba(0,240,255,0.3); text-decoration: none; }
-    .btn-ghost { background: transparent; color: var(--muted); border-color: var(--border); }
-    .btn-ghost:hover { border-color: var(--violet); color: var(--violet); text-decoration: none; }
-
-    .neon-divider { height: 1px; background: linear-gradient(90deg, transparent, var(--green), var(--cyan), var(--violet), transparent); opacity: 0.4; }
-    .stats-bar { display: flex; justify-content: center; gap: 48px; padding: 40px 24px; }
-    .stat { text-align: center; }
-    .stat-value { font-size: 2rem; font-weight: 900; font-family: 'JetBrains Mono', monospace; color: var(--green); text-shadow: 0 0 15px rgba(0,255,136,0.4); }
-    .stat-value.cyan { color: var(--cyan); text-shadow: 0 0 15px rgba(0,240,255,0.4); }
-    .stat-value.magenta { color: var(--magenta); text-shadow: 0 0 15px rgba(255,0,170,0.4); }
-    .stat-value.yellow { color: var(--yellow); text-shadow: 0 0 15px rgba(255,238,0,0.4); }
-    .stat-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; font-family: 'JetBrains Mono', monospace; }
-
-    .section { max-width: 1100px; margin: 0 auto; padding: 80px 24px; }
-    .section h2 { font-size: 1.8rem; font-weight: 800; color: var(--green); text-shadow: 0 0 20px rgba(0,255,136,0.3); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; font-family: 'JetBrains Mono', monospace; }
-    .section .subtitle { color: var(--muted); margin-bottom: 40px; }
-
-    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
-    .feature-card { background: linear-gradient(135deg, rgba(10,10,30,0.9), rgba(10,20,15,0.9)); border: 1px solid var(--border); border-radius: 4px; padding: 24px; transition: all 0.3s; position: relative; overflow: hidden; }
-    .feature-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--green), var(--cyan)); opacity: 0; transition: opacity 0.3s; }
-    .feature-card:hover { border-color: rgba(0,255,136,0.3); box-shadow: 0 0 20px rgba(0,255,136,0.05); }
-    .feature-card:hover::before { opacity: 1; }
-    .feature-card h3 { font-size: 1rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
-    .feature-card p { color: var(--muted); font-size: 0.85rem; }
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 2px; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; font-family: 'JetBrains Mono', monospace; }
-    .badge-auto { background: rgba(0,255,136,0.15); color: var(--green); border: 1px solid rgba(0,255,136,0.3); }
-    .badge-sec { background: rgba(255,0,170,0.15); color: var(--magenta); border: 1px solid rgba(255,0,170,0.3); }
-    .badge-ai { background: rgba(0,240,255,0.1); color: var(--cyan); border: 1px solid rgba(0,240,255,0.3); }
-
-    .code-block { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 24px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; line-height: 1.9; overflow-x: auto; color: var(--muted); position: relative; }
-    .code-block::before { content: 'terminal'; position: absolute; top: 8px; right: 12px; font-size: 0.6rem; color: rgba(0,255,136,0.3); text-transform: uppercase; letter-spacing: 0.1em; }
-    .code-block .cmd { color: var(--green); }
-    .code-block .flag { color: var(--cyan); }
-    .code-block .comment { color: rgba(90,90,138,0.6); }
-    .code-block .prompt { color: var(--magenta); }
-
-    .tools-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
-    .tool-item { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; color: var(--muted); }
-    .tool-item .name { color: var(--green); }
-
-    .cta-section { text-align: center; padding: 100px 24px; position: relative; }
-    .cta-section h2 { font-size: 2rem; margin-bottom: 12px; color: var(--text); text-shadow: none; text-transform: none; }
-    .cta-section p { color: var(--muted); margin-bottom: 32px; max-width: 500px; margin-left: auto; margin-right: auto; }
-    footer { text-align: center; padding: 32px 24px; color: var(--muted); font-size: 0.75rem; font-family: 'JetBrains Mono', monospace; }
-
-    @media (max-width: 768px) { .hero h1 { font-size: 2.2rem; } .stats-bar { gap: 20px; flex-wrap: wrap; } .features { grid-template-columns: 1fr; } }
-      a:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
-    .section p + p { margin-top: 12px; }
-  </style>
+<link rel="stylesheet" href="site.css">
 </head>
 <body>
-<div class="grid-bg" aria-hidden="true"></div>
+<header class="wrap"><nav class="sites" aria-label="Pulse projects">
+<a class="mark" href="https://github.com/PulseSRE"><svg viewBox="0 0 68 36" aria-hidden="true"><path d="M0 20 H18 L22 24 L28 3 L34 32 L38 20 H50 L54 15 L58 20 H68" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/></svg><span>Pulse</span></a>
+<a class="site" href="https://pulsesre.github.io/pulse-agent/" aria-current="page">Agent</a><a class="site" href="https://pulsesre.github.io/pulse-ui/">UI</a><a class="site" href="https://pulsesre.github.io/pulse-operator/">Operator</a><span class="ver">agent v2.34.0</span>
+</nav></header>
 <main>
-<section class="hero" aria-labelledby="title">
-<h1 id="title">Pulse Agent</h1>
-<div class="version">v2.33.0 // API PROTOCOL 2</div>
-<p class="tagline">Evidence-based SRE investigation for OpenShift and Kubernetes.</p>
-<div class="hero-buttons"><a class="btn btn-primary" href="https://github.com/PulseSRE/pulse-agent">Source and setup</a><a class="btn btn-secondary" href="https://github.com/PulseSRE/pulse-agent/releases/latest">Published releases</a></div>
+<section class="hero wrap" aria-labelledby="title">
+<h1 id="title" class="display"><span class="line">Finds what broke.</span> <span class="line">Asks before it fixes it.</span></h1>
+<p class="lede">Pulse Agent is an SRE and security agent for OpenShift, built on Claude. It watches your cluster, traces each incident to the change that caused it, and only acts on what you approve. Then it waits to see whether the fix held.</p>
+<div class="actions">
+<a class="btn primary" href="https://github.com/PulseSRE/pulse-operator#install-via-olm">Install with the operator</a>
+<a class="btn" href="https://github.com/PulseSRE/pulse-agent">Read the source</a>
+</div>
 </section>
-<section class="section" aria-labelledby="capabilities"><h2 id="capabilities">What you can do</h2><p class="subtitle">Capabilities depend on configuration, permissions and the deployed image pair. Consult current source and operational guides.</p><div class="features"><article class="feature-card"><h3>Investigate incidents</h3><p>Monitor findings and phased playbooks support crashloops, failed rollouts and scheduling failures. Investigations collect observations; missing evidence remains unresolved.</p></article>
-<article class="feature-card"><h3>Review and approve changes</h3><p>Write tools pass confirmation and configured namespace/node policy. Proactive investigations are read-only; automated monitor execution depends on server trust and supported handlers.</p></article>
-<article class="feature-card"><h3>Measure recovery</h3><p>Mutation completion and verified recovery are separate records. Postcondition probes and live readiness observations produce verified, failing or unverifiable results; recurrence can revoke a previous verdict.</p></article>
-<article class="feature-card"><h3>Inspect installation prerequisites</h3><p>Authenticated /readiness reports provider configuration, database, installation Kubernetes access and monitor state. Provider connectivity stays unknown until separately tested.</p></article></div></section>
-<section class="section" aria-labelledby="new"><h2 id="new">New in v2.33.0</h2><p class="subtitle">The monitor got better at knowing what it is looking at, what is normal, and what changed. <a href="https://github.com/PulseSRE/pulse-agent/releases/tag/v2.33.0">Release notes</a></p><div class="features"><article class="feature-card"><h3>One finding per condition</h3><p>A finding keeps its id while its numbers move and its pods are recreated. Only the scanner that raised it can resolve it, so a skipped or failed scan never "resolves" anything and a fix only gets credit for a condition that really cleared.</p></article>
-<article class="feature-card"><h3>No silent blind spots</h3><p>A scanner that cannot see (permission denied, Prometheus down, an API missing) reports itself degraded, says what it could not watch and how to fix it, instead of looking clean.</p></article>
-<article class="feature-card"><h3>Normal for this workload</h3><p>Seven-day per-workload baselines for memory, CPU and restarts. Findings and investigations say "3x this workload's normal" rather than a raw number.</p></article>
-<article class="feature-card"><h3>What changed</h3><p>Investigations lead with the rollouts, ConfigMap edits, Argo CD syncs and cluster upgrades around an incident, ranked by how likely they are related.</p></article>
-<article class="feature-card"><h3>Five new scanners</h3><p>Storage that will not bind, mount or is nearly full; routes and DNS failing; admission webhooks stalling writes; maintenance blockers that will hang the next drain or upgrade; and pods far outside their own normal. 32 scanners in total.</p></article>
-<article class="feature-card"><h3>Safer approvals</h3><p>Only a known person on an ask-first client can answer a fix proposal, the approver is recorded, and an approval is refused if the finding cleared or the server stopped allowing fixes while it waited.</p></article></div></section>
-<section class="section" aria-labelledby="evidence"><h2 id="evidence">Readiness and recovery evidence</h2><p class="subtitle">A configured provider, running monitor or successful tool request does not establish incident recovery. Live model outcomes and real-cluster acceptance are separate gates. Scheduling has a playbook, but no default scheduling auto-fix handler.</p><p>Crashloop, failed rollout and pending-pod acceptance must preserve diagnostic observations, the exact approved target/change, execution results and fresh recovery measurements. Rejected or unverifiable operations stay unresolved.</p></section>
-<section class="section" aria-labelledby="guides"><h2 id="guides">Operational guides</h2><p class="subtitle">These links open current repository documentation. Historical plans and designs describe proposals, not current operational guarantees.</p><p><a href="https://github.com/PulseSRE/pulse-agent/blob/main/README.md">Setup and configuration</a></p>
-<p><a href="https://github.com/PulseSRE/pulse-agent/blob/main/docs/README.md">Documentation index</a></p>
-<p><a href="https://github.com/PulseSRE/pulse-agent/blob/main/docs/INSTALLATION_READINESS.md">Installation readiness</a> · <a href="https://github.com/PulseSRE/pulse-agent/blob/main/EVAL_LAB.md">Review an incident as an eval draft</a></p>
-<p><a href="https://github.com/PulseSRE/pulse-agent/blob/main/docs/ARCHITECTURE.md">Architecture</a></p>
-<p><a href="https://github.com/PulseSRE/pulse-agent/blob/main/API_CONTRACT.md">API contract</a></p>
-<p><a href="https://github.com/PulseSRE/pulse-agent/blob/main/SECURITY.md">Security and trust</a></p>
-<p><a href="https://github.com/PulseSRE/pulse-agent/blob/main/TESTING.md">Testing and live acceptance</a></p>
-<p><a href="https://github.com/PulseSRE/pulse-agent/blob/main/DATABASE.md">Database operations</a></p>
-<p><a href="https://github.com/PulseSRE/pulse-agent/blob/main/docs/TEMPORAL.md">Durable workflows</a></p>
-<p><a href="https://github.com/PulseSRE/pulse-agent/blob/main/RELEASE.md">Release process</a></p>
-<p><a href="https://github.com/PulseSRE/pulse-agent/blob/main/EVAL_LAB.md">Review-only incident eval drafts</a></p></section>
+
+<div class="wrap strip" role="img" aria-labelledby="trace-desc">
+<svg class="trace" viewBox="0 -10 1200 150" preserveAspectRatio="none" aria-hidden="true">
+<path class="before draw" style="--len:1517;--dur:1.1s;--delay:.2s" d="M0.0 92.0 L8.0 92.0 L12.0 88.0 L16.0 92.0 L22.0 92.0 L25.0 99.0 L29.0 30.0 L33.0 112.0 L37.0 92.0 L44.0 92.0 L50.0 83.0 L56.0 92.0 L64.0 92.0 L80.0 92.0 L84.0 88.0 L88.0 92.0 L94.0 92.0 L97.0 99.0 L101.0 30.0 L105.0 112.0 L109.0 92.0 L116.0 92.0 L122.0 83.0 L128.0 92.0 L136.0 92.0 L152.0 92.0 L156.0 88.0 L160.0 92.0 L166.0 92.0 L169.0 99.0 L173.0 30.0 L177.0 112.0 L181.0 92.0 L188.0 92.0 L194.0 83.0 L200.0 92.0 L208.0 92.0 L224.0 92.0 L228.0 88.0 L232.0 92.0 L238.0 92.0 L241.0 99.0 L245.0 30.0 L249.0 112.0 L253.0 92.0 L260.0 92.0 L266.0 83.0 L272.0 92.0 L280.0 92.0 L296.0 92.0 L300.0 88.0 L304.0 92.0 L310.0 92.0 L313.0 99.0 L317.0 30.0 L321.0 112.0 L325.0 92.0 L332.0 92.0 L338.0 83.0 L344.0 92.0 L352.0 92.0 L368.0 92.0 L372.0 88.0 L376.0 92.0 L382.0 92.0 L385.0 99.0 L389.0 30.0 L393.0 112.0 L397.0 92.0 L404.0 92.0 L410.0 83.0 L416.0 92.0 L424.0 92.0 L452.0 92.0"/>
+<path class="broken draw" style="--len:776;--dur:1.3s;--delay:1.3s" d="M452.0 92.0 L459.5 47.5 L464.5 109.8 L477.0 92.0 L484.8 59.9 L490.0 104.8 L503.0 92.0 L509.3 60.5 L513.5 104.6 L524.0 92.0 L530.3 73.0 L534.5 99.6 L545.0 92.0 L551.0 66.9 L555.0 102.0 L565.0 92.0 L571.9 82.7 L576.5 95.7 L588.0 92.0 L595.8 80.7 L601.0 96.5 L614.0 92.0 L624.0 87.9 L636.0 87.6 L649.0 88.2 L659.0 93.3 L672.0 96.5 L685.0 92.9 L694.0 96.8 L703.0 92.6 L713.0 89.9 L723.0 92.4 L736.0 90.1 L751.0 93.8 L760.0 92.8 L774.0 88.9 L783.0 92.5 L792.0 92.6 L805.0 89.1 L819.0 92.3 L834.0 90.1 L836.0 96.2 L836.0 92.0"/>
+<path class="after draw" style="--len:1251;--dur:0.9s;--delay:2.6s" d="M836.0 92.0 L844.0 92.0 L848.0 88.0 L852.0 92.0 L858.0 92.0 L861.0 99.0 L865.0 30.0 L869.0 112.0 L873.0 92.0 L880.0 92.0 L886.0 83.0 L892.0 92.0 L900.0 92.0 L916.0 92.0 L920.0 88.0 L924.0 92.0 L930.0 92.0 L933.0 99.0 L937.0 30.0 L941.0 112.0 L945.0 92.0 L952.0 92.0 L958.0 83.0 L964.0 92.0 L972.0 92.0 L988.0 92.0 L992.0 88.0 L996.0 92.0 L1002.0 92.0 L1005.0 99.0 L1009.0 30.0 L1013.0 112.0 L1017.0 92.0 L1024.0 92.0 L1030.0 83.0 L1036.0 92.0 L1044.0 92.0 L1060.0 92.0 L1064.0 88.0 L1068.0 92.0 L1074.0 92.0 L1077.0 99.0 L1081.0 30.0 L1085.0 112.0 L1089.0 92.0 L1096.0 92.0 L1102.0 83.0 L1108.0 92.0 L1116.0 92.0 L1132.0 92.0 L1136.0 88.0 L1140.0 92.0 L1146.0 92.0 L1149.0 99.0 L1153.0 30.0 L1157.0 112.0 L1161.0 92.0 L1168.0 92.0 L1174.0 83.0 L1180.0 92.0 L1188.0 92.0 L1200.0 92.0"/>
+</svg>
+<ol class="notes" id="trace-desc" aria-label="A sample incident, in order">
+<li class="s-changed" style="--at:.9s"><time>14:02</time><b>Something changed</b>Deployment checkout rolls out revision 15.</li>
+<li class="s-broken" style="--at:1.5s"><time>14:03</time><b>Pulse notices</b>1 of 3 pods ready. It opens one incident, not three alerts.</li>
+<li class="s-ask" style="--at:2.1s"><time>14:06</time><b>Pulse asks</b>&ldquo;Revision 15 is the likely cause. Roll back to 14?&rdquo;</li>
+<li class="s-ok" style="--at:2.7s"><time>14:07</time><b>You approve</b>The rollback runs, as you, within your permissions.</li>
+<li class="s-ok" style="--at:3.3s"><time>14:37</time><b>Verified</b>Healthy for 30 minutes, so the fix is marked as held.</li>
+</ol>
+<p class="caption">A sample incident. Times and names are illustrative; the sequence is how Pulse works.</p>
+</div>
+
+<section class="block" aria-labelledby="how">
+<div class="wrap">
+<h2 id="how">Every fix goes through four steps</h2>
+<p class="intro">Nothing skips a step. A fix that is not verified does not count, and Pulse does not learn from it.</p>
+<ol class="steps">
+<li style="--c:var(--ink)"><h3>Notice</h3><p>32 scanners check the cluster every minute, from crashlooping pods to expiring certificates and SLO burn. If one lacks a permission, Pulse says so and how to fix it, instead of showing an empty list.</p></li>
+<li style="--c:var(--trace)"><h3>Explain</h3><p>It ranks what changed before the incident (rollouts, ConfigMap edits, Argo CD syncs, cluster upgrades) and shows the evidence, the alternatives it ruled out, and a confidence score.</p></li>
+<li style="--c:var(--ask)"><h3>Ask</h3><p>Every change waits for your approval, with the exact target named. The approval carries a one-time code, so it cannot be replayed. Ask only for a plan and no change is offered at all.</p></li>
+<li style="--c:var(--ok)"><h3>Verify</h3><p>After a fix, Pulse watches the finding. Only a fix that holds for the recurrence window, 30 minutes by default, counts as verified, and only verified fixes teach it anything.</p></li>
+</ol>
+</div>
+</section>
+
+<section class="block" aria-labelledby="new">
+<div class="wrap">
+<h2 id="new">What's new</h2>
+<div class="release">
+<p class="when"><strong>v2.34.0</strong>22 October 2026<br>Pairs with UI v2.34.0 and operator v0.11.0</p>
+<ul>
+<li style="--c:var(--trace)"><b>Tighter security boundary.</b> <span>Only admins can use the tools that change the agent itself. Metrics queried from chat run with your permissions, not the agent's. Secret values are redacted before anything reaches the model.</span></li>
+<li style="--c:var(--ok)"><b>Chat survives API trouble.</b> <span>Rate limits and dropped connections are retried, and one failed turn no longer breaks the rest of the conversation. Cut-off answers say so.</span></li>
+<li style="--c:var(--ask)"><b>Approvals reach people.</b> <span>A durable plan waiting on approval becomes an inbox item you can answer there, instead of only from the panel that started it.</span></li>
+<li style="--c:var(--ink)"><b>Pod logs show the end.</b> <span>The agent reads the most recent log lines, where a crash is, instead of startup noise.</span></li>
+</ul>
+</div>
+<p class="intro"><a href="https://github.com/PulseSRE/pulse-agent/blob/main/CHANGELOG.md">Full changelog</a></p>
+</div>
+</section>
+
+<section class="block" aria-labelledby="limits">
+<div class="wrap">
+<h2 id="limits">What it will not do on its own</h2>
+<p class="intro">These are enforced in code and server settings, not in the prompt, and nothing in the browser can loosen them.</p>
+<dl class="ledger">
+<dt>Write to your cluster</dt><dd><p>Read-only unless the operator enables writes. At the default trust level, every change asks first. The server sets the highest trust level; the browser cannot raise it.</p></dd>
+<dt>Act with more power than you have</dt><dd><p>Chat requests run with your own OpenShift token, so Pulse can only do what you are allowed to do. The monitor's background scans use the agent's own service account.</p></dd>
+<dt>Delete pods in protected namespaces</dt><dd><p><code>production</code>, <code>openshift-*</code> and <code>kube-system</code> by default. Configurable.</p></dd>
+<dt>Drain or cordon nodes</dt><dd><p>Off unless an admin turns on the break-glass setting.</p></dd>
+<dt>Count a fix it has not seen hold</dt><dd><p>A fix is only verified once the finding stays resolved. Before an automatic fix changes a resource, Pulse keeps a restorable copy of it.</p></dd>
+</dl>
+</div>
+</section>
+
+<section class="block" aria-labelledby="evidence">
+<div class="wrap">
+<h2 id="evidence">Measured on the release commit</h2>
+<p class="intro">Every release runs recorded incidents against the live model and a judge, plus a simulated cluster. These are the numbers for v2.34.0; not every scenario passes, and the gate is that none gets worse.</p>
+<div class="results">
+<div><strong>39/51</strong><span>recorded incidents passed, up from 28 at the baseline</span></div>
+<div><strong>84</strong><span>average judge score for diagnosis quality, out of 100</span></div>
+<div><strong>11/11</strong><span>simulated incidents resolved, including tool errors and denied permissions</span></div>
+<div><strong>5/5</strong><span>safety scenarios passed in the simulated cluster</span></div>
+</div>
+<p class="caption">Live judged replay with claude-sonnet-5, and the SRE-Bench simulation, from <a href="https://github.com/PulseSRE/pulse-agent/actions/runs/39834893992">this CI run</a>. A real-cluster check is a separate step.</p>
+</div>
+</section>
+
+<section class="block" aria-labelledby="install">
+<div class="wrap">
+<h2 id="install">Run it on your cluster</h2>
+<p class="intro">Pulse needs OpenShift 4.12 or later and a Claude backend: Vertex AI or an Anthropic API key. The operator installs the agent, the UI and PostgreSQL from one resource.</p>
+<pre><code><span class="c"># After installing the operator from its catalog</span>
+<span class="k">apiVersion:</span> pulse.ai/v1alpha1
+<span class="k">kind:</span> OpenShiftPulse
+<span class="k">metadata:</span>
+  <span class="k">name:</span> pulse
+  <span class="k">namespace:</span> openshiftpulse
+<span class="k">spec:</span>
+  <span class="k">vertexAI:</span> { <span class="k">projectId:</span> my-gcp-project, <span class="k">region:</span> us-east5, <span class="k">credentialSecret:</span> gcp-sa-key }
+  <span class="k">agent:</span> { <span class="k">image:</span> <span class="v">quay.io/amobrem/pulse-agent:v2.34.0</span>, <span class="k">trustLevel:</span> 2 }
+  <span class="k">ui:</span>    { <span class="k">image:</span> <span class="v">quay.io/amobrem/openshiftpulse:v2.34.0</span> }</code></pre>
+<ul class="links">
+<li><a href="https://github.com/PulseSRE/pulse-operator#install-via-olm">Install guide</a><span>The canonical steps, in the operator README</span></li>
+<li><a href="https://github.com/PulseSRE/pulse-agent/blob/main/docs/ARCHITECTURE.md">Architecture</a><span>How the agent loop, monitor and skills fit together</span></li>
+<li><a href="https://github.com/PulseSRE/pulse-agent/blob/main/SECURITY.md">Security model</a><span>Trust levels, token forwarding, what admins control</span></li>
+<li><a href="https://github.com/PulseSRE/pulse-agent/blob/main/docs/TEMPORAL.md">Durable plans</a><span>Runs that survive restarts and wait for approval</span></li>
+<li><a href="https://github.com/PulseSRE/pulse-agent/blob/main/TESTING.md">Testing and evals</a><span>How the numbers above are produced</span></li>
+<li><a href="https://github.com/PulseSRE/pulse-agent/blob/main/docs/SKILL_DEVELOPER_GUIDE.md">Writing skills</a><span>Teach Pulse a new kind of incident</span></li>
+</ul>
+</div>
+</section>
 </main>
-<footer>Pulse Agent · <a href="https://github.com/PulseSRE/pulse-agent/releases">Release history</a> · <a href="https://pulsesre.github.io/pulse-ui/">Pulse ui</a> <a href="https://pulsesre.github.io/pulse-operator/">Pulse operator</a></footer>
+<footer><div class="wrap">
+<span>Pulse agent v2.34.0. MIT licensed.</span>
+<span><a href="https://github.com/PulseSRE/pulse-agent">Source</a> &nbsp; <a href="https://github.com/PulseSRE/pulse-agent/releases">Releases</a> &nbsp; <a href="https://github.com/PulseSRE/pulse-agent/blob/main/CHANGELOG.md">Changelog</a></span>
+</div></footer>
 </body>
 </html>
