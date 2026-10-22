@@ -615,6 +615,17 @@ def _execute_tool_with_timeout(
             "error_category": "server",
             "result_bytes": 0,
         }
+        # The thread cannot be stopped, so the call is still running and may
+        # yet succeed. For a write, "timed out" read as "did not happen" and
+        # invited a second attempt; a repeated scale or restart is not harmless.
+        if name in get_write_tools():
+            return (
+                f"Error: {name} did not finish within {timeout}s and is still running. "
+                "Its outcome is unknown: it may still complete. Check the resource's current "
+                "state before retrying, and do not repeat it blindly.",
+                None,
+                meta,
+            )
         return f"Error: {name} timed out after {timeout}s", None, meta
 
 
@@ -685,6 +696,7 @@ async def run_agent_streaming(
 
     full_text_parts = []
     iterations = 0
+    finished = False
     policy_denied_write = False
     # Asked for a plan, not a change: writes are refused before anyone is asked
     # to confirm them (see action_policy.requests_plan_only).
@@ -722,7 +734,11 @@ async def run_agent_streaming(
 
             fallback_cats = MODE_CATEGORIES.get(mode)
             original_tool_map = tool_map
-            _filtered_defs, filtered_map, _offered = select_tools_adaptive(
+            # Off the event loop: below high TF-IDF confidence this makes a
+            # blocking LLM call, which stalled every other WebSocket and the
+            # monitor for its duration.
+            _filtered_defs, filtered_map, _offered = await asyncio.to_thread(
+                select_tools_adaptive,
                 last_user,
                 all_tool_map=tool_map,
                 fallback_categories=fallback_cats,
@@ -818,8 +834,17 @@ async def run_agent_streaming(
         max_retries = 3
         retry_delays = [1, 3, 8]
 
-        stream_ctx = None
+        # Request, stream and final message are all inside the retry loop.
+        # client.messages.stream() only builds the request: the HTTP call and
+        # any 429/529/connection error happen on entering the context or while
+        # iterating. With only stream() inside the try, retries and the circuit
+        # breaker never saw an API failure; it surfaced as a raw exception.
+        # A failure after text reached the user is not retried, since a retry
+        # would repeat that text; it counts against the breaker and is raised.
+        response = None
         for attempt in range(max_retries + 1):
+            emitted = False
+            attempt_parts: list[str] = []
             try:
                 effective_thinking = thinking if thinking is not None else {"type": "adaptive"}
                 stream_ctx = client.messages.stream(
@@ -834,66 +859,69 @@ async def run_agent_streaming(
                     ),
                     messages=messages,
                 )
+                async with stream_ctx as stream:
+                    async for event in stream:
+                        if event.type == "content_block_start":
+                            if hasattr(event.content_block, "name"):
+                                emitted = True
+                                await event_bus.on_tool_use(event.content_block.name)
+                        elif event.type == "content_block_delta":
+                            if event.delta.type == "text_delta":
+                                emitted = True
+                                await event_bus.on_text(event.delta.text)
+                                attempt_parts.append(event.delta.text)
+                            elif event.delta.type == "thinking_delta":
+                                emitted = True
+                                await event_bus.on_thinking(event.delta.thinking)
+
+                    response = await stream.get_final_message()
+                full_text_parts.extend(attempt_parts)
                 break
-            except anthropic.APIStatusError as e:
-                if hasattr(e, "status_code") and e.status_code in (429, 529) and attempt < max_retries:
+            except (anthropic.APIStatusError, anthropic.APIConnectionError) as e:
+                full_text_parts.extend(attempt_parts)
+                status = getattr(e, "status_code", None)
+                retryable = not emitted and attempt < max_retries
+                if retryable and (isinstance(e, anthropic.APIConnectionError) or status in (429, 500, 502, 503, 529)):
                     delay = retry_delays[attempt]
                     logger.warning(
-                        "API %d, retrying in %ds (attempt %d/%d)", e.status_code, delay, attempt + 1, max_retries
+                        "API %s, retrying in %ds (attempt %d/%d)",
+                        status or type(e).__name__,
+                        delay,
+                        attempt + 1,
+                        max_retries,
                     )
-                    await event_bus.on_text(f"\n*Rate limited, retrying in {delay}s...*\n")
+                    if status in (429, 529):
+                        await event_bus.on_text(f"\n*Rate limited, retrying in {delay}s...*\n")
                     await asyncio.sleep(min(delay, 30))
                     continue
                 # Orphaned tool_result: context compression stripped a tool_use turn but
                 # kept the paired tool_result, making the history invalid.  Strip all
                 # tool_result user turns whose IDs have no matching tool_use in the
                 # preceding assistant turns, then retry once without sleeping.
-                if (
-                    hasattr(e, "status_code")
-                    and e.status_code == 400
-                    and "tool_use_id" in str(e)
-                    and attempt < max_retries
-                ):
+                if retryable and status == 400 and "tool_use_id" in str(e):
                     logger.warning("Orphaned tool_result in history — stripping and retrying")
                     messages[:] = _strip_orphaned_tool_results(messages)
                     continue
-                _circuit_breaker.record_failure()
-                if _circuit_breaker.is_open:
-                    return (
-                        "The agent has entered **Silent Mode** — the Claude API is unreachable "
-                        f"after {_circuit_breaker.failure_count} consecutive failures. "
-                        f"Will retry in {int(_circuit_breaker.recovery_timeout)}s."
-                    )
-                raise
-            except anthropic.APIConnectionError:
-                if attempt < max_retries:
-                    await asyncio.sleep(retry_delays[attempt])
-                    continue
-                _circuit_breaker.record_failure()
-                if _circuit_breaker.is_open:
-                    return (
-                        "The agent has entered **Silent Mode** — the Claude API is unreachable "
-                        f"after {_circuit_breaker.failure_count} consecutive failures. "
-                        f"Will retry in {int(_circuit_breaker.recovery_timeout)}s."
-                    )
+                # A 4xx other than rate limiting is a bad request, not an outage:
+                # it says nothing about whether the API is reachable.
+                if (
+                    isinstance(e, anthropic.APIConnectionError)
+                    or status is None
+                    or status >= 500
+                    or status in (429, 529)
+                ):
+                    _circuit_breaker.record_failure()
+                    if _circuit_breaker.is_open:
+                        return (
+                            "".join(full_text_parts)
+                            + "The agent has entered **Silent Mode** — the Claude API is unreachable "
+                            f"after {_circuit_breaker.failure_count} consecutive failures. "
+                            f"Will retry in {int(_circuit_breaker.recovery_timeout)}s."
+                        )
                 raise
 
-        if stream_ctx is None:
+        if response is None:
             return "Failed to connect to Claude API after retries."
-
-        async with stream_ctx as stream:
-            async for event in stream:
-                if event.type == "content_block_start":
-                    if hasattr(event.content_block, "name"):
-                        await event_bus.on_tool_use(event.content_block.name)
-                elif event.type == "content_block_delta":
-                    if event.delta.type == "text_delta":
-                        await event_bus.on_text(event.delta.text)
-                        full_text_parts.append(event.delta.text)
-                    elif event.delta.type == "thinking_delta":
-                        await event_bus.on_thinking(event.delta.thinking)
-
-            response = await stream.get_final_message()
 
         # Extract token usage from API response
         _usage = getattr(response, "usage", None)
@@ -908,7 +936,19 @@ async def run_agent_streaming(
         # API call succeeded — reset circuit breaker
         _circuit_breaker.record_success()
 
-        if response.stop_reason == "end_turn":
+        if response.stop_reason not in ("tool_use", "pause_turn"):
+            # end_turn, max_tokens, refusal, stop_sequence: the turn is over.
+            # The response is not appended: the caller appends the final text,
+            # and a max_tokens response can end in a half-written tool_use
+            # block with no result, which the next request would reject.
+            finished = True
+            if response.stop_reason == "max_tokens":
+                logger.warning("Agent response hit max_tokens (%d)", max_tokens)
+                full_text_parts.append(
+                    "\n\n*Response cut off at the output length limit; it may be incomplete. Ask me to continue.*"
+                )
+            elif response.stop_reason == "refusal":
+                logger.warning("Agent response ended with a refusal")
             break
 
         messages.append({"role": "assistant", "content": _sanitize_content(response.content)})
@@ -1110,12 +1150,12 @@ async def run_agent_streaming(
                     await event_bus.on_component(block.name, component)
 
             messages.append({"role": "user", "content": tool_results})
-        elif response.stop_reason == "pause_turn":
+        else:  # pause_turn: resend so the server-side tool can continue
             continue
-        else:
-            break
 
-    limit_hit = budget.exhausted()
+    # Only a loop that ran out may say it was cut off. A turn that ended on
+    # its own in its last allowed iteration used to get the notice anyway.
+    limit_hit = "" if finished else budget.exhausted()
     if limit_hit:
         # A truncated answer still reads as an answer, so say it was truncated.
         logger.warning("Agent stopped early — reached %s (%s)", limit_hit, budget.summary())

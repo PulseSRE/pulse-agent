@@ -243,6 +243,25 @@ def describe_pod(namespace: str, pod_name: str):
     return (text, component)
 
 
+_MODEL_LOG_CHARS = 2000
+
+
+def _log_tail_for_model(log_text: str, limit: int = _MODEL_LOG_CHARS) -> str:
+    """The end of the log, where a crash's error and stack trace are.
+
+    The model used to get the first 2000 characters of the requested tail:
+    on a crashing pod, startup noise, with the error itself cut off.
+    """
+    if len(log_text) <= limit:
+        return log_text
+    tail = log_text[-limit:]
+    newline = tail.find("\n")
+    if 0 <= newline < len(tail) - 1:
+        tail = tail[newline + 1 :]  # start on a whole line
+    omitted = len(log_text) - len(tail)
+    return f"[... {omitted} earlier characters omitted; showing the most recent lines ...]\n{tail}"
+
+
 @beta_tool
 def get_pod_logs(namespace: str, pod_name: str, container: str = "", tail_lines: int = 100, previous: bool = False):
     """Get logs from a pod container.
@@ -300,7 +319,7 @@ def get_pod_logs(namespace: str, pod_name: str, container: str = "", tail_lines:
         "source": source,
         "lines": lines[-500:],  # Cap at 500 lines
     }
-    return (log_text[:2000] if len(log_text) > 2000 else log_text, component)
+    return (_log_tail_for_model(log_text), component)
 
 
 @beta_tool
