@@ -42,6 +42,15 @@
 <p class="caption">A sample incident. Times and names are illustrative; the sequence is how Pulse works.</p>
 </div>
 
+<section class="block" aria-labelledby="all">
+<div class="wrap">
+<h2 id="all">Everything it does</h2>
+<p class="intro">One agent for the whole job of keeping an OpenShift cluster healthy: finding problems, explaining them, fixing them with your say-so, and getting better at it.</p>
+<div class="glance"><div><strong>144</strong><span>tools, 36 of them from MCP</span></div><div><strong>32</strong><span>scanners</span></div><div><strong>7</strong><span>skills</span></div><div><strong>83</strong><span>PromQL recipes</span></div><div><strong>13</strong><span>runbooks</span></div></div>
+<div class="areas"><div class="area"><h3>Diagnose and triage</h3><p>Ask in plain English; it investigates with real cluster data.</p><ul><li>Crashes, OOM kills, image pull failures, scheduling problems, degraded operators</li><li>Correlates events, pod status, logs and Prometheus metrics into one root cause</li><li>13 built-in runbooks and 83 tested PromQL recipes, checked against your cluster before use</li><li>Right-sizing from actual CPU and memory use against requests and limits</li></ul></div><div class="area"><h3>Audit security</h3><p>A read-only security pass you can run any time.</p><ul><li>Privileged containers, root users, missing security contexts, dangerous capabilities</li><li>Overly broad RBAC, cluster-admin bindings, wildcard permissions</li><li>Namespaces with no network policy, unpinned or untrusted images</li><li>Security context constraints and old, exposed or unused Secrets</li></ul></div><div class="area"><h3>Watch the cluster</h3><p>A monitor that runs without anyone asking.</p><ul><li>32 scanners every minute: 17 for failures, 5 for stuck control loops, 5 audit, 5 predictive</li><li>Predicts memory, disk and autoscaler exhaustion before it happens</li><li>Knows each workload's normal from 7-day baselines: “3x its usual memory”</li><li>Learns which findings are noise and holds them back</li><li>A morning briefing: what happened overnight and what needs you</li></ul></div><div class="area"><h3>Explain what changed</h3><p>Incidents start from the change most likely behind them.</p><ul><li>Ranks rollouts, ConfigMap edits, Argo CD syncs and cluster upgrades around an incident</li><li>Dependency graph with blast radius, and risk scores for recent changes</li><li>Incident timelines that line up events across sources</li><li>Writes the postmortem once the incident is resolved</li></ul></div><div class="area"><h3>Fix safely</h3><p>Changes are checked before, during and after.</p><ul><li>Every write asks first by default, with the target named</li><li>Preview impact, risk and reversibility before running a fix</li><li>Restart, scale, rollback, pod delete and cordon check their target first, snapshot it, then confirm the result</li><li>Automatic fixes only at trust level 3 or above, which an admin sets on the server</li></ul></div><div class="area"><h3>Run plans</h3><p>Multi-step investigations with a contract for each step.</p><ul><li>Phased plans: triage, diagnose, fix, verify, each declaring what it must produce</li><li>A step that skips its output is retried, then marked partial, never silently passed</li><li>Write your own plans; every edit is versioned and reversible</li><li>With Temporal, plans survive restarts and wait hours for an approval</li></ul></div><div class="area"><h3>Build dashboards on request</h3><p>Ask for a view and it designs one from live data.</p><ul><li>25 component kinds: metrics, tables, charts, status, topology</li><li>Topology in five perspectives: physical, logical, network, multi-tenant, Helm</li><li>SLO tracking with live error-budget burn rates</li><li>Capacity planning and scaling recommendations</li></ul></div><div class="area"><h3>Learn from verified fixes</h3><p>Memory that only keeps what worked.</p><ul><li>Remembers facts about your cluster: owners, retention, GitOps layout</li><li>Turns a diagnosis into a reusable skill only after its fix held</li><li>Refines existing skills rather than cloning them, and asks for review again</li><li>Searches your past conversations for similar incidents</li></ul></div><div class="area"><h3>Fleets and GitOps</h3><p>Beyond one cluster and one source of truth.</p><ul><li>Pods, deployments and alerts across every cluster managed by Advanced Cluster Management</li><li>Compare a resource or a metric between clusters to find what differs</li><li>Argo CD sync status, drift, and the exact diff an out-of-sync application would apply</li><li>Install OpenShift GitOps, create applications, or propose a fix as a Git pull request</li></ul></div><div class="area"><h3>Extend it</h3><p>Add knowledge and tools without a redeploy.</p><ul><li>7 skills: SRE, security, dashboards, capacity, plans, postmortems, SLOs</li><li>Write a skill as a folder with a prompt and its own evals</li><li>36 more tools from the OpenShift MCP server: Helm, Tekton, service mesh, KubeVirt and more</li><li>A terminal CLI for working against any cluster from your laptop</li></ul></div><div class="area"><h3>Run it responsibly</h3><p>Know what it costs and how well it works.</p><ul><li>Prometheus metrics for tokens, estimated cost, scanner runs and fix outcomes</li><li>An optional daily cost budget that pauses investigations when reached</li><li>A release gate of recorded incidents judged against the live model</li><li>Structured logs with a request id on every entry</li></ul></div></div>
+</div>
+</section>
+
 <section class="block" aria-labelledby="how">
 <div class="wrap">
 <h2 id="how">Every fix goes through four steps</h2>
@@ -55,21 +64,6 @@
 </div>
 </section>
 
-<section class="block" aria-labelledby="new">
-<div class="wrap">
-<h2 id="new">What's new</h2>
-<div class="release">
-<p class="when"><strong>v2.34.0</strong>22 October 2026<br>Pairs with UI v2.34.0 and operator v0.11.0</p>
-<ul>
-<li style="--c:var(--trace)"><b>Tighter security boundary.</b> <span>Only admins can use the tools that change the agent itself. Metrics queried from chat run with your permissions, not the agent's. Secret values are redacted before anything reaches the model.</span></li>
-<li style="--c:var(--ok)"><b>Chat survives API trouble.</b> <span>Rate limits and dropped connections are retried, and one failed turn no longer breaks the rest of the conversation. Cut-off answers say so.</span></li>
-<li style="--c:var(--ask)"><b>Approvals reach people.</b> <span>A durable plan waiting on approval becomes an inbox item you can answer there, instead of only from the panel that started it.</span></li>
-<li style="--c:var(--ink)"><b>Pod logs show the end.</b> <span>The agent reads the most recent log lines, where a crash is, instead of startup noise.</span></li>
-</ul>
-</div>
-<p class="intro"><a href="https://github.com/PulseSRE/pulse-agent/blob/main/CHANGELOG.md">Full changelog</a></p>
-</div>
-</section>
 
 <section class="block" aria-labelledby="limits">
 <div class="wrap">
@@ -96,6 +90,22 @@
 <div><strong>5/5</strong><span>safety scenarios passed in the simulated cluster</span></div>
 </div>
 <p class="caption">Live judged replay with claude-sonnet-5, and the SRE-Bench simulation, from <a href="https://github.com/PulseSRE/pulse-agent/actions/runs/39834893992">this CI run</a>. A real-cluster check is a separate step.</p>
+</div>
+</section>
+
+<section class="block" aria-labelledby="new">
+<div class="wrap">
+<h2 id="new">What's new</h2>
+<div class="release">
+<p class="when"><strong>v2.34.0</strong>22 October 2026<br>Pairs with UI v2.34.0 and operator v0.11.0</p>
+<ul>
+<li style="--c:var(--trace)"><b>Tighter security boundary.</b> <span>Only admins can use the tools that change the agent itself. Metrics queried from chat run with your permissions, not the agent's. Secret values are redacted before anything reaches the model.</span></li>
+<li style="--c:var(--ok)"><b>Chat survives API trouble.</b> <span>Rate limits and dropped connections are retried, and one failed turn no longer breaks the rest of the conversation. Cut-off answers say so.</span></li>
+<li style="--c:var(--ask)"><b>Approvals reach people.</b> <span>A durable plan waiting on approval becomes an inbox item you can answer there, instead of only from the panel that started it.</span></li>
+<li style="--c:var(--ink)"><b>Pod logs show the end.</b> <span>The agent reads the most recent log lines, where a crash is, instead of startup noise.</span></li>
+</ul>
+</div>
+<p class="intro"><a href="https://github.com/PulseSRE/pulse-agent/blob/main/CHANGELOG.md">Full changelog</a></p>
 </div>
 </section>
 
