@@ -14,7 +14,7 @@
 <body>
 <header class="wrap"><nav class="sites" aria-label="Pulse projects">
 <a class="mark" href="https://github.com/PulseSRE"><svg viewBox="0 0 68 36" aria-hidden="true"><path d="M0 20 H18 L22 24 L28 3 L34 32 L38 20 H50 L54 15 L58 20 H68" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/></svg><span>Pulse</span></a>
-<a class="site" href="https://pulsesre.github.io/pulse-agent/" aria-current="page">Agent</a><a class="site" href="https://pulsesre.github.io/pulse-ui/">UI</a><a class="site" href="https://pulsesre.github.io/pulse-operator/">Operator</a><span class="ver">agent v2.34.0</span>
+<a class="site" href="https://pulsesre.github.io/pulse-agent/" aria-current="page">Agent</a><a class="site" href="https://pulsesre.github.io/pulse-ui/">UI</a><a class="site" href="https://pulsesre.github.io/pulse-operator/">Operator</a><a class="site" href="https://pulsesre.github.io/sre-bench/">SRE-Bench</a><span class="ver">agent v2.34.0</span>
 </nav></header>
 <main>
 <section class="hero wrap" aria-labelledby="title">
@@ -51,6 +51,15 @@
 </video>
 <figcaption id="film-cap"><b>See it in 30 seconds.</b> A rollout breaks checkout; Pulse opens one incident, asks before rolling back, and marks the fix held after 30 minutes. No sound.</figcaption>
 </figure>
+</section>
+
+<section class="block" aria-labelledby="why">
+<div class="wrap">
+<h2 id="why">Why it matters</h2>
+<p class="intro">Kubernetes rarely fails in one place. One bad rollout becomes dozens of alerts, the cause lives in whoever remembers the last change, and the fix is a command typed under pressure. Pulse changes each of those.</p>
+<div class="why"><div class="p"><b>An alert storm for one problem</b></div><div class="a"><p>One incident per cause. Pulse groups related findings and learns which ones are noise, so the page you get is the one that matters.</p></div><div class="p"><b>The cause lives in someone's head</b></div><div class="a"><p>Every incident starts from the change most likely behind it: a rollout, a config edit, an Argo CD sync, an upgrade. Pulse shows its evidence and the explanations it ruled out.</p></div><div class="p"><b>Fixes typed under pressure</b></div><div class="a"><p>A proposed fix names its target, its risk and how to undo it. You approve it; it runs as you, within your permissions, after a snapshot of what it changes.</p></div><div class="p"><b>Nobody knows if the fix held</b></div><div class="a"><p>Pulse watches afterwards and marks a fix as held only when the cluster stays healthy. If the problem comes back, the finding stays open and the fix is never turned into a skill.</p></div><div class="p"><b>Knowledge leaves with people</b></div><div class="a"><p>What a team learns stays: facts about your cluster, skills built from fixes that were verified, and past conversations you can search.</p></div><div class="p"><b>AI you can't audit</b></div><div class="a"><p>At the default trust level, every change is approved by a named person, and each can be reversed. Trust is capped on the server, protected namespaces are enforced in code, and the agent is scored in public on <a href="https://pulsesre.github.io/sre-bench/">SRE-Bench</a>.</p></div></div>
+<div class="who"><div><h3>On-call engineers</h3><p>Fewer pages, a starting point instead of a blank terminal, and a fix that's one approval away.</p></div><div><h3>Platform and SRE leads</h3><p>The same response whoever is on call, runbooks that improve from real incidents, and metrics for cost and fix outcomes.</p></div><div><h3>Security and compliance</h3><p>Read-only by default, per-user permissions, a record of every change, and a security audit you can run any time.</p></div></div><p class="outcome">What to measure: time to recover, pages per week, and changes made without a person's approval. The last one is zero by default.</p>
+</div>
 </section>
 
 <section class="block" aria-labelledby="all">
