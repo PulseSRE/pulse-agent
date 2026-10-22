@@ -89,3 +89,29 @@ def derive_status(phases: list[dict], outputs: dict[str, dict]) -> str:
             return "partial"
         saw_incomplete = True
     return "partial" if saw_incomplete else "complete"
+
+
+def blocked_by(phase: dict, outputs: dict[str, dict]) -> list[str]:
+    """Dependencies of ``phase`` that did not come back complete or partial.
+
+    The in-process engine never runs a phase whose dependency failed, was
+    denied or was skipped; it only lets ``runs: always`` phases through. The
+    interpreter used to treat any settled dependency as good enough, so a
+    failed triage still paid for diagnose and verify.
+    """
+    return [
+        dep for dep in phase.get("depends_on", []) if outputs.get(dep, {}).get("status") not in ("complete", "partial")
+    ]
+
+
+def derive_status_v2(phases: list[dict], outputs: dict[str, dict]) -> str:
+    """``derive_status`` plus the engine's one harder verdict.
+
+    A required phase that could not run because its dependencies failed makes
+    the plan ``failed`` in the in-process engine, not merely ``partial``.
+    """
+    for phase in phases:
+        out = outputs.get(phase["id"]) or {}
+        if phase.get("required", True) and out.get("skip_kind") == "blocked":
+            return "failed"
+    return derive_status(phases, outputs)

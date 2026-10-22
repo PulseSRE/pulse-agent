@@ -87,9 +87,78 @@ async def _ensure_flywheel_schedules(client) -> None:
     _FLYWHEEL_SCHEDULED = True
 
 
+#: What the worker is doing, for /readiness and the run endpoints. A run
+#: accepted while no worker polls sits in RUNNING forever with nothing
+#: executing it; on a fresh install the agent routinely starts before the
+#: Temporal server is ready, which is how that happened.
+_STATE: dict = {"state": "disabled", "detail": "", "since": 0.0}
+
+#: Reconnect backoff bounds, seconds.
+_RETRY_FIRST = 2.0
+_RETRY_MAX = 60.0
+
+
+def _set_state(state: str, detail: str = "") -> None:
+    import time
+
+    if _STATE["state"] != state or _STATE["detail"] != detail:
+        _STATE.update(state=state, detail=detail, since=time.time())
+
+
+def worker_state() -> dict:
+    """``state`` is disabled, connecting, polling or stopped."""
+    return dict(_STATE)
+
+
+def worker_ready() -> tuple[bool, str]:
+    """Whether a durable run started now would be executed, and if not why."""
+    state = _STATE["state"]
+    if state == "polling":
+        return True, ""
+    if state == "connecting":
+        return False, (
+            "The Temporal worker has not connected yet, so a run started now would wait with nothing executing it. "
+            f"Last error: {_STATE['detail'] or 'none yet'}. Pulse retries in the background; check that the "
+            "Temporal server is up and reachable at PULSE_AGENT_TEMPORAL_HOST."
+        )
+    return False, f"The Temporal worker is {state}."
+
+
+async def _connect_with_retry(shutdown: asyncio.Event):
+    """Connect, retrying with backoff until connected or shut down.
+
+    It used to try once at startup and give up until the next pod restart.
+    """
+    from temporalio.client import Client
+
+    from ..config import get_settings
+
+    cfg = get_settings().temporal
+    delay = _RETRY_FIRST
+    logged = False
+    while not shutdown.is_set():
+        try:
+            return await Client.connect(cfg.host, namespace=cfg.namespace)
+        except Exception as e:
+            _set_state("connecting", f"{type(e).__name__}: {str(e)[:200]}")
+            if not logged:
+                logger.warning(
+                    "Temporal worker cannot connect to %s yet; retrying in the background. "
+                    "Durable runs are refused until it connects. The in-process engine is unaffected.",
+                    cfg.host,
+                    exc_info=True,
+                )
+                logged = True
+            try:
+                await asyncio.wait_for(shutdown.wait(), timeout=delay)
+            except TimeoutError:
+                pass
+            delay = min(delay * 2, _RETRY_MAX)
+    return None
+
+
 async def run_worker(shutdown: asyncio.Event) -> None:
     """Poll the task queue until ``shutdown`` is set. Never raises on exit."""
-    from temporalio.client import Client
     from temporalio.worker import Worker
 
     from ..config import get_settings
@@ -101,15 +170,10 @@ async def run_worker(shutdown: asyncio.Event) -> None:
     from .plan_workflow import PlanWorkflow
 
     cfg = get_settings().temporal
-    try:
-        client = await Client.connect(cfg.host, namespace=cfg.namespace)
-    except Exception:
-        logger.warning(
-            "Temporal worker could not connect to %s — durable plan runs are unavailable "
-            "until the next restart. The in-process engine is unaffected.",
-            cfg.host,
-            exc_info=True,
-        )
+    _set_state("connecting")
+    client = await _connect_with_retry(shutdown)
+    if client is None:
+        _set_state("stopped", "shut down before connecting")
         return
 
     # A build id stamps every task this worker completes, so a code change that
@@ -134,6 +198,13 @@ async def run_worker(shutdown: asyncio.Event) -> None:
     await _ensure_flywheel_schedules(client)
 
     logger.info("Temporal worker polling %s (queue=%s)", cfg.host, cfg.task_queue)
-    async with worker:
-        await shutdown.wait()
+    try:
+        async with worker:
+            _set_state("polling", cfg.host)
+            await shutdown.wait()
+    except Exception as e:
+        _set_state("stopped", f"{type(e).__name__}: {str(e)[:200]}")
+        logger.error("Temporal worker stopped unexpectedly; durable runs are refused", exc_info=True)
+        return
+    _set_state("stopped", "agent shutting down")
     logger.info("Temporal worker stopped")

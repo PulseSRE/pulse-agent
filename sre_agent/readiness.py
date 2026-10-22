@@ -118,6 +118,37 @@ def monitor_check() -> dict:
     )
 
 
+def temporal_check() -> dict | None:
+    """Durable execution, only when configured: is a worker actually polling?
+
+    Without one, a durable run is accepted and never executes.
+    """
+    from .config import get_settings
+
+    if not get_settings().temporal.host:
+        return None
+    from .temporal.worker import worker_state
+
+    state = worker_state()
+    if state["state"] == "polling":
+        return check(
+            "temporal_worker",
+            "healthy",
+            "Temporal worker is connected and polling; durable runs will execute.",
+            "",
+            "worker_state",
+        )
+    detail = f" Last error: {state['detail']}" if state["detail"] else ""
+    return check(
+        "temporal_worker",
+        "unhealthy",
+        f"Temporal worker is {state['state']}; durable runs are refused until it polls.{detail}",
+        "Check that the Temporal server is running and reachable at PULSE_AGENT_TEMPORAL_HOST; "
+        "the worker reconnects on its own.",
+        "worker_state",
+    )
+
+
 async def observed(check_id: str, probe: Callable, message: str, remediation: str, source: str) -> dict:
     try:
         result = await asyncio.wait_for(asyncio.to_thread(probe), timeout=6)
@@ -166,6 +197,9 @@ async def collect_readiness() -> dict:
             )
         )
     checks = provider_checks() + await asyncio.gather(*probes) + [monitor_check()]
+    temporal = temporal_check()
+    if temporal is not None:
+        checks.append(temporal)
     statuses = {item["status"] for item in checks}
     return dict(
         status="degraded" if "unhealthy" in statuses else "unknown" if "unknown" in statuses else "healthy",

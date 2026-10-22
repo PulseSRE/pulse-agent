@@ -69,6 +69,39 @@ Deployment for v1, and it shares the agent's credentials, tools and database
 exactly as the in-process engine does. Splitting it out later is an operator
 change, not a code change: `temporal/worker.py` is already the entrypoint.
 
+## Worker health
+
+The worker connects in the background and keeps retrying with backoff (up to
+60s between attempts) until the server answers; it no longer gives up after
+one attempt at startup. `/readiness` carries a `temporal_worker` check when a
+host is configured. While the worker is not polling, or the server cannot be
+reached, the run endpoints answer 503 with the reason instead of accepting a
+run nothing would execute, and the monitor's durable auto-fix falls back to
+the inline path.
+
+Activities run blocking Kubernetes and database calls on threads
+(`temporal/_io.py`): the worker shares the agent's event loop, and the
+Kubernetes client has no request timeout. Phase activities and `apply_fix`
+heartbeat every 10s; a phase carries a 30s heartbeat timeout, so a worker that
+dies mid-phase is replaced in about 30s rather than at 2.5x the phase timeout.
+
+## Phase semantics
+
+The durable interpreter follows the in-process engine's skip rules: a phase
+runs only when every dependency came back `complete` or `partial`; a failed
+required phase stops the plan; `runs: always` phases run at the end
+regardless; phases not run are recorded as `skipped` with `skip_kind`
+`blocked` or `stopped`. A required phase blocked by a failed dependency makes
+the plan `failed`.
+
+Cancelling a plan run waits for any phase activity in flight (it is shielded,
+never severed mid-write), records the run to `plan_executions`, and completes
+with status `cancelled`.
+
+These behaviours are behind the `phase-heartbeat-and-cancel-record` patch;
+histories from before it replay the original loop. `tests/test_temporal_plans.py`
+replays histories recorded by the previous code.
+
 ## Configuration
 
 | Variable | Default | Meaning |

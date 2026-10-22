@@ -631,7 +631,7 @@ async def run_plan_template(incident_type: str, request: Request, _auth=Depends(
     for a human instead of being skipped as needs_escalation.
     """
     from ..plan_templates import get_template
-    from ..temporal.client import TemporalDisabledError, start_plan_run
+    from ..temporal.client import TemporalDisabledError, TemporalUnavailableError, start_plan_run
     from ..temporal.sequencing import unsupported_features
 
     template = get_template(incident_type)
@@ -657,7 +657,7 @@ async def run_plan_template(incident_type: str, request: Request, _auth=Depends(
 
     try:
         started = await start_plan_run(incident_type, incident)
-    except TemporalDisabledError as e:
+    except (TemporalDisabledError, TemporalUnavailableError) as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     return {"status": "started", **started}
 
@@ -665,11 +665,11 @@ async def run_plan_template(incident_type: str, request: Request, _auth=Depends(
 @router.get("/workflow-runs/{workflow_id}")
 async def get_workflow_run(workflow_id: str, _auth=Depends(verify_token)):
     """Status and live progress of a durable plan run."""
-    from ..temporal.client import TemporalDisabledError, describe_plan_run
+    from ..temporal.client import TemporalDisabledError, TemporalUnavailableError, describe_plan_run
 
     try:
         return await describe_plan_run(workflow_id)
-    except TemporalDisabledError as e:
+    except (TemporalDisabledError, TemporalUnavailableError) as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Unknown workflow run: {e}") from e
@@ -678,11 +678,11 @@ async def get_workflow_run(workflow_id: str, _auth=Depends(verify_token)):
 @router.get("/workflow-runs")
 async def list_workflow_runs(limit: int = Query(25, ge=1, le=100), _auth=Depends(verify_token)):
     """Recent durable runs, from Temporal's own visibility store."""
-    from ..temporal.client import TemporalDisabledError, list_runs
+    from ..temporal.client import TemporalDisabledError, TemporalUnavailableError, list_runs
 
     try:
         return {"runs": await list_runs(limit)}
-    except TemporalDisabledError as e:
+    except (TemporalDisabledError, TemporalUnavailableError) as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
 
 
@@ -699,12 +699,12 @@ async def cancel_workflow_run(workflow_id: str, request: Request, _auth=Depends(
     outcome. Returns as soon as the request is delivered; poll the run to see
     the compensation finish.
     """
-    from ..temporal.client import TemporalDisabledError, cancel_run
+    from ..temporal.client import TemporalDisabledError, TemporalUnavailableError, cancel_run
 
     body = await request.json() if (request.headers.get("content-length") or "0") != "0" else {}
     try:
         await cancel_run(workflow_id, str(body.get("reason") or ""))
-    except TemporalDisabledError as e:
+    except (TemporalDisabledError, TemporalUnavailableError) as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Unknown workflow run: {e}") from e
@@ -714,7 +714,7 @@ async def cancel_workflow_run(workflow_id: str, request: Request, _auth=Depends(
 @router.post("/workflow-runs/{workflow_id}/approve")
 async def approve_workflow_phase(workflow_id: str, request: Request, _auth=Depends(require_admin)):
     """Deliver a human verdict to a run waiting on approval."""
-    from ..temporal.client import TemporalDisabledError, approve_plan_phase
+    from ..temporal.client import TemporalDisabledError, TemporalUnavailableError, approve_plan_phase
 
     body = await request.json()
     phase_id = str(body.get("phase_id") or "").strip()
@@ -726,7 +726,7 @@ async def approve_workflow_phase(workflow_id: str, request: Request, _auth=Depen
 
     try:
         await approve_plan_phase(workflow_id, phase_id, approved)
-    except TemporalDisabledError as e:
+    except (TemporalDisabledError, TemporalUnavailableError) as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     return {"status": "signalled", "phase_id": phase_id, "approved": approved}
 

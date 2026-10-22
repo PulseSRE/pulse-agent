@@ -14,6 +14,8 @@ from typing import Any
 
 from temporalio import activity
 
+from ._io import _beating, _off_loop
+
 logger = logging.getLogger("pulse_agent.temporal.incident")
 
 
@@ -26,10 +28,12 @@ async def capture_snapshot(resource: dict) -> dict | None:
     """
     from ..snapshot import capture
 
-    return capture(
-        kind=resource.get("kind", "Pod"),
-        name=resource.get("name", ""),
-        namespace=resource.get("namespace", ""),
+    return await _off_loop(
+        lambda: capture(
+            kind=resource.get("kind", "Pod"),
+            name=resource.get("name", ""),
+            namespace=resource.get("namespace", ""),
+        )
     )
 
 
@@ -55,7 +59,7 @@ async def apply_fix(plan: dict) -> dict:
     from temporalio.exceptions import ApplicationError
 
     try:
-        execution = execute_fix_with_snapshot(fix_plan)
+        execution = await _beating(_off_loop(execute_fix_with_snapshot, fix_plan), "applying")
     except FixPreconditionError as exc:
         raise ApplicationError(str(exc), type="FixNotApplied", non_retryable=True) from exc
     except ApiException as exc:
@@ -90,7 +94,9 @@ async def verify_fix(resource: dict) -> dict:
     """
     from ..monitor.health_gate import PASS, check_resource
 
-    gate = check_resource(resource.get("kind", "Pod"), resource.get("name", ""), resource.get("namespace", ""))
+    gate = await _off_loop(
+        check_resource, resource.get("kind", "Pod"), resource.get("name", ""), resource.get("namespace", "")
+    )
     if gate.status != PASS:
         raise RuntimeError(f"Recovery not verified ({gate.status}): {gate.detail}")
     return {"healthy": True, "evidence": gate.detail, "baseline": gate.observations}
@@ -103,7 +109,7 @@ async def restore_snapshot(snapshot: dict | None) -> str:
         return "no snapshot captured; nothing to restore"
     from ..snapshot import restore
 
-    return restore(snapshot)
+    return await _off_loop(restore, snapshot)
 
 
 @activity.defn(name="pulse.incident.check_recurrence")
@@ -115,7 +121,9 @@ async def check_recurrence(resource: dict) -> dict:
     """
     from ..monitor.health_gate import FAIL, PASS, check_resource
 
-    gate = check_resource(resource.get("kind", "Pod"), resource.get("name", ""), resource.get("namespace", ""))
+    gate = await _off_loop(
+        check_resource, resource.get("kind", "Pod"), resource.get("name", ""), resource.get("namespace", "")
+    )
     if gate.status not in (PASS, FAIL):
         raise RuntimeError(f"Recovery recheck is unverifiable: {gate.detail}")
     if resource.get("kind", "Pod") == "Pod" and gate.status == PASS:
@@ -132,6 +140,10 @@ async def check_recurrence(resource: dict) -> dict:
 @activity.defn(name="pulse.incident.record_outcome")
 async def record_outcome(finding_id: str, verdict: str, evidence: str, applied: bool | None = None) -> None:
     """Persist the final verdict where fix history already lives."""
+    await _off_loop(_record_outcome_sync, finding_id, verdict, evidence, applied)
+
+
+def _record_outcome_sync(finding_id: str, verdict: str, evidence: str, applied: bool | None) -> None:
     from temporalio.exceptions import ApplicationError
 
     from ..monitor.findings import _ts
