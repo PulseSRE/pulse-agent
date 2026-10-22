@@ -21,6 +21,8 @@ from typing import Any
 
 from temporalio import activity
 
+from ._io import _beating, _off_loop
+
 logger = logging.getLogger("pulse_agent.temporal")
 
 
@@ -44,6 +46,7 @@ def plan_to_dict(plan) -> dict:
                 "branches": dict(p.branches),
                 "parallel_with": list(p.parallel_with) if p.parallel_with else None,
                 "subplan": p.subplan,
+                "runs": p.runs,
                 "retry_limit": p.retry_limit,
             }
             for p in plan.phases
@@ -83,7 +86,7 @@ async def load_plan(incident_type: str) -> dict:
     """
     from ..plan_templates import get_template
 
-    plan = get_template(incident_type)
+    plan = await _off_loop(get_template, incident_type)
     if plan is None:
         raise ValueError(f"No plan template for incident type '{incident_type}'")
     return plan_to_dict(plan)
@@ -125,7 +128,10 @@ async def run_plan_phase(
             return approved_phase_can_write(writes_approved, get_settings().monitor.max_trust_level)
 
         runtime = PlanRuntime(client=client, on_confirm=confirm_write)
-        output = await runtime._execute_phase(phase, incident, priors)
+        # Heartbeats let a worker that died mid-phase be noticed in seconds.
+        # Without them the retry waited out the whole start-to-close timeout,
+        # 2.5x the phase timeout: 12.5 minutes for crashloop's 300s phases.
+        output = await _beating(runtime._execute_phase(phase, incident, priors), f"phase {phase_id}")
     finally:
         try:
             await client.close()
@@ -155,7 +161,7 @@ async def record_plan_execution(plan: dict, outputs: dict, status: str, duration
         total_duration_ms=duration_ms,
     )
     result.phase_outputs = {pid: _output_from_dict(od) for pid, od in outputs.items()}
-    PlanRuntime()._record_execution(skill_plan, result, incident)
+    await _off_loop(PlanRuntime()._record_execution, skill_plan, result, incident)
 
 
 ALL_ACTIVITIES: Sequence[Callable[..., Any]] = [load_plan, run_plan_phase, record_plan_execution]

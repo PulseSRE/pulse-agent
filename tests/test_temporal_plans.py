@@ -88,8 +88,9 @@ def _plan(phases):
     return {"id": "p1", "name": "Test Plan", "incident_type": "test", "max_total_duration": 600, "phases": phases}
 
 
-def _phase(pid, *, deps=(), approval=False, required=True):
+def _phase(pid, *, deps=(), approval=False, required=True, runs="on_success"):
     return {
+        "runs": runs,
         "id": pid,
         "skill_name": "sre",
         "required": required,
@@ -128,6 +129,7 @@ async def _run_workflow(
     fail_phases=(),
     crash_phases=(),
     attempts=None,
+    cancel_when=None,
 ):
     """Execute PlanWorkflow with stub activities; optionally signal mid-run.
 
@@ -200,7 +202,16 @@ async def _run_workflow(
             if send_approval is not None:
                 phase_id, approved = send_approval
                 await handle.signal("approve_phase", args=[phase_id, approved])
+            if cancel_when is not None:
+                # Polling a query does not advance time-skipping's clock, so a
+                # phase waiting on approval is still waiting when this fires.
+                for _ in range(400):
+                    if cancel_when(await handle.query("progress"), ran):
+                        break
+                    await aio.sleep(0.02)
+                await handle.cancel()
             result = await handle.result()
+            diag["history"] = await handle.fetch_history()
     return result, ran, recorded, diag
 
 
@@ -276,8 +287,10 @@ class TestWritePhaseSafety:
             )
         )
         assert ran == ["diagnose"]
-        assert result["phase_outputs"]["remediate"]["status"] == "failed"
-        assert "diagnose did not complete" in result["phase_outputs"]["remediate"]["evidence_summary"]
+        # Like the in-process engine, a failed required phase stops the plan;
+        # the write phase is recorded as not run and says why.
+        assert result["phase_outputs"]["remediate"]["status"] == "skipped"
+        assert "'diagnose' failed" in result["phase_outputs"]["remediate"]["evidence_summary"]
 
     def test_an_approved_write_phase_is_attempted_once(self):
         """A retry after the worker dies could apply the write a second time."""
@@ -1213,3 +1226,154 @@ class TestListRuns:
         """Runs started before memo existed must not vanish from the listing."""
         runs = self._list([self._execution()])
         assert runs[0]["memo"] == {}
+
+
+class TestEngineParity:
+    """The durable interpreter skips what the in-process engine skips.
+
+    It used to treat any settled dependency as good enough: on a live server a
+    failed triage still paid for diagnose and verify, and ``runs: always`` was
+    dropped on the way into the workflow.
+    """
+
+    def test_a_failed_required_phase_stops_the_plan_but_always_phases_run(self):
+        from sre_agent.temporal.plan_workflow import PlanRunInput
+
+        plan = _plan(
+            [
+                _phase("triage"),
+                _phase("diagnose", deps=["triage"]),
+                _phase("verify", deps=["diagnose"], runs="always"),
+            ]
+        )
+        result, ran, recorded, _ = asyncio.run(
+            _run_workflow(plan, PlanRunInput(incident_type="test"), fail_phases={"triage"})
+        )
+        assert ran == ["triage", "verify"]
+        assert result["phase_outputs"]["diagnose"]["status"] == "skipped"
+        assert "'triage' failed" in result["phase_outputs"]["diagnose"]["evidence_summary"]
+        assert result["status"] == recorded["status"] == "partial"
+
+    def test_a_required_phase_blocked_by_a_failed_optional_one_fails_the_plan(self):
+        from sre_agent.temporal.plan_workflow import PlanRunInput
+
+        plan = _plan([_phase("enrich", required=False), _phase("diagnose", deps=["enrich"])])
+        result, ran, _, _ = asyncio.run(_run_workflow(plan, PlanRunInput(incident_type="test"), fail_phases={"enrich"}))
+        assert ran == ["enrich"]
+        assert result["phase_outputs"]["diagnose"]["skip_kind"] == "blocked"
+        assert result["status"] == "failed"
+
+    def test_a_denied_fix_blocks_its_dependents_except_always_phases(self):
+        from sre_agent.temporal.plan_workflow import PlanRunInput
+
+        plan = _plan(
+            [
+                _phase("diagnose"),
+                _phase("remediate", deps=["diagnose"], approval=True, required=False),
+                _phase("report", deps=["remediate"], required=False),
+                _phase("verify", deps=["remediate"], runs="always"),
+            ]
+        )
+        result, ran, _, _ = asyncio.run(
+            _run_workflow(
+                plan,
+                PlanRunInput(incident_type="test", approval_timeout_seconds=3600),
+                send_approval=("remediate", False),
+            )
+        )
+        assert ran == ["diagnose", "verify"]
+        assert result["phase_outputs"]["remediate"]["status"] == "needs_escalation"
+        assert result["phase_outputs"]["report"]["status"] == "skipped"
+
+
+class TestCancellation:
+    def test_cancelling_a_run_waiting_on_approval_records_what_ran(self):
+        from sre_agent.temporal.plan_workflow import PlanRunInput
+
+        plan = _plan([_phase("diagnose"), _phase("remediate", deps=["diagnose"], approval=True)])
+        result, ran, recorded, _ = asyncio.run(
+            _run_workflow(
+                plan,
+                PlanRunInput(incident_type="test", approval_timeout_seconds=3600),
+                cancel_when=lambda progress, _ran: progress.get("awaiting_approval") == "remediate",
+            )
+        )
+        assert ran == ["diagnose"]
+        assert result["status"] == recorded["status"] == "cancelled"
+        assert result["phase_outputs"]["diagnose"]["status"] == "complete"
+        assert result["phase_outputs"]["remediate"]["status"] == "skipped"
+
+    def test_a_phase_in_flight_when_cancelled_finishes_and_is_recorded(self):
+        """Cancel must not sever a phase mid-write; it waits and records it."""
+        from sre_agent.temporal.plan_workflow import PlanRunInput
+
+        plan = _plan([_phase("slow"), _phase("after", deps=["slow"])])
+        result, ran, recorded, _ = asyncio.run(
+            _run_workflow(
+                plan,
+                PlanRunInput(incident_type="test"),
+                phase_delay=0.5,
+                cancel_when=lambda _progress, ran_so_far: "slow" in ran_so_far,
+            )
+        )
+        assert ran == ["slow"]
+        assert result["status"] == "cancelled"
+        assert recorded["outputs"]["slow"]["status"] == "complete"
+        assert recorded["outputs"]["after"]["status"] == "skipped"
+
+
+class TestWorkerDeathDetection:
+    def test_phase_activities_carry_a_heartbeat_timeout(self):
+        """Without one, a dead worker's phase waited out 2.5x the phase timeout."""
+        from sre_agent.temporal.plan_workflow import _PHASE_HEARTBEAT_TIMEOUT, PlanRunInput
+
+        _, _, _, diag = asyncio.run(_run_workflow(_plan([_phase("only")]), PlanRunInput(incident_type="test")))
+        scheduled = [
+            e.activity_task_scheduled_event_attributes
+            for e in diag["history"].events
+            if e.HasField("activity_task_scheduled_event_attributes")
+            and e.activity_task_scheduled_event_attributes.activity_type.name == "pulse.run_plan_phase"
+        ]
+        assert scheduled
+        assert scheduled[0].heartbeat_timeout.ToTimedelta() == _PHASE_HEARTBEAT_TIMEOUT
+
+    def test_phase_activity_heartbeats_while_the_phase_runs(self):
+        import asyncio as aio
+
+        from sre_agent.temporal import _io
+
+        beats: list = []
+
+        async def slow():
+            await aio.sleep(0.35)
+            return "done"
+
+        with (
+            patch.object(_io, "_HEARTBEAT_EVERY", 0.1),
+            patch.object(_io.activity, "in_activity", return_value=True),
+            patch.object(_io.activity, "heartbeat", side_effect=beats.append),
+        ):
+            assert aio.run(_io._beating(slow(), "phase x")) == "done"
+        assert len(beats) >= 2 and set(beats) == {"phase x"}
+
+
+class TestReplayOfPreChangeHistories:
+    """Histories recorded by the previous workflow code replay without error.
+
+    A deployed agent has runs parked on approval gates for up to a day; the
+    new worker must replay them exactly. Each fixture was recorded by the
+    pre-change plan_workflow.py (tests/fixtures/temporal_histories).
+    """
+
+    @pytest.mark.parametrize("name", ["chain", "approved", "denied", "failed_diag", "wave_branch", "child", "waiting"])
+    def test_replays(self, name):
+        from pathlib import Path
+
+        from temporalio.client import WorkflowHistory
+        from temporalio.worker import Replayer
+
+        from sre_agent.temporal.plan_workflow import PlanWorkflow
+
+        raw = (Path(__file__).parent / "fixtures" / "temporal_histories" / f"{name}.json").read_text()
+        history = WorkflowHistory.from_json(f"hist-{name}", raw)
+        asyncio.run(Replayer(workflows=[PlanWorkflow]).replay_workflow(history))

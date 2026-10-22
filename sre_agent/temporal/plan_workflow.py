@@ -56,7 +56,14 @@ from temporalio.exceptions import ApplicationError
 
 with workflow.unsafe.imports_passed_through():
     from .activities import load_plan, record_plan_execution, run_plan_phase
-    from .sequencing import derive_status, ready_phases, resolve_branch, unsupported_features
+    from .sequencing import (
+        blocked_by,
+        derive_status,
+        derive_status_v2,
+        ready_phases,
+        resolve_branch,
+        unsupported_features,
+    )
 
 #: Margin over a phase's own timeout: _execute_phase may retry once with the
 #: contract gap named, so the activity gets room for both attempts plus the
@@ -69,6 +76,10 @@ _PHASE_TIMEOUT_MARGIN = 2.5
 #: more composition than any real runbook has needed.
 MAX_SUBPLAN_DEPTH = 3
 
+#: A phase activity heartbeats every 10s; three missed beats means the worker
+#: running it is gone and the phase should be retried elsewhere.
+_PHASE_HEARTBEAT_TIMEOUT = timedelta(seconds=30)
+
 
 @dataclass
 class PlanRunInput:
@@ -80,6 +91,11 @@ class PlanRunInput:
     approval_timeout_seconds: int = 86400
     #: Subplan nesting depth of this run; 0 for a run a user started.
     depth: int = 0
+
+
+def _skipped_output(phase: dict, reason: str, kind: str) -> dict:
+    """A phase that was not run, and why. ``kind`` is blocked or stopped."""
+    return {**_escalation_output(phase, reason), "status": "skipped", "skip_kind": kind}
 
 
 def _escalation_output(phase: dict, reason: str) -> dict:
@@ -107,6 +123,9 @@ class PlanWorkflow:
         self._awaiting: str = ""
         self._current_phase: str = ""
         self._outputs: dict[str, dict] = {}
+        # Phase activities in flight, so a cancelled run can wait for them to
+        # finish (never sever a write) and record what they did.
+        self._inflight: dict[str, workflow.ActivityHandle[dict]] = {}
 
     @workflow.signal
     def approve_phase(self, phase_id: str, approved: bool = True) -> None:
@@ -194,12 +213,31 @@ class PlanWorkflow:
         attempts = 2
         if may_write and workflow.patched("no-retry-approved-writes"):
             attempts = 1
-        return await workflow.execute_activity(
+        retry = RetryPolicy(maximum_attempts=attempts, non_retryable_error_types=["ValueError"])
+        if not workflow.patched("phase-heartbeat-and-cancel-record"):
+            return await workflow.execute_activity(
+                run_plan_phase,
+                args=args,
+                start_to_close_timeout=timeout,
+                retry_policy=retry,
+            )
+        # The activity heartbeats, so a worker that died mid-phase is noticed
+        # within the heartbeat timeout instead of the whole start-to-close.
+        # Shielded: cancelling the run must not sever a phase mid-write; the
+        # cancel handler waits for it and records what it did.
+        handle = workflow.start_activity(
             run_plan_phase,
             args=args,
             start_to_close_timeout=timeout,
-            retry_policy=RetryPolicy(maximum_attempts=attempts, non_retryable_error_types=["ValueError"]),
+            heartbeat_timeout=_PHASE_HEARTBEAT_TIMEOUT,
+            retry_policy=retry,
         )
+        self._inflight[phase["id"]] = handle
+        try:
+            return await asyncio.shield(handle)
+        finally:
+            if handle.done():
+                self._inflight.pop(phase["id"], None)
 
     @workflow.run
     async def run(self, params: PlanRunInput) -> dict:
@@ -223,6 +261,131 @@ class PlanWorkflow:
             )
 
         phases: list[dict] = plan["phases"]
+        if not workflow.patched("phase-heartbeat-and-cancel-record"):
+            return await self._run_graph_v1(plan, phases, params, started)
+        try:
+            status = await self._run_graph_v2(plan, phases, params)
+        except asyncio.CancelledError:
+            status = await self._settle_after_cancel(phases)
+        duration_ms = int((workflow.now() - started).total_seconds() * 1000)
+        # Shielded so a cancelled run still leaves its plan_executions row;
+        # a no-op shield when the run was not cancelled.
+        await asyncio.shield(
+            workflow.execute_activity(
+                record_plan_execution,
+                args=[plan, self._outputs, status, duration_ms, params.incident],
+                schedule_to_close_timeout=timedelta(seconds=60),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
+        )
+        return {
+            "status": status,
+            "plan_id": plan["id"],
+            "duration_ms": duration_ms,
+            "phase_outputs": self._outputs,
+        }
+
+    async def _settle_after_cancel(self, phases: list[dict]) -> str:
+        """Let in-flight phases finish, then call the run cancelled.
+
+        Returning instead of re-raising completes the workflow with a result
+        that says "cancelled" and carries what ran, the same choice the
+        incident workflow makes. Re-raising ended the run CANCELED with no
+        plan_executions row and no phases visible through the API.
+        """
+        for pid, handle in list(self._inflight.items()):
+            try:
+                self._outputs[pid] = await asyncio.shield(handle)
+            except Exception as exc:
+                phase = next(p for p in phases if p["id"] == pid)
+                self._outputs[pid] = {
+                    **_escalation_output(phase, f"Phase ended with cancellation: {exc}"),
+                    "status": "failed",
+                }
+        self._inflight.clear()
+        for phase in phases:
+            if phase["id"] not in self._outputs:
+                self._outputs[phase["id"]] = _skipped_output(phase, "Run cancelled before this phase", "stopped")
+        self._current_phase = ""
+        self._awaiting = ""
+        return "cancelled"
+
+    async def _gate_and_collect(self, plan: dict, phase: dict, params: PlanRunInput) -> dict | None:
+        """Approval gate for one phase. Returns an output when it must not run."""
+        if not phase.get("approval_required"):
+            return None
+        approved = await self._gate_on_approval(phase, params.approval_timeout_seconds)
+        if approved:
+            return None
+        reason = (
+            f"Phase '{phase['id']}' was not approved within the window"
+            if phase["id"] not in self._approvals
+            else f"Phase '{phase['id']}' was denied by a human"
+        )
+        return _escalation_output(phase, reason)
+
+    async def _run_graph_v2(self, plan: dict, phases: list[dict], params: PlanRunInput) -> str:
+        """The phase graph with the in-process engine's skip rules.
+
+        A phase runs only when every dependency came back complete or partial;
+        a failed required phase stops the plan; ``runs: always`` phases run at
+        the end regardless. Waves still run concurrently and branches still
+        re-target skills, as in v1.
+        """
+        always = [p for p in phases if p.get("runs") == "always"]
+        main = [p for p in phases if p.get("runs") != "always"]
+        stopped_by = ""
+
+        while any(p["id"] not in self._outputs for p in main):
+            ready = ready_phases(main, set(self._outputs))
+            if not ready:
+                break
+            runnable: list[dict] = []
+            for phase in ready:
+                self._current_phase = phase["id"]
+                blocked = blocked_by(phase, self._outputs)
+                if blocked:
+                    self._outputs[phase["id"]] = _skipped_output(
+                        phase, f"Not run: {', '.join(blocked)} did not complete", "blocked"
+                    )
+                    continue
+                refused = await self._gate_and_collect(plan, phase, params)
+                if refused is not None:
+                    self._outputs[phase["id"]] = refused
+                    continue
+                runnable.append(phase)
+
+            if runnable:
+                results = await asyncio.gather(*(self._run_phase(plan, phase, params) for phase in runnable))
+                for phase, output in zip(runnable, results, strict=True):
+                    self._outputs[phase["id"]] = output
+                failed = [
+                    p["id"]
+                    for p in runnable
+                    if p.get("required", True) and self._outputs[p["id"]].get("status") == "failed"
+                ]
+                if failed:
+                    stopped_by = failed[0]
+                    break
+
+        for phase in main:
+            if phase["id"] not in self._outputs:
+                if stopped_by:
+                    reason, kind = f"Plan stopped: required phase '{stopped_by}' failed", "stopped"
+                else:
+                    reason, kind = "Not run: its dependencies never ran", "blocked"
+                self._outputs[phase["id"]] = _skipped_output(phase, reason, kind)
+
+        for phase in always:
+            self._current_phase = phase["id"]
+            refused = await self._gate_and_collect(plan, phase, params)
+            self._outputs[phase["id"]] = refused if refused is not None else await self._run_phase(plan, phase, params)
+
+        self._current_phase = ""
+        return derive_status_v2(phases, self._outputs)
+
+    async def _run_graph_v1(self, plan: dict, phases: list[dict], params: PlanRunInput, started) -> dict:
+        """The original interpreter loop, kept verbatim for histories recorded before v2."""
         # Waves run concurrently and branches re-target skills since the
         # "wave-parallel-branching-subplans" patch; histories recorded before
         # it replay the original one-phase-at-a-time loop unchanged.

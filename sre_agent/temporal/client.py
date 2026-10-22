@@ -25,6 +25,32 @@ class TemporalDisabledError(RuntimeError):
         )
 
 
+class TemporalUnavailableError(RuntimeError):
+    """Temporal is configured but cannot be used right now. Callers answer 503."""
+
+
+class TemporalWorkerUnavailableError(TemporalUnavailableError):
+    """Raised instead of starting a run that no worker would execute.
+
+    Temporal accepts a start whether or not anything polls the task queue, so
+    without this check a run was reported "started" and then sat in RUNNING
+    forever. Callers turn it into a 503 (REST) or the inline fallback (the
+    monitor's durable auto-fix).
+    """
+
+
+def _require_worker() -> None:
+    from .worker import worker_ready, worker_state
+
+    # "disabled" means this process runs no worker (none started, or one
+    # split into its own Deployment); nothing local to check then.
+    if worker_state()["state"] == "disabled":
+        return
+    ready, reason = worker_ready()
+    if not ready:
+        raise TemporalWorkerUnavailableError(reason)
+
+
 def _settings():
     from ..config import get_settings
 
@@ -62,7 +88,12 @@ async def _connect():
         raise TemporalDisabledError()
     from temporalio.client import Client
 
-    return await Client.connect(cfg.host, namespace=cfg.namespace)
+    try:
+        return await Client.connect(cfg.host, namespace=cfg.namespace)
+    except Exception as e:
+        # Was an unhandled 500 ("Internal Server Error") on the run endpoint,
+        # and a misleading "Unknown workflow run" 404 on the others.
+        raise TemporalUnavailableError(f"Cannot reach the Temporal server at {cfg.host}: {type(e).__name__}") from e
 
 
 async def start_plan_run(incident_type: str, incident: dict) -> dict:
@@ -70,6 +101,7 @@ async def start_plan_run(incident_type: str, incident: dict) -> dict:
     from .plan_workflow import PlanRunInput, PlanWorkflow
 
     cfg = _settings()
+    _require_worker()
     client = await _connect()
     workflow_id = f"plan-{incident_type}-{uuid.uuid4().hex[:10]}"
     handle = await client.start_workflow(
@@ -135,6 +167,7 @@ async def start_incident_run(
     from .incident_workflow import IncidentInput, IncidentWorkflow
 
     cfg = _settings()
+    _require_worker()
     client = await _connect()
     workflow_id = f"incident-{finding_id}"
     handle = await client.start_workflow(
