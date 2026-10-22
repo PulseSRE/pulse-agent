@@ -2,7 +2,9 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
-## [Unreleased]
+## v2.34.0 (2026-10-22)
+
+Paired with pulse-ui v2.34.0 and pulse-operator v0.11.0. No new migrations. **Behaviour change:** Prometheus queries made for a person (chat, `/query`) now run with that person's token, so users without monitoring access get a 403 for metrics in chat, matching the UI's own Prometheus proxy; the monitor's scans still use the service account. Durable-execution fixes take effect only where Temporal is enabled. Pull requests #167–#174.
 
 ### Security
 Found in a review of the UI → agent → cluster boundary; each item has a regression test in `tests/test_security_boundary.py` that fails on the previous code.
