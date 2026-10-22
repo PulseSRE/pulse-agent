@@ -705,7 +705,7 @@ def gen_durable_approvals() -> list[dict[str, Any]]:
             + (f" on {target}" if target else ""),
             summary=(
                 f"Run {run['workflow_id']} reached phase '{run['phase_id']}', which needs a person to approve "
-                "before it runs. Approve or deny it here or in Toolbox → Runs. Unanswered, it times out and "
+                "before it runs. Approve or deny it here or in Pulse Agent → Runs. Unanswered, it times out and "
                 "the phase is recorded as needs_escalation."
             ),
             severity="warning",
