@@ -4,6 +4,15 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## [Unreleased]
 
+### Security
+Found in a review of the UI → agent → cluster boundary; each item has a regression test in `tests/test_security_boundary.py` that fails on the previous code.
+- **A non-admin could rewrite the system prompt.** `POST /views/{id}/actions` ran whatever tool the request body named, so a view a user owned could run `edit_skill` (reproduced: `PUT /admin/skills/sre` → 403, the same edit through the action endpoint → 200, against the real app). The endpoint now runs only an `action_button` stored in the view, with its stored input and `min_trust_level`, and never a tool that changes the agent itself. Those tools (`create_skill`, `edit_skill`, `delete_skill`, `create_skill_from_template`, `propose_git_change`) are also removed from a non-admin's chat tools, where a user could approve the confirmation themselves
+- **`/log-counts` and `/query` ran as the service account.** Any signed-in user could recover log contents in any namespace by counting pattern matches one character at a time, and run any PromQL with the agent's `cluster-monitoring-view` binding. Both now run under the caller's token. Prometheus requests made on someone's behalf (including chat) send that person's token; only the monitor's own scans use the service account's. **Behaviour change:** users without monitoring access now get a 403 for metrics in chat, matching the UI's own Prometheus proxy
+- **Multi-skill chat turns dropped the user's token**, so both skills' Kubernetes calls ran as the service account. The token and identity are now carried through `run_parallel_skills`
+- **`describe_resource` returned Secret values** to the model, and so to chat history and the provider. Values are replaced by their sizes; key names stay visible
+- **Monitor fix approvals over `/ws/monitor` were not admin-gated**, though the fix runs as the service account and the REST approval requires an admin. They now follow the same rule. Plan template create/edit/delete now require an admin too (templates decide what durable runs do and where they stop for approval)
+- **The shared WebSocket token was written to the access log** (`"WebSocket /ws/agent?token=…" [accepted]`). `token=` query values are now masked; verified against a running server
+
 ### Added
 - Durable approvals reach people. A plan run waiting on an approval gate becomes an inbox item (and is listed by `GET /workflow-runs/awaiting-approval`) instead of being answerable only from the panel that started it, while that panel stayed open; unanswered, such runs timed out to `needs_escalation` with nobody asked. The item auto-resolves when the gate is answered or times out, and survives a Temporal outage rather than resolving falsely
 - A durable run can be started from an inbox item (`POST /inbox/{item_id}/durable-run`, preview with `GET /inbox/{item_id}/plan`): the plan matching the finding investigates that finding. Runs started from the plan panel carried an empty incident, so the plan investigated nothing in particular

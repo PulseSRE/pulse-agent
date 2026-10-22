@@ -186,7 +186,13 @@ class PrometheusClient:
         ctx = self._build_ssl_context()
         headers: dict[str, str] = {}
         if base_url.startswith("https"):
-            token = self._get_token()
+            # The caller's own token when a request runs on someone's behalf
+            # (chat, view refresh), so metrics follow their RBAC the way the
+            # UI's own /api/prometheus proxy does. The service account's token
+            # only for the monitor's own scans, which run with no caller.
+            from .k8s_client import get_current_user_token
+
+            token = get_current_user_token() or self._get_token()
             if token:
                 headers["Authorization"] = f"Bearer {token}"
 

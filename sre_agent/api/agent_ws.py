@@ -54,6 +54,12 @@ class SkillExecutor:
         current_user: str = "anonymous",
     ) -> SkillOutput:
         """Run one skill and return structured output."""
+        from ..admin_tools import without_admin_tools
+
+        # Skill-editing tools follow require_admin: a non-admin used to be
+        # offered edit_skill in chat and could approve the confirmation
+        # themselves, rewriting the system prompt the REST endpoint guards.
+        config = without_admin_tools(config, current_user)
         tools_called: list[str] = []
         components: list[dict] = []
         token_usage: dict[str, int] = {}

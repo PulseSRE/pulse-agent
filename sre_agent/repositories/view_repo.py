@@ -656,32 +656,45 @@ class ViewRepository(BaseRepository):
         view = self.get_view(view_id)
         if not view:
             return []
-        layout = view.get("layout", [])
-        tools: list[dict] = []
+        return [
+            {"action": b["action"], "action_input": b["action_input"], "label": b["label"]}
+            for b in extract_view_actions(view)
+        ]
 
-        def _scan(components: list[dict]) -> None:
-            for comp in components:
-                if comp.get("kind") == "action_button":
-                    tools.append(
-                        {
-                            "action": comp.get("action", ""),
-                            "action_input": comp.get("action_input", {}),
-                            "label": comp.get("label", ""),
-                        }
-                    )
-                for key in ("items", "components"):
-                    nested = comp.get(key)
-                    if isinstance(nested, list):
-                        _scan(nested)
-                tabs = comp.get("tabs")
-                if isinstance(tabs, list):
-                    for tab in tabs:
-                        tab_comps = tab.get("components")
-                        if isinstance(tab_comps, list):
-                            _scan(tab_comps)
 
-        _scan(layout)
-        return tools
+def extract_view_actions(view: dict) -> list[dict]:
+    """Every action_button in a view's layout, nested containers and tabs included.
+
+    Each entry: action, action_input, label, min_trust_level.
+    """
+    tools: list[dict] = []
+
+    def _scan(components: list) -> None:
+        for comp in components:
+            if not isinstance(comp, dict):
+                continue
+            if comp.get("kind") == "action_button":
+                tools.append(
+                    {
+                        "action": comp.get("action", ""),
+                        "action_input": comp.get("action_input", {}) or {},
+                        "label": comp.get("label", ""),
+                        "min_trust_level": comp.get("min_trust_level", 0),
+                    }
+                )
+            for key in ("items", "components"):
+                nested = comp.get(key)
+                if isinstance(nested, list):
+                    _scan(nested)
+            tabs = comp.get("tabs")
+            if isinstance(tabs, list):
+                for tab in tabs:
+                    tab_comps = tab.get("components") if isinstance(tab, dict) else None
+                    if isinstance(tab_comps, list):
+                        _scan(tab_comps)
+
+    _scan(view.get("layout", []) or [])
+    return tools
 
 
 # ---------------------------------------------------------------------------

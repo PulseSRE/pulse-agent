@@ -93,7 +93,14 @@ class TestActionEndpoint:
         # import. Skipping here would report success while testing nothing.
         assert tool_name is not None, "TOOL_REGISTRY is empty — tool registration is broken"
 
-        with patch("sre_agent.db.get_view", return_value={"id": "cv-test", "owner": "testuser", "layout": []}):
+        # The button must be in the view now; input validation still applies to it.
+        button = {
+            "kind": "action_button",
+            "label": "x",
+            "action": tool_name,
+            "action_input": {"namespace": "INVALID!!"},
+        }
+        with patch("sre_agent.db.get_view", return_value={"id": "cv-test", "owner": "testuser", "layout": [button]}):
             resp = client.post(
                 "/views/cv-test/actions",
                 json={"action": tool_name, "action_input": {"namespace": "INVALID!!"}},
@@ -111,7 +118,8 @@ class TestActionEndpoint:
         # import. Skipping here would report success while testing nothing.
         assert tool_name is not None, "TOOL_REGISTRY is empty — tool registration is broken"
 
-        with patch("sre_agent.db.get_view", return_value={"id": "cv-test", "owner": "testuser", "layout": []}):
+        button = {"kind": "action_button", "label": "x", "action": tool_name, "action_input": {"replicas": 999}}
+        with patch("sre_agent.db.get_view", return_value={"id": "cv-test", "owner": "testuser", "layout": [button]}):
             resp = client.post(
                 "/views/cv-test/actions",
                 json={"action": tool_name, "action_input": {"replicas": 999}},

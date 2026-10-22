@@ -75,9 +75,9 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `DELETE` | `/slo/{service}/{slo_type}` | token | Remove SLO definition |
 | `GET` | `/analytics/fix-strategies` | token | Fix strategy effectiveness per category+tool (query: `days` 1-365) |
 | `GET` | `/analytics/learning` | token | Agent learning feed: weight updates, scaffolded skills, routing decisions (query: `days` 1-365) |
-| `PUT` | `/plan-templates/{type}` | token | Update plan template phases/timeouts |
-| `DELETE` | `/plan-templates/{type}` | token | Delete a runtime-created plan template (bundled templates are protected) |
-| `POST` | `/plan-templates` | token | Create a new plan template (versioned; phases accept depends_on, branch_on/branches, parallel_with, subplan) |
+| `PUT` | `/plan-templates/{type}` | admin | Update plan template phases/timeouts |
+| `DELETE` | `/plan-templates/{type}` | admin | Delete a runtime-created plan template (bundled templates are protected) |
+| `POST` | `/plan-templates` | admin | Create a new plan template (versioned; phases accept depends_on, branch_on/branches, parallel_with, subplan) |
 | `GET` | `/plan-templates/{type}/versions` | token | Version history for one plan template |
 | `POST` | `/plan-templates/{type}/run` | admin | Start a durable run of this plan on Temporal. 503 with the reason when durable execution is not configured |
 | `GET` | `/workflow-runs` | token | Recent durable runs from Temporal's visibility store (query: `limit` 1-100). Each row carries a `memo` labelling what the run is acting on |
@@ -98,8 +98,8 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/eval/score` | token | Tool-selection accuracy scoring against static + learned eval prompts |
 | `GET` | `/usage/summary` | token | Tool usage split by agent mode vs. pipeline/scanner mode |
 | `GET` | `/interactions` | token | Query the `user_interactions` audit log |
-| `GET` | `/query` | token | Direct PromQL -> ComponentSpec proxy for live widget refresh (no LLM call) |
-| `GET` | `/log-counts` | token | Per-pod log pattern match counts for live-table enrichment |
+| `GET` | `/query` | token | Direct PromQL -> ComponentSpec proxy for live widget refresh (no LLM call). Runs under the caller's forwarded token |
+| `GET` | `/log-counts` | token | Per-pod log pattern match counts for live-table enrichment. Reads pods and logs under the caller's forwarded token |
 | `GET` | `/topology/blast-radius` | token | Blast-radius analysis for a resource (query: `kind`, `name`, `namespace`) |
 | `GET` | `/incidents/{finding_id}/impact` | token | Business/user impact estimate for a finding |
 | `GET` | `/incidents/{finding_id}/learning` | token | What the agent learned from a resolved finding |
@@ -1244,7 +1244,7 @@ Source-derived paths below supplement the table above. Authentication names iden
 | `POST` | `/views/claim/{share_token:path}` | `get_owner` | Claim a shared view using a share token. Clones the view to your account. |
 | `GET` | `/views/{view_id}/versions` | `get_owner` | List version history for a view. |
 | `POST` | `/views/{view_id}/undo` | `get_owner` | Undo the last change to a view (restore previous version). |
-| `POST` | `/views/{view_id}/actions` | `get_owner`, `get_user_token` | Execute a tool action from a view's action_button component. |
+| `POST` | `/views/{view_id}/actions` | `get_owner`, `get_user_token` | Execute an action_button stored in the view's layout (stored action, input and min_trust_level only; 403 for anything else, and never a skill/git-changing tool), under the caller's token. |
 | `POST` | `/views/{view_id}/status` | `get_owner` | Transition a view's status. |
 | `POST` | `/views/{view_id}/claim` | `get_owner` | Claim a team view. |
 | `DELETE` | `/views/{view_id}/claim` | `get_owner` | Release a claim on a view. |

@@ -27,7 +27,17 @@ Every `confirm_request` event includes a JIT nonce (generated via `secrets.token
 
 The shared agent token authenticates the UI/service connection; it does not establish a user's Kubernetes privileges. The trusted OAuth/reverse proxy supplies user identity and, when enabled, an access token. With `PULSE_AGENT_TOKEN_FORWARDING` (default enabled), interactive paths that propagate `user_token_context` use the caller's token. Background monitor/worker operations use service-account credentials. Review each execution path; this is not universal impersonation.
 
+Prometheus/Thanos queries made on a caller's behalf (chat tools, `GET /query`, view refresh) send the caller's token, so metrics follow their RBAC the way the UI's own `/api/prometheus` proxy does; a user without monitoring access gets a 403 from Thanos rather than the service account's view. `GET /log-counts` reads pods and logs under the caller's token. Multi-skill chat turns carry the caller's token into both skills. Only the monitor's own scans use the service account's Prometheus token.
+
+`describe_resource` never returns Secret values: `data`/`stringData` are replaced by their sizes and `last-applied-configuration` is removed, so values never reach the model, chat history or the provider.
+
 `require_admin` verifies the shared token and a user identity. `PULSE_AGENT_ADMIN_USERS`, when configured, restricts that identity to the comma-separated allowlist. When unset, **any authenticated user is allowed**; the dependency name does not imply cluster-admin RBAC. Set an explicit allowlist in production. `PULSE_AGENT_DEV_USER` is a local fallback and must not be relied on as production identity.
+
+The same admin rule (`admin_tools.is_admin`) covers the paths that reach admin acts without an admin endpoint: tools that change the agent itself (`create_skill`, `edit_skill`, `delete_skill`, `create_skill_from_template`, `propose_git_change`) are removed from a non-admin's chat tools and can never run from a view action; answering a monitor fix proposal over `/ws/monitor` requires an admin (the fix runs as the service account, as on `POST /fix-history/{id}/approve`); creating, editing and deleting plan templates require `require_admin`.
+
+`POST /views/{id}/actions` runs only an `action_button` stored in that view's layout, with the stored `action_input` and `min_trust_level`; the request can no longer name an arbitrary tool or lower the trust requirement. Write tools run under the caller's token.
+
+The shared WebSocket token travels to the agent as `?token=`; `token=` query values are masked in uvicorn's access and WebSocket log lines.
 
 Deployment RBAC is owned by pulse-operator and its `OpenShiftPulse` CR, including write-operation and secret-read options. Inspect the reconciled ClusterRoles and the caller's own permissions; old Helm `rbac.*` values no longer configure this repository. Token forwarding must fail closed for protected interactive writes if a user token is required but absent; the rollback route explicitly checks that case.
 

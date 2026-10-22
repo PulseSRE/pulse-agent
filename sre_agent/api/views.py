@@ -330,15 +330,23 @@ async def rest_query(
     q: str = Query(..., description="PromQL query string"),
     time_range: str = Query("", alias="range", description="Time range, e.g. '1h', '24h'"),
     _auth=Depends(verify_token),
+    user_token: str | None = Depends(get_user_token),
 ):
     """Execute a PromQL query and return a ComponentSpec for live widget refresh.
 
     No Claude/LLM involved -- direct Prometheus proxy.
     """
 
+    import asyncio
+
+    from ..k8s_client import user_token_context
     from ..k8s_tools import get_prometheus_query
 
-    result = get_prometheus_query.func(q, time_range)
+    # Under the caller's token, not the service account's: this endpoint
+    # needs only the shared UI token, so it handed any signed-in user every
+    # metric the agent's cluster-monitoring-view binding can read.
+    with user_token_context(user_token):
+        result = await asyncio.to_thread(get_prometheus_query.func, q, time_range)
 
     if isinstance(result, tuple) and len(result) == 2:
         _text_result, component = result
@@ -360,6 +368,7 @@ async def rest_log_counts(
     label_selector: str = Query("", alias="labelSelector", description="Pod label selector"),
     tail_lines: int = Query(100, alias="tailLines", ge=10, le=1000, description="Log lines to scan per pod"),
     _auth=Depends(verify_token),
+    user_token: str | None = Depends(get_user_token),
 ):
     """Count log lines matching a pattern per pod.  Used by live table log enrichment.
 
@@ -382,7 +391,14 @@ async def rest_log_counts(
     if pattern_err:
         return JSONResponse(status_code=400, content={"error": pattern_err})
 
-    core = get_core_client()
+    from ..k8s_client import user_token_context
+
+    # The client is built inside the caller's token context and reused by the
+    # per-pod reads, so every list and log read runs under the user's RBAC.
+    # Under the service account, a user with no permissions could recover log
+    # contents in any namespace by counting matches one character at a time.
+    with user_token_context(user_token):
+        core = get_core_client()
 
     pods_result = safe(
         lambda: core.list_namespaced_pod(
@@ -428,6 +444,7 @@ async def rest_execute_action(
     from fastapi.responses import JSONResponse
 
     from .. import db
+    from ..admin_tools import ADMIN_ONLY_TOOLS
     from ..tool_registry import TOOL_REGISTRY, WRITE_TOOL_NAMES
     from .sanitize import ACTION_BLOCKED_TOOLS, validate_action_input
 
@@ -440,7 +457,7 @@ async def rest_execute_action(
     if not isinstance(action_input, dict):
         return JSONResponse(status_code=400, content={"error": "'action_input' must be a dict"})
 
-    if action in ACTION_BLOCKED_TOOLS:
+    if action in ACTION_BLOCKED_TOOLS or action in ADMIN_ONLY_TOOLS:
         return JSONResponse(status_code=403, content={"error": f"Tool '{action}' is not allowed via action buttons"})
     if action not in TOOL_REGISTRY:
         return JSONResponse(status_code=400, content={"error": f"Tool '{action}' not found"})
@@ -455,8 +472,22 @@ async def rest_execute_action(
     if view.get("owner") != owner and view.get("visibility") != "team":
         return JSONResponse(status_code=404, content={"error": "View not found or not accessible"})
 
-    # min_trust_level on action_button (set by agent/monitor when creating the view)
-    min_trust = body.get("min_trust_level", 0)
+    # Only an action the view actually carries. The tool name and input used to
+    # come straight from the request body, so any tool could be run through
+    # any view the caller could read.
+    button = next(
+        (
+            b
+            for b in db.extract_view_actions(view)
+            if b.get("action") == action and (b.get("action_input") or {}) == action_input
+        ),
+        None,
+    )
+    if button is None:
+        return JSONResponse(status_code=403, content={"error": "This view has no such action"})
+
+    # min_trust_level comes from the stored button, never from the request.
+    min_trust = button.get("min_trust_level", 0)
     if isinstance(min_trust, int) and min_trust > settings.max_trust_level:
         return JSONResponse(status_code=403, content={"error": f"Action requires trust level {min_trust}"})
 

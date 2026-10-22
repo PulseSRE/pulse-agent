@@ -70,6 +70,9 @@ async def lifespan(app: FastAPI):
     from ..logging_config import configure_logging
 
     configure_logging()
+    from ..logging_config import install_token_redaction
+
+    install_token_redaction()
     # Ensure pulse_agent loggers are at INFO so monitor scan output is visible
     logging.getLogger("pulse_agent").setLevel(logging.INFO)
 
