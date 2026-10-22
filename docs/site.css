@@ -261,3 +261,9 @@ p code, li code { font-family: var(--mono); font-size: 0.86em; background: var(-
 .gallery figcaption { font-size: 14.5px; }
 @media (max-width: 1000px) { .areas, .gallery { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 640px) { .areas, .gallery { grid-template-columns: 1fr; } }
+
+/* 30-second film */
+.film { padding-top: 8px; }
+.film video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: var(--paper); border: 1px solid var(--grid-major); }
+.film figcaption { margin-top: 12px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
