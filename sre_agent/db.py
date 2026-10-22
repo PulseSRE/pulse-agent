@@ -461,6 +461,13 @@ def escalate_assessment_to_incident(view_id: str) -> bool:
     return get_view_repo().escalate_assessment_to_incident(view_id)
 
 
+def extract_view_actions(view: dict) -> list[dict]:
+    """Every action_button stored in ``view``'s layout."""
+    from .repositories.view_repo import extract_view_actions as _extract
+
+    return _extract(view)
+
+
 def extract_resolution_tools(view_id: str) -> list[dict]:
     """Extract action_button tool sequences from a view's layout.
 

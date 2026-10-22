@@ -777,6 +777,9 @@ async def run_parallel_skills(
     client,
     websocket=None,
     session_id: str = "",
+    *,
+    user_token: str | None = None,
+    current_user: str = "anonymous",
 ) -> ParallelSkillResult:
     """Run two skills in parallel with progressive result streaming.
 
@@ -811,7 +814,10 @@ async def run_parallel_skills(
             if websocket is not None:
                 from .api.agent_ws import SkillExecutor
 
-                executor = SkillExecutor(websocket, session_id)
+                # The caller's token, so both skills' Kubernetes calls run
+                # under the user's RBAC. Without it every multi-skill turn ran
+                # as the service account.
+                executor = SkillExecutor(websocket, session_id, user_token=user_token)
 
                 primary_task = asyncio.create_task(
                     executor.run(
@@ -821,11 +827,18 @@ async def run_parallel_skills(
                         primary_config["write_tools"],
                         primary.name,
                         skill_tag=primary.name,
+                        current_user=current_user,
                     )
                 )
                 secondary_task = asyncio.create_task(
                     executor.run(
-                        secondary_config, messages, c, sec_write_tools, secondary.name, skill_tag=secondary.name
+                        secondary_config,
+                        messages,
+                        c,
+                        sec_write_tools,
+                        secondary.name,
+                        skill_tag=secondary.name,
+                        current_user=current_user,
                     )
                 )
 

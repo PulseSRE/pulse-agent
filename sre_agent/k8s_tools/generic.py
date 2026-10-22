@@ -614,6 +614,34 @@ def get_resource_relationships(namespace: str, name: str, kind: str = "Pod"):
     return (text, component) if component else text
 
 
+def _redact_secret(obj: dict) -> dict:
+    """A Secret with its values replaced by their sizes."""
+    import base64
+
+    out = dict(obj)
+    for field in ("data", "stringData"):
+        values = obj.get(field)
+        if isinstance(values, dict):
+            redacted = {}
+            for key, value in values.items():
+                size = len(str(value or ""))
+                if field == "data":
+                    try:
+                        size = len(base64.b64decode(str(value or ""), validate=False))
+                    except Exception:
+                        pass
+                redacted[key] = f"<redacted: {size} bytes>"
+            out[field] = redacted
+    metadata = dict(obj.get("metadata") or {})
+    annotations = dict(metadata.get("annotations") or {})
+    if "kubectl.kubernetes.io/last-applied-configuration" in annotations:
+        annotations["kubectl.kubernetes.io/last-applied-configuration"] = "<redacted>"
+        metadata["annotations"] = annotations
+    metadata.pop("managedFields", None)
+    out["metadata"] = metadata
+    return out
+
+
 @beta_tool
 def describe_resource(namespace: str, name: str, kind: str, group: str = "", version: str = "v1"):
     """Get detailed information about any Kubernetes resource including metadata, status, conditions, and events. Use this for resources that don't have a specialized describe tool.
@@ -647,6 +675,12 @@ def describe_resource(namespace: str, name: str, kind: str, group: str = "", ver
 
     if not isinstance(obj, dict):
         return f"Unexpected response type: {type(obj).__name__}"
+
+    if obj.get("kind") == "Secret" or plural == "secrets":
+        # Never hand secret values to the model: they would sit in the prompt,
+        # the chat history and the provider's logs. Keys and sizes are enough
+        # to diagnose a missing or empty key.
+        obj = _redact_secret(obj)
 
     # Extract key sections for structured display
     metadata = obj.get("metadata", {})

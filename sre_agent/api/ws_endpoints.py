@@ -595,6 +595,8 @@ async def websocket_auto_agent(websocket: WebSocket):
                             client=None,
                             websocket=websocket,
                             session_id=session_id,
+                            user_token=user_token,
+                            current_user=ws_user,
                         )
 
                         from ..skill_selector import get_last_selection_result

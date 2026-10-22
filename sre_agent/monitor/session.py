@@ -44,7 +44,11 @@ class MonitorClient:
         approve a write with no name attached. Answering needs a known person
         on a client that opted into ask-first (trust 2+).
         """
-        return bool(self.user) and self.trust_level >= 2
+        from ..admin_tools import is_admin
+
+        # An approved fix runs as the service account, so answering one is an
+        # admin act, as it is on REST (/fix-history/{id}/approve).
+        return bool(self.user) and is_admin(self.user) and self.trust_level >= 2
 
     def resolve_action_response(self, action_id: str, approved: bool) -> bool:
         """Resolve an outstanding action approval request."""

@@ -536,7 +536,7 @@ async def get_plan_template(incident_type: str, _auth=Depends(verify_token)):
 
 
 @router.post("/plan-templates")
-async def create_plan_template(request: Request, _auth=Depends(verify_token)):
+async def create_plan_template(request: Request, _auth=Depends(require_admin)):
     """Create a new investigation plan template.
 
     Plans could be edited and deleted but never created — a new incident type
@@ -830,7 +830,7 @@ async def plan_template_versions(incident_type: str, _auth=Depends(verify_token)
 
 
 @router.put("/plan-templates/{incident_type}")
-async def update_plan_template(incident_type: str, request: Request, _auth=Depends(verify_token)):
+async def update_plan_template(incident_type: str, request: Request, _auth=Depends(require_admin)):
     """Update an existing plan template. Rewrites the YAML file and reloads."""
     import re
 
@@ -902,7 +902,7 @@ async def update_plan_template(incident_type: str, request: Request, _auth=Depen
 
 
 @router.delete("/plan-templates/{incident_type}")
-async def delete_plan_template(incident_type: str, _auth=Depends(verify_token)):
+async def delete_plan_template(incident_type: str, _auth=Depends(require_admin)):
     """Delete a runtime-created plan template. Bundled templates are protected."""
     import yaml
 
