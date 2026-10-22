@@ -135,6 +135,7 @@ Optional and inert until configured — see [docs/TEMPORAL.md](docs/TEMPORAL.md)
 
 - **Executions survive the pod** -- The in-process engine ran a plan as an asyncio task and wrote its record only at the end, so a rollout mid-plan lost the run entirely, with no record and no resume. Definitions became durable with migration 036; this makes executions durable too
 - **Approvals can actually wait** -- `approval_required` phases were marked `needs_escalation` and skipped, because an in-process engine cannot block for hours. On Temporal the workflow waits for a signal, so human-in-the-loop plans are possible rather than structurally impossible
+- **Approvals reach people** -- a run waiting on approval becomes an inbox item and is listed by `GET /workflow-runs/awaiting-approval`, answerable from the console's inbox or Runs tab. A durable run can also start from an inbox item (`POST /inbox/{id}/durable-run`), so the plan investigates that finding
 - **One interpreter workflow** -- `PulsePlanWorkflow` executes *any* plan definition by walking its phase graph, including plans authored in the UI at runtime. A new plan is data, not a deploy. Sequencing decisions are pure functions (`temporal/sequencing.py`), testable without a Temporal server and incapable of IO; all IO lives in activities, and phase execution still goes through `PlanRuntime._execute_phase` with the same contract check and retry-with-gap
 - **Configure with** `PULSE_AGENT_TEMPORAL_HOST` (plus `_NAMESPACE`, `_TASK_QUEUE`, `_APPROVAL_TIMEOUT`). The [operator](https://github.com/PulseSRE/pulse-operator) provisions a server with `spec.temporal.enabled` and injects the host
 
@@ -280,7 +281,16 @@ Key CR fields relevant to this agent (set on the `OpenShiftPulse` resource, not 
 
 - Non-root user (UID 1001) on RHEL UBI9 base image
 - `runAsNonRoot`, `readOnlyRootFilesystem`, drops all capabilities
-- NetworkPolicy restricts egress to DNS + HTTPS only
+- NetworkPolicy admits only the console and user-workload Prometheus to port 8080. Outbound traffic is not restricted (the agent calls the Kubernetes API, Thanos, Alertmanager and the AI backend)
+
+### Access boundary
+
+- Chat requests run with the caller's OpenShift token, including Prometheus queries, so a user sees only metrics they could query themselves. The monitor's scans use the agent's service account
+- Tools that change the agent itself (`create_skill`, `edit_skill`, `delete_skill`, `create_skill_from_template`, `propose_git_change`) are offered only to admins (`spec.agent.adminUsers` on the operator; empty means any signed-in user)
+- `describe_resource` replaces Secret values with their sizes before anything reaches the model
+- A view's action buttons run only the action stored in the view, with its stored input
+
+See [SECURITY.md](SECURITY.md) for the full model.
 - Liveness/readiness probes via `/healthz`
 
 ## UI (OpenShift Pulse)
