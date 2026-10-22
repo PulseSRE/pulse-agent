@@ -14,6 +14,8 @@
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 
+<p align="center"><a href="https://pulsesre.github.io/pulse-agent/#film"><img src="docs/media/video-thumb.jpg" alt="Watch the 30-second overview of Pulse" width="640"></a><br><sub>30-second overview, no sound</sub></p>
+
 AI-powered OpenShift SRE and Security Agent built on Claude. Pulse Agent connects to your cluster via the Kubernetes API and uses the configured Claude model for diagnostics, incident triage, security audits, and automated remediation -- all through natural language. It pairs with the [OpenShift Pulse](https://github.com/PulseSRE/pulse-ui) UI for rich incident management, or runs standalone as a CLI. Both are deployed together via the [pulse-operator](https://github.com/PulseSRE/pulse-operator) — see [Deploy to OpenShift](#deploy-to-openshift) below.
 
 > **Runs on OpenShift, not vanilla Kubernetes.** The deployed product uses
