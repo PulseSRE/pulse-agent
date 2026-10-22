@@ -243,3 +243,21 @@ figure { margin: 0; }
   .spec .what { padding: 12px 0 18px; }
 }
 p code, li code { font-family: var(--mono); font-size: 0.86em; background: var(--paper-2); padding: 1px 5px; border-radius: 2px; color: var(--ink); }
+
+/* Capability tour: areas of the product, each a short list of what it does. */
+.glance { display: flex; flex-wrap: wrap; gap: 8px 40px; margin: 30px 0 0; padding: 18px 0; border-top: 2px solid var(--ink); border-bottom: 1px solid var(--grid-major); }
+.glance div { display: flex; align-items: baseline; gap: 10px; }
+.glance strong { font-size: 40px; font-weight: 800; font-stretch: 66%; line-height: 1; font-variant-numeric: tabular-nums; }
+.glance span { font-size: 15px; color: var(--ink-2); }
+.areas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 44px 40px; margin-top: 48px; }
+.area { border-top: 2px solid var(--ink); padding-top: 16px; }
+.area h3 { font-size: 24px; font-weight: 800; font-stretch: 80%; letter-spacing: -0.015em; }
+.area > p { font-size: 16px; color: var(--ink-2); margin: 8px 0 0; }
+.area ul { list-style: none; margin: 14px 0 0; padding: 0; }
+.area li { font-size: 15.5px; line-height: 1.45; padding: 7px 0 7px 16px; border-top: 1px solid var(--grid); position: relative; color: var(--ink); }
+.area li::before { content: ""; position: absolute; left: 0; top: 15px; width: 6px; height: 2px; background: var(--ink-3); }
+.gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px 28px; margin-top: 40px; }
+.gallery .shot { box-shadow: 6px 6px 0 var(--grid-major); }
+.gallery figcaption { font-size: 14.5px; }
+@media (max-width: 1000px) { .areas, .gallery { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 640px) { .areas, .gallery { grid-template-columns: 1fr; } }
