@@ -74,6 +74,9 @@ def _downgrade_action(action_row: dict, finding: dict) -> str:
     )
     repo.update_action_verification(action_row["id"], RECURRED, evidence, _ts())
     repo.update_action_outcome(action_row["id"], "recurred")
+    from ..fix_learning import mark_recurred
+
+    mark_recurred(action_row["id"])
     return evidence
 
 

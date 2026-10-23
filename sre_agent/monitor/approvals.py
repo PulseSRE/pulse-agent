@@ -82,7 +82,9 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
     if plan is None:
         raise ApprovalError("No fix strategy applies to this finding any more", status_code=409)
     if plan.strategy == "require_human_review":
-        raise ApprovalError("This fix has no automated form — it needs to be done by hand", status_code=409)
+        learned = plan.params.get("track_record")
+        detail = f" ({learned})" if learned else ""
+        raise ApprovalError(f"This fix has no automated form — it needs to be done by hand{detail}", status_code=409)
 
     # Claim it before doing anything. Two operators clicking at once should
     # produce one fix and one conflict, not two fixes.
@@ -194,6 +196,8 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
             "resources": finding.get("resources", []),
             "verify_resources": execution.verify_resources or finding.get("resources", []),
             "target_scan": monitor._scan_counter + 1,
+            "strategy": plan.strategy,
+            "cause": plan.cause_category,
         }
     return report
 

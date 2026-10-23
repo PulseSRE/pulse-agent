@@ -762,3 +762,15 @@ CREATE TABLE IF NOT EXISTS runtime_artifact_versions (
 CREATE INDEX IF NOT EXISTS idx_runtime_artifact_versions_lookup
     ON runtime_artifact_versions(kind, name, version DESC);
 """
+
+
+FIX_OUTCOMES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS fix_outcomes (
+    action_id    TEXT PRIMARY KEY,
+    cause        TEXT NOT NULL,
+    strategy     TEXT NOT NULL,
+    verdict      TEXT NOT NULL,
+    recorded_at  BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fix_outcomes_cause ON fix_outcomes(cause, recorded_at);
+"""

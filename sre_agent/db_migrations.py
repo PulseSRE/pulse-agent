@@ -375,6 +375,13 @@ def _migrate_038_decaying_tool_counts(db: Database) -> None:
     db.execute("ALTER TABLE tool_predictions ALTER COLUMN miss_count TYPE DOUBLE PRECISION")
 
 
+def _migrate_039_fix_outcomes(db: Database) -> None:
+    """Ledger of verification verdicts per applied fix, for fix_learning."""
+    from .db_schema import FIX_OUTCOMES_SCHEMA
+
+    db.executescript(FIX_OUTCOMES_SCHEMA)
+
+
 def _migrate_025_rekey_inbox_correlation_keys(db: Database) -> None:
     """Re-key inbox items left orphaned when correlation keys gained a namespace.
 
@@ -599,4 +606,5 @@ MIGRATIONS = [
     (36, "runtime_artifacts", _migrate_036_runtime_artifacts),
     (37, "grid_12", _migrate_037_grid_12),
     (38, "decaying_tool_counts", _migrate_038_decaying_tool_counts),
+    (39, "fix_outcomes", _migrate_039_fix_outcomes),
 ]
