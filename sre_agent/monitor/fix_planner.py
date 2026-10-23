@@ -163,17 +163,30 @@ def plan_fix(investigation: dict, finding: dict) -> FixPlan | None:
     if not strategy:
         return None
 
-    return FixPlan(
-        strategy=strategy,
-        cause_category=cause_category,
-        confidence=confidence,
-        description=f"{strategy}: {recommended_fix[:200]}",
-        params={
-            "suspected_cause": suspected_cause,
-            "recommended_fix": recommended_fix,
-            "resources": finding.get("resources", []),
-        },
+    return _steer(
+        FixPlan(
+            strategy=strategy,
+            cause_category=cause_category,
+            confidence=confidence,
+            description=f"{strategy}: {recommended_fix[:200]}",
+            params={
+                "suspected_cause": suspected_cause,
+                "recommended_fix": recommended_fix,
+                "resources": finding.get("resources", []),
+            },
+        )
     )
+
+
+def _steer(plan: FixPlan) -> FixPlan:
+    """Let what has held for this cause before adjust the plan (fix_learning)."""
+    try:
+        from ..fix_learning import steer
+
+        return steer(plan)
+    except Exception:
+        logger.debug("Fix track-record steering failed", exc_info=True)
+        return plan
 
 
 # Categories where a default fix strategy is known without investigation.
@@ -243,23 +256,26 @@ def default_fix_plan(category: str, finding: dict) -> FixPlan | None:
     if category == "alerts":
         # Alerts are not one category of problem, so they cannot share one
         # strategy. Dispatch on the alert itself.
-        return alert_fix_plan(finding)
+        alert_plan = alert_fix_plan(finding)
+        return _steer(alert_plan) if alert_plan else None
 
     entry = _FAST_PATH_STRATEGIES.get(category)
     if not entry:
         return None
 
     strategy, description = entry
-    return FixPlan(
-        strategy=strategy,
-        cause_category=category,
-        confidence=0.6,  # lower than investigation-backed plans
-        description=description,
-        params={
-            "suspected_cause": f"Fast-path: {category} detected by scanner",
-            "recommended_fix": description,
-            "resources": finding.get("resources", []),
-        },
+    return _steer(
+        FixPlan(
+            strategy=strategy,
+            cause_category=category,
+            confidence=0.6,  # lower than investigation-backed plans
+            description=description,
+            params={
+                "suspected_cause": f"Fast-path: {category} detected by scanner",
+                "recommended_fix": description,
+                "resources": finding.get("resources", []),
+            },
+        )
     )
 
 

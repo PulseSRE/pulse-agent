@@ -178,6 +178,13 @@ async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -
             )
         )
 
+        # What this verdict says about the strategy, for the next plan with the
+        # same cause.
+        if payload.get("strategy") and payload.get("cause"):
+            from ..fix_learning import record_verdict
+
+            await asyncio.to_thread(record_verdict, action_id, str(payload["cause"]), str(payload["strategy"]), status)
+
         # Contract probes for interactive writes have no finding, no auto-fix
         # runbook to learn, and no held trajectory — record the verdict above
         # and stop. Learning from a chat-initiated write would file it under

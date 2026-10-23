@@ -1021,6 +1021,9 @@ class ClusterMonitor:
                 # resource when there is no better target.
                 "verify_resources": execution.verify_resources or verify_resources or resources,
                 "target_scan": self._scan_counter + 1,
+                # Which fix this was, so its verdict can teach fix_learning.
+                "strategy": targeted_plan.strategy if targeted_plan else "",
+                "cause": targeted_plan.cause_category if targeted_plan else "",
             }
 
             logger.info(
