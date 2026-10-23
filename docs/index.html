@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pulse Agent: an SRE agent that asks before it acts</title>
+<title>Pulse Agent: finds what broke, verifies it with you, helps you fix it</title>
 <meta name="description" content="Pulse Agent watches an OpenShift cluster, ties incidents to what changed, and changes nothing without your approval. Then it checks the fix held.">
-<meta property="og:title" content="Pulse Agent: an SRE agent that asks before it acts">
+<meta property="og:title" content="Pulse Agent: finds what broke, verifies it with you, helps you fix it">
 <meta property="og:description" content="Pulse Agent watches an OpenShift cluster, ties incidents to what changed, and changes nothing without your approval. Then it checks the fix held.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 68 68'%3E%3Crect width='68' height='68' rx='10' fill='%2313222b'/%3E%3Cpath d='M4 36 H20 L24 40 L30 16 L36 52 L40 36 H50 L54 31 L58 36 H64' fill='none' stroke='%23eef2ef' stroke-width='5' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
 
@@ -18,8 +18,8 @@
 </nav></header>
 <main>
 <section class="hero wrap" aria-labelledby="title">
-<h1 id="title" class="display"><span class="line">Finds what broke.</span> <span class="line">Asks before it fixes it.</span></h1>
-<p class="lede">Pulse Agent is an SRE and security agent for OpenShift, built on Claude. It watches your cluster, traces each incident to the change that caused it, and only acts on what you approve. Then it waits to see whether the fix held.</p>
+<h1 id="title" class="display"><span class="line">Finds what broke.</span> <span class="line">Verifies it with you.</span> <span class="line">Helps you fix it.</span></h1>
+<p class="lede">Pulse Agent is a team of AI agents for OpenShift, built on Claude. They watch your cluster, trace each incident to the change behind it, and build you a live view of the evidence so you can check their work. Then they work out the fix with you, and wait to see that it held.</p>
 <div class="actions">
 <a class="btn primary" href="https://github.com/PulseSRE/pulse-operator#install-via-olm">Install with the operator</a>
 <a class="btn" href="https://github.com/PulseSRE/pulse-agent">Read the source</a>
@@ -35,8 +35,8 @@
 <ol class="notes" id="trace-desc" aria-label="A sample incident, in order">
 <li class="s-changed" style="--at:.9s"><time>14:02</time><b>Something changed</b>Deployment checkout rolls out revision 15.</li>
 <li class="s-broken" style="--at:1.5s"><time>14:03</time><b>Pulse notices</b>1 of 3 pods ready. It opens one incident, not three alerts.</li>
-<li class="s-ask" style="--at:2.1s"><time>14:06</time><b>Pulse asks</b>&ldquo;Revision 15 is the likely cause. Roll back to 14?&rdquo;</li>
-<li class="s-ok" style="--at:2.7s"><time>14:07</time><b>You approve</b>The rollback runs, as you, within your permissions.</li>
+<li class="s-ask" style="--at:2.1s"><time>14:05</time><b>Pulse shows the proof</b>Ready pods fell after revision 15; its new pods are missing a setting.</li>
+<li class="s-ok" style="--at:2.7s"><time>14:07</time><b>You fix it together</b>&ldquo;Roll back to 14?&rdquo; You approve, and it runs as you.</li>
 <li class="s-ok" style="--at:3.3s"><time>14:37</time><b>Verified</b>Healthy for 30 minutes, so the fix is marked as held.</li>
 </ol>
 <p class="caption">A sample incident. Times and names are illustrative; the sequence is how Pulse works.</p>
@@ -49,7 +49,7 @@
 <source src="media/pulse-30s.mp4" type="video/mp4">
 <a href="media/pulse-30s.mp4">Watch the 30-second overview (MP4)</a>
 </video>
-<figcaption id="film-cap"><b>See it in 30 seconds.</b> One bad rollout sets off 38 alerts. Pulse turns them into one incident, finds the change behind it, asks before rolling back, and checks that the fix held. Sample data, no sound.</figcaption>
+<figcaption id="film-cap"><b>See it in 30 seconds.</b> One bad rollout sets off 38 alerts. Pulse turns them into one incident, shows you the proof, works out the fix with you, and checks that it held. Sample data.</figcaption>
 </figure>
 </section>
 
@@ -57,8 +57,41 @@
 <div class="wrap">
 <h2 id="why">Why it matters</h2>
 <p class="intro">Kubernetes rarely fails in one place. One bad rollout becomes dozens of alerts, the cause lives in whoever remembers the last change, and the fix is a command typed under pressure. Pulse changes each of those.</p>
-<div class="why"><div class="p"><b>An alert storm for one problem</b></div><div class="a"><p>One incident per cause. Pulse groups related findings and learns which ones are noise, so the page you get is the one that matters.</p></div><div class="p"><b>The cause lives in someone's head</b></div><div class="a"><p>Every incident starts from the change most likely behind it: a rollout, a config edit, an Argo CD sync, an upgrade. Pulse shows its evidence and the explanations it ruled out.</p></div><div class="p"><b>Fixes typed under pressure</b></div><div class="a"><p>A proposed fix names its target, its risk and how to undo it. You approve it; it runs as you, within your permissions, after a snapshot of what it changes.</p></div><div class="p"><b>Nobody knows if the fix held</b></div><div class="a"><p>Pulse watches afterwards and marks a fix as held only when the cluster stays healthy. If the problem comes back, the finding stays open and the fix is never turned into a skill.</p></div><div class="p"><b>Knowledge leaves with people</b></div><div class="a"><p>What a team learns stays: facts about your cluster, skills built from fixes that were verified, and past conversations you can search.</p></div><div class="p"><b>AI you can't audit</b></div><div class="a"><p>At the default trust level, every change is approved by a named person, and each can be reversed. Trust is capped on the server, protected namespaces are enforced in code, and the agent is scored in public on <a href="https://pulsesre.github.io/sre-bench/">SRE-Bench</a>.</p></div></div>
+<div class="why"><div class="p"><b>An alert storm for one problem</b></div><div class="a"><p>One incident per cause. Pulse groups related findings and learns which ones are noise, so the page you get is the one that matters.</p></div><div class="p"><b>A black box you have to trust</b></div><div class="a"><p>Every diagnosis comes with its proof: a live view of the metrics, logs and changes behind it, the evidence against it, and what was ruled out. You check it before anything changes.</p></div><div class="p"><b>Fixes typed under pressure</b></div><div class="a"><p>A proposed fix names its target, its risk and how to undo it. You approve it; it runs as you, within your permissions, after a snapshot of what it changes.</p></div><div class="p"><b>Nobody knows if the fix held</b></div><div class="a"><p>Pulse watches afterwards and marks a fix as held only when the cluster stays healthy. If the problem comes back, the finding stays open and the fix is never turned into a skill.</p></div><div class="p"><b>Knowledge leaves with people</b></div><div class="a"><p>What a team learns stays: facts about your cluster, skills built from fixes that were verified, and past conversations you can search.</p></div><div class="p"><b>AI you can't audit</b></div><div class="a"><p>At the default trust level, every change is approved by a named person, and each can be reversed. Trust is capped on the server, protected namespaces are enforced in code, and the agent is scored in public on <a href="https://pulsesre.github.io/sre-bench/">SRE-Bench</a>.</p></div></div>
 <div class="who"><div><h3>On-call engineers</h3><p>Fewer pages, a starting point instead of a blank terminal, and a fix that's one approval away.</p></div><div><h3>Platform and SRE leads</h3><p>The same response whoever is on call, runbooks that improve from real incidents, and metrics for cost and fix outcomes.</p></div><div><h3>Security and compliance</h3><p>Read-only by default, per-user permissions, a record of every change, and a security audit you can run any time.</p></div></div><p class="outcome">What to measure: time to recover, pages per week, and changes made without a person's approval. The last one is zero by default.</p>
+</div>
+</section>
+
+<section class="block" aria-labelledby="proof">
+<div class="wrap">
+<h2 id="proof">See the proof</h2>
+<p class="intro">An AI that says &ldquo;it's the rollout&rdquo; is only useful if you can check. Pulse's agents record the evidence behind every diagnosis, and when you pick an incident up, Pulse builds a view of that evidence from live cluster data.</p>
+<ol class="steps">
+<li><h3>The agents investigate</h3><p>With read-only tools. Every claim cites its signal: a metric, a log line, an event, a change. Evidence that argues against the diagnosis is recorded too, and lowers the confidence.</p></li>
+<li><h3>Pulse builds the proof</h3><p>Three to five widgets chosen for this incident: the metric trend with its PromQL query, the changes before it, the steps the agents took. Built from live data when you pick the incident up.</p></li>
+<li><h3>You verify it</h3><p>Agree, push back in the chat, or reject it. A diagnosis with no evidence is capped at low confidence, whatever the model claims.</p></li>
+</ol>
+<figure><div class="shot"><img src="https://pulsesre.github.io/pulse-ui/screenshots/evidence.png" width="1440" height="900" loading="lazy" alt="An investigation view for a failing checkout rollout: the steps the agents took, a chart of ready pods falling from 3 to 1 after revision 15, the crash log line saying payments.url is not set, and the confidence score."></div>
+<figcaption><b>The evidence view, with sample data.</b> Generated for the incident, so you can check the diagnosis before anything changes.</figcaption></figure>
+</div>
+</section>
+
+<section class="block" aria-labelledby="chat">
+<div class="wrap">
+<h2 id="chat">Ask for a view, get one</h2>
+<p class="intro">Say what you want to see, in your own words. Pulse works out what you mean, queries your cluster, and builds a dashboard for exactly that question, with the tools it used shown as it goes.</p>
+<div class="two">
+<figure><div class="shot"><img src="https://pulsesre.github.io/pulse-ui/screenshots/chat.png" width="1440" height="900" loading="lazy" alt="The Pulse chat: asked how checkout has been doing since the 14:02 rollout, Pulse shows the tools it ran and builds a view with ready pods over time, restarts, error rate and recent events."></div>
+<figcaption><b>The question.</b> &ldquo;Show me how checkout has been doing since the 14:02 rollout.&rdquo;</figcaption></figure>
+<figure><div class="shot"><img src="https://pulsesre.github.io/pulse-ui/screenshots/view.png" width="1440" height="900" loading="lazy" alt="The generated view, full screen: charts of ready pods with the rollout marked, container restarts and error rate, a table of checkout pods and the recent events."></div>
+<figcaption><b>The view it built.</b> Live data, saved for you to keep, edit or share.</figcaption></figure>
+</div>
+<dl class="ledger">
+<dt>It understands intent</dt><dd><p>&ldquo;Since the rollout&rdquo;, &ldquo;compared with last week&rdquo;, &ldquo;just the failing pods&rdquo;: you describe the question, not the queries.</p></dd>
+<dt>It shows its work</dt><dd><p>Each tool and PromQL query appears as Pulse runs it, so you can see where every number came from.</p></dd>
+<dt>It's a real dashboard</dt><dd><p>Live, saved and versioned. Ask for a change in plain English, like &ldquo;make that p99&rdquo;, or share it with your team.</p></dd>
+<dt>It runs as you</dt><dd><p>Chat requests use your own OpenShift token, so a view only shows what you are allowed to see.</p></dd>
+</dl>
 </div>
 </section>
 
