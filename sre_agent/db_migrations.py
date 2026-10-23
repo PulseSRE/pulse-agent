@@ -364,6 +364,17 @@ _NS_FROM_RESOURCES = """
 """
 
 
+def _migrate_038_decaying_tool_counts(db: Database) -> None:
+    """Let tool-prediction hit and miss counts decay with the score.
+
+    They were integers that only ever grew: a tool skipped on a hundred turns
+    a year ago stayed buried by those misses forever, and decaying an integer
+    count rounds it to zero within a day. Fractional counts decay smoothly.
+    """
+    db.execute("ALTER TABLE tool_predictions ALTER COLUMN hit_count TYPE DOUBLE PRECISION")
+    db.execute("ALTER TABLE tool_predictions ALTER COLUMN miss_count TYPE DOUBLE PRECISION")
+
+
 def _migrate_025_rekey_inbox_correlation_keys(db: Database) -> None:
     """Re-key inbox items left orphaned when correlation keys gained a namespace.
 
@@ -587,4 +598,5 @@ MIGRATIONS = [
     (35, "user_skills", _migrate_035_user_skills),
     (36, "runtime_artifacts", _migrate_036_runtime_artifacts),
     (37, "grid_12", _migrate_037_grid_12),
+    (38, "decaying_tool_counts", _migrate_038_decaying_tool_counts),
 ]

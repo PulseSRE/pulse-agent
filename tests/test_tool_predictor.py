@@ -188,8 +188,8 @@ class TestPredictTools:
                 {"tool_name": "describe_pod", "total_score": 20.0, "total_hits": 15},
             ],
             [
-                {"tool_b": "get_pod_logs", "frequency": 50},
-                {"tool_b": "get_events", "frequency": 30},
+                {"partner": "get_pod_logs", "frequency": 50},
+                {"partner": "get_events", "frequency": 30},
             ],
         ]
         mock_get_db.return_value = db

@@ -65,7 +65,9 @@ def test_actual_weight_recomputation_persists_and_reloads(database, monkeypatch)
             selected_skill="sre",
             threshold_used=0.5,
             conflicts_json="[]",
-            skill_overridden=None,
+            # Weights are relearned only once routing has been corrected a few
+            # times; uncorrected rows are the selector agreeing with itself.
+            skill_overridden="security" if index < 3 else None,
             tools_requested_missing=[],
             selection_ms=2,
             channel_weights_json="{}",

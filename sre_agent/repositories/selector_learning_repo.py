@@ -26,7 +26,8 @@ class SelectorLearningRepository(BaseRepository):
             "SELECT channel_scores, selected_skill, skill_overridden, "
             "tools_requested_missing "
             "FROM skill_selection_log "
-            "WHERE timestamp > NOW() - INTERVAL '%s days' "
+            "WHERE session_id != '__weight_snapshot__' "
+            "AND timestamp > NOW() - INTERVAL '%s days' "
             "AND channel_scores IS NOT NULL",
             (days,),
         )
@@ -90,7 +91,8 @@ class SelectorLearningRepository(BaseRepository):
                 "COUNT(*) as total, "
                 "SUM(CASE WHEN skill_overridden IS NOT NULL THEN 1 ELSE 0 END) as overrides "
                 "FROM skill_selection_log "
-                "WHERE timestamp > NOW() - INTERVAL '%s days' "
+                "WHERE session_id != '__weight_snapshot__' "
+                "AND timestamp > NOW() - INTERVAL '%s days' "
                 "GROUP BY selected_skill "
                 "HAVING COUNT(*) >= %s",
                 (days, min_invocations),

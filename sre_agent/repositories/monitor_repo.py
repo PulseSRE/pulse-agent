@@ -731,7 +731,8 @@ class MonitorRepository(BaseRepository):
             "COUNT(DISTINCT selected_skill) as skills_used, "
             "SUM(CASE WHEN skill_overridden IS NOT NULL THEN 1 ELSE 0 END) as overrides "
             "FROM skill_selection_log "
-            "WHERE timestamp > NOW() - INTERVAL '%s days'",
+            "WHERE session_id != '__weight_snapshot__' "
+            "AND timestamp > NOW() - INTERVAL '%s days'",
             (days,),
         )
 

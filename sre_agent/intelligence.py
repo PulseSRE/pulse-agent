@@ -470,12 +470,18 @@ def _compute_fix_outcomes(days: int) -> str:
 
 
 def _compute_selector_weights() -> str:
-    """Report current ORCA selector channel weights from batch learning."""
-    try:
-        from .selector_learning import recompute_channel_weights
+    """Report the channel weights the live selector is using.
 
-        weights = recompute_channel_weights(days=7)
-        if not weights:
+    Reads them; does not recompute. Recomputing here wrote a weight snapshot
+    on every prompt build and reported weights the selector was not using
+    until the next daily flywheel applied them.
+    """
+    try:
+        from .skill_loader import _get_selector
+        from .skill_selector import DEFAULT_WEIGHTS
+
+        weights = dict(_get_selector()._weights)
+        if not weights or weights == DEFAULT_WEIGHTS:
             return ""
         lines = ["### Selector Channel Weights"]
         for ch, w in sorted(weights.items(), key=lambda x: -x[1]):

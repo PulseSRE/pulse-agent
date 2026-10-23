@@ -597,10 +597,17 @@ async def _run_agent_ws_inner(
 
     # Record turn-level data (tools + token usage + routing decision)
     try:
+        from ..request_context import current_turn
         from ..skill_loader import get_last_routing_decision
         from ..tool_usage import record_turn
 
-        offered = [td.get("name", "") for td in tool_defs if isinstance(td, dict)]
+        # What the model was really offered (after adaptive selection), not the
+        # skill's full tool set: tools it never saw are not tools it declined.
+        turn = current_turn()
+        if turn is not None and turn.offered_tools is not None:
+            offered = list(turn.offered_tools)
+        else:
+            offered = [td.get("name", "") for td in tool_defs if isinstance(td, dict)]
 
         record_turn(
             session_id=ws_id,

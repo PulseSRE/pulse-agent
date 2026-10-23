@@ -361,8 +361,8 @@ CREATE TABLE IF NOT EXISTS tool_predictions (
     token       TEXT NOT NULL,
     tool_name   TEXT NOT NULL,
     score       FLOAT NOT NULL DEFAULT 1.0,
-    hit_count   INT NOT NULL DEFAULT 1,
-    miss_count  INT NOT NULL DEFAULT 0,
+    hit_count   DOUBLE PRECISION NOT NULL DEFAULT 1,
+    miss_count  DOUBLE PRECISION NOT NULL DEFAULT 0,
     last_seen   TIMESTAMPTZ DEFAULT NOW(),
     PRIMARY KEY (token, tool_name)
 );
