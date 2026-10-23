@@ -173,7 +173,7 @@ def compare_to_baseline(namespace: str, workload: str, metric: str, observed: fl
 
 
 @beta_tool
-def search_conversations(query: str, owner: str = "", limit: int = 5) -> str:
+def search_conversations(query: str, limit: int = 5) -> str:
     """Search past conversations for something discussed before.
 
     Use when the user refers to earlier work ("the thing we found last week") or
@@ -182,14 +182,21 @@ def search_conversations(query: str, owner: str = "", limit: int = 5) -> str:
 
     Args:
         query: Phrase to look for.
-        owner: Session owner. Leave empty to use the current user.
         limit: Maximum results.
     """
     from ..chat_history import search_messages
+    from ..request_context import get_current_user
 
     if len(query.strip()) < 3:
         return "Error: query must be at least 3 characters."
 
+    # The owner comes from the authenticated request, never from the model. The
+    # parameter this used to take was passed straight to SQL: left empty (as the
+    # docstring said to) it matched nothing, and set to another user's name it
+    # returned that user's conversations.
+    owner = get_current_user()
+    if owner is None:
+        return "Past conversations are only searchable for a signed-in user."
     rows = search_messages(owner, query, limit)
     if not rows:
         return f"Nothing in past conversations matched '{query}'."

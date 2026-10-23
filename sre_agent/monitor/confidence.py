@@ -161,16 +161,23 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
     return None
 
 
+_INJECTION_PATTERNS = [
+    r"ignore\s+(all\s+)?previous\s+instructions",
+    r"you\s+are\s+now",
+    r"system:\s*",
+    r"assistant:\s*",
+    r"<\/?system>",
+]
+
+
+def sanitize_block(text: str) -> str:
+    """Strip injection phrases from stored text bound for a prompt, without a length cap."""
+    result = text
+    for pattern in _INJECTION_PATTERNS:
+        result = re.sub(pattern, "[REDACTED]", result, flags=re.IGNORECASE)
+    return result
+
+
 def _sanitize_for_prompt(text: str) -> str:
     """Strip potential prompt injection from cluster-sourced text."""
-    patterns = [
-        r"ignore\s+(all\s+)?previous\s+instructions",
-        r"you\s+are\s+now",
-        r"system:\s*",
-        r"assistant:\s*",
-        r"<\/?system>",
-    ]
-    result = text
-    for pattern in patterns:
-        result = re.sub(pattern, "[REDACTED]", result, flags=re.IGNORECASE)
-    return result[:500]  # Cap length
+    return sanitize_block(text)[:500]  # Cap length

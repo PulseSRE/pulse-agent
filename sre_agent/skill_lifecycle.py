@@ -105,16 +105,28 @@ def refine_skill(skill, candidate) -> str | None:
 
     try:
         refined = f"---\n{yaml.dump(meta, default_flow_style=False, sort_keys=False)}---{body}"
-        skill_file.write_text(refined, encoding="utf-8")
-        # A refinement is the flywheel's output. Persisting the candidate that
-        # produced it (migration 033) but not the skill itself meant the
-        # learning was erased by the next rollout.
+        # A refinement is the flywheel's output. Persist it first: the file may
+        # live in a read-only image layer, and a failed write must not lose it.
         from .skill_store import persist_skill
 
         persist_skill(skill.name, refined, source="refined")
     except Exception:
-        logger.warning("Failed to write refined skill '%s'", skill.name, exc_info=True)
+        logger.warning("Failed to persist refined skill '%s'", skill.name, exc_info=True)
         return None
+    try:
+        skill_file.write_text(refined, encoding="utf-8")
+    except OSError:
+        # Read-only skill directory: write the refinement to the user skills
+        # directory instead, which shadows the original at load.
+        try:
+            from .skill_loader import _get_user_skills_dir
+
+            target = _get_user_skills_dir() / skill.name
+            target.mkdir(parents=True, exist_ok=True)
+            skill_file = target / "skill.md"
+            skill_file.write_text(refined, encoding="utf-8")
+        except OSError:
+            logger.warning("Refined skill '%s' persisted but not written to disk", skill.name, exc_info=True)
 
     try:
         from .skill_loader import reload_skills
@@ -252,6 +264,29 @@ def note_recurrence(category: str, detail: str) -> None:
         logger.debug("Failed to create recurrence inbox item for '%s'", skill.name, exc_info=True)
 
 
+def learned_skill_name(category: str) -> str:
+    """A name for the skill learned about one finding category.
+
+    Derived from the category, not the finding title: titles carry pod names
+    and hash suffixes, and a one-word title such as "security" produced a name
+    that overrode a built-in skill (user skills shadow built-ins at load).
+    The "learned-" prefix keeps learned skills out of the built-in namespace,
+    and a taken name gets a numeric suffix rather than being overwritten.
+    """
+    import re
+
+    from .skill_loader import list_skills
+
+    slug = re.sub(r"[^a-z0-9]+", "-", (category or "general").lower()).strip("-")[:40] or "general"
+    base = f"learned-{slug}"
+    taken = {s.name for s in list_skills()}
+    name, n = base, 2
+    while name in taken:
+        name = f"{base}-{n}"
+        n += 1
+    return name
+
+
 def _scaffold_new(candidate) -> str | None:
     """First verified trajectory for this category: create the skill.
 
@@ -267,6 +302,7 @@ def _scaffold_new(candidate) -> str | None:
             scaffold_skill_from_resolution,
         )
 
+        skill_name = learned_skill_name(candidate.category or "")
         skill_content = scaffold_skill_from_resolution(
             query=candidate.title,
             tools_called=candidate.tools_called,
@@ -274,10 +310,18 @@ def _scaffold_new(candidate) -> str | None:
             root_cause=candidate.root_cause,
             confidence=candidate.confidence,
             incident_type=candidate.category or "",
+            skill_name=skill_name,
         )
-        tokens = (candidate.title or "unknown").lower().split()[:3]
-        skill_name = "-".join(t for t in tokens if t.isalnum())[:40] or "auto-skill"
         path = save_scaffolded_skill(skill_content, skill_name)
+        if path:
+            # Load it now, so the next verified case for this category finds it
+            # and refines it instead of scaffolding a second copy.
+            try:
+                from .skill_loader import reload_skills
+
+                reload_skills()
+            except Exception:
+                logger.warning("Reload after scaffolding '%s' failed", skill_name, exc_info=True)
         scaffold_plan_template(
             skill_name=skill_name,
             plan_phases=["triage", "diagnose", "remediate", "verify"],

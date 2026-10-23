@@ -174,6 +174,19 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
         finding=finding,
     )
     if monitor is not None:
+        # An approved fix is a fix. Without this the finding clearing on the next
+        # scan was reported as "self-healed", and the learning candidate for it
+        # was discarded as "the diagnosis was not what fixed it" — so at the
+        # default trust level, where every fix is approved by a person, nothing
+        # verified was ever learned.
+        if finding_id:
+            monitor._recent_fix_ids.add(finding_id)
+        try:
+            from ..trajectory import candidate_key, get_learner
+
+            get_learner().restart_clock(candidate_key(category, finding.get("resources", [])))
+        except Exception:
+            logger.debug("Could not restart learning clock for %s", action_id, exc_info=True)
         monitor._pending_verifications[action_id] = {
             "action_id": action_id,
             "finding_id": finding_id,

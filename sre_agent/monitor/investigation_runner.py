@@ -336,15 +336,18 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
                 except Exception as e:
                     logger.warning("Failed to store investigation: %s", e)
 
-            from ..plan_templates import match_template as _match_tmpl
-
             # Hold the trajectory rather than learning from it now. Scaffolding used
             # to fire here, on the diagnosis alone, before any fix had been applied
             # — so a confidently wrong root cause became a skill that then routed
             # future incidents. The verification pipeline promotes this candidate
             # only once the finding is confirmed resolved.
-            _has_template = _match_tmpl(category=finding.get("category", "")) is not None
-            if not _has_template and result.get("confidence", 0) >= 0.75:
+            #
+            # This used to be skipped for any category with a built-in plan
+            # template. Every category auto-fix can handle has one, so the path
+            # that verifies fixes most often could never learn anything. A
+            # template says how to run the plan; the candidate is what this
+            # cluster taught about the cause, which a template does not know.
+            if result.get("confidence", 0) >= 0.75:
                 try:
                     from ..trajectory import LearningCandidate, candidate_key, get_learner
 
@@ -357,7 +360,7 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
                             summary=result.get("summary", ""),
                             confidence=float(result.get("confidence", 0) or 0),
                             evidence=list(result.get("evidence_detail", []) or []),
-                            tools_called=["proactive_investigation"],
+                            tools_called=list(result.get("tools_called") or []),
                         )
                     )
                 except Exception:

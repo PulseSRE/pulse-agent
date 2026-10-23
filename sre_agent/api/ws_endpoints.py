@@ -166,6 +166,9 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         ws_user = "anonymous"
 
     structlog.contextvars.bind_contextvars(user=ws_user)
+    from ..request_context import set_current_user
+
+    set_current_user(ws_user)
 
     # Persist chat session
     try:
@@ -395,6 +398,9 @@ async def websocket_auto_agent(websocket: WebSocket):
         ws_user = "anonymous"
 
     structlog.contextvars.bind_contextvars(user=ws_user)
+    from ..request_context import set_current_user
+
+    set_current_user(ws_user)
 
     # Persist chat session
     try:

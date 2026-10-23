@@ -6,6 +6,7 @@ import functools
 import json
 import logging
 from datetime import UTC, datetime
+from typing import ClassVar
 
 from .. import db_schema
 from ..db import Database
@@ -344,6 +345,21 @@ class IncidentStore:
         return self.db.fetchall(
             f"SELECT * FROM patterns WHERE ({conditions}) ORDER BY frequency DESC LIMIT ?", tuple(params + [limit])
         )
+
+    _FORGETTABLE: ClassVar[frozenset[str]] = frozenset({"runbooks", "patterns", "incidents"})
+
+    def forget(self, table: str, row_id: int) -> bool:
+        """Delete one learned row an operator has judged wrong.
+
+        Memory that can only accumulate cannot be corrected: a runbook learned
+        from a bad turn keeps being injected into every matching prompt until
+        it ages out, which for runbooks is never.
+        """
+        if table not in self._FORGETTABLE:
+            raise ValueError(f"not a memory table: {table}")
+        cur = self.db.execute(f"DELETE FROM {table} WHERE id = ?", (int(row_id),))
+        self.db.commit()
+        return bool(getattr(cur, "rowcount", 0))
 
     @db_safe(default=None)
     def record_metric(self, metric_name: str, value: float, window: str = "session") -> None:

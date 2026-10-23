@@ -309,6 +309,15 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
         agent_mode="pipeline:investigate",
     )
 
+    # The tools the investigation actually used. A skill learned from this
+    # trajectory records them as its procedure; the placeholder it used to get
+    # ("proactive_investigation") taught the skill nothing about how to diagnose.
+    tools_called: list[str] = []
+
+    def _note_tool(name: str) -> None:
+        if name and name not in tools_called:
+            tools_called.append(name)
+
     async with borrow_async_client(client) as c:
         response = await run_agent_streaming(
             client=c,
@@ -317,6 +326,7 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
             tool_defs=readonly_defs,
             tool_map=readonly_map,
             write_tools=set(),
+            on_tool_use=_note_tool,
             on_tool_result=on_tool_result,
         )
 
@@ -368,6 +378,7 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
         "evidence_detail": [e.model_dump() for e in parsed_evidence],
         "alternatives_considered": [str(a) for a in alternatives[:10]],
         "view_plan": view_plan,
+        "tools_called": tools_called,
     }
 
 
