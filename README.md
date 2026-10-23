@@ -16,6 +16,14 @@
 
 <p align="center"><a href="https://pulsesre.github.io/pulse-agent/#film"><img src="docs/media/video-thumb.jpg" alt="Watch the 30-second overview of Pulse" width="640"></a><br><sub>30-second overview, no sound</sub></p>
 
+<p align="center"><b>Finds what broke. Verifies it with you. Helps you fix it.</b></p>
+
+A team of AI agents for OpenShift, built on Claude. They watch your cluster, trace each incident to the change behind it, and build you a live view of the evidence so you can check their work before anything changes. Ask in plain English and Pulse builds the dashboard you asked for.
+
+| See the proof | Ask for a view, get one |
+|---|---|
+| ![The evidence view for a failing rollout](https://pulsesre.github.io/pulse-ui/screenshots/evidence.png) | ![The chat building a view from a question](https://pulsesre.github.io/pulse-ui/screenshots/chat.png) |
+
 AI-powered OpenShift SRE and Security Agent built on Claude. Pulse Agent connects to your cluster via the Kubernetes API and uses the configured Claude model for diagnostics, incident triage, security audits, and automated remediation -- all through natural language. It pairs with the [OpenShift Pulse](https://github.com/PulseSRE/pulse-ui) UI for rich incident management, or runs standalone as a CLI. Both are deployed together via the [pulse-operator](https://github.com/PulseSRE/pulse-operator) — see [Deploy to OpenShift](#deploy-to-openshift) below.
 
 > **Runs on OpenShift, not vanilla Kubernetes.** The deployed product uses
