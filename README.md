@@ -54,7 +54,7 @@ The selector supports six scoring channels (availability depends on data/configu
 | **Taxonomy** | Alert name prefixes and scanner category matching | 0.10 |
 | **Temporal** | Recent-change keywords, cluster changes, and time-of-day signals | 0.10 |
 
-Weights are not static -- they are **recomputed from outcomes** via `selector_learning.py`. The system analyzes `skill_selection_log` entries (correct selections vs. overrides) and adjusts channel weights to optimize routing accuracy. Learned weights persist to the database.
+Weights are not static -- they are **recomputed daily from outcomes** via `selector_learning.py`. When the agent loads a different skill mid-turn with `skill_load`, that turn is logged as an override, and the skill it reached for counts as the right answer. Channels whose top pick matched the right skill gain weight; the rest lose it. Weights change only after at least 3 corrections in the window, because uncorrected selections are the selector agreeing with itself. Learned weights persist to the database.
 
 ### Phased Plan Execution
 
