@@ -23,6 +23,7 @@ def scaffold_skill_from_resolution(
     confidence: float,
     plan_phases: list[str] | None = None,
     incident_type: str = "",
+    skill_name: str | None = None,
 ) -> str:
     """Auto-draft a skill.md from a novel incident resolution.
 
@@ -56,7 +57,10 @@ def scaffold_skill_from_resolution(
     if not categories:
         categories = {"diagnostics"}
 
-    skill_name = "-".join(keywords[:3]).replace(" ", "-")
+    # The caller's name wins: the frontmatter name and the directory the skill is
+    # saved under must be the same string, or approving the skill by the name the
+    # UI shows can miss its file.
+    skill_name = skill_name or "-".join(keywords[:3]).replace(" ", "-")
 
     # Top tools from the resolution become requires_tools (max 8)
     # These bypass TF-IDF prediction so the skill always has its core tools
@@ -259,30 +263,32 @@ def save_scaffolded_skill(skill_content: str, skill_name: str) -> str | None:
         logger.warning("Scaffolded skill '%s' failed validation: %s", skill_name, validation_errors)
         return None
 
+    # Durable storage first. It is what survives a rollout, and it does not
+    # depend on the container filesystem: this used to write into the installed
+    # package directory, which OpenShift's arbitrary UID cannot write to, so the
+    # write failed, was logged at debug, and the persist after it never ran.
+    from .skill_store import persist_skill
+
+    stored = False
     try:
-        from pathlib import Path
+        stored = bool(persist_skill(skill_name, skill_content, source="scaffolded"))
+    except Exception:
+        logger.warning("Failed to persist scaffolded skill %s", skill_name, exc_info=True)
 
-        skills_dir = Path(__file__).parent / "skills" / skill_name
+    try:
+        from .skill_loader import _get_user_skills_dir
 
-        # Verify resolved path stays within skills directory
-        base = (Path(__file__).parent / "skills").resolve()
-        if not str(skills_dir.resolve()).startswith(str(base)):
+        base = _get_user_skills_dir().resolve()
+        skills_dir = (base / skill_name).resolve()
+        if not str(skills_dir).startswith(str(base) + "/"):
             logger.warning("Path traversal blocked for skill: %s", skill_name)
             return None
-
         skills_dir.mkdir(parents=True, exist_ok=True)
-
         skill_path = skills_dir / "skill.md"
         skill_path.write_text(skill_content, encoding="utf-8")
-        # Scaffolded skills land in the installed package directory, which is
-        # the container image layer — gone on the next rollout without this.
-        from .skill_store import persist_skill
-
-        persist_skill(skill_name, skill_content, source="scaffolded")
-
         logger.info("Scaffolded new skill: %s", skill_path)
         return str(skill_path)
-
     except Exception:
-        logger.debug("Failed to save scaffolded skill", exc_info=True)
-        return None
+        # Loud, not debug: a learned skill that cannot be written is a lesson lost.
+        logger.warning("Failed to write scaffolded skill %s to the skills directory", skill_name, exc_info=True)
+        return f"db:{skill_name}" if stored else None

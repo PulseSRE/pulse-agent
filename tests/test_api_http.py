@@ -267,7 +267,12 @@ class TestMemoryEndpoints:
         assert "patterns" in data
 
     def test_memory_import(self, api_client, api_headers):
-        r = api_client.post("/memory/import", headers=api_headers, json={"runbooks": [], "patterns": []})
+        # Imported runbooks are injected into later prompts: an admin action.
+        r = api_client.post(
+            "/memory/import",
+            headers={**api_headers, "X-Forwarded-User": "admin"},
+            json={"runbooks": [], "patterns": []},
+        )
         assert r.status_code == 200
 
     def test_memory_runbooks(self, api_client, api_headers):

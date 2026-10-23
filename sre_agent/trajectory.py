@@ -278,6 +278,33 @@ class TrajectoryLearner:
             logger.warning("Failed to demote recurred trajectory %s", key, exc_info=True)
             return False
 
+    def restart_clock(self, key: str) -> bool:
+        """A fix for this candidate was just applied: time its verdict from now.
+
+        The TTL used to run from when the investigation recorded the candidate.
+        A proposal that waited more than two hours for a person to approve it
+        lost its candidate before the fix it proposed was even applied.
+        """
+        now = time.time()
+        found = False
+        with self._lock:
+            cand = self._candidates.get(key)
+            if cand is not None:
+                cand.created_at = now
+                found = True
+        db = self.db
+        if db is not None:
+            try:
+                cur = db.execute(
+                    "UPDATE learning_candidates SET created_at = ? WHERE candidate_key = ? AND status = 'pending'",
+                    (int(now * 1000), key),
+                )
+                db.commit()
+                found = found or getattr(cur, "rowcount", 0) > 0
+            except Exception:
+                logger.debug("Failed to restart clock for candidate %s", key, exc_info=True)
+        return found
+
     def discard(self, key: str, reason: str) -> None:
         """The fix did not resolve the finding. Drop the candidate unlearned."""
         with self._lock:

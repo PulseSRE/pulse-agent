@@ -1220,6 +1220,7 @@ class ClusterMonitor:
         # Deduplicate
         current_keys = set()
         new_findings = []
+        suppressed_new: list[dict] = []
         unique_findings: list[dict] = []
         for f in all_findings:
             key = _finding_key(f)
@@ -1264,6 +1265,10 @@ class ClusterMonitor:
                     self._noise_suppressed += 1
                     self._noise_suppressed_last_scan += 1
                     self._last_findings[key] = f
+                    # Hidden from the feed, not from the recurrence check: a
+                    # verified fix coming undone must still retract what was
+                    # learned from it, however often the condition has flapped.
+                    suppressed_new.append(f)
                     continue
 
                 new_findings.append(f)
@@ -1302,6 +1307,11 @@ class ClusterMonitor:
             or owner not in scheduled
             or owner in globally_disabled
         }
+        # Only a finding that went away on its own is evidence of flapping. One
+        # Pulse fixed is the opposite: counting it as transient taught the noise
+        # filter to hide exactly the conditions Pulse keeps fixing, so the third
+        # recurrence of a fix that does not hold was suppressed instead of shown.
+        self_healed_keys: set[str] = set()
         for key in stale_keys:
             self._finding_scanner.pop(key, None)
             resolved_finding = self._last_findings.pop(key)
@@ -1310,6 +1320,8 @@ class ClusterMonitor:
             if finding_id in self._recent_fix_ids:
                 resolved_by = "auto-fix"
                 self._recent_fix_ids.discard(finding_id)
+            else:
+                self_healed_keys.add(key)
             await self._broadcast_raw(
                 {
                     "type": "resolution",
@@ -1340,12 +1352,26 @@ class ClusterMonitor:
                     str(resolved_finding.get("category", "")),
                     resolved_finding.get("resources", []),
                 )
-                if resolved_by == "auto-fix":
-                    promoted = learner.promote(ckey)
-                    if promoted is not None:
-                        from .verification_pipeline import _scaffold_from_verified
+                verifying = any(p.get("finding_id") == finding_id for p in self._pending_verifications.values())
+                if resolved_by == "auto-fix" and verifying:
+                    # The verification pipeline decides, with its health gate: a
+                    # finding can vanish because the scanner went blind or the
+                    # workload was deleted, which is not a fix holding.
+                    pass
+                elif resolved_by == "auto-fix":
+                    # A fix with no queued verification (dispatched durably).
+                    # Promote only if the resources are affirmatively healthy.
+                    from . import health_gate
 
-                        await asyncio.to_thread(_scaffold_from_verified, promoted)
+                    gate, _evidence = await asyncio.to_thread(
+                        health_gate.check_resources, resolved_finding.get("resources", [])
+                    )
+                    if gate == health_gate.PASS:
+                        promoted = learner.promote(ckey)
+                        if promoted is not None:
+                            from .verification_pipeline import _scaffold_from_verified
+
+                            await asyncio.to_thread(_scaffold_from_verified, promoted)
                 else:
                     learner.discard(ckey, "finding self-healed — the diagnosis was not what fixed it")
             except Exception:
@@ -1400,13 +1426,14 @@ class ClusterMonitor:
         try:
             from .recurrence import process_recurrences
 
-            await process_recurrences(self, new_findings)
+            await process_recurrences(self, new_findings + suppressed_new)
         except Exception:
             logger.exception("Recurrence processing failed")
 
         # Track transient findings
         for key in stale_keys:
-            self._transient_counts[key] = self._transient_counts.get(key, 0) + 1
+            if key in self_healed_keys:
+                self._transient_counts[key] = self._transient_counts.get(key, 0) + 1
             self._investigation_fingerprints.pop(key, None)
 
         if len(self._recent_fix_ids) > 500:

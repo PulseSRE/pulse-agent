@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from .auth import verify_token
+from .auth import require_admin, verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -29,8 +29,12 @@ async def export_memory(_auth=Depends(verify_token)):
 
 
 @router.post("/memory/import")
-async def import_memory(body: dict, _auth=Depends(verify_token)):
-    """Import runbooks and patterns from another pod's export."""
+async def import_memory(body: dict, _admin: str = Depends(require_admin)):
+    """Import runbooks and patterns from another pod's export.
+
+    Imported runbooks are injected into later prompts, so this rewrites what
+    the agent does — an administrator action, not a shared-token one.
+    """
     from ..memory import get_manager
 
     manager = get_manager()
@@ -189,7 +193,7 @@ async def list_environment_facts(scope: str = Query(default=""), _auth=Depends(v
 
 
 @router.post("/memory/environment")
-async def record_environment_fact(payload: dict, _auth=Depends(verify_token)):
+async def record_environment_fact(payload: dict, admin: str = Depends(require_admin)):
     """Record or correct a fact. Operators can fix what the agent believes."""
     from ..memory.environment import CLUSTER_SCOPE, get_cluster_memory
 
@@ -202,14 +206,16 @@ async def record_environment_fact(payload: dict, _auth=Depends(verify_token)):
         key,
         value,
         scope=str(payload.get("scope") or CLUSTER_SCOPE),
-        source=str(payload.get("source") or "operator"),
+        # Attribute the fact to the person who stated it, not to a label the
+        # caller chose.
+        source=f"operator:{admin}",
         confidence=float(payload.get("confidence") or 0.9),
     )
     return {"ok": ok}
 
 
 @router.delete("/memory/environment/{scope}/{key}")
-async def forget_environment_fact(scope: str, key: str, _auth=Depends(verify_token)):
+async def forget_environment_fact(scope: str, key: str, _admin: str = Depends(require_admin)):
     """Drop a fact that has stopped being true."""
     from ..memory.environment import get_cluster_memory
 
@@ -257,3 +263,23 @@ async def learning_gate_stats(_auth=Depends(verify_token)):
     from ..trajectory import get_learner
 
     return get_learner().stats()
+
+
+_FORGET_KINDS = {"runbooks": "runbooks", "patterns": "patterns", "incidents": "incidents"}
+
+
+@router.delete("/memory/{kind}/{row_id}")
+async def forget_memory_row(kind: str, row_id: int, _admin: str = Depends(require_admin)):
+    """Forget one learned runbook, pattern or incident that taught the wrong lesson."""
+    from ..memory import get_manager
+
+    table = _FORGET_KINDS.get(kind)
+    if table is None:
+        raise HTTPException(status_code=404, detail=f"Unknown memory kind: {kind}")
+    manager = get_manager()
+    if not manager:
+        raise HTTPException(status_code=503, detail="Memory system not enabled")
+    if not manager.store.forget(table, row_id):
+        raise HTTPException(status_code=404, detail=f"No {kind[:-1]} with id {row_id}")
+    logger.info("Forgot memory %s id=%s", table, row_id)
+    return {"ok": True}
