@@ -16,18 +16,33 @@ class TestRecomputeWeights:
     def test_returns_weights_with_sufficient_data(self, mock_get_db):
         db = MagicMock()
         mock_get_db.return_value = db
-        db.fetchall.return_value = [
-            {
-                "channel_scores": '{"keyword": {"sre": 0.9}, "component": {"sre": 0.5}}',
-                "selected_skill": "sre",
-                "skill_overridden": None,
-                "tools_requested_missing": None,
-            }
-        ] * 15  # 15 rows > 10 minimum
+        agree = {
+            "channel_scores": '{"keyword": {"sre": 0.9}, "component": {"sre": 0.5}}',
+            "selected_skill": "sre",
+            "skill_overridden": None,
+            "tools_requested_missing": None,
+        }
+        corrected = {**agree, "skill_overridden": "security"}
+        db.fetchall.return_value = [agree] * 12 + [corrected] * 3
 
         weights = recompute_channel_weights(days=7)
         assert len(weights) > 0
         assert abs(sum(weights.values()) - 1.0) < 0.01
+
+    @patch("sre_agent.db.get_database")
+    def test_no_corrections_means_no_change(self, mock_get_db):
+        """Without overrides every row is the selector agreeing with itself."""
+        db = MagicMock()
+        mock_get_db.return_value = db
+        db.fetchall.return_value = [
+            {
+                "channel_scores": '{"keyword": {"sre": 0.9}}',
+                "selected_skill": "sre",
+                "skill_overridden": None,
+                "tools_requested_missing": None,
+            }
+        ] * 50
+        assert recompute_channel_weights(days=7) == {}
 
     @patch("sre_agent.db.get_database")
     def test_returns_empty_with_insufficient_data(self, mock_get_db):

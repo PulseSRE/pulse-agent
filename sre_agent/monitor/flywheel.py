@@ -37,6 +37,16 @@ async def run_daily_tasks() -> dict:
         logger.debug("Trajectory expiry failed", exc_info=True)
 
     try:
+        from ..tool_predictor import decay_scores
+
+        # Defined and documented as daily, and never called: prediction
+        # scores never faded and stale pairings were never pruned.
+        await asyncio.to_thread(decay_scores)
+        summary["tool_predictions"] = "decayed"
+    except Exception:
+        logger.debug("Tool prediction decay failed", exc_info=True)
+
+    try:
         from ..selector_learning import recompute_channel_weights
 
         new_weights = await asyncio.to_thread(recompute_channel_weights, 7)

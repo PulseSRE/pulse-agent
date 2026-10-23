@@ -823,6 +823,16 @@ class SkillSelector:
         return base
 
 
+def _active_weights() -> dict[str, float]:
+    """The weights the live selector is using — what a logged selection was scored with."""
+    try:
+        from .skill_loader import _get_selector
+
+        return dict(_get_selector()._weights)
+    except Exception:
+        return dict(DEFAULT_WEIGHTS)
+
+
 def record_selection_outcome(
     *,
     session_id: str,
@@ -855,7 +865,7 @@ def record_selection_outcome(
             skill_overridden=skill_overridden,
             tools_requested_missing=missing or None,
             selection_ms=result.selection_ms,
-            channel_weights_json=json.dumps(DEFAULT_WEIGHTS),
+            channel_weights_json=json.dumps(_active_weights()),
         )
     except Exception:
         logger.debug("Failed to record selection outcome", exc_info=True)

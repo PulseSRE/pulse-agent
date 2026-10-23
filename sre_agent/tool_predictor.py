@@ -2,7 +2,7 @@
 
 Three-tier prediction:
 1. TF-IDF token scoring (hot path, zero cost, sub-ms)
-2. LLM picker via Haiku (cold-start fallback, self-eliminating)
+2. LLM picker (cold-start fallback; its picks are not learned as hits)
 3. Chain bigrams + co-occurrence (mid-turn expansion)
 """
 
@@ -182,8 +182,10 @@ def learn(
                     "INSERT INTO tool_predictions (token, tool_name, score, hit_count, miss_count, last_seen) "
                     "VALUES (%s, %s, 0.0, 0, 1, NOW()) "
                     "ON CONFLICT (token, tool_name) DO UPDATE SET "
-                    "miss_count = tool_predictions.miss_count + 1, "
-                    "last_seen = NOW()",
+                    # Not last_seen: that marks when a pairing last proved
+                    # useful. Refreshing it on misses meant a pairing that
+                    # only ever missed was never old enough to prune.
+                    "miss_count = tool_predictions.miss_count + 1",
                     (token, tool),
                 )
 
@@ -271,14 +273,19 @@ def _expand_cooccurrence(db, tools: list[str], limit: int = 5) -> list[str]:
 
     placeholders = ", ".join(["%s"] * len(tools))
     try:
+        # Pairs are stored once, alphabetically (tool_a < tool_b). Expanding
+        # only from tool_a meant a partner that sorts first was never found.
         rows = db.fetchall(
-            f"SELECT tool_b, SUM(frequency) AS frequency FROM tool_cooccurrence "
-            f"WHERE tool_a IN ({placeholders}) AND tool_b NOT IN ({placeholders}) "
-            f"GROUP BY tool_b "
+            f"SELECT partner, SUM(frequency) AS frequency FROM ("
+            f"  SELECT tool_b AS partner, frequency FROM tool_cooccurrence WHERE tool_a IN ({placeholders})"
+            f"  UNION ALL"
+            f"  SELECT tool_a AS partner, frequency FROM tool_cooccurrence WHERE tool_b IN ({placeholders})"
+            f") pairs WHERE partner NOT IN ({placeholders}) "
+            f"GROUP BY partner "
             f"ORDER BY frequency DESC LIMIT %s",
-            (*tools, *tools, limit),
+            (*tools, *tools, *tools, limit),
         )
-        return [r["tool_b"] for r in rows]
+        return [r["partner"] for r in rows]
     except Exception:
         return []
 
@@ -367,11 +374,11 @@ def select_tools_adaptive(
             tool_names = set(llm_tools)
             source = "llm"
 
-            # Bootstrap TF-IDF from LLM picks (fire-and-forget)
-            try:
-                learn(query=query, tools_called=llm_tools, tools_offered=list(all_tool_map.keys()))
-            except Exception:
-                logger.debug("Failed to bootstrap TF-IDF from LLM picks", exc_info=True)
+            # No bootstrapping from these picks. Recording a guess as a hit made
+            # the predictor learn its own guesses: five of them and TF-IDF went
+            # "high confidence" on tools nobody had called, and every other
+            # tool took a miss per token. It learns from record_turn, which
+            # sees what the model actually called.
         else:
             # Phase 3: Category fallback
             tool_names = set()
@@ -408,18 +415,21 @@ def select_tools_adaptive(
 
 
 def decay_scores(*, factor: float = 0.95, prune_days: int = 30) -> None:
-    """Apply daily decay to prediction scores and prune stale entries.
+    """Fade old evidence so predictions follow current use, and prune dead pairings.
 
-    Call from a daily cron or at startup.
+    Score, hits and misses all decay together, so a burst of misses long ago
+    stops burying a tool and the confidence threshold reflects recent hits.
+    Run daily by the flywheel.
     """
     try:
         db = _get_db()
         db.execute(
-            "UPDATE tool_predictions SET score = score * %s",
-            (factor,),
+            "UPDATE tool_predictions SET score = score * %s, hit_count = hit_count * %s, miss_count = miss_count * %s",
+            (factor, factor, factor),
         )
         db.execute(
-            "DELETE FROM tool_predictions WHERE last_seen < NOW() - INTERVAL '%s days'",
+            "DELETE FROM tool_predictions WHERE last_seen < NOW() - INTERVAL '%s days' "
+            "OR (score < 0.05 AND miss_count < 0.05)",
             (prune_days,),
         )
         db.commit()

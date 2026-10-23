@@ -131,6 +131,15 @@ def skill_load(name: str, reference: str = "") -> str:
 
     refs = list_references(skill.path)
 
+    if not reference:
+        # Routing learns from this: the agent reaching for a different skill
+        # than the one it was routed to means routing picked wrong.
+        from .request_context import current_turn
+
+        turn = current_turn()
+        if turn is not None and skill.name not in turn.loaded_skills:
+            turn.loaded_skills.append(skill.name)
+
     if reference:
         if reference not in refs:
             found = ", ".join(refs) if refs else "none"

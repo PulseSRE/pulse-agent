@@ -108,7 +108,9 @@ def test_applies_once_through_run_migrations():
     from sre_agent.db_migrations import run_migrations
 
     db = get_database()
-    db.execute("DELETE FROM schema_migrations WHERE version = 37")
+    # The runner applies versions above the highest recorded one, so forget
+    # 37 and everything after it to make 37 pending again.
+    db.execute("DELETE FROM schema_migrations WHERE version >= 37")
     db.commit()
     _insert_view("cv-3", OLD_POSITIONS)
     run_migrations(db)

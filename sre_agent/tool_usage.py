@@ -290,27 +290,29 @@ def record_turn(
 
         # Feed skill selector feedback
         try:
-            from .skill_loader import get_last_routing_decision
-            from .skill_selector import record_selection_outcome
+            from .request_context import current_turn
+            from .skill_selector import get_last_selection_result, record_selection_outcome
 
-            decision = get_last_routing_decision()
-            if decision and decision.get("skill_name"):
-                from .skill_selector import SelectionResult
-
-                # Reconstruct a minimal SelectionResult from routing decision
-                result = SelectionResult(
-                    skill_name=decision["skill_name"],
-                    fused_scores=decision.get("competing_scores", {}),
-                    channel_scores={},
-                    threshold_used=0.45,
-                    selection_ms=0,
-                )
+            # The selection itself, with the per-channel scores that weight
+            # learning reads. This used to be rebuilt from the routing decision
+            # with channel_scores={}, so every logged outcome was empty and
+            # recompute_channel_weights had nothing to learn from.
+            result = get_last_selection_result()
+            # Only a selection this turn's routing made: a turn with a fixed
+            # mode reuses the context and would otherwise log the last one again.
+            if result is not None and result.channel_scores and result.skill_name == routing_skill:
+                turn = current_turn()
+                loaded = list(turn.loaded_skills) if turn is not None else []
+                # The agent loading another skill by name is it telling us
+                # routing chose wrong; the skill it reached for is the answer.
+                overridden = next((s for s in loaded if s != result.skill_name), None)
                 record_selection_outcome(
                     session_id=session_id,
                     query_summary=query_summary,
                     result=result,
                     tools_called=tools_called,
                     tools_offered=tools_offered,
+                    skill_overridden=overridden,
                 )
         except Exception:
             logger.debug("Selector feedback recording failed", exc_info=True)

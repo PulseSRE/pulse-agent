@@ -709,6 +709,12 @@ async def run_agent_streaming(
 
     budget = LoopBudget(max_iterations=MAX_ITERATIONS)
 
+    # Fresh per-turn signals: the offered tool set and any skills loaded by
+    # name, read back by the caller when it records the turn for learning.
+    from .request_context import begin_turn
+
+    turn_signals = begin_turn()
+
     settings = get_settings()
     model = settings.agent.model
     max_tokens = settings.agent.max_tokens
@@ -757,6 +763,8 @@ async def run_agent_streaming(
                 len(write_in_map),
                 write_in_map[:5],
             )
+
+    turn_signals.offered_tools = list(tool_map.keys())
 
     # --- Harness: Cached system prompt with cluster context ---
     if use_harness:
