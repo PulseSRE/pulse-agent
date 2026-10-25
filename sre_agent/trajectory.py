@@ -106,6 +106,8 @@ class TrajectoryLearner:
 
     def __init__(self, ttl_seconds: int = CANDIDATE_TTL_SECONDS, db=None, use_db: bool = True) -> None:
         self._candidates: dict[str, LearningCandidate] = {}
+        # Verified, waiting out the recurrence window (memory fallback only).
+        self._verified: dict[str, tuple[LearningCandidate, float]] = {}
         self._ttl = ttl_seconds
         self._lock = threading.Lock()
         self._db = db
@@ -245,6 +247,97 @@ class TrajectoryLearner:
         logger.info("Promoting verified trajectory %s: %s", key, candidate.root_cause)
         return candidate
 
+    def hold_verified(self, key: str) -> bool:
+        """The fix was verified on the next scan. Hold the lesson until it has lasted.
+
+        "Verified" means healthy one scan after the fix. A fix that treats a
+        symptom passes that check and comes back minutes later; learning from it
+        at that moment turned fixes that did not hold into skills (the learning
+        simulator's memory-leak scenario deepened one to v4 from fixes that all
+        recurred). The candidate waits as ``verified`` for the recurrence window;
+        ``promote_matured`` learns from it only if nothing came back.
+
+        Returns True when the candidate is now held.
+        """
+        with self._lock:
+            candidate = self._candidates.pop(key, None)
+        if candidate is None:
+            candidate = self._load_pending(key)
+        if candidate is None:
+            return False
+
+        learnable, reason = candidate.is_learnable()
+        if not learnable:
+            self._resolve(key, "discarded", reason)
+            self.discarded += 1
+            logger.info("Verified trajectory %s not learnable: %s", key, reason)
+            return False
+
+        now = time.time()
+        if not self._resolve(key, "verified", "fix verified; waiting out the recurrence window"):
+            with self._lock:
+                self._verified[key] = (candidate, now)
+        logger.info("Holding verified trajectory %s until the recurrence window passes", key)
+        return True
+
+    def promote_matured(self, window_seconds: float, now: float | None = None) -> list[LearningCandidate]:
+        """Learn from verified candidates whose fix lasted the whole recurrence window."""
+        now = now if now is not None else time.time()
+        cutoff_ms = int((now - window_seconds) * 1000)
+        matured: list[LearningCandidate] = []
+
+        with self._lock:
+            for key, (candidate, verified_at) in list(self._verified.items()):
+                if verified_at * 1000 <= cutoff_ms:
+                    matured.append(candidate)
+                    del self._verified[key]
+
+        db = self.db
+        if db is not None:
+            try:
+                rows = db.fetchall(
+                    "SELECT id, candidate_key, category, title, root_cause, summary, confidence, "
+                    "evidence_json, tools_json, created_at FROM learning_candidates "
+                    "WHERE status = 'verified' AND resolved_at <= ? ORDER BY id",
+                    (cutoff_ms,),
+                )
+                for row in rows or []:
+                    # Conditional, so two pods sharing the database cannot both
+                    # learn from one candidate.
+                    cur = db.execute(
+                        "UPDATE learning_candidates SET status = 'promoted', reason = '', resolved_at = ? "
+                        "WHERE id = ? AND status = 'verified'",
+                        (_now_ms(), row["id"]),
+                    )
+                    if getattr(cur, "rowcount", 0) <= 0:
+                        continue
+                    try:
+                        evidence = json.loads(row["evidence_json"] or "[]")
+                        tools = json.loads(row["tools_json"] or "[]")
+                    except (TypeError, ValueError):
+                        evidence, tools = [], []
+                    matured.append(
+                        LearningCandidate(
+                            key=row["candidate_key"],
+                            category=row["category"] or "",
+                            title=row["title"] or "",
+                            root_cause=row["root_cause"] or "",
+                            summary=row["summary"] or "",
+                            confidence=float(row["confidence"] or 0.0),
+                            evidence=evidence,
+                            tools_called=tools,
+                            created_at=float(row["created_at"] or 0) / 1000.0,
+                        )
+                    )
+                db.commit()
+            except Exception:
+                logger.warning("Failed to promote matured candidates", exc_info=True)
+
+        for candidate in matured:
+            self.promoted += 1
+            logger.info("Promoting trajectory %s: its fix lasted the recurrence window", candidate.key)
+        return matured
+
     def mark_recurred(self, key: str, reason: str) -> bool:
         """The finding a promoted trajectory explained came back. Demote it.
 
@@ -258,14 +351,21 @@ class TrajectoryLearner:
         promotions were separate incidents whose fixes may genuinely have held
         for months.
         """
+        with self._lock:
+            held = self._verified.pop(key, None)
+        if held is not None:
+            self.recurred += 1
+            logger.info("Dropping held trajectory %s before it was learned: %s", key, reason)
         db = self.db
         if db is None:
-            return False
+            return held is not None
         try:
+            # A candidate still held in its window is caught before anything was
+            # learned from it; a promoted one is demoted after the fact.
             cur = db.execute(
                 "UPDATE learning_candidates SET status = 'recurred', reason = ?, resolved_at = ? "
                 "WHERE id = (SELECT MAX(id) FROM learning_candidates "
-                "            WHERE candidate_key = ? AND status = 'promoted')",
+                "            WHERE candidate_key = ? AND status IN ('verified', 'promoted'))",
                 (reason[:500], _now_ms(), key),
             )
             db.commit()
@@ -374,6 +474,7 @@ class TrajectoryLearner:
                 counts = {r["status"]: int(r["c"]) for r in rows}
                 return {
                     "pending": counts.get("pending", 0),
+                    "verified": counts.get("verified", 0),
                     "promoted": counts.get("promoted", 0),
                     "discarded": counts.get("discarded", 0),
                     "expired": counts.get("expired", 0),
@@ -383,6 +484,7 @@ class TrajectoryLearner:
                 logger.debug("Failed to read learning stats", exc_info=True)
         return {
             "pending": len(self._candidates),
+            "verified": len(self._verified),
             "promoted": self.promoted,
             "discarded": self.discarded,
             "expired": self.expired,

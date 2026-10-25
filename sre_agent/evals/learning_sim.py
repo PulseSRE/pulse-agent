@@ -28,6 +28,7 @@ import asyncio
 import json
 import os
 import tempfile
+import time
 import uuid
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -88,7 +89,7 @@ SCENARIOS: dict[str, Scenario] = {
         Scenario(
             name="memory-leak",
             summary="OOM from a leak: raising the limit and restarting both look healthy, then recur. "
-            "Pulse should try the alternative, then ask a person.",
+            "Pulse should try the alternative, then ask a person, and learn no skill from fixes that came back.",
             category="oom",
             diagnosis="OOMKilled: container exceeded memory limit; usage climbs steadily until killed",
             outcomes={"patch_resources": RECURS, "restart_controller": RECURS},
@@ -188,13 +189,14 @@ def _fake_executor(world: _World, tool: str):
 
 
 async def _run_scenario(scenario: Scenario) -> ScenarioResult:
+    from ..config import get_settings
     from ..db import get_database
     from ..fix_learning import HUMAN_REVIEW
     from ..monitor import fix_planner, health_gate
     from ..monitor.actions import save_action
     from ..monitor.findings import _ts
     from ..monitor.recurrence import process_recurrences
-    from ..monitor.verification_pipeline import process_verifications
+    from ..monitor.verification_pipeline import mature_verified, process_verifications
     from ..skill_loader import list_skills, reload_skills
     from ..trajectory import LearningCandidate, candidate_key, get_learner, reset_learner
 
@@ -316,6 +318,9 @@ async def _run_scenario(scenario: Scenario) -> ScenarioResult:
                 again["resources"] = finding["resources"]
                 await process_recurrences(monitor, [again])
                 verdict = "recurred"
+            # Then the recurrence window passes. What production does once per
+            # scan: anything still held whose fix lasted becomes a lesson.
+            mature_verified(now=time.time() + get_settings().monitor.recurrence_window + 1)
             world.broken.discard(workload)
             result.incidents.append(IncidentResult(index, workload, plan.strategy, verdict, learned))
 

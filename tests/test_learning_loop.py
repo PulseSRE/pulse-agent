@@ -107,6 +107,14 @@ def test_an_approved_fix_that_holds_becomes_a_loadable_skill(user_skills, monkey
         patch("sre_agent.memory.get_manager", return_value=None),
     ):
         asyncio.run(process_verifications(monitor, findings=[]))
+        # Verified one scan later is not yet "held": nothing is learned until
+        # the recurrence window passes without the condition coming back.
+        assert learner.promoted == 0
+        assert skill_loader.get_skill("learned-crashloop") is None
+        from sre_agent.config import get_settings
+        from sre_agent.monitor.verification_pipeline import mature_verified
+
+        assert mature_verified(now=time.time() + get_settings().monitor.recurrence_window + 1) == 1
 
     assert learner.promoted == 1
     skill = skill_loader.get_skill("learned-crashloop")

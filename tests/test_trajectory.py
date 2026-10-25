@@ -165,7 +165,14 @@ class TestStats:
         learner.record(bad)
         learner.promote(good.key)
         learner.discard(bad.key, "still failing")
-        assert learner.stats() == {"pending": 0, "promoted": 1, "discarded": 1, "expired": 0, "recurred": 0}
+        assert learner.stats() == {
+            "pending": 0,
+            "verified": 0,
+            "promoted": 1,
+            "discarded": 1,
+            "expired": 0,
+            "recurred": 0,
+        }
 
     def test_learner_is_process_wide(self):
         """Same instance every call — the property the name is about.
@@ -399,3 +406,57 @@ class TestMonitorWiring:
 
         src = inspect.getsource(flywheel)
         assert "expire_stale" in src, "silence must not become a promotion by default"
+
+
+class TestHeldUntilTheWindowPasses:
+    """A fix verified one scan later has not yet held. Learn only once it has lasted."""
+
+    @pytest.mark.parametrize("use_db", [False, True])
+    def test_a_held_candidate_is_learned_only_after_the_window(self, use_db):
+        import time
+
+        learner = TrajectoryLearner(use_db=use_db)
+        cand = _candidate(key=f"held-{use_db}")
+        learner.record(cand)
+        assert learner.hold_verified(cand.key)
+        assert learner.promote_matured(1800) == [], "inside the window nothing is learned"
+        matured = learner.promote_matured(1800, now=time.time() + 1801)
+        assert [c.key for c in matured] == [cand.key]
+        assert matured[0].root_cause == cand.root_cause
+        assert learner.promote_matured(1800, now=time.time() + 9999) == [], "learned once, not every scan"
+
+    @pytest.mark.parametrize("use_db", [False, True])
+    def test_a_recurrence_inside_the_window_drops_it_unlearned(self, use_db):
+        import time
+
+        learner = TrajectoryLearner(use_db=use_db)
+        cand = _candidate(key=f"recur-{use_db}")
+        learner.record(cand)
+        learner.hold_verified(cand.key)
+        assert learner.mark_recurred(cand.key, "came back after 3 min")
+        assert learner.promote_matured(1800, now=time.time() + 1801) == []
+
+    def test_an_unlearnable_candidate_is_not_held(self):
+        learner = TrajectoryLearner(use_db=False)
+        weak = _candidate(key="weak", confidence=0.1)
+        learner.record(weak)
+        assert not learner.hold_verified(weak.key)
+        assert learner.stats()["discarded"] == 1
+
+    def test_with_the_window_off_verification_learns_at_once(self, monkeypatch):
+        from unittest.mock import patch
+
+        from sre_agent import trajectory
+        from sre_agent.config import _reset_settings
+        from sre_agent.monitor import verification_pipeline
+
+        monkeypatch.setenv("PULSE_AGENT_RECURRENCE_WINDOW", "0")
+        _reset_settings()
+        learner = TrajectoryLearner(use_db=False)
+        monkeypatch.setattr(trajectory, "_learner", learner)
+        cand = _candidate(key="no-window")
+        learner.record(cand)
+        with patch.object(verification_pipeline, "_scaffold_from_verified") as scaffold:
+            verification_pipeline.learn_when_held(cand.key)
+        scaffold.assert_called_once()
+        assert scaffold.call_args.args[0].key == cand.key

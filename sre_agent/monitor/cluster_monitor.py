@@ -1370,11 +1370,9 @@ class ClusterMonitor:
                         health_gate.check_resources, resolved_finding.get("resources", [])
                     )
                     if gate == health_gate.PASS:
-                        promoted = learner.promote(ckey)
-                        if promoted is not None:
-                            from .verification_pipeline import _scaffold_from_verified
+                        from .verification_pipeline import learn_when_held
 
-                            await asyncio.to_thread(_scaffold_from_verified, promoted)
+                        await asyncio.to_thread(learn_when_held, ckey)
                 else:
                     learner.discard(ckey, "finding self-healed — the diagnosis was not what fixed it")
             except Exception:
@@ -1432,6 +1430,14 @@ class ClusterMonitor:
             await process_recurrences(self, new_findings + suppressed_new)
         except Exception:
             logger.exception("Recurrence processing failed")
+
+        # Fixes that have now lasted the whole recurrence window become lessons.
+        try:
+            from .verification_pipeline import mature_verified
+
+            await asyncio.to_thread(mature_verified)
+        except Exception:
+            logger.exception("Promoting matured learning candidates failed")
 
         # Track transient findings
         for key in stale_keys:
