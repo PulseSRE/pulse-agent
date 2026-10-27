@@ -262,6 +262,25 @@ def simulate_action(tool: str, inp: dict) -> dict:
     }
 
 
+def _record_investigation_usage(finding: dict, usage: dict, offered: list[str], called: list[str]) -> None:
+    import time as _time
+
+    try:
+        from ..tool_usage import record_turn
+
+        record_turn(
+            session_id=f"pipeline-{str(finding.get('id', 'unknown'))[:12]}",
+            turn_number=int(_time.time()),
+            agent_mode="pipeline:investigate",
+            query_summary=str(finding.get("title", ""))[:200],
+            tools_offered=offered,
+            tools_called=called,
+            **usage,
+        )
+    except Exception:
+        logger.debug("Recording investigation usage failed", exc_info=True)
+
+
 async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[str, Any]:
     from ..agent import (
         SYSTEM_PROMPT as SRE_SYSTEM_PROMPT,
@@ -323,6 +342,14 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
     # trajectory records them as its procedure; the placeholder it used to get
     # ("proactive_investigation") taught the skill nothing about how to diagnose.
     tools_called: list[str] = []
+    # Token usage, recorded as a turn so the daily cost budget — which reads
+    # turns — counts investigations. It only ever saw chat before, so with no
+    # chat traffic investigations ran past any budget.
+    usage = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_creation_tokens": 0}
+
+    def _add_usage(**kwargs):
+        for key in usage:
+            usage[key] += int(kwargs.get(key) or 0)
 
     def _note_tool(name: str) -> None:
         if name and name not in tools_called:
@@ -338,7 +365,9 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
             write_tools=set(),
             on_tool_use=_note_tool,
             on_tool_result=on_tool_result,
+            on_usage=_add_usage,
         )
+    _record_investigation_usage(finding, usage, list(readonly_map.keys()), tools_called)
 
     # Use module-level mutation
     import sre_agent.monitor.actions as _actions_mod

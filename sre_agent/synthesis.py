@@ -13,7 +13,17 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger("pulse_agent.synthesis")
 
-SYNTHESIS_MODEL = "claude-sonnet-5"
+SYNTHESIS_MODEL = "claude-sonnet-5"  # fallback only; see _synthesis_model()
+
+
+def _synthesis_model() -> str:
+    """The configured model. A hard-coded id ignored PULSE_AGENT_MODEL and broke on Vertex ids."""
+    try:
+        from .config import get_settings
+
+        return get_settings().agent.model or SYNTHESIS_MODEL
+    except Exception:
+        return SYNTHESIS_MODEL
 
 
 @dataclass
@@ -117,6 +127,9 @@ async def synthesize_parallel_outputs(
     Args:
         on_text_delta: optional async callback(str) for streaming synthesis text.
     """
+    # Whether any synthesis text already reached the user, so a failure does
+    # not stream the whole fallback after it as a second answer.
+    streamed_any = [False]
     try:
         user_content = (
             f"Original user query: {query}\n\n"
@@ -128,19 +141,32 @@ async def synthesize_parallel_outputs(
 
         if on_text_delta:
             collected: list[str] = []
+            sent = 0
             async with client.messages.stream(
-                model=SYNTHESIS_MODEL,
+                model=_synthesis_model(),
                 max_tokens=4096,
                 system=_SYNTHESIS_SYSTEM,
                 messages=[{"role": "user", "content": user_content}],
             ) as stream:
                 async for text in stream.text_stream:
                     collected.append(text)
-                    await on_text_delta(text)
+                    # Forward prose only. The machine-readable conflicts block
+                    # at the end was streamed to the user verbatim before
+                    # being stripped from the final response. Hold back a few
+                    # characters so a marker split across chunks is caught.
+                    so_far = "".join(collected)
+                    marker = so_far.find("```json")
+                    safe_end = marker if marker != -1 else max(sent, len(so_far) - len("```json"))
+                    if safe_end > sent:
+                        await on_text_delta(so_far[sent:safe_end])
+                        sent = safe_end
+                    streamed_any[0] = sent > 0
             raw_text = "".join(collected)
+            if raw_text.find("```json") == -1 and len(raw_text) > sent:
+                await on_text_delta(raw_text[sent:])
         else:
             response = await client.messages.create(
-                model=SYNTHESIS_MODEL,
+                model=_synthesis_model(),
                 max_tokens=4096,
                 system=_SYNTHESIS_SYSTEM,
                 messages=[{"role": "user", "content": user_content}],
@@ -163,6 +189,8 @@ async def synthesize_parallel_outputs(
         fallback = _build_fallback_response(result)
         if on_text_delta:
             try:
+                if streamed_any[0]:
+                    await on_text_delta("\n\n*The combined summary was interrupted; both skills' results follow.*\n\n")
                 await on_text_delta(fallback)
             except Exception:
                 logger.debug("Suppressed exception", exc_info=True)

@@ -21,7 +21,6 @@ try:
         COST_BUDGET_REMAINING_USD,
         INVESTIGATION_BUDGET_REMAINING,
         INVESTIGATIONS_TOTAL,
-        TOKEN_PRICES,
     )
 
     _METRICS_AVAILABLE = True
@@ -66,16 +65,18 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
             if cached and (now_t - cached[0]) < 300:
                 today_cost = cached[1]
             else:
+                from ..observability import estimate_cost_usd
                 from ..repositories import get_analytics_repo
 
                 totals = get_analytics_repo().fetch_token_totals(1)
                 if totals and totals["total_incidents"] > 0:
-                    _in = int(totals["total_input"])
-                    _out = int(totals["total_output"])
-                    today_cost = (
-                        (_in * TOKEN_PRICES["input"] + _out * TOKEN_PRICES["output"]) / 1_000_000
-                        if _METRICS_AVAILABLE
-                        else (_in * 15.0 + _out * 75.0) / 1_000_000
+                    # Includes investigations now (they record their usage as
+                    # turns) and cache tokens, priced for the configured model.
+                    today_cost = estimate_cost_usd(
+                        int(totals["total_input"]),
+                        int(totals["total_output"]),
+                        int(totals.get("total_cache_read") or 0),
+                        int(totals.get("total_cache_write") or 0),
                     )
                 else:
                     today_cost = 0.0
