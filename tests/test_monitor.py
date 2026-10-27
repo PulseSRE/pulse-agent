@@ -1409,8 +1409,8 @@ class TestCreateDashboard:
 class TestEvalScaffoldingIntegration:
     """Integration tests verifying monitor session calls eval scaffolder."""
 
-    def test_plan_execution_calls_scaffold_eval_from_plan(self, monkeypatch):
-        """After plan execution with tools, scaffold_eval_from_plan is called."""
+    def test_plan_execution_reports_and_holds_candidate_without_scaffolding(self, monkeypatch):
+        """A plan run reports its investigation and is held for verification, not scaffolded."""
         monkeypatch.setenv("PULSE_AGENT_INVESTIGATIONS_MAX_PER_SCAN", "1")
         monkeypatch.setenv("PULSE_AGENT_INVESTIGATION_TIMEOUT", "30")
 
@@ -1475,21 +1475,16 @@ class TestEvalScaffoldingIntegration:
         async def _fake_execute(tmpl, incident, on_phase_start=None, on_phase_complete=None):
             return plan_result
 
-        eval_mock = MagicMock()
+        learner = MagicMock()
         with (
-            patch(
-                "sre_agent.monitor.cluster_monitor.ClusterMonitor._try_plan_execution",
-                wraps=monitor._try_plan_execution,
-            ),
             patch("sre_agent.plan_runtime.PlanRuntime.execute", side_effect=_fake_execute),
             patch("sre_agent.plan_templates.match_template", return_value=template),
             patch("sre_agent.postmortem.save_postmortem"),
-            patch("sre_agent.skill_scaffolder.save_scaffolded_skill"),
-            patch(
-                "sre_agent.skill_scaffolder.scaffold_skill_from_resolution", return_value="---\nname: test\n---\ntest"
-            ),
-            patch("sre_agent.skill_scaffolder.scaffold_plan_template"),
-            patch("sre_agent.eval_scaffolder.scaffold_eval_from_plan", side_effect=eval_mock) as mock_eval,
+            patch("sre_agent.monitor.actions.save_investigation"),
+            patch("sre_agent.inbox.attach_investigation_to_finding", return_value=False),
+            patch("sre_agent.trajectory.get_learner", return_value=learner),
+            patch("sre_agent.skill_scaffolder.save_scaffolded_skill") as mock_skill,
+            patch("sre_agent.eval_scaffolder.scaffold_eval_from_plan") as mock_eval,
         ):
             loop = asyncio.new_event_loop()
             try:
@@ -1498,13 +1493,14 @@ class TestEvalScaffoldingIntegration:
                 loop.close()
 
         assert result is True
-        mock_eval.assert_called_once()
-        call_kwargs = mock_eval.call_args[1]
-        assert call_kwargs["skill_name"] is not None
-        assert call_kwargs["finding"] is finding
-        assert call_kwargs["plan_result"] is plan_result
-        assert "describe_pod" in call_kwargs["tools_called"]
-        assert call_kwargs["duration_seconds"] == 45.0
+        mock_skill.assert_not_called()
+        mock_eval.assert_not_called()
+        reports = [m for m in sent_messages if m.get("type") == "investigation_report"]
+        assert reports and reports[0]["suspected_cause"] == "OOM kill due to memory leak"
+        learner.record.assert_called_once()
+        candidate = learner.record.call_args.args[0]
+        assert candidate.root_cause == "OOM kill due to memory leak"
+        assert "describe_pod" in candidate.tools_called
 
     def test_flat_investigation_records_a_candidate_without_scaffolding(self, monkeypatch):
         """A confident diagnosis is held, not learned — nothing is scaffolded until a fix is verified."""

@@ -105,9 +105,7 @@ class TestPlanReport:
             findings={"recommended_fix": "raise the limit to 512Mi"},
             confidence=0.3,
         )
-        return PlanResult(
-            plan_id="p", plan_name="oom", phase_outputs={"diagnose": diagnose, "remediate": remediate}
-        )
+        return PlanResult(plan_id="p", plan_name="oom", phase_outputs={"diagnose": diagnose, "remediate": remediate})
 
     def test_plan_run_reports_its_investigation(self, monkeypatch):
         from sre_agent.monitor import actions
