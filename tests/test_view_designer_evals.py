@@ -7,6 +7,16 @@ from sre_agent.evals.runner import evaluate_suite, score_scenario
 from sre_agent.evals.scenarios import load_suite
 
 
+def _recorded(fixture: dict) -> dict:
+    """Recorded tool responses, from the fixture or from each of its turns."""
+    if fixture.get("multi_turn"):
+        merged: dict = {}
+        for turn in fixture["turns"]:
+            merged.update(turn.get("recorded_responses", {}))
+        return merged
+    return fixture["recorded_responses"]
+
+
 class TestViewDesignerFixtures:
     def test_fixtures_exist(self):
         fixtures = list_fixtures()
@@ -18,17 +28,19 @@ class TestViewDesignerFixtures:
         for name in ["view_namespace_dashboard", "view_cluster_overview", "view_add_widget", "view_incident_triage"]:
             fixture = load_fixture(name)
             assert "name" in fixture
-            assert "prompt" in fixture
-            assert "recorded_responses" in fixture
             assert "expected" in fixture
-            assert len(fixture["recorded_responses"]) > 0
+            if fixture.get("multi_turn"):
+                assert all(turn.get("prompt") for turn in fixture["turns"])
+            else:
+                assert "prompt" in fixture
+            assert len(_recorded(fixture)) > 0
 
     def test_fixture_has_no_write_tools(self):
         """View designer fixtures should not record write tool responses."""
         write_tools = {"delete_pod", "scale_deployment", "drain_node", "cordon_node", "apply_yaml"}
         for name in ["view_namespace_dashboard", "view_cluster_overview", "view_add_widget", "view_incident_triage"]:
             fixture = load_fixture(name)
-            recorded = set(fixture["recorded_responses"].keys())
+            recorded = set(_recorded(fixture).keys())
             overlap = recorded & write_tools
             assert not overlap, f"Fixture {name} records write tools: {overlap}"
 
@@ -110,3 +122,27 @@ class TestScoreReplayViewDesigner:
         score = score_replay(result, expected)
         assert score["passed"] is True
         assert score["score"] == 100
+
+
+class TestTriageFixtureRequiresADashboard:
+    """The view designer plans and waits for approval, so one turn proved nothing was built."""
+
+    def test_approval_turn_and_dashboard_required(self):
+        fixture = load_fixture("view_incident_triage")
+        assert fixture.get("multi_turn") and len(fixture["turns"]) == 2
+        assert "create_dashboard" in fixture["expected"]["should_use_tools"]
+
+    def test_view_designer_is_not_offered_memory_tools(self):
+        from sre_agent.memory.memory_tools import MEMORY_TOOLS
+        from sre_agent.skill_loader import build_config_from_skill, get_skill, guaranteed_tool_names, load_skills
+
+        load_skills()
+        skill = get_skill("view_designer")
+        offered = {d["name"] for d in build_config_from_skill(skill, "create an incident dashboard")["tool_defs"]}
+        memory = {t.name for t in MEMORY_TOOLS}
+        assert not (offered & memory)
+        assert not (guaranteed_tool_names(skill) & memory)
+        assert "create_dashboard" in offered
+
+        sre = get_skill("sre")
+        assert memory <= {d["name"] for d in build_config_from_skill(sre, "why is api crashing")["tool_defs"]}
