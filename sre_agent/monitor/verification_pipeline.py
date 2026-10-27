@@ -37,6 +37,41 @@ def _scaffold_from_verified(candidate) -> None:
         logger.debug("Scaffolding from verified trajectory failed", exc_info=True)
 
 
+def learn_when_held(key: str) -> None:
+    """A fix for this candidate was verified. Learn from it once it has lasted.
+
+    With the recurrence window off there is nothing to wait for, so the
+    candidate is promoted at once, as before.
+    """
+    from ..trajectory import get_learner
+
+    window = int(get_settings().monitor.recurrence_window)
+    learner = get_learner()
+    if window <= 0:
+        promoted = learner.promote(key)
+        if promoted is not None:
+            _scaffold_from_verified(promoted)
+        return
+    learner.hold_verified(key)
+
+
+def mature_verified(now: float | None = None) -> int:
+    """Learn from held candidates whose fix lasted the recurrence window. Sync.
+
+    Run once per scan, after recurrences are processed, so a condition that
+    came back this scan has already dropped its candidate.
+    """
+    from ..trajectory import get_learner
+
+    window = int(get_settings().monitor.recurrence_window)
+    if window <= 0:
+        return 0
+    matured = get_learner().promote_matured(window, now=now)
+    for candidate in matured:
+        _scaffold_from_verified(candidate)
+    return len(matured)
+
+
 async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -> None:
     """Verify whether previously applied fixes remained healthy on next scan."""
     if not monitor._pending_verifications:
@@ -226,9 +261,7 @@ async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -
 
             key = candidate_key(category, resources)
             if status == "verified":
-                promoted = get_learner().promote(key)
-                if promoted is not None:
-                    _scaffold_from_verified(promoted)
+                learn_when_held(key)
             elif status == "unverifiable":
                 # Neither outcome was demonstrated. Discarding here would record
                 # a judgement the check never made; the candidate is left pending

@@ -55,6 +55,7 @@ def test_a_recurring_fix_gets_one_alternative_then_a_person(curves):
     assert r.first_escalation is not None and r.first_escalation <= 5
     assert r.fixes_that_did_not_hold <= 4
     assert all(i.verdict == "escalated" for i in r.incidents[r.first_escalation - 1 :])
+    assert r.skill is None, "fixes that came back within the recurrence window teach nothing"
 
 
 def test_each_incident_is_a_different_workload(curves):
