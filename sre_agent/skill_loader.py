@@ -83,6 +83,9 @@ class Skill:
     eval_scenarios: list[dict] = field(default_factory=list)
     path: Path = field(default=Path("."))
     skip_component_hints: bool = False
+    # Offer the memory tools (past incidents, learned runbooks, cluster facts,
+    # past conversations). Skills whose job is not diagnosis can opt out.
+    memory_tools: bool = True
     degraded: bool = False
     degraded_reason: str = ""
     display_name: str = ""
@@ -223,6 +226,7 @@ def _parse_skill_md(path: Path) -> Skill | None:
         handoff_to=meta.get("handoff_to", {}),
         configurable=meta.get("configurable", []),
         skip_component_hints=meta.get("skip_component_hints", False),
+        memory_tools=bool(meta.get("memory_tools", True)),
         path=path.parent,
         display_name=meta.get("display_name", ""),
         icon=meta.get("icon", ""),
@@ -694,7 +698,9 @@ def _memory_tools() -> list:
 
 def guaranteed_tool_names(skill) -> set[str]:
     """Tools a skill keeps even when adaptive selection does not predict them."""
-    names = set(ALWAYS_INCLUDE) | set(_SELF_DESCRIBE_TOOLS) | {t.name for t in _memory_tools()}
+    names = set(ALWAYS_INCLUDE) | set(_SELF_DESCRIBE_TOOLS)
+    if skill is None or skill.memory_tools:
+        names |= {t.name for t in _memory_tools()}
     if skill is not None:
         names |= set(skill.requires_tools or [])
     return names
@@ -808,9 +814,17 @@ def build_config_from_skill(skill: Skill, query: str = "") -> dict:
     # to Pulse's own memory.
     from .config import get_settings
 
-    if get_settings().agent.memory:
+    # A skill can opt out: offered them, view_designer spent its tool budget on
+    # past incidents and runbooks before building (view_incident_triage replay
+    # rose from 18 to 24-26 calls with search_past_incidents among them).
+    if get_settings().agent.memory and skill.memory_tools:
         for tool in _memory_tools():
             tool_map.setdefault(tool.name, tool)
+    elif not skill.memory_tools:
+        # The diagnostics category also lists them; an opt-out removes them
+        # whichever way they arrived.
+        for tool in _memory_tools():
+            tool_map.pop(tool.name, None)
 
     tool_defs = [t.to_dict() for t in tool_map.values()]
     write_tools = set(WRITE_TOOL_NAMES) if skill.write_tools else set()

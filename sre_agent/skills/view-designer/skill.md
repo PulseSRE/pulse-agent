@@ -26,6 +26,9 @@ categories:
   - diagnostics
   - monitoring
 skip_component_hints: true
+# Diagnosis memory (past incidents, learned runbooks) cost this skill its tool
+# budget before a view was built; it designs views from live data instead.
+memory_tools: false
 write_tools: false
 priority: 10
 requires_tools:
