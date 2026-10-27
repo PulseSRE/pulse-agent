@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -23,7 +24,7 @@ from ..inbox import (
     unclaim_item,
     update_item_status,
 )
-from .auth import get_owner, require_admin, verify_token
+from .auth import get_owner, get_user_token, require_admin, verify_token
 
 router = APIRouter(tags=["inbox"], dependencies=[Depends(verify_token)])
 
@@ -162,8 +163,13 @@ async def rest_update_inbox_item(item_id: str, request: Request):
 
 
 @router.post("/inbox/{item_id}/claim")
-async def rest_claim_item(item_id: str, owner: str = Depends(get_owner)):
-    ok = claim_item(item_id, owner)
+async def rest_claim_item(
+    item_id: str,
+    owner: str = Depends(get_owner),
+    user_token: str | None = Depends(get_user_token),
+):
+    # claim_item may run tools and an LLM call to build the view; keep it off the event loop.
+    ok = await asyncio.to_thread(claim_item, item_id, owner, user_token)
     if not ok:
         raise HTTPException(status_code=404, detail="Item not found")
     return {"ok": True}

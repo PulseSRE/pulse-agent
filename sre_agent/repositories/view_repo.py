@@ -122,13 +122,20 @@ class ViewRepository(BaseRepository):
         trigger_source: str = "user",
         finding_id: str | None = None,
         visibility: str = "private",
+        reuse_by_title: bool = True,
     ) -> str | None:
-        """Save a new view for a user. Returns the view ID."""
+        """Save a view for a user. Returns the view ID, or None if nothing was written.
+
+        ``reuse_by_title`` (default, for chat-created dashboards) overwrites the
+        owner's existing view with the same title. Generated views pass False so
+        two incidents with the same title cannot overwrite each other.
+        """
         db = self.db
         now = datetime.now(UTC).isoformat()
-        existing = self.get_view_by_title(owner, title)
-        if existing:
-            view_id = existing["id"]
+        if reuse_by_title:
+            existing = self.get_view_by_title(owner, title)
+            if existing:
+                view_id = existing["id"]
 
         db.execute(
             "INSERT INTO views (id, owner, title, description, icon, layout, positions, "
@@ -158,6 +165,12 @@ class ViewRepository(BaseRepository):
             ),
         )
         db.commit()
+
+        stored = db.fetchone("SELECT owner FROM views WHERE id = ?", (view_id,))
+        if not stored or stored["owner"] != owner:
+            # The id belongs to someone else; ON CONFLICT ... WHERE wrote nothing.
+            logger.warning("View %s not saved: id is owned by another user", view_id)
+            return None
 
         try:
             self.snapshot_view(view_id, "created")

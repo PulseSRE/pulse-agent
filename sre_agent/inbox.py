@@ -839,7 +839,13 @@ def update_item_status(item_id: str, new_status: str, actor: str = "") -> bool:
     return True
 
 
-def claim_item(item_id: str, username: str) -> bool:
+def claim_item(item_id: str, username: str, user_token: str | None = None) -> bool:
+    """Claim an item and generate its investigation view.
+
+    ``user_token`` is the claimant's forwarded OAuth token; view-plan tools run
+    with it so the generated view shows only what that person may read.
+    Synchronous (DB + possibly an LLM call) — async callers use a thread.
+    """
     item = get_inbox_item(item_id)
     if item is None:
         return False
@@ -860,7 +866,7 @@ def claim_item(item_id: str, username: str) -> bool:
     if target_status != current:
         _publish_event("inbox_item_updated", item_id, {"status": target_status})
 
-    _generate_view_for_item(item_id, item, username)
+    _generate_view_for_item(item_id, item, username, user_token=user_token)
 
     return True
 
@@ -900,7 +906,9 @@ Reply ONLY with valid JSON, no markdown:
 {{"components": [{{"kind": "...", "title": "...", "props": {{...}}}}]}}"""
 
 
-def _generate_view_for_item(item_id: str, item: dict[str, Any], owner: str = "system") -> None:
+def _generate_view_for_item(
+    item_id: str, item: dict[str, Any], owner: str = "system", *, user_token: str | None = None
+) -> None:
     """Generate an investigation view when a user claims an item."""
     metadata = item.get("metadata", {})
     if not metadata.get("investigation_summary") and not metadata.get("action_plan") and not metadata.get("view_plan"):
@@ -919,7 +927,7 @@ def _generate_view_for_item(item_id: str, item: dict[str, Any], owner: str = "sy
         if view_plan:
             from .view_executor import execute_view_plan
 
-            layout = execute_view_plan(view_plan, item)
+            layout = execute_view_plan(view_plan, item, user_token=user_token)
             if not layout:
                 layout = _fallback_layout(item, metadata)
         else:
@@ -928,10 +936,13 @@ def _generate_view_for_item(item_id: str, item: dict[str, Any], owner: str = "sy
         from .db import save_view
 
         view_id = f"cv-{uuid.uuid4().hex[:12]}"
-        title = f"Investigation: {item['title'][:60]}"
+        # Titles are unique per owner (idx_views_owner_title). Two incidents
+        # with the same title used to resolve to the same view, so claiming the
+        # second overwrote the first one's evidence; the item id keeps them apart.
+        title = f"Investigation: {item['title'][:60]} · {item_id[-6:]}"
         view_type = "incident" if item.get("severity") in ("critical", "warning") else "plan"
 
-        save_view(
+        saved_id = save_view(
             owner=owner,
             view_id=view_id,
             title=title,
@@ -942,7 +953,11 @@ def _generate_view_for_item(item_id: str, item: dict[str, Any], owner: str = "sy
             trigger_source="agent",
             finding_id=item.get("finding_id") or item_id,
             visibility="team",
+            reuse_by_title=False,
         )
+        if not saved_id:
+            raise RuntimeError(f"view for inbox item {item_id} was not saved")
+        view_id = saved_id
 
         metadata["view_status"] = "ready"
         now = int(time.time())
@@ -1020,23 +1035,35 @@ def _fallback_layout(item: dict[str, Any], metadata: dict[str, Any]) -> list[dic
                 },
             }
         )
-    if item.get("namespace"):
-        layout.append(
-            {
-                "kind": "resource_counts",
-                "title": f"Resources in {item['namespace']}",
-                "props": {"namespace": item["namespace"]},
-            }
-        )
-    if metadata.get("blast_radius"):
-        layout.append(
-            {
-                "kind": "blast_radius",
-                "title": "Blast Radius",
-                "props": metadata["blast_radius"],
-            }
-        )
+    # No resource_counts card here: without measured counts it rendered as an
+    # empty widget. Downstream dependents are shown by name with an unknown
+    # status, because the graph knows who depends on the resource, not their health.
+    dependents = _blast_radius_items(metadata.get("blast_radius"))
+    if dependents:
+        layout.append({"kind": "status_list", "title": "Downstream Dependents", "props": {"items": dependents}})
     return layout
+
+
+def _blast_radius_items(blast: Any) -> list[dict[str, Any]]:
+    """status_list items from stored blast-radius metadata (``Kind/namespace/name`` keys)."""
+    if not isinstance(blast, dict):
+        return []
+    items: list[dict[str, Any]] = []
+    for key in blast.get("affected_resources") or []:
+        kind, _, rest = str(key).partition("/")
+        namespace, _, name = rest.partition("/")
+        label = f"{kind}/{name}" if name else str(key)
+        items.append(
+            {
+                "name": label,
+                "status": "unknown",
+                "detail": f"depends on this resource · namespace {namespace or 'cluster'}",
+            }
+        )
+    total = blast.get("affected_count")
+    if isinstance(total, int) and total > len(items) and items:
+        items.append({"name": f"{total - len(items)} more not shown", "status": "unknown", "detail": ""})
+    return items
 
 
 def claim_and_investigate(item_id: str, username: str) -> bool:
@@ -1341,6 +1368,61 @@ def _finding_corr_key(finding: dict[str, Any]) -> str:
     return f"{category}:{namespace}"
 
 
+def investigation_metadata(result: dict[str, Any], investigation_id: str) -> dict[str, Any]:
+    """The inbox metadata an investigation contributes: summary, evidence, view plan.
+
+    Shared by the inbox's own investigations and the monitor's, so an evidence
+    view can be built at claim time whichever path diagnosed the finding.
+    """
+    meta: dict[str, Any] = {
+        "investigation_id": investigation_id,
+        "investigation_summary": result.get("summary", ""),
+        "suspected_cause": result.get("suspected_cause", ""),
+        "recommended_fix": result.get("recommended_fix", ""),
+        "investigation_confidence": result.get("confidence", 0),
+        "evidence": list(result.get("evidence", []) or []),
+        "evidence_detail": list(result.get("evidence_detail", []) or []),
+        "alternatives_considered": list(result.get("alternatives_considered", []) or []),
+    }
+    # "view_plan", not "viewPlan": _run_proactive_investigation reads the
+    # model's camelCase viewPlan but normalises it to snake_case on the way out.
+    raw_view_plan = result.get("view_plan", [])
+    if isinstance(raw_view_plan, list) and raw_view_plan:
+        from .view_executor import validate_view_plan
+
+        meta["view_plan"] = validate_view_plan(raw_view_plan)
+        if meta["view_plan"]:
+            meta["view_plan_at"] = int(time.time())
+    return meta
+
+
+def attach_investigation_to_finding(finding: dict[str, Any], result: dict[str, Any], investigation_id: str) -> bool:
+    """Put a monitor investigation's evidence on the finding's open inbox item.
+
+    The monitor diagnosed findings and kept the result to itself: the inbox
+    item a person claims had no evidence and no view plan, so the "view that
+    shows the data behind the diagnosis" was never built for monitor-found
+    problems. Returns True when an item was updated.
+    """
+    try:
+        repo = get_inbox_repo()
+        # The same lookup bridge_finding_to_inbox uses to find the item.
+        row = repo.find_active_by_finding_id(finding.get("id", ""))
+        corr_key = _finding_corr_key(finding)
+        if row is None and corr_key:
+            row = repo.find_active_by_correlation_task(corr_key)
+        if not row:
+            return False
+        item = _deserialize_row(row)
+        metadata = item.get("metadata") or {}
+        metadata.update(investigation_metadata(result, investigation_id))
+        repo.update_metadata(item["id"], metadata, int(time.time()))
+        return True
+    except Exception:
+        _inbox_logger.debug("Attaching investigation to inbox item failed", exc_info=True)
+        return False
+
+
 def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
     """Create or update an inbox item from a monitor finding."""
     finding_id = finding.get("id", "")
@@ -1583,27 +1665,9 @@ def _phase_b_investigate() -> int:
                 save_investigation(result, finding_dict)
 
                 metadata = item.get("metadata", {})
-                metadata["investigation_id"] = investigation_id
-                metadata["investigation_summary"] = result.get("summary", "")
-                metadata["suspected_cause"] = result.get("suspected_cause", "")
-                metadata["recommended_fix"] = result.get("recommended_fix", "")
-                metadata["investigation_confidence"] = result.get("confidence", 0)
-                metadata["evidence"] = result.get("evidence", [])
+                metadata.update(investigation_metadata(result, investigation_id))
                 metadata["skill_used"] = "sre"
                 metadata["tools_offered"] = tools_offered[:20]
-
-                # "view_plan", not "viewPlan": _run_proactive_investigation reads
-                # the model's camelCase viewPlan but normalises it to snake_case
-                # on the way out (e2c1ae9), like every other key read above.
-                # This read was missed in that rename, so the inbox path silently
-                # dropped every investigation view plan.
-                raw_view_plan = result.get("view_plan", [])
-                if isinstance(raw_view_plan, list) and raw_view_plan:
-                    from .view_executor import validate_view_plan
-
-                    metadata["view_plan"] = validate_view_plan(raw_view_plan)
-                    if metadata["view_plan"]:
-                        metadata["view_plan_at"] = int(time.time())
 
                 try:
                     from .dependency_graph import get_dependency_graph

@@ -412,25 +412,43 @@ class PlanRuntime:
 
         # Try to find structured JSON in response
         match = re.search(r"```json\s*(\{.*?\})\s*```", response, re.DOTALL)
+        from .evidence import derive_confidence, parse_evidence
+
         if match:
             try:
                 data = json.loads(match.group(1))
+                # Confidence comes from the evidence, with the model's own figure
+                # as a ceiling — the same rule the single-call investigation
+                # uses. Phases used to report a fixed 0.7 whatever they found.
+                evidence = parse_evidence(data.get("evidence", []))[:10]
+                try:
+                    asserted = float(data.get("confidence", 0.0))
+                except (TypeError, ValueError):
+                    asserted = 0.0
+                findings = data.get("findings", {})
+                if not isinstance(findings, dict):
+                    findings = {}
+                alternatives = data.get("alternatives_considered")
+                if isinstance(alternatives, list) and alternatives:
+                    findings.setdefault("alternatives_considered", [str(a) for a in alternatives[:10]])
                 return SkillOutput(
                     skill_id=phase.skill_name,
                     phase_id=phase.id,
                     status=data.get("status", "complete"),
-                    findings=data.get("findings", {}),
+                    findings=findings,
                     branch_signal=data.get("branch_signal"),
                     evidence_summary=data.get("evidence_summary", response[:2000]),
                     actions_taken=data.get("actions_taken", tools_called),
                     open_questions=data.get("open_questions", []),
                     risk_flags=data.get("risk_flags", []),
-                    confidence=float(data.get("confidence", 0.7)),
+                    confidence=derive_confidence(evidence, asserted),
+                    evidence=[e.model_dump() for e in evidence],
                 )
             except (json.JSONDecodeError, ValueError) as e:
                 logger.debug("Could not parse structured output for phase '%s': %s", phase.id, e)
 
-        # Fallback: use raw response text
+        # Fallback: use raw response text. Prose with no structured evidence
+        # gets the unsupported-evidence cap, not a confident-looking 0.7.
         return SkillOutput(
             skill_id=phase.skill_name,
             phase_id=phase.id,
@@ -438,7 +456,7 @@ class PlanRuntime:
             findings={"raw_response": response[:2000]},
             evidence_summary=response[:2000],
             actions_taken=tools_called,
-            confidence=0.7,
+            confidence=derive_confidence([], 0.7),
         )
 
     def _compress_prior_outputs(self, outputs: dict[str, SkillOutput]) -> str:
@@ -705,6 +723,23 @@ class PlanRuntime:
             logger.debug("Could not inject skill examples for phase '%s'", phase.id, exc_info=True)
 
         parts.append("\nInvestigate and produce structured findings.")
+        produces = ", ".join(f'"{p}": ...' for p in (phase.produces or []))
+        parts.append(
+            "\n## Output format\n"
+            "End your answer with one fenced ```json block:\n"
+            "```json\n"
+            "{\n"
+            f'  "findings": {{{produces}}},\n'
+            '  "evidence_summary": "two or three sentences",\n'
+            '  "evidence": [{"observation": "what you saw", "kind": "metric|log|event|resource|change|trace", '
+            '"source": "the tool or query it came from", "stance": "supports|contradicts|context"}],\n'
+            '  "alternatives_considered": ["causes you ruled out, and why"],\n'
+            '  "confidence": 0.0,\n'
+            '  "open_questions": []\n'
+            "}\n"
+            "```\n"
+            "Confidence is derived from the evidence you list; claims without evidence count for little."
+        )
 
         return "\n".join(parts)
 

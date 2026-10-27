@@ -111,10 +111,13 @@ def create_dashboard(
     if not visibility:
         visibility = "team" if view_type != "custom" else "private"
 
+    # The view is written after this turn ends, so this result cannot claim it
+    # is saved; the UI opens it once the save succeeds, or shows an error.
     message = (
-        f"Created view '{title}' with ID {view_id}. "
-        f"The dashboard is now saved and visible to the user. "
-        f"Tell the user: 'Here is your dashboard. Would you like any changes?'"
+        f"Dashboard '{title}' (ID {view_id}) will be saved when your reply finishes, "
+        f"and it opens for the user once it is saved. "
+        f"Tell the user the dashboard is being saved and ask whether they would like any changes. "
+        f"Do not say it is already saved."
     )
     if advisory:
         notes = "\n".join(f"- {a}" for a in advisory[:6])
@@ -235,6 +238,13 @@ def namespace_summary(namespace: str):
     """
     from .errors import ToolError
     from .k8s_client import get_apps_client, get_core_client, safe
+    from .k8s_tools.validators import _validate_k8s_namespace
+
+    if not namespace:
+        return "Error: namespace is required."
+    err = _validate_k8s_namespace(namespace)
+    if err:
+        return err
 
     core = get_core_client()
 
@@ -254,13 +264,31 @@ def namespace_summary(namespace: str):
         if cs.state and cs.state.waiting and cs.state.waiting.reason == "CrashLoopBackOff"
     )
 
+    # A list that fails (often RBAC) is reported as unknown, never as zero: "0
+    # secrets" and "could not read secrets" are different answers.
+    unreadable: dict[str, str] = {}
+
+    def _count(resource: str, call) -> int | None:
+        try:
+            result = call()
+        except Exception as exc:  # optional APIs (Routes) may be absent
+            unreadable[resource] = str(exc)[:120]
+            return None
+        if isinstance(result, ToolError):
+            unreadable[resource] = str(result)[:120]
+            return None
+        items = result.get("items", []) if isinstance(result, dict) else result.items
+        return len(items)
+
     # Deployment counts
     apps = get_apps_client()
     deps_result = safe(lambda: apps.list_namespaced_deployment(namespace, limit=500))
-    total_deps = 0
+    total_deps: int | None = None
     healthy_deps = 0
     degraded_deps = 0
-    if not isinstance(deps_result, ToolError):
+    if isinstance(deps_result, ToolError):
+        unreadable["deployments"] = str(deps_result)[:120]
+    else:
         total_deps = len(deps_result.items)
         for dep in deps_result.items:
             ready = dep.status.ready_replicas or 0
@@ -270,96 +298,98 @@ def namespace_summary(namespace: str):
             elif ready < desired:
                 degraded_deps += 1
 
-    # Additional resource counts
-    sts_result = safe(lambda: apps.list_namespaced_stateful_set(namespace, limit=500))
-    sts_count = 0 if isinstance(sts_result, ToolError) else len(sts_result.items)
+    sts_count = _count("statefulsets", lambda: safe(lambda: apps.list_namespaced_stateful_set(namespace, limit=500)))
+    ds_count = _count("daemonsets", lambda: safe(lambda: apps.list_namespaced_daemon_set(namespace, limit=500)))
+    svc_count = _count("services", lambda: safe(lambda: core.list_namespaced_service(namespace, limit=500)))
+    cm_count = _count("configmaps", lambda: safe(lambda: core.list_namespaced_config_map(namespace, limit=500)))
+    secret_count = _count("secrets", lambda: safe(lambda: core.list_namespaced_secret(namespace, limit=500)))
+    pvc_count = _count("pvcs", lambda: safe(lambda: core.list_namespaced_persistent_volume_claim(namespace, limit=500)))
 
-    ds_result = safe(lambda: apps.list_namespaced_daemon_set(namespace, limit=500))
-    ds_count = 0 if isinstance(ds_result, ToolError) else len(ds_result.items)
-
-    svc_result = safe(lambda: core.list_namespaced_service(namespace, limit=500))
-    svc_count = 0 if isinstance(svc_result, ToolError) else len(svc_result.items)
-
-    cm_result = safe(lambda: core.list_namespaced_config_map(namespace, limit=500))
-    cm_count = 0 if isinstance(cm_result, ToolError) else len(cm_result.items)
-
-    secret_result = safe(lambda: core.list_namespaced_secret(namespace, limit=500))
-    secret_count = 0 if isinstance(secret_result, ToolError) else len(secret_result.items)
-
-    pvc_result = safe(lambda: core.list_namespaced_persistent_volume_claim(namespace, limit=500))
-    pvc_count = 0 if isinstance(pvc_result, ToolError) else len(pvc_result.items)
-
-    # Routes (OpenShift) and Ingresses
-    route_count = 0
-    try:
+    def _routes():
         from .k8s_client import get_custom_client
 
         custom = get_custom_client()
-        routes = safe(lambda: custom.list_namespaced_custom_object("route.openshift.io", "v1", namespace, "routes"))
-        if not isinstance(routes, ToolError):
-            route_count = len(routes.get("items", []))
-    except Exception:
-        logger.debug("Suppressed exception", exc_info=True)
+        return safe(lambda: custom.list_namespaced_custom_object("route.openshift.io", "v1", namespace, "routes"))
 
-    ingress_count = 0
-    try:
+    def _ingresses():
         from .k8s_client import get_networking_client
 
         networking = get_networking_client()
-        ingresses = safe(lambda: networking.list_namespaced_ingress(namespace, limit=500))
-        if not isinstance(ingresses, ToolError):
-            ingress_count = len(ingresses.items)
-    except Exception:
-        logger.debug("Suppressed exception", exc_info=True)
+        return safe(lambda: networking.list_namespaced_ingress(namespace, limit=500))
+
+    route_count = _count("routes", _routes)
+    ingress_count = _count("ingresses", _ingresses)
 
     # Warning events (last hour)
-    events_result = safe(lambda: core.list_namespaced_event(namespace, field_selector="type=Warning"))
-    warning_count = 0
-    if not isinstance(events_result, ToolError):
-        warning_count = len(events_result.items)
+    warning_count = _count(
+        "events", lambda: safe(lambda: core.list_namespaced_event(namespace, field_selector="type=Warning"))
+    )
+
+    def _n(value: int | None) -> str:
+        return "unknown" if value is None else str(value)
 
     # Build text summary
+    deployments_line = (
+        "  Deployments: unknown (could not read)\n"
+        if total_deps is None
+        else f"  Deployments: {total_deps} total — {healthy_deps} healthy, {degraded_deps} degraded\n"
+    )
     text = (
         f"Namespace '{namespace}' summary:\n"
         f"  Pods: {total_pods} total — {running} running, {pending} pending, "
         f"{failed} failed, {crashloop} crashlooping\n"
-        f"  Deployments: {total_deps} total — {healthy_deps} healthy, "
-        f"{degraded_deps} degraded\n"
-        f"  StatefulSets: {sts_count} | DaemonSets: {ds_count} | "
-        f"Services: {svc_count} | ConfigMaps: {cm_count}\n"
-        f"  Routes: {route_count} | Ingresses: {ingress_count} | "
-        f"Secrets: {secret_count} | PVCs: {pvc_count}\n"
-        f"  Warning events: {warning_count}"
+        f"{deployments_line}"
+        f"  StatefulSets: {_n(sts_count)} | DaemonSets: {_n(ds_count)} | "
+        f"Services: {_n(svc_count)} | ConfigMaps: {_n(cm_count)}\n"
+        f"  Routes: {_n(route_count)} | Ingresses: {_n(ingress_count)} | "
+        f"Secrets: {_n(secret_count)} | PVCs: {_n(pvc_count)}\n"
+        f"  Warning events: {_n(warning_count)}"
     )
+    if unreadable:
+        text += "\n  Could not read (shown as unknown, not zero): " + "; ".join(
+            f"{name}: {why}" for name, why in unreadable.items()
+        )
 
-    # Build resource counts component (clickable summary cards)
-    resource_counts = {
-        "kind": "resource_counts",
-        "title": f"{namespace} Resources",
-        "namespace": namespace,
-        "items": [
-            {"resource": "pods", "count": total_pods, "gvr": "v1~pods", "status": "error" if failed > 0 else "healthy"},
+    # Build resource counts component (clickable summary cards). Unreadable
+    # resources are left out of the cards rather than shown as 0.
+    count_items: list[dict] = [
+        {"resource": "pods", "count": total_pods, "gvr": "v1~pods", "status": "error" if failed > 0 else "healthy"},
+    ]
+    if total_deps is not None:
+        count_items.append(
             {
                 "resource": "deployments",
                 "count": total_deps,
                 "gvr": "apps~v1~deployments",
                 "status": "warning" if degraded_deps > 0 else "healthy",
-            },
-            {"resource": "statefulsets", "count": sts_count, "gvr": "apps~v1~statefulsets"},
-            {"resource": "daemonsets", "count": ds_count, "gvr": "apps~v1~daemonsets"},
-            {"resource": "services", "count": svc_count, "gvr": "v1~services"},
-            {"resource": "routes", "count": route_count, "gvr": "route.openshift.io~v1~routes"},
-            {"resource": "ingresses", "count": ingress_count, "gvr": "networking.k8s.io~v1~ingresses"},
-            {"resource": "secrets", "count": secret_count, "gvr": "v1~secrets"},
-            {"resource": "pvcs", "count": pvc_count, "gvr": "v1~persistentvolumeclaims"},
-            {"resource": "configmaps", "count": cm_count, "gvr": "v1~configmaps"},
+            }
+        )
+    for resource, count, gvr in (
+        ("statefulsets", sts_count, "apps~v1~statefulsets"),
+        ("daemonsets", ds_count, "apps~v1~daemonsets"),
+        ("services", svc_count, "v1~services"),
+        ("routes", route_count, "route.openshift.io~v1~routes"),
+        ("ingresses", ingress_count, "networking.k8s.io~v1~ingresses"),
+        ("secrets", secret_count, "v1~secrets"),
+        ("pvcs", pvc_count, "v1~persistentvolumeclaims"),
+        ("configmaps", cm_count, "v1~configmaps"),
+    ):
+        if count is not None:
+            count_items.append({"resource": resource, "count": count, "gvr": gvr})
+    if warning_count is not None:
+        count_items.append(
             {
                 "resource": "events",
                 "count": warning_count,
                 "gvr": "v1~events",
                 "status": "warning" if warning_count > 0 else "healthy",
-            },
-        ],
+            }
+        )
+    resource_counts = {
+        "kind": "resource_counts",
+        "title": f"{namespace} Resources",
+        "namespace": namespace,
+        "items": count_items,
     }
 
     # Build metric cards — only trends that ADD info beyond the resource counts row
@@ -399,10 +429,10 @@ def namespace_summary(namespace: str):
             # we know; with "or vector(0)" the card would read 0 on any cluster.
             "kind": "metric_card",
             "title": "Warning Events",
-            "value": str(warning_count),
-            "status": "healthy" if warning_count == 0 else "warning",
-            "description": "when this dashboard was built",
-            "color": "#f59e0b" if warning_count > 0 else "#10b981",
+            "value": _n(warning_count),
+            "status": "warning" if warning_count is None or warning_count > 0 else "healthy",
+            "description": "could not read events" if warning_count is None else "when this dashboard was built",
+            "color": "#64748b" if warning_count is None else ("#f59e0b" if warning_count > 0 else "#10b981"),
             "link": f"/r/v1~events?ns={namespace}",
         },
     ]

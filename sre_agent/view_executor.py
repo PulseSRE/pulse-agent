@@ -17,6 +17,8 @@ logger = logging.getLogger("pulse_agent.view_executor")
 _MAX_WIDGETS = 6
 _TOOL_TIMEOUT = 10
 _STALENESS_THRESHOLD = 1800
+# Tools report failure as a returned string with one of these prefixes.
+_TOOL_ERROR_PREFIXES = ("Error", "Failed")
 _executor = concurrent.futures.ThreadPoolExecutor(max_workers=6, thread_name_prefix="view")
 atexit.register(_executor.shutdown, wait=False)
 
@@ -26,8 +28,27 @@ def _resolve_tool(tool_name: str) -> Any:
     return TOOL_REGISTRY.get(tool_name)
 
 
-def _record_tool_call(tool_name: str, args: dict, result: Any, item_id: str) -> None:
-    """Fire-and-forget tool usage recording for audit trail."""
+def _record_tool_call(
+    tool_name: str,
+    args: dict,
+    result: Any,
+    item_id: str,
+    *,
+    duration_ms: int = 0,
+    error: str | None = None,
+) -> None:
+    """Fire-and-forget tool usage recording for audit trail.
+
+    Records what actually happened: a tool that raised, or returned one of the
+    ``safe()`` error strings, is an error with its message, not a success.
+    """
+    if error is None:
+        from .errors import ToolError
+
+        if isinstance(result, ToolError):
+            error = str(result)[:500]
+        elif isinstance(result, str) and result.startswith(_TOOL_ERROR_PREFIXES):
+            error = result[:500]
     try:
         from .tool_usage import record_tool_call
 
@@ -38,10 +59,10 @@ def _record_tool_call(tool_name: str, args: dict, result: Any, item_id: str) -> 
             turn_number=0,
             agent_mode="view_executor",
             tool_category=None,
-            status="success",
-            error_message=None,
+            status="error" if error else "success",
+            error_message=error,
             error_category=None,
-            duration_ms=0,
+            duration_ms=duration_ms,
             result_bytes=len(str(result)[:200]) if result else 0,
             requires_confirmation=False,
             was_confirmed=None,
@@ -50,13 +71,48 @@ def _record_tool_call(tool_name: str, args: dict, result: Any, item_id: str) -> 
         logger.debug("Failed to record tool call %s", tool_name, exc_info=True)
 
 
+# How each evidence stance is shown. The stance word is also in the detail text,
+# so the meaning never rests on colour alone.
+_STANCE_STATUS = {"supports": "healthy", "contradicts": "warning", "context": "unknown"}
+
+
+def _evidence_items(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    """Evidence as status_list items, preferring the structured form."""
+    items: list[dict[str, Any]] = []
+    detail = metadata.get("evidence_detail") or []
+    if isinstance(detail, list) and detail:
+        for ev in detail[:10]:
+            if not isinstance(ev, dict) or not str(ev.get("observation", "")).strip():
+                continue
+            raw_stance = str(ev.get("stance") or "")
+            stance = raw_stance if raw_stance in _STANCE_STATUS else "supports"
+            parts: list[str] = [stance]
+            if ev.get("kind") and ev.get("kind") != "unknown":
+                parts.append(str(ev["kind"]))
+            parts.append(f"source: {ev['source']}" if ev.get("source") else "source not recorded")
+            items.append(
+                {"name": str(ev["observation"])[:300], "status": _STANCE_STATUS[stance], "detail": " · ".join(parts)}
+            )
+        return items
+    for text in (metadata.get("evidence") or [])[:10]:
+        if isinstance(text, str) and text.strip():
+            items.append({"name": text.strip()[:300], "status": "unknown", "detail": "source not recorded"})
+    return items
+
+
 def _build_header_widgets(item: dict[str, Any]) -> list[dict[str, Any]]:
-    """Build deterministic header widgets: confidence badge + investigation summary."""
+    """Build deterministic header widgets: confidence, findings, evidence, alternatives.
+
+    The evidence is the reason to trust (or not trust) the suspected cause, so it
+    is shown with the cause rather than left in metadata.
+    """
     header: list[dict[str, Any]] = []
     metadata = item.get("metadata", {})
 
-    confidence = metadata.get("investigation_confidence", 0)
-    if confidence:
+    # A confidence of 0 is a real answer ("nothing supports this") and is shown;
+    # only a missing value is skipped.
+    confidence = metadata.get("investigation_confidence")
+    if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
         header.append(
             {
                 "kind": "confidence_badge",
@@ -84,6 +140,24 @@ def _build_header_widgets(item: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
 
+    evidence = _evidence_items(metadata)
+    if evidence:
+        header.append({"kind": "status_list", "title": "Evidence", "props": {"items": evidence}})
+
+    alternatives = [str(a).strip() for a in (metadata.get("alternatives_considered") or []) if str(a).strip()]
+    if alternatives:
+        header.append(
+            {
+                "kind": "info_card_grid",
+                "title": "Alternatives Considered",
+                "props": {
+                    "cards": [
+                        {"label": f"Alternative {i}", "value": a[:300]} for i, a in enumerate(alternatives[:5], 1)
+                    ]
+                },
+            }
+        )
+
     return header
 
 
@@ -107,10 +181,16 @@ def _execute_tool_widget(
         logger.warning("Widget %s has non-dict args, skipping", widget.get("title", ""))
         return None
 
-    with user_token_context(user_token):
-        result = tool_obj.call(args)
-
-    _record_tool_call(tool_name, args, result, item_id)
+    started = time.monotonic()
+    try:
+        with user_token_context(user_token):
+            result = tool_obj.call(args)
+    except Exception as exc:
+        _record_tool_call(
+            tool_name, args, None, item_id, duration_ms=int((time.monotonic() - started) * 1000), error=str(exc)[:500]
+        )
+        raise
+    _record_tool_call(tool_name, args, result, item_id, duration_ms=int((time.monotonic() - started) * 1000))
 
     title = widget.get("title", "")
 

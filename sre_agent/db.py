@@ -282,8 +282,9 @@ def save_view(
     trigger_source: str = "user",
     finding_id: str | None = None,
     visibility: str = "private",
+    reuse_by_title: bool = True,
 ) -> str | None:
-    """Save a new view for a user. Returns the view ID."""
+    """Save a view for a user. Returns the view ID, or None if nothing was written."""
     from .repositories.view_repo import get_view_repo
 
     return get_view_repo().save_view(
@@ -299,6 +300,7 @@ def save_view(
         trigger_source=trigger_source,
         finding_id=finding_id,
         visibility=visibility,
+        reuse_by_title=reuse_by_title,
     )
 
 
