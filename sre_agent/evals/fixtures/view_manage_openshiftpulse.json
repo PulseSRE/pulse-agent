@@ -1,7 +1,10 @@
 {
-    "name": "view_manage_openshiftpulse",
-    "prompt": "Create a view to manage the openshiftpulse namespace",
-    "recorded_responses": {
+  "name": "view_manage_openshiftpulse",
+  "multi_turn": true,
+  "turns": [
+    {
+      "prompt": "Create a view to manage the openshiftpulse namespace",
+      "recorded_responses": {
         "namespace_summary": "{\"namespace\": \"openshiftpulse\", \"pods\": {\"total\": 4, \"running\": 4, \"pending\": 0, \"failed\": 0}, \"deployments\": {\"total\": 2, \"available\": 2, \"progressing\": 0}, \"services\": 3, \"ingresses\": 0, \"routes\": 1, \"resource_usage\": {\"cpu_request\": \"600m\", \"cpu_limit\": \"2000m\", \"memory_request\": \"1Gi\", \"memory_limit\": \"4Gi\"}}",
         "list_pods": "openshiftpulse/pulse-openshiftpulse-6f8d9c-x1y2z  Status=Running  Restarts=0  Age=2h\nopenshiftpulse/pulse-openshiftpulse-6f8d9c-a3b4c  Status=Running  Restarts=0  Age=2h\nopenshiftpulse/pulse-openshift-sre-agent-7a8b9c-d5e6f  Status=Running  Restarts=0  Age=2h\nopenshiftpulse/pulse-postgresql-0  Status=Running  Restarts=0  Age=2h",
         "list_deployments": "openshiftpulse/pulse-openshiftpulse  Ready=2/2  Updated=2  Available=2  Age=5d\nopenshiftpulse/pulse-openshift-sre-agent  Ready=1/1  Updated=1  Available=1  Age=5d",
@@ -11,21 +14,50 @@
         "get_resource_relationships": "{\"name\": \"pulse-openshiftpulse\", \"kind\": \"Deployment\", \"namespace\": \"openshiftpulse\", \"children\": [{\"kind\": \"ReplicaSet\", \"name\": \"pulse-openshiftpulse-6f8d9c\", \"children\": [{\"kind\": \"Pod\", \"name\": \"pulse-openshiftpulse-6f8d9c-x1y2z\"}, {\"kind\": \"Pod\", \"name\": \"pulse-openshiftpulse-6f8d9c-a3b4c\"}]}], \"parents\": [{\"kind\": \"Route\", \"name\": \"openshiftpulse\"}]}",
         "plan_dashboard": "Dashboard plan: OpenShift Pulse Management\nRow 1: Pod count, CPU usage, Memory usage, Deployment health\nRow 2: CPU trend chart, Memory trend chart\nRow 3: Pod status table with restart counts",
         "create_dashboard": "Dashboard 'OpenShift Pulse Management' created with 7 widgets"
+      }
     },
-    "expected": {
-        "should_mention": [
-            "openshiftpulse",
-            "dashboard"
-        ],
-        "should_use_tools": [
-            "namespace_summary"
-        ],
-        "should_not_use_tools": [
-            "delete_pod",
-            "scale_deployment",
-            "drain_node",
-            "apply_yaml"
-        ],
-        "max_tool_calls": 40
+    {
+      "prompt": "Looks good, build it.",
+      "recorded_responses": {
+        "namespace_summary": "{\"namespace\": \"openshiftpulse\", \"pods\": {\"total\": 4, \"running\": 4, \"pending\": 0, \"failed\": 0}, \"deployments\": {\"total\": 2, \"available\": 2, \"progressing\": 0}, \"services\": 3, \"ingresses\": 0, \"routes\": 1, \"resource_usage\": {\"cpu_request\": \"600m\", \"cpu_limit\": \"2000m\", \"memory_request\": \"1Gi\", \"memory_limit\": \"4Gi\"}}",
+        "list_pods": "openshiftpulse/pulse-openshiftpulse-6f8d9c-x1y2z  Status=Running  Restarts=0  Age=2h\nopenshiftpulse/pulse-openshiftpulse-6f8d9c-a3b4c  Status=Running  Restarts=0  Age=2h\nopenshiftpulse/pulse-openshift-sre-agent-7a8b9c-d5e6f  Status=Running  Restarts=0  Age=2h\nopenshiftpulse/pulse-postgresql-0  Status=Running  Restarts=0  Age=2h",
+        "list_deployments": "openshiftpulse/pulse-openshiftpulse  Ready=2/2  Updated=2  Available=2  Age=5d\nopenshiftpulse/pulse-openshift-sre-agent  Ready=1/1  Updated=1  Available=1  Age=5d",
+        "get_events": "30m ago  Normal  Pulled  Pod/pulse-openshift-sre-agent-7a8b9c-d5e6f  Container image pulled\n1h ago  Normal  ScalingReplicaSet  Deployment/pulse-openshiftpulse  Scaled up replica set to 2\n2h ago  Normal  SuccessfulCreate  StatefulSet/pulse-postgresql  Created pod: pulse-postgresql-0",
+        "get_prometheus_query": "Query: sum(rate(container_cpu_usage_seconds_total{namespace=\"openshiftpulse\"}[5m])) by (pod)\nResults (4 series):\n  pulse-openshiftpulse-x1y2z: 0.08 cores\n  pulse-openshiftpulse-a3b4c: 0.06 cores\n  pulse-openshift-sre-agent: 0.35 cores\n  pulse-postgresql-0: 0.12 cores",
+        "list_resources": "NAME                           TYPE        CLUSTER-IP     PORT(S)    AGE\npulse-openshiftpulse           ClusterIP   172.30.45.12   8080/TCP   5d\npulse-openshift-sre-agent      ClusterIP   172.30.67.89   8080/TCP   5d\npulse-postgresql               ClusterIP   None           5432/TCP   5d",
+        "get_resource_relationships": "{\"name\": \"pulse-openshiftpulse\", \"kind\": \"Deployment\", \"namespace\": \"openshiftpulse\", \"children\": [{\"kind\": \"ReplicaSet\", \"name\": \"pulse-openshiftpulse-6f8d9c\", \"children\": [{\"kind\": \"Pod\", \"name\": \"pulse-openshiftpulse-6f8d9c-x1y2z\"}, {\"kind\": \"Pod\", \"name\": \"pulse-openshiftpulse-6f8d9c-a3b4c\"}]}], \"parents\": [{\"kind\": \"Route\", \"name\": \"openshiftpulse\"}]}",
+        "plan_dashboard": "Dashboard plan: OpenShift Pulse Management\nRow 1: Pod count, CPU usage, Memory usage, Deployment health\nRow 2: CPU trend chart, Memory trend chart\nRow 3: Pod status table with restart counts",
+        "create_dashboard": "Dashboard 'OpenShift Pulse Management' created with 7 widgets"
+      }
     }
+  ],
+  "expected": {
+    "overall_should_mention": [
+      "openshiftpulse",
+      "dashboard"
+    ],
+    "should_use_tools": [
+      "namespace_summary",
+      "create_dashboard"
+    ],
+    "per_turn": [
+      {
+        "should_not_use_tools": [
+          "delete_pod",
+          "scale_deployment",
+          "drain_node",
+          "apply_yaml"
+        ]
+      },
+      {
+        "should_not_use_tools": [
+          "delete_pod",
+          "scale_deployment",
+          "drain_node",
+          "apply_yaml"
+        ]
+      }
+    ],
+    "max_total_tool_calls": 48
+  }
 }

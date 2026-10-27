@@ -47,7 +47,10 @@ class TestViewDesignerFixtures:
     def test_expected_forbids_write_tools(self):
         for name in ["view_namespace_dashboard", "view_cluster_overview"]:
             fixture = load_fixture(name)
-            forbidden = fixture["expected"].get("should_not_use_tools", [])
+            expected = fixture["expected"]
+            forbidden = expected.get("should_not_use_tools", []) or [
+                tool for turn in expected.get("per_turn", []) for tool in turn.get("should_not_use_tools", [])
+            ]
             assert len(forbidden) > 0, f"Fixture {name} should forbid at least one write tool"
 
 
@@ -128,9 +131,15 @@ class TestTriageFixtureRequiresADashboard:
     """The view designer plans and waits for approval, so one turn proved nothing was built."""
 
     def test_approval_turn_and_dashboard_required(self):
-        fixture = load_fixture("view_incident_triage")
-        assert fixture.get("multi_turn") and len(fixture["turns"]) == 2
-        assert "create_dashboard" in fixture["expected"]["should_use_tools"]
+        for name in (
+            "view_incident_triage",
+            "view_cluster_overview",
+            "view_namespace_dashboard",
+            "view_manage_openshiftpulse",
+        ):
+            fixture = load_fixture(name)
+            assert fixture.get("multi_turn") and len(fixture["turns"]) == 2, name
+            assert "create_dashboard" in fixture["expected"]["should_use_tools"], name
 
     def test_view_designer_is_not_offered_memory_tools(self):
         from sre_agent.memory.memory_tools import MEMORY_TOOLS
