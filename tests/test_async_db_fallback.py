@@ -114,6 +114,7 @@ class TestHandoffProcessorFallback:
         mock_repo.async_get_pending_handoffs = AsyncMock(
             return_value=[
                 {
+                    "id": 7,
                     "details": '{"target": "security_agent", "namespace": "ns1", "context": "test"}',
                     "namespace": "ns1",
                 }
@@ -132,7 +133,7 @@ class TestHandoffProcessorFallback:
         ):
             _run(process_handoffs(mock_monitor))
 
-        mock_repo.delete_processed_handoffs.assert_called_once()
+        mock_repo.delete_processed_handoffs.assert_called_once_with([7])
 
 
 class TestInvestigationRunnerFallback:

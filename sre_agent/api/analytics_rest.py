@@ -201,7 +201,9 @@ def _compute_cost_stats(days: int) -> dict:
     trends comparing current period vs previous period, breakdown by agent_mode,
     and estimated dollar cost using Vertex AI pricing.
     """
-    from ..observability import TOKEN_PRICES
+    from ..observability import token_prices
+
+    TOKEN_PRICES = token_prices()
 
     INPUT_PRICE = TOKEN_PRICES["input"]
     OUTPUT_PRICE = TOKEN_PRICES["output"]
@@ -376,8 +378,10 @@ def get_budget_status(_token: None = Depends(verify_token)):
 
     cost = None
     if settings.cost_budget_usd > 0:
-        from ..observability import TOKEN_PRICES
+        from ..observability import token_prices
         from ..repositories import get_analytics_repo
+
+        TOKEN_PRICES = token_prices()
 
         totals = get_analytics_repo().fetch_token_totals(1)
         if totals and totals["total_incidents"] > 0:

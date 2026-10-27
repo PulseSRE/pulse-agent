@@ -348,7 +348,7 @@ async def _run_agent_ws_inner(
 
             manager = get_manager()
             if manager:
-                manager.start_turn()
+                manager.start_turn(ws_id)
         except Exception:
             logger.debug("Memory manager init failed", exc_info=True)
 
@@ -642,8 +642,8 @@ async def _run_agent_ws_inner(
     if manager and hasattr(manager, "finish_turn") and user_query:
         try:
             for t in session_tools:
-                manager.record_tool_call(t, {})
-            manager.finish_turn(user_query, full_response)
+                manager.record_tool_call(t, {}, session_id=ws_id)
+            manager.finish_turn(user_query, full_response, session_id=ws_id)
         except Exception:
             logger.debug("Memory finish_turn failed", exc_info=True)
 
@@ -749,14 +749,10 @@ def _make_receive_loop(
                             approved = False
                         future.set_result(approved)
                         logger.info("Confirmation received: approved=%s nonce=%s", approved, received_nonce[:8])
-                        try:
-                            from ..memory import get_manager
-
-                            manager = get_manager()
-                            if manager and approved:
-                                manager.update_last_outcome(True)
-                        except Exception:
-                            logger.debug("Failed to record confirmation as positive feedback", exc_info=True)
+                        # Not recorded as feedback. Approving a write mid-turn
+                        # says the person agrees to try it, not that the
+                        # problem was resolved, and it used to mark the
+                        # *previous* turn (of any session) as resolved.
                     _pending_nonces.pop(session_id, None)
                     continue
 
@@ -772,7 +768,7 @@ def _make_receive_loop(
 
                         manager = get_manager()
                         if manager:
-                            result = manager.update_last_outcome(resolved)
+                            result = manager.update_last_outcome(resolved, session_id=session_id)
                             await websocket.send_json(
                                 {
                                     "type": "feedback_ack",

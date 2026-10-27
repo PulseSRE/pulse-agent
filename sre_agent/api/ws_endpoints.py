@@ -47,6 +47,20 @@ def _is_turn_start(message: dict) -> bool:
     return not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content or [])
 
 
+def _persist_multi_skill_turn(session_id: str, content: str, full_response: str, *, is_first_turn: bool) -> None:
+    """Save a multi-skill turn to chat history, as the single-skill path does.
+
+    Every multi-skill branch used to `continue` straight past save_turn, so
+    those turns vanished from resumed sessions and from search_conversations.
+    """
+    try:
+        from ..chat_history import save_turn
+
+        save_turn(session_id, content, full_response, is_first_turn=is_first_turn)
+    except Exception:
+        logger.debug("Failed to persist multi-skill turn", exc_info=True)
+
+
 def _cap_messages(messages: list[dict], max_msgs: int) -> None:
     """Cap conversation history to prevent unbounded memory growth.
 
@@ -648,6 +662,10 @@ async def websocket_auto_agent(websocket: WebSocket):
                             logger.warning("Both skill outputs empty — skipping synthesis")
                             full_response = "Both skills returned empty results. Please try rephrasing your query."
                             messages.append({"role": "assistant", "content": full_response})
+                            _cap_messages(messages, get_settings().server.max_conversation_messages)
+                            _persist_multi_skill_turn(
+                                session_id, content, full_response, is_first_turn=(turn_counter == 1)
+                            )
                             await websocket.send_json({"type": "text_delta", "text": full_response})
                             await websocket.send_json(
                                 {"type": "done", "full_response": full_response, "skill_name": intent}
@@ -663,6 +681,10 @@ async def websocket_auto_agent(websocket: WebSocket):
                             )
                             full_response = f"*Note: {empty_skill} skill did not return results.*\n\n{active_output}"
                             messages.append({"role": "assistant", "content": full_response})
+                            _cap_messages(messages, get_settings().server.max_conversation_messages)
+                            _persist_multi_skill_turn(
+                                session_id, content, full_response, is_first_turn=(turn_counter == 1)
+                            )
                             await websocket.send_json({"type": "text_delta", "text": full_response})
                             await websocket.send_json(
                                 {
@@ -697,6 +719,8 @@ async def websocket_auto_agent(websocket: WebSocket):
                             )
                         full_response = synthesis.unified_response
                         messages.append({"role": "assistant", "content": full_response})
+                        _cap_messages(messages, get_settings().server.max_conversation_messages)
+                        _persist_multi_skill_turn(session_id, content, full_response, is_first_turn=(turn_counter == 1))
 
                         # Forward buffered components from both skills
                         for comp in parallel_result.primary_components + parallel_result.secondary_components:

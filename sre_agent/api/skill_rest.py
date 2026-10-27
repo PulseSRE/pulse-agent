@@ -588,6 +588,55 @@ async def list_mcp_servers(_auth=Depends(verify_token)):
     }
 
 
+def _set_toolsets_on_operator_cr(toolsets: list[str]) -> dict | None:
+    """Set the toolsets on the OpenShiftPulse resource. None when there is no operator CR."""
+    from kubernetes import client as k8s
+    from kubernetes.client.rest import ApiException
+
+    from ..k8s_client import _load_k8s
+
+    _load_k8s()
+    api = k8s.CustomObjectsApi()
+    ns = _detect_namespace()
+    value = ",".join(toolsets)
+    try:
+        crs = api.list_namespaced_custom_object("pulse.ai", "v1alpha1", ns, "openshiftpulses").get("items", [])
+    except ApiException as e:
+        if e.status in (403, 404):
+            return None  # no operator here, or not allowed to look: use the Deployment path
+        raise
+    if not crs:
+        return None
+    name = crs[0]["metadata"]["name"]
+    try:
+        api.patch_namespaced_custom_object(
+            "pulse.ai",
+            "v1alpha1",
+            ns,
+            "openshiftpulses",
+            name,
+            {"spec": {"agent": {"mcp": {"toolsets": value}}}},
+        )
+    except ApiException as e:
+        if e.status == 403:
+            patch = '{"spec":{"agent":{"mcp":{"toolsets":"' + value + '"}}}}'
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The Pulse Operator manages the MCP server, and the agent is not allowed to change its "
+                    f"configuration. Ask a cluster admin to run: oc patch openshiftpulse {name} -n {ns} "
+                    f"--type=merge -p '{patch}'"
+                ),
+            ) from e
+        raise
+    return {
+        "status": "updated",
+        "toolsets": toolsets,
+        "managedBy": "pulse-operator",
+        "detail": f"OpenShiftPulse {ns}/{name} updated; the operator will roll the MCP server.",
+    }
+
+
 @router.post("/admin/mcp/toolsets")
 async def update_mcp_toolsets(body: dict, _auth=Depends(require_admin)):
     """Update MCP server toolsets by patching the deployment and reconnecting.
@@ -606,7 +655,16 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(require_admin)):
             detail=f"Invalid toolsets: {invalid}. Valid: {_MCP_AVAILABLE_TOOLSETS}",
         )
 
-    # Patch the MCP deployment args
+    # Under the Pulse Operator the MCP Deployment's args are rendered from
+    # OpenShiftPulse.spec.agent.mcp.toolsets on every reconcile, so patching the
+    # Deployment (below) is reverted within seconds — and the Deployment is
+    # named "<cr>-mcp-server", which the lookup below never matched. Change the
+    # CR instead when one exists.
+    operator_result = _set_toolsets_on_operator_cr(toolsets)
+    if operator_result is not None:
+        return operator_result
+
+    # Patch the MCP deployment args (installs without the operator)
     try:
         from ..k8s_client import get_apps_client
 

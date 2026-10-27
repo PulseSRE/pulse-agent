@@ -84,11 +84,12 @@ async def process_handoffs(monitor: ClusterMonitor) -> None:
             except Exception as e:
                 logger.error("Handoff SRE investigation failed: %s", e)
 
-    if rows:
+    processed_ids = [row["id"] for row in rows if row.get("id") is not None]
+    if processed_ids:
         try:
-            await repo.async_delete_processed_handoffs(cutoff)
+            await repo.async_delete_processed_handoffs(processed_ids)
         except _ASYNC_DB_ERRORS:
             try:
-                repo.delete_processed_handoffs(cutoff)
+                repo.delete_processed_handoffs(processed_ids)
             except Exception as e:
                 logger.error("Failed to clean up handoff requests: %s", e)

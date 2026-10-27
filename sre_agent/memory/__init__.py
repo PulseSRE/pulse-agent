@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from dataclasses import dataclass, field
 
 from .evaluation import evaluate_interaction
 from .memory_tools import MEMORY_TOOLS, set_store
@@ -43,20 +44,43 @@ def is_memory_enabled() -> bool:
     return get_settings().agent.memory
 
 
+_DEFAULT_SESSION = "default"
+
+
+@dataclass
+class _TurnState:
+    """One chat session's turn, kept so later feedback scores the right turn."""
+
+    turn_start: float = 0
+    tool_calls: list[dict] = field(default_factory=list)
+    rejected_count: int = 0
+    last_incident_id: int | None = None
+    prev_tool_calls: list[dict] = field(default_factory=list)
+    prev_rejected_count: int = 0
+    prev_turn_duration: float = 0
+
+
 class MemoryManager:
     """Orchestrates the self-improving agent layer."""
+
+    # Sessions whose turn state is kept for feedback; oldest dropped beyond this.
+    _MAX_SESSIONS = 500
 
     def __init__(self, db_path: str | None = None):
         self.store = IncidentStore(db_path)
         set_store(self.store)
-        self._turn_start: float = 0
-        self._tool_calls: list[dict] = []
-        self._rejected_count: int = 0
-        self._last_incident_id: int | None = None
-        # Preserved copies for feedback after a new turn starts
-        self._prev_tool_calls: list[dict] = []
-        self._prev_rejected_count: int = 0
-        self._prev_turn_duration: float = 0
+        # Turn state per chat session. It was one set of fields on this
+        # process-wide object, so a thumbs-up in one session scored whichever
+        # session's turn had finished last.
+        self._sessions: dict[str, _TurnState] = {}
+
+    def _state(self, session_id: str) -> _TurnState:
+        state = self._sessions.get(session_id)
+        if state is None:
+            if len(self._sessions) >= self._MAX_SESSIONS:
+                self._sessions.pop(next(iter(self._sessions)))
+            state = self._sessions[session_id] = _TurnState()
+        return state
 
     def store_incident(self, incident: dict, confirmed: bool = False) -> int | None:
         """Store a learned incident from auto-fix or investigation.
@@ -147,32 +171,43 @@ class MemoryManager:
     def get_extra_tools(self) -> list:
         return MEMORY_TOOLS
 
-    def start_turn(self):
+    def start_turn(self, session_id: str = _DEFAULT_SESSION):
+        state = self._state(session_id)
         # Preserve previous turn's data before resetting
-        self._prev_tool_calls = self._tool_calls[:]
-        self._prev_rejected_count = self._rejected_count
-        self._prev_turn_duration = time.time() - self._turn_start if self._turn_start else 0
+        state.prev_tool_calls = state.tool_calls[:]
+        state.prev_rejected_count = state.rejected_count
+        state.prev_turn_duration = time.time() - state.turn_start if state.turn_start else 0
         # Reset for new turn
-        self._turn_start = time.time()
-        self._tool_calls = []
-        self._rejected_count = 0
+        state.turn_start = time.time()
+        state.tool_calls = []
+        state.rejected_count = 0
 
-    def record_tool_call(self, name: str, input_data: dict, was_rejected: bool = False):
-        self._tool_calls.append(
+    def record_tool_call(
+        self, name: str, input_data: dict, was_rejected: bool = False, session_id: str = _DEFAULT_SESSION
+    ):
+        state = self._state(session_id)
+        state.tool_calls.append(
             {
                 "name": name,
                 "input_summary": {k: str(v)[:50] for k, v in input_data.items()},
             }
         )
         if was_rejected:
-            self._rejected_count += 1
+            state.rejected_count += 1
 
-    def finish_turn(self, user_query: str, final_response: str, user_confirmed: bool | None = None) -> dict:
-        duration = time.time() - self._turn_start
+    def finish_turn(
+        self,
+        user_query: str,
+        final_response: str,
+        user_confirmed: bool | None = None,
+        session_id: str = _DEFAULT_SESSION,
+    ) -> dict:
+        state = self._state(session_id)
+        duration = time.time() - state.turn_start
 
         eval_result = evaluate_interaction(
-            tool_calls=self._tool_calls,
-            rejected_count=self._rejected_count,
+            tool_calls=state.tool_calls,
+            rejected_count=state.rejected_count,
             user_confirmed_resolution=user_confirmed,
             duration_seconds=duration,
             final_response=final_response,
@@ -185,7 +220,7 @@ class MemoryManager:
 
         incident_id = self.store.record_incident(
             query=user_query,
-            tool_sequence=self._tool_calls,
+            tool_sequence=state.tool_calls,
             resolution=final_response,
             outcome=outcome,
             namespace=namespace,
@@ -196,7 +231,7 @@ class MemoryManager:
             duration_seconds=duration,
             score=eval_result.score,
         )
-        self._last_incident_id = incident_id
+        state.last_incident_id = incident_id
 
         self.store.record_metric("interaction_score", eval_result.score)
         self.store.record_metric("tool_count", float(eval_result.tool_count))
@@ -204,11 +239,11 @@ class MemoryManager:
         runbook_id = None
         # Create runbook from explicit thumbs-up OR high-scoring interactions with 2+ tools
         # Score is 0-1 scale (0.7 = 7/10 in the UI)
-        should_learn = (outcome == "resolved" and len(self._tool_calls) >= 2) or (
-            eval_result.score >= 0.7 and len(self._tool_calls) >= 2 and outcome != "unresolved"
+        should_learn = (outcome == "resolved" and len(state.tool_calls) >= 2) or (
+            eval_result.score >= 0.7 and len(state.tool_calls) >= 2 and outcome != "unresolved"
         )
         if should_learn:
-            if not is_duplicate_runbook(self.store, self._tool_calls):
+            if not is_duplicate_runbook(self.store, state.tool_calls):
                 runbook_id = extract_runbook(self.store, incident_id)
 
         # Run pattern detection on a background thread every 10 incidents
@@ -224,18 +259,22 @@ class MemoryManager:
             "runbook_id": runbook_id,
         }
 
-    def update_last_outcome(self, resolved: bool) -> dict | None:
-        """Update the last incident's outcome after user feedback.
+    def update_last_outcome(self, resolved: bool, session_id: str = _DEFAULT_SESSION) -> dict | None:
+        """Record a person's verdict on the most recent turn of *this* session.
 
         Uses preserved data from the previous turn to avoid stale-state bugs.
         """
-        if self._last_incident_id is None:
+        state = self._sessions.get(session_id)
+        if state is None:
+            return None
+        incident_id = state.last_incident_id
+        if incident_id is None:
             return None
 
         # Use preserved previous turn data (not current turn which may have reset)
-        tool_calls = self._prev_tool_calls or self._tool_calls
-        rejected = self._prev_rejected_count if self._prev_tool_calls else self._rejected_count
-        duration = self._prev_turn_duration if self._prev_tool_calls else (time.time() - self._turn_start)
+        tool_calls = state.prev_tool_calls or state.tool_calls
+        rejected = state.prev_rejected_count if state.prev_tool_calls else state.rejected_count
+        duration = state.prev_turn_duration if state.prev_tool_calls else (time.time() - state.turn_start)
 
         eval_result = evaluate_interaction(
             tool_calls=tool_calls,
@@ -244,16 +283,14 @@ class MemoryManager:
             duration_seconds=duration,
             final_response="",
         )
-        self.store.update_incident_outcome(
-            self._last_incident_id, "resolved" if resolved else "unresolved", eval_result.score
-        )
+        self.store.update_incident_outcome(incident_id, "resolved" if resolved else "unresolved", eval_result.score)
 
         runbook_id = None
         if resolved and len(tool_calls) >= 2:
             if not is_duplicate_runbook(self.store, tool_calls):
-                runbook_id = extract_runbook(self.store, self._last_incident_id)
+                runbook_id = extract_runbook(self.store, incident_id)
 
-        return {"incident_id": self._last_incident_id, "score": eval_result.score, "runbook_id": runbook_id}
+        return {"incident_id": incident_id, "score": eval_result.score, "runbook_id": runbook_id}
 
     def close(self):
         self.store.close()
