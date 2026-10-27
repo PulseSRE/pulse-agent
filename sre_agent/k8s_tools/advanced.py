@@ -62,7 +62,8 @@ def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = False):
         return err
 
     # Allowlist — only these resource types can be created/modified via apply_yaml.
-    # Everything else is blocked to prevent privilege escalation.
+    # RBAC kinds, Secrets, Pods and cluster-scoped kinds are blocked outright;
+    # workload kinds are further checked for privileged pod templates below.
     _ALLOWED_KINDS = {
         "Deployment",
         "StatefulSet",
@@ -83,6 +84,14 @@ def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = False):
             f"Error: Creating/modifying {kind} resources is not allowed via apply_yaml. "
             f"Allowed kinds: {', '.join(sorted(_ALLOWED_KINDS))}"
         )
+
+    # The kind allowlist alone did not stop escalation: a Deployment, Job or
+    # CronJob carries a pod template, and a privileged or host-namespace pod is
+    # a node takeover whatever kind wraps it. Platform admission (SCC/PSA) may
+    # also catch these, but this tool should never be the way in.
+    violation = _pod_template_violation(kind, resource)
+    if violation:
+        return f"Error: apply_yaml refuses {kind}/{name}: {violation}. Make this change through your normal review process."
 
     # Check ArgoCD auto-sync — warn if changes will be reverted
     from ..gitops_tools import check_argo_auto_sync
@@ -151,6 +160,59 @@ def apply_yaml(yaml_content: str, namespace: str = "", dry_run: bool = False):
         return classify_api_error(e, "apply_yaml")
     except Exception as e:
         return f"Error applying YAML: {type(e).__name__}: {e}"
+
+
+_POD_TEMPLATE_PATHS = {
+    "Deployment": ("spec", "template", "spec"),
+    "StatefulSet": ("spec", "template", "spec"),
+    "DaemonSet": ("spec", "template", "spec"),
+    "Job": ("spec", "template", "spec"),
+    "CronJob": ("spec", "jobTemplate", "spec", "template", "spec"),
+}
+# Capabilities a workload may add without that being an escalation.
+_HARMLESS_CAPABILITIES = {"NET_BIND_SERVICE"}
+
+
+def _pod_template_violation(kind: str, resource: dict) -> str:
+    """Why a workload's pod template is an escalation, or "" if it is not."""
+    path = _POD_TEMPLATE_PATHS.get(kind)
+    if not path:
+        return ""
+    node: object = resource
+    for key in path:
+        node = node.get(key) if isinstance(node, dict) else None
+        if node is None:
+            return ""
+    if not isinstance(node, dict):
+        return ""
+    pod: dict = node
+    for field in ("hostNetwork", "hostPID", "hostIPC"):
+        if pod.get(field):
+            return f"{field} is set"
+    for volume in pod.get("volumes") or []:
+        if isinstance(volume, dict) and "hostPath" in volume:
+            return f"volume '{volume.get('name', '?')}' mounts a hostPath"
+    pod_ctx = pod.get("securityContext") or {}
+    if isinstance(pod_ctx, dict) and pod_ctx.get("runAsUser") == 0:
+        return "the pod runs as root (runAsUser: 0)"
+    for group in ("initContainers", "containers", "ephemeralContainers"):
+        for container in pod.get(group) or []:
+            if not isinstance(container, dict):
+                continue
+            ctx = container.get("securityContext") or {}
+            if not isinstance(ctx, dict):
+                continue
+            cname = container.get("name", "?")
+            if ctx.get("privileged"):
+                return f"container '{cname}' is privileged"
+            if ctx.get("allowPrivilegeEscalation"):
+                return f"container '{cname}' allows privilege escalation"
+            if ctx.get("runAsUser") == 0:
+                return f"container '{cname}' runs as root (runAsUser: 0)"
+            added = set((ctx.get("capabilities") or {}).get("add") or []) - _HARMLESS_CAPABILITIES
+            if added:
+                return f"container '{cname}' adds capabilities {sorted(added)}"
+    return ""
 
 
 @beta_tool

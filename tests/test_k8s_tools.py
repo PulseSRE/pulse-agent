@@ -386,20 +386,28 @@ class TestWriteTools:
         assert "uncordon_node" in WRITE_TOOLS
         assert "delete_pod" in WRITE_TOOLS
 
-    def test_scale_clamps_replicas(self, mock_k8s):
-        mock_k8s["apps"].patch_namespaced_deployment_scale.return_value = SimpleNamespace()
+    # Out-of-range values are refused, not clamped: the person confirmed the
+    # number they saw, and running a different one is not what they approved.
+    def test_scale_rejects_too_many_replicas(self, mock_k8s):
         result = scale_deployment.call({"namespace": "default", "name": "nginx", "replicas": 9999})
-        assert f"{MAX_REPLICAS} replicas" in result
+        assert result.startswith("Error:") and str(MAX_REPLICAS) in result
+        mock_k8s["apps"].patch_namespaced_deployment_scale.assert_not_called()
 
-    def test_scale_clamps_negative(self, mock_k8s):
-        mock_k8s["apps"].patch_namespaced_deployment_scale.return_value = SimpleNamespace()
+    def test_scale_rejects_negative(self, mock_k8s):
         result = scale_deployment.call({"namespace": "default", "name": "nginx", "replicas": -5})
-        assert "0 replicas" in result
+        assert result.startswith("Error:")
+        mock_k8s["apps"].patch_namespaced_deployment_scale.assert_not_called()
 
-    def test_delete_pod_clamps_grace(self, mock_k8s):
-        mock_k8s["core"].delete_namespaced_pod.return_value = SimpleNamespace()
+    def test_delete_pod_rejects_out_of_range_grace(self, mock_k8s):
         result = delete_pod.call({"namespace": "default", "pod_name": "p", "grace_period_seconds": 9999})
-        assert "deleted" in result
+        assert result.startswith("Error:")
+        mock_k8s["core"].delete_namespaced_pod.assert_not_called()
+
+    def test_delete_pod_defaults_to_the_pods_own_grace_period(self, mock_k8s):
+        mock_k8s["core"].delete_namespaced_pod.return_value = SimpleNamespace()
+        assert "deleted" in delete_pod.call({"namespace": "default", "pod_name": "p"})
+        body = mock_k8s["core"].delete_namespaced_pod.call_args.kwargs["body"]
+        assert body.grace_period_seconds is None
 
     def test_restart_deployment(self, mock_k8s):
         mock_k8s["apps"].patch_namespaced_deployment.return_value = SimpleNamespace()

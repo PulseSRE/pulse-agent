@@ -55,6 +55,19 @@ def _current_finding(finding_id: str) -> dict[str, Any] | None:
     return None
 
 
+def _proposed_strategy(action: dict) -> str:
+    """The fix strategy recorded when the proposal was made ("" for older proposals)."""
+    import json
+
+    inp = action.get("input")
+    if isinstance(inp, str):
+        try:
+            inp = json.loads(inp)
+        except (TypeError, ValueError):
+            inp = None
+    return str((inp or {}).get("fixStrategy") or "") if isinstance(inp, dict) else ""
+
+
 def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
     """Execute a proposed fix on a person's authority. Raises ApprovalError if refused."""
     from ..repositories import get_monitor_repo
@@ -74,6 +87,12 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
     if finding is None:
         raise ApprovalError(STALE_PROPOSAL_MESSAGE, status_code=409)
 
+    from .autofix import remediation_blocked_reason
+
+    blocked = remediation_blocked_reason()
+    if blocked:
+        raise ApprovalError(blocked, status_code=409)
+
     category = finding.get("category", "")
     investigation = get_investigation_for_finding(finding_id)
     plan = plan_fix(investigation, finding) if investigation else None
@@ -81,6 +100,16 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
         plan = default_fix_plan(category, finding)
     if plan is None:
         raise ApprovalError("No fix strategy applies to this finding any more", status_code=409)
+    proposed_strategy = _proposed_strategy(action)
+    if proposed_strategy and plan.strategy != proposed_strategy:
+        # The plan is re-derived on purpose (the cluster may have moved), but a
+        # person approved one specific fix. Running another on their authority
+        # is not what they agreed to.
+        raise ApprovalError(
+            f"The fix Pulse would run now ({plan.strategy}) is not the one proposed ({proposed_strategy}); "
+            "nothing was changed. Reject this proposal and review the new one.",
+            status_code=409,
+        )
     if plan.strategy == "require_human_review":
         learned = plan.params.get("track_record")
         detail = f" ({learned})" if learned else ""

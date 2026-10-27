@@ -221,7 +221,10 @@ def scale_deployment(namespace: str, name: str, replicas: int):
         return err
     if err := _validate_k8s_name(name):
         return err
-    replicas = min(max(0, replicas), MAX_REPLICAS)
+    # Rejected rather than clamped: a confirmed -1 used to scale to 0 (an
+    # outage nobody asked for) and 500 silently became 100.
+    if not 0 <= replicas <= MAX_REPLICAS:
+        return f"Error: replicas must be between 0 and {MAX_REPLICAS}, got {replicas}. Nothing was changed."
     result = _kc.safe(
         lambda: _kc.get_apps_client().patch_namespaced_deployment_scale(
             name, namespace, body={"spec": {"replicas": replicas}}

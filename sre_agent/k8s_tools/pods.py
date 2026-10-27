@@ -323,13 +323,14 @@ def get_pod_logs(namespace: str, pod_name: str, container: str = "", tail_lines:
 
 
 @beta_tool
-def delete_pod(namespace: str, pod_name: str, grace_period_seconds: int = 30):
+def delete_pod(namespace: str, pod_name: str, grace_period_seconds: int = 0):
     """Delete a pod (it will be recreated by its controller if one exists). REQUIRES USER CONFIRMATION.
 
     Args:
         namespace: Kubernetes namespace.
         pod_name: Name of the pod to delete.
-        grace_period_seconds: Grace period before force killing (1-300).
+        grace_period_seconds: 0 (default) uses the pod's own terminationGracePeriodSeconds;
+            otherwise 1-300 seconds before the pod is force-killed.
     """
     from kubernetes import client
 
@@ -337,14 +338,18 @@ def delete_pod(namespace: str, pod_name: str, grace_period_seconds: int = 30):
         return err
     if err := _validate_k8s_name(pod_name, "pod_name"):
         return err
-    grace_period_seconds = min(max(1, grace_period_seconds), 300)
-    result = _kc.safe(
-        lambda: _kc.get_core_client().delete_namespaced_pod(
-            pod_name,
-            namespace,
-            body=client.V1DeleteOptions(grace_period_seconds=grace_period_seconds),
-        )
+    # Rejected rather than clamped: the person confirmed the value they saw,
+    # and silently running a different one is not what they approved. The
+    # default used to force 30s, cutting short pods that need longer to stop
+    # (a database flushing on a 600s grace period).
+    if grace_period_seconds and not 1 <= grace_period_seconds <= 300:
+        return f"Error: grace_period_seconds must be 0 (use the pod's own) or 1-300, got {grace_period_seconds}."
+    options = (
+        client.V1DeleteOptions(grace_period_seconds=grace_period_seconds)
+        if grace_period_seconds
+        else client.V1DeleteOptions()
     )
+    result = _kc.safe(lambda: _kc.get_core_client().delete_namespaced_pod(pod_name, namespace, body=options))
     if isinstance(result, ToolError):
         return str(result)
     return f"Pod {namespace}/{pod_name} deleted."

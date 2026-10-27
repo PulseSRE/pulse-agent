@@ -217,19 +217,27 @@ _SIMULATION_DESCRIPTIONS: dict[str, str] = {
     "rollback_deployment": "Deployment will revert to a previous ReplicaSet revision. Pods will be replaced via rolling update to the previous template.",
     "apply_yaml": "Kubernetes resource will be created or updated. Server-side dry-run validates the manifest before apply.",
     "create_network_policy": "A NetworkPolicy will be created restricting traffic. Existing connections may be dropped depending on CNI plugin behavior.",
+    "exec_command": "A command will run inside a container. Its effects are whatever the command does and cannot be undone by Pulse.",
+    "remove_finalizer": "A finalizer will be removed, letting a stuck deletion complete. Whatever cleanup the finalizer guarded will not run.",
 }
 
 
+# A static guide, not a prediction: risk, reversibility and duration come from
+# what each tool does in general, not from this cluster. The response says so
+# ("basis": "static") so the UI does not present it as a forecast.
+_HIGH_RISK = {"drain_node", "apply_yaml", "scale_deployment", "exec_command", "remove_finalizer"}
+_MEDIUM_RISK = {"delete_pod", "restart_deployment", "rollback_deployment", "cordon_node", "create_network_policy"}
+# Running a command or dropping a finalizer cannot be undone by Pulse.
+_IRREVERSIBLE = {"drain_node", "exec_command", "remove_finalizer"}
+
+
 def simulate_action(tool: str, inp: dict) -> dict:
-    """Predict the impact of a tool action without executing it."""
+    """Describe the general impact of a tool action without executing it."""
     description = _SIMULATION_DESCRIPTIONS.get(tool, f"Action '{tool}' will be executed on the cluster.")
 
-    # Estimate risk level
-    high_risk = {"drain_node", "apply_yaml", "scale_deployment"}
-    medium_risk = {"delete_pod", "restart_deployment", "rollback_deployment", "cordon_node"}
-    if tool in high_risk:
+    if tool in _HIGH_RISK:
         risk = "high"
-    elif tool in medium_risk:
+    elif tool in _MEDIUM_RISK:
         risk = "medium"
     else:
         risk = "low"
@@ -238,17 +246,19 @@ def simulate_action(tool: str, inp: dict) -> dict:
     detail = description
     if tool == "scale_deployment" and "replicas" in inp:
         detail += f" Target: {inp.get('replicas')} replicas."
-    if tool == "delete_pod" and "name" in inp:
-        detail += f" Pod: {inp.get('namespace', 'default')}/{inp.get('name')}."
+    pod = inp.get("pod_name") or inp.get("name")
+    if tool == "delete_pod" and pod:
+        detail += f" Pod: {inp.get('namespace', 'default')}/{pod}."
 
     return {
         "tool": tool,
         "risk": risk,
         "description": detail,
-        "reversible": tool not in {"drain_node"},
+        "reversible": tool not in _IRREVERSIBLE,
         "estimatedDuration": "30-120s"
         if tool in {"restart_deployment", "drain_node", "rollback_deployment"}
         else "< 10s",
+        "basis": "static",
     }
 
 

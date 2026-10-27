@@ -441,12 +441,12 @@ def execute_with_contract(name: str, input_data: dict, call: Callable[[], Any]) 
         logger.warning("Contract precheck for %s crashed", name, exc_info=True)
         return f"Precondition check for {name} could not complete ({e}). The write was not attempted."
 
-    snapshot_blob = ""
+    snapshot = None
     target = contract.snapshot_target(args, pre)
     if target is not None:
         from . import snapshot as snap_mod
 
-        snapshot_blob = snap_mod.to_json(snap_mod.capture(*target))
+        snapshot = snap_mod.capture(*target)
 
     start = time.monotonic()
     result = call()
@@ -457,6 +457,13 @@ def execute_with_contract(name: str, input_data: dict, call: Callable[[], Any]) 
         # Validator message, ToolError string, or anything else that is not the
         # tool's own success sentence: pass it through, record nothing.
         return result
+
+    snapshot_blob = ""
+    if snapshot is not None:
+        from . import snapshot as snap_mod
+
+        # The state right after this write, so a rollback can tell a later edit.
+        snapshot_blob = snap_mod.to_json(snap_mod.mark_applied(snapshot))
 
     try:
         _action_id, note = _record_and_schedule(contract, args, pre, snapshot_blob, text, duration_ms)

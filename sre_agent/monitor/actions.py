@@ -293,7 +293,9 @@ def execute_rollback(action_id: str) -> dict:
         if not snap:
             return {"error": "Rollback failed: the stored snapshot could not be parsed"}
         try:
-            restored_text = restore(snap)
+            # A person asked for this, possibly long after the fix: never let it
+            # overwrite a change made since.
+            restored_text = restore(snap, require_unchanged_since_fix=True)
         except Exception as e:
             return {"error": f"Rollback failed: {e}"}
         get_monitor_repo().update_action_status(action_id, "rolled_back", "rolled_back")

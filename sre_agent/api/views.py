@@ -502,6 +502,17 @@ async def rest_execute_action(
     if input_err:
         return JSONResponse(status_code=400, content={"error": input_err})
 
+    if action in WRITE_TOOL_NAMES and not user_token:
+        from ..config import get_settings as _settings
+
+        if _settings().agent.token_forwarding:
+            # Without the person's token the write would run as the agent's
+            # service account, with the agent's rights rather than theirs.
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Your access token did not reach Pulse; sign in again to run this action"},
+            )
+
     from ..agent import _execute_tool
 
     tool_map = {action: TOOL_REGISTRY[action]}

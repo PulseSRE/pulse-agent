@@ -488,6 +488,29 @@ def _execute_tool(
             from .policy import check_write_policy
             from .tool_contracts import execute_with_contract
 
+            # A signed-in person's write runs with their own RBAC. When the
+            # login proxy did not forward their token, the K8s client falls
+            # back to the agent's service account, so a confirmed write would
+            # run with the agent's rights instead of theirs. Refuse it.
+            # Monitor investigations and durable plans have no signed-in user
+            # and run as the service account by design.
+            if not user_token and name in get_write_tools():
+                from .config import get_settings
+                from .request_context import get_current_user
+
+                if get_settings().agent.token_forwarding and get_current_user() is not None:
+                    msg = (
+                        f"'{name}' was not run: your access token did not reach Pulse, so this write would "
+                        "have run with the agent's permissions instead of yours. Sign in again and retry."
+                    )
+                    meta = {
+                        "status": "error",
+                        "error_message": msg,
+                        "error_category": "unauthorized",
+                        "result_bytes": len(msg),
+                    }
+                    return f"Error: {msg}", None, meta
+
             # Harness-level deny policy runs after confirmation, before the
             # call: rules that hold regardless of configured model or what a
             # chat approver clicked (see sre_agent/policy.py).

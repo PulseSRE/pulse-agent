@@ -91,7 +91,7 @@ make release VERSION=X.Y.Z            # agent-only version/badge commit + tag; s
 - Noise learning: tracks transient findings, assigns `noiseScore` to suppress flaky alerts
 - `findings_snapshot` event for stale finding cleanup
 - Morning briefing: `GET /briefing` endpoint aggregates recent activity with time-aware greeting, live scanner data, and trend findings with priority items
-- Simulation preview: `POST /simulate` predicts impact, risk, duration, reversibility
+- Simulation preview: `POST /monitor/simulate` returns a static guide to a tool's impact, risk, duration and reversibility (`basis: "static"`; not a cluster-specific forecast)
 - WebSocket `feedback` message type for UI-driven memory learning (thumbs up/down)
 - Approved confirmations recorded as implicit positive feedback for memory
 - Fix history persisted to the database (`PULSE_AGENT_DATABASE_URL`)
