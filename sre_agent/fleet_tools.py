@@ -57,15 +57,27 @@ def _get_proxy_api_client(cluster_name: str):
     """
     from kubernetes import client
 
+    from .k8s_client import _check_user_token_required, _load_k8s, get_current_user_token
+
+    _load_k8s()
     # Get the default config (already loaded by _load_k8s)
     default_config = client.Configuration.get_default_copy()
-    # Create a new config with the ACM proxy host, inheriting auth
+    # Create a new config with the ACM proxy host
     proxy_config = client.Configuration()
     proxy_config.host = (
         f"{default_config.host}/apis/cluster.open-cluster-management.io/v1/managedclusters/{cluster_name}/proxy"
     )
-    proxy_config.api_key = default_config.api_key
-    proxy_config.api_key_prefix = default_config.api_key_prefix
+    # The person's own token when one was forwarded, as for every other K8s
+    # call: this used to copy the service account's credentials, so a user
+    # could read other clusters with the agent's rights instead of their own.
+    token = get_current_user_token()
+    if token:
+        proxy_config.api_key = {"authorization": f"Bearer {token}"}
+        proxy_config.api_key_prefix = {}
+    else:
+        _check_user_token_required()
+        proxy_config.api_key = default_config.api_key
+        proxy_config.api_key_prefix = default_config.api_key_prefix
     proxy_config.ssl_ca_cert = default_config.ssl_ca_cert
     proxy_config.cert_file = default_config.cert_file
     proxy_config.key_file = default_config.key_file
@@ -356,7 +368,8 @@ _KIND_READERS: dict[str, tuple[str, str]] = {
     "daemonset": ("apps", "read_namespaced_daemon_set"),
     "configmap": ("core", "read_namespaced_config_map"),
     "service": ("core", "read_namespaced_service"),
-    "secret": ("core", "read_namespaced_secret"),
+    # No "secret": comparing Secrets field by field printed their values into
+    # the conversation. Compare which keys exist with a Secret-aware tool.
     "serviceaccount": ("core", "read_namespaced_service_account"),
 }
 
@@ -379,7 +392,7 @@ def fleet_compare_resource(kind: str, name: str, namespace: str = "default"):
     """Compare a specific resource across all managed clusters to detect configuration drift.
 
     Args:
-        kind: Resource kind (Deployment, StatefulSet, DaemonSet, ConfigMap, Service, Secret, ServiceAccount)
+        kind: Resource kind (Deployment, StatefulSet, DaemonSet, ConfigMap, Service, ServiceAccount; not Secret, whose values must never be printed)
         name: Resource name.
         namespace: Kubernetes namespace.
     """

@@ -11,15 +11,34 @@ from .. import k8s_client as _kc
 from ..decorators import beta_tool
 
 
+def _agent_namespace() -> str:
+    """The namespace Pulse itself runs in."""
+    import os
+    from pathlib import Path
+
+    try:
+        return Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read_text().strip()
+    except OSError:
+        return os.environ.get("POD_NAMESPACE", "openshiftpulse")
+
+
 @beta_tool
-def record_audit_entry(action: str, details: str, namespace: str = "pulse-agent") -> str:
-    """Record an agent action to a ConfigMap in the cluster for team visibility.
+def record_audit_entry(action: str, details: str, namespace: str = "") -> str:
+    """Record an agent action to a ConfigMap in Pulse's own namespace for team visibility.
 
     Args:
         action: Short action name (e.g. 'scale_deployment', 'security_scan').
         details: Description of what was done and the outcome.
-        namespace: Namespace for the audit ConfigMap (default: pulse-agent).
+        namespace: Leave empty. Only Pulse's own namespace is accepted.
     """
+    # This writes a ConfigMap without asking for confirmation, so it may only
+    # write to Pulse's own namespace: the model choosing the namespace meant it
+    # could create or rewrite a ConfigMap anywhere it had access.
+    own = _agent_namespace()
+    if namespace and namespace != own:
+        return f"Error: audit entries are only written to Pulse's own namespace ({own}), not '{namespace}'."
+    namespace = own
+    action = "".join(ch for ch in action if ch.isalnum() or ch in "-_.")[:60] or "action"
     now = datetime.now(UTC)
     entry_key = f"{now.strftime('%Y%m%d-%H%M%S-%f')}-{action}"
     # Truncate details to prevent exceeding ConfigMap 1MB limit

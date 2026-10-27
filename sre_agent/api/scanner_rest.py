@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, Depends, Query
 
 from ..config import get_settings
-from .auth import verify_token
+from .auth import require_admin, verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -193,12 +193,17 @@ async def pause_autofix(_auth=Depends(verify_token)):
 
 
 @router.post("/monitor/resume")
-async def resume_autofix(_auth=Depends(verify_token)):
-    """Resume auto-fix actions after a pause."""
+async def resume_autofix(admin: str = Depends(require_admin)):
+    """Resume auto-fix actions after a pause.
+
+    Pausing stays open to anyone holding the UI token: stopping remediation is
+    the safe direction. Resuming re-enables autonomous writes, so it takes the
+    same authority as approving one.
+    """
     from ..monitor import set_autofix_paused
 
     set_autofix_paused(False)
-    logger.info("Auto-fix RESUMED via /monitor/resume")
+    logger.info("Auto-fix RESUMED via /monitor/resume by %s", admin)
     return {"autofix_paused": False}
 
 

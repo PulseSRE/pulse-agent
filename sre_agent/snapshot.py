@@ -16,7 +16,8 @@ the resource's own spec, captured immediately before the write.
 What is captured is deliberately narrow — the mutable spec and the metadata
 needed to address the object again. Status and server-owned metadata are excluded from the replayed fields. The
 original UID is retained separately to refuse rollback onto a recreated object.
-Restore tests the current resourceVersion atomically before replacing mutable fields.
+Restore tests the current resourceVersion atomically before replacing mutable fields,
+and refuses when the object was edited after the fix (``mark_applied``).
 """
 
 from __future__ import annotations
@@ -107,18 +108,82 @@ def capture(kind: str, name: str, namespace: str) -> dict[str, Any] | None:
     return snapshot
 
 
+def _read(kind: str, name: str, namespace: str) -> dict:
+    from kubernetes.client import ApiClient
+
+    from .k8s_client import get_apps_client, get_core_client
+
+    if kind == "ConfigMap":
+        obj = get_core_client().read_namespaced_config_map(name, namespace)
+    else:
+        apps = get_apps_client()
+        suffix = {"Deployment": "deployment", "StatefulSet": "stateful_set", "DaemonSet": "daemon_set"}[kind]
+        obj = getattr(apps, f"read_namespaced_{suffix}")(name, namespace)
+    return ApiClient().sanitize_for_serialization(obj)
+
+
+def _change_marker(kind: str, metadata: dict) -> dict[str, Any]:
+    """What identifies 'nobody has changed this since': generation for workloads.
+
+    A workload's resourceVersion moves on every status update (a rollout, a
+    pod becoming ready), so comparing it would refuse every rollback. Its
+    generation moves only when the spec is edited, which is what a rollback
+    would overwrite. A ConfigMap has no status, so its resourceVersion is the
+    right marker.
+    """
+    if kind == "ConfigMap":
+        return {"resourceVersion": metadata.get("resourceVersion")}
+    return {"generation": metadata.get("generation")}
+
+
+def mark_applied(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Record the object's state right after the fix wrote to it.
+
+    Rollback compares against this, so a change someone made *after* the fix
+    (a hotfix, a manual scale) is never silently overwritten. Leaves the
+    snapshot unmarked if the read fails; restore then refuses to roll back
+    rather than guess.
+    """
+    if not snapshot or snapshot.get("kind") not in SUPPORTED_KINDS:
+        return snapshot
+    if not snapshot.get("name") or not snapshot.get("namespace"):
+        return snapshot
+    try:
+        meta = _read(snapshot["kind"], snapshot["name"], snapshot["namespace"]).get("metadata", {})
+    except Exception:
+        # Never fails the fix: an unmarked snapshot only means a later
+        # rollback is refused rather than risked.
+        logger.warning(
+            "Could not record post-fix state for %s %s/%s",
+            snapshot.get("kind"),
+            snapshot.get("namespace"),
+            snapshot.get("name"),
+            exc_info=True,
+        )
+        return snapshot
+    if meta.get("uid") == snapshot.get("uid"):
+        snapshot["afterFix"] = _change_marker(snapshot["kind"], meta)
+    return snapshot
+
+
 def describe(snapshot: dict[str, Any] | None) -> str:
     """One line naming what a snapshot would restore, for logs and the UI."""
     if not snapshot:
         return "no snapshot — this change cannot be undone automatically"
-    return f"{snapshot['kind']} {snapshot['namespace']}/{snapshot['name']} captured before change"
+    return f"{snapshot.get('kind')} {snapshot.get('namespace')}/{snapshot.get('name')} captured before change"
 
 
-def restore(snapshot: dict[str, Any]) -> str:
+def restore(snapshot: dict[str, Any], *, require_unchanged_since_fix: bool = False) -> str:
     """Put a resource back the way the snapshot found it.
 
     Raises on failure. A rollback that fails quietly is worse than one that never
     existed, because the operator believes the change was undone.
+
+    When the snapshot records the object's state right after the fix
+    (``mark_applied``), restore refuses if the object has been edited since:
+    replaying the pre-fix spec would silently revert that later change. With
+    ``require_unchanged_since_fix`` an unmarked snapshot is refused too, because
+    nothing can prove the object is still as the fix left it.
     """
     if not snapshot:
         raise ValueError("No snapshot to restore from")
@@ -155,6 +220,21 @@ def restore(snapshot: dict[str, Any]) -> str:
     if not meta.get("resourceVersion"):
         raise ValueError("Resource has no resourceVersion; cannot safely restore")
 
+    after_fix = snapshot.get("afterFix")
+    if after_fix:
+        current_marker = _change_marker(kind, meta)
+        if current_marker != after_fix:
+            ((field, then),) = after_fix.items()
+            raise ValueError(
+                f"{kind} {namespace}/{name} was changed after the fix ({field} {then} -> "
+                f"{current_marker[field]}); rolling back would overwrite that change. Review it and revert by hand."
+            )
+    elif require_unchanged_since_fix:
+        raise ValueError(
+            "This snapshot does not record the object's state after the fix, so a later change "
+            "cannot be ruled out; rolling back could overwrite it. Revert by hand."
+        )
+
     # JSON Patch add replaces an existing subtree in its entirety, unlike
     # strategic/merge patches which retain keys and keyed list entries omitted
     # from the old snapshot. Both tests and writes are one atomic API operation.
@@ -162,6 +242,9 @@ def restore(snapshot: dict[str, Any]) -> str:
         {"op": "test", "path": "/metadata/uid", "value": snapshot["uid"]},
         {"op": "test", "path": "/metadata/resourceVersion", "value": meta["resourceVersion"]},
     ]
+    if after_fix and "generation" in after_fix and after_fix["generation"] is not None:
+        # Same check, atomically with the write.
+        body.append({"op": "test", "path": "/metadata/generation", "value": after_fix["generation"]})
     desired = {f"/{key}": value for key, value in fields.items()}
     for key in ("labels", "annotations"):
         value = dict(snapshot.get("metadata", {}).get(key) or {})

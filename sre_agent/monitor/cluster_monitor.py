@@ -646,6 +646,9 @@ class ClusterMonitor:
                 action_report["fixStrategy"] = targeted_plan.strategy
                 action_report["causeCategory"] = targeted_plan.cause_category
                 action_report["fixDescription"] = targeted_plan.description
+                # Persisted with the proposal, so an approval later can refuse
+                # to run a different fix than the one the person was shown.
+                action_report["input"]["fixStrategy"] = targeted_plan.strategy
 
             # If an open episode already explains this finding, say so on the
             # proposal. Measured on the reference cluster: all four fixes
@@ -847,10 +850,11 @@ class ClusterMonitor:
 
     def _approval_is_stale(self, finding: dict) -> str:
         """Why an approval that just arrived should not be acted on, or ""."""
-        if int(get_settings().monitor.max_trust_level) < 2:
-            return "Approval arrived after the server stopped allowing ask-first fixes"
-        if not get_settings().monitor.autofix_enabled:
-            return "Approval arrived after auto-fix was turned off"
+        from .autofix import remediation_blocked_reason
+
+        blocked = remediation_blocked_reason()
+        if blocked:
+            return f"Approval arrived but nothing was changed: {blocked}"
         if _finding_key(finding) not in self._last_findings:
             return "The condition cleared before the approval arrived — nothing was changed"
         return ""

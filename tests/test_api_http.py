@@ -245,7 +245,8 @@ class TestMonitorControl:
         assert r.status_code == 200
 
     def test_resume(self, api_client, api_headers):
-        r = api_client.post("/monitor/resume", headers=api_headers)
+        # Resuming re-enables autonomous writes: an admin action.
+        r = api_client.post("/monitor/resume", headers={**api_headers, "X-Forwarded-User": "admin"})
         assert r.status_code == 200
 
 

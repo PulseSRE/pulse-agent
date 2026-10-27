@@ -345,6 +345,9 @@ _expected_deployment_uid: ContextVar[str | None] = ContextVar("fix_deployment_ui
 _verify_resources: ContextVar[list[dict] | None] = ContextVar("fix_verify_resources", default=None)
 
 
+_APPLIED_TOOLS = frozenset({"delete_pod", "rollback_deployment", "patch_resources"})
+
+
 @dataclass(frozen=True)
 class FixExecution:
     result: tuple[str, str, str]
@@ -353,7 +356,7 @@ class FixExecution:
 
     @property
     def applied(self) -> bool:
-        return self.result[0] in {"delete_pod", "rollback_deployment", "patch_resources"}
+        return self.result[0] in _APPLIED_TOOLS
 
 
 def execute_fix_with_snapshot(plan: FixPlan) -> FixExecution:
@@ -363,7 +366,12 @@ def execute_fix_with_snapshot(plan: FixPlan) -> FixExecution:
     uid_token = _expected_deployment_uid.set(None)
     try:
         result = execute_fix(plan)
-        return FixExecution(result, take_last_snapshot(), list(_verify_resources.get() or []))
+        snapshot = take_last_snapshot()
+        if snapshot is not None and result[0] in _APPLIED_TOOLS:
+            from ..snapshot import mark_applied
+
+            snapshot = mark_applied(snapshot)
+        return FixExecution(result, snapshot, list(_verify_resources.get() or []))
     finally:
         _last_snapshot.reset(token)
         _verify_resources.reset(target_token)
@@ -584,8 +592,11 @@ def _execute_patch_resources(plan: FixPlan) -> tuple[str, str, str]:
     kind = r.get("kind", "")
     apps = get_apps_client()
 
-    # If resource is a Pod, find the owning Deployment
+    # If resource is a Pod, find the owning Deployment, and which of its
+    # containers was the one OOM-killed.
+    oom_container = None
     if kind == "Pod":
+        oom_container = _oom_killed_container(name, ns)
         dep_name = _find_owning_deployment(name, ns)
         if dep_name:
             name = dep_name
@@ -595,11 +606,33 @@ def _execute_patch_resources(plan: FixPlan) -> tuple[str, str, str]:
         raise ValueError(f"Cannot patch resources on {kind}/{name} — only Deployments supported")
 
     dep = apps.read_namespaced_deployment(name, ns)
-    container = dep.spec.template.spec.containers[0]
+    containers = dep.spec.template.spec.containers
+    if oom_container is not None:
+        matches = [i for i, c in enumerate(containers) if c.name == oom_container]
+    else:
+        # Without a record of which container was killed, only an unambiguous
+        # single-container pod is safe to patch: the first container is often
+        # not the one that ran out (a sidecar, or the app behind one).
+        matches = [0] if len(containers) == 1 else []
+    if not matches:
+        return (
+            "skip",
+            f"Deployment {name} in {ns}",
+            "Not changed: could not tell which container ran out of memory — needs a person to choose.",
+        )
+    index = matches[0]
+    container = containers[index]
 
-    current_limit = "256Mi"
-    if container.resources and container.resources.limits:
-        current_limit = container.resources.limits.get("memory", "256Mi")
+    limits_now = (container.resources.limits or {}) if container.resources else {}
+    if "memory" not in limits_now:
+        # It used to assume 256Mi here and "double" it to 512Mi — which, for a
+        # container with no limit using 2Gi, imposes a limit far below its use.
+        return (
+            "skip",
+            f"Deployment {name} in {ns}: container {container.name} has no memory limit",
+            "Not changed: with no existing limit there is nothing safe to double — needs a person to size it.",
+        )
+    current_limit = limits_now["memory"]
 
     from ..units import parse_memory_bytes
 
@@ -619,14 +652,29 @@ def _execute_patch_resources(plan: FixPlan) -> tuple[str, str, str]:
     _snapshot_before("Deployment", name, ns, dep)
     limits = dict(container.resources.limits or {}) if container.resources else {}
     limits["memory"] = new_limit
-    if container.resources is None:
-        operation = {"op": "add", "path": "/spec/template/spec/containers/0/resources", "value": {"limits": limits}}
-    else:
-        operation = {"op": "add", "path": "/spec/template/spec/containers/0/resources/limits", "value": limits}
+    operation = {
+        "op": "add",
+        "path": f"/spec/template/spec/containers/{index}/resources/limits",
+        "value": limits,
+    }
     body = _patch_tests(dep) + [operation]
     apps.patch_namespaced_deployment(name, ns, body=body, _content_type="application/json-patch+json")
 
     return ("patch_resources", before, f"Deployment {name} patched: memory limit {current_limit} -> {new_limit}")
+
+
+def _oom_killed_container(pod_name: str, namespace: str) -> str | None:
+    """The name of the container in this pod whose last termination was OOMKilled."""
+    try:
+        pod = get_core_client().read_namespaced_pod(pod_name, namespace)
+    except Exception:
+        return None
+    for status in (pod.status.container_statuses or []) if pod.status else []:
+        for state in (status.last_state, status.state):
+            terminated = getattr(state, "terminated", None) if state else None
+            if terminated is not None and getattr(terminated, "reason", "") == "OOMKilled":
+                return status.name
+    return None
 
 
 def _execute_noop(plan: FixPlan) -> tuple[str, str, str]:

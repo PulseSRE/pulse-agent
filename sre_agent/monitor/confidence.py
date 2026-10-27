@@ -167,6 +167,9 @@ _INJECTION_PATTERNS = [
     r"system:\s*",
     r"assistant:\s*",
     r"<\/?system>",
+    # The data delimiters themselves: text that closes the data block early
+    # ("--- END CLUSTER DATA ---") would let what follows read as instructions.
+    r"-{2,}\s*(BEGIN|END)\b[^\n-]{0,40}?DATA[^\n-]{0,60}-*",
 ]
 
 

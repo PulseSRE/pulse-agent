@@ -43,6 +43,26 @@ def set_autofix_paused(paused: bool, updated_by: str = "") -> None:
     logger.info("Auto-fix %s (persisted)", "paused" if paused else "resumed")
 
 
+def remediation_blocked_reason() -> str:
+    """Why no fix may run right now, or "" if one may.
+
+    One answer for every path that executes a fix: the autonomous loop, an
+    approval over the WebSocket, and an approval from the inbox or fix history.
+    The REST approval used to check none of these, so pausing auto-fix during
+    an incident did not stop an admin's click from running a queued proposal.
+    """
+    from ..config import get_settings
+
+    settings = get_settings().monitor
+    if is_autofix_paused():
+        return "Auto-fix is paused — resume it before approving fixes"
+    if not settings.autofix_enabled:
+        return "Auto-fix is turned off on this server (PULSE_AGENT_AUTOFIX_ENABLED=false)"
+    if int(settings.max_trust_level) < 2:
+        return "This server no longer allows ask-first fixes (PULSE_AGENT_MAX_TRUST_LEVEL < 2)"
+    return ""
+
+
 def is_autofix_paused() -> bool:
     """Return the persisted pause state, defaulting to PAUSED on any read error.
 
