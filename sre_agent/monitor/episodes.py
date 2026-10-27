@@ -215,8 +215,18 @@ def attach_symptoms(
                 # since — that is coincidence with a long tail, and attaching it
                 # tells an operator a confident story about the wrong cause.
                 continue
-        elif first_seen.get(key, started) < cutoff:
-            # Already broken before the cause appeared.
+        else:
+            seen = first_seen.get(key, started)
+            if seen < cutoff:
+                # Already broken before the cause appeared.
+                continue
+            if seen > started + _ONSET_SPREAD_SECONDS:
+                # The same upper bound as above, for findings that do not
+                # report their own onset. Only alerts do, so every other symptom
+                # had no limit at all: an episode open for a day still absorbed
+                # whatever broke since, and muted its webhook.
+                continue
+        if not _in_scope(cause_finding, finding):
             continue
         category = finding.get("category", "")
         resources = finding.get("resources") or []
@@ -228,6 +238,36 @@ def attach_symptoms(
     if attached:
         repo.refresh_rollup(episode_id)
     return attached
+
+
+# Namespaces whose workloads serve the whole cluster. A failure there (the SDN,
+# DNS, the ingress controller) can plausibly break things in any namespace.
+_CLUSTER_SERVICE_NAMESPACE_PREFIXES = ("openshift-", "kube-")
+_CLUSTER_SERVICE_NAMESPACES = frozenset({"openshift"})
+
+
+def _namespace_of(finding: dict) -> str:
+    resources = finding.get("resources") or []
+    return str(finding.get("namespace") or (resources[0].get("namespace", "") if resources else ""))
+
+
+def _in_scope(cause: dict, symptom: dict) -> bool:
+    """Whether the cause is somewhere it could have affected the symptom.
+
+    Cluster-scoped causes (nodes, the control plane, ClusterOperators,
+    webhooks) and failures in cluster-service namespaces reach everywhere. A
+    cause in an ordinary application namespace does not: a stuck controller in
+    ``team-a`` is no explanation for a crashloop in ``team-b``, and attaching
+    it there muted ``team-b``'s alert under someone else's incident.
+    """
+    cause_ns = _namespace_of(cause)
+    if (
+        not cause_ns
+        or cause_ns in _CLUSTER_SERVICE_NAMESPACES
+        or cause_ns.startswith(_CLUSTER_SERVICE_NAMESPACE_PREFIXES)
+    ):
+        return True
+    return _namespace_of(symptom) == cause_ns
 
 
 def close(episode_id: str, reason: str = "cause cleared") -> None:

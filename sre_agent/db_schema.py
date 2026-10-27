@@ -774,3 +774,12 @@ CREATE TABLE IF NOT EXISTS fix_outcomes (
 );
 CREATE INDEX IF NOT EXISTS idx_fix_outcomes_cause ON fix_outcomes(cause, recorded_at);
 """
+
+
+NOISE_MEMORY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS monitor_noise (
+    finding_key      TEXT PRIMARY KEY,
+    transient_count  INTEGER NOT NULL,
+    updated_at       BIGINT NOT NULL
+);
+"""

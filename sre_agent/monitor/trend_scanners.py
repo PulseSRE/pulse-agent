@@ -15,24 +15,39 @@ logger = logging.getLogger("pulse_agent.monitor")
 
 _last_prometheus_error_time: float = 0.0
 _PROMETHEUS_ERROR_COOLDOWN = 300
-_prometheus_degraded: bool = False
+# Trend scanners whose most recent query failed. Per scanner, not one global
+# flag: the four trend scanners and trend_degraded run concurrently, so a single
+# boolean was whatever the last query to finish happened to say -- one success
+# anywhere cleared a failure everywhere, and trend_degraded read it mid-cycle.
+_degraded_scanners: set[str] = set()
+
+
+def _mark(ok: bool) -> None:
+    from .scanner_health import _current_scanner
+
+    name = _current_scanner.get() or "trend"
+    if ok:
+        _degraded_scanners.discard(name)
+    else:
+        _degraded_scanners.add(name)
 
 
 def _query_prometheus(query: str) -> list[dict]:
     """Query Prometheus via unified client and return results."""
-    global _last_prometheus_error_time, _prometheus_degraded
+    global _last_prometheus_error_time
     try:
         data = get_prometheus_client().query(query, timeout=15)
         if data.get("status") != "success":
             logger.debug("Prometheus query failed: %s", data.get("error", "unknown"))
             # Without this the scanner reported "clean" with Prometheus down.
             report_failure(f"Prometheus query failed: {data.get('error', 'unknown')}")
+            _mark(False)
             return []
-        _prometheus_degraded = False
+        _mark(True)
         return data.get("data", {}).get("result", [])
     except PrometheusConfigError as e:
         logger.warning("Prometheus config error: %s", e)
-        _prometheus_degraded = True
+        _mark(False)
         report_failure(f"Prometheus not configured: {e}")
         return []
     except Exception as e:
@@ -42,21 +57,21 @@ def _query_prometheus(query: str) -> list[dict]:
             logger.warning("Prometheus query error (suppressing for %ds): %s", _PROMETHEUS_ERROR_COOLDOWN, e)
         else:
             logger.debug("Prometheus query error (suppressed): %s", e)
-        _prometheus_degraded = True
+        _mark(False)
         report_failure(f"Prometheus unreachable: {e}")
         return []
 
 
 def get_trend_degraded_finding() -> list[dict]:
-    """Return a degraded finding if Prometheus queries failed this cycle."""
-    if not _prometheus_degraded:
+    """Return a degraded finding while any trend scanner's latest query failed."""
+    if not _degraded_scanners:
         return []
     return [
         _make_finding(
             severity="info",
             category="monitoring",
             title="Trend monitoring degraded",
-            summary="Prometheus trend queries failed — predictive scanners returned no data",
+            summary=("Prometheus trend queries failed — no forecast from: " + ", ".join(sorted(_degraded_scanners))),
             resources=[],
             auto_fixable=False,
         )

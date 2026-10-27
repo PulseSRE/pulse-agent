@@ -24,7 +24,7 @@ from .autofix import is_autofix_paused
 from .confidence import _estimate_auto_fix_confidence, _estimate_finding_confidence, _finding_key
 from .findings import _make_action_report, _ts
 from .registry import SEVERITY_CRITICAL
-from .scanners import ALL_SCANNERS, get_all_scanner_instances
+from .scanners import get_all_scanner_instances
 
 try:
     from ..observability import (
@@ -75,6 +75,28 @@ def _resolve_finding_inbox(finding_id: str, finding: dict | None = None) -> None
         resolve_finding_inbox_item(finding_id, finding)
     except Exception:
         logger.debug("Failed to resolve inbox item for finding %s", finding_id, exc_info=True)
+
+
+def _announced_before(findings: list[dict]) -> set[str]:
+    """Ids of findings whose condition already has an open inbox item.
+
+    The inbox item outlives the process; the monitor's memory of what it
+    announced does not. An open item means someone already got the page.
+    """
+    announced: set[str] = set()
+    try:
+        from ..inbox import _finding_corr_key
+        from ..repositories.inbox_repo import get_inbox_repo
+
+        repo = get_inbox_repo()
+        for f in findings:
+            key = _finding_corr_key(f)
+            if key and repo.find_active_by_correlation_task(key):
+                announced.add(f.get("id", ""))
+    except Exception:
+        # Unknown is not "already announced": page rather than stay silent.
+        logger.debug("Could not check for already-announced findings", exc_info=True)
+    return announced
 
 
 def _close_episode_for(finding: dict) -> None:
@@ -217,6 +239,13 @@ class ClusterMonitor:
         self._last_daily_run: float = 0.0
         self._last_weekly_run: float = 0.0
         self._transient_counts: dict[str, int] = {}
+        # Loaded from the database on the first scan (see noise_store).
+        self._noise_loaded = False
+        # Per-scanner results of the last completed scan (the briefing reads
+        # which scanners are failing). None until a scan completes.
+        self._last_scanner_results: list[dict] | None = None
+        # The first scan of a process sees every standing problem as new.
+        self._first_scan_announced = False
         self._noise_threshold = get_settings().monitor.noise_threshold
         self._noise_suppressed = 0
         self._noise_suppressed_last_scan = 0
@@ -1223,6 +1252,17 @@ class ClusterMonitor:
             if _METRICS_AVAILABLE:
                 SCANNER_RUNS_TOTAL.labels(scanner=name).inc()
         scheduled = {s.meta.name for s in get_all_scanner_instances()}
+        self._last_scanner_results = list(scanner_results)
+
+        if not self._noise_loaded:
+            # Restarting is not evidence that a flapping finding stopped
+            # flapping. Without this every known-noisy condition paged again
+            # until it had flapped three more times.
+            from .noise_store import load_counts
+
+            for k, v in (await asyncio.to_thread(load_counts)).items():
+                self._transient_counts[k] = max(v, self._transient_counts.get(k, 0))
+            self._noise_loaded = True
 
         # Deduplicate
         current_keys = set()
@@ -1283,10 +1323,16 @@ class ClusterMonitor:
                 self._first_seen.setdefault(key, int(time.time()))
         all_findings = unique_findings
 
+        # Bound memory, but never by forgetting something reported this cycle.
+        # Evicting the oldest keys regardless made a cluster with more than 500
+        # standing problems forget some of them, see them again next scan as
+        # "new", announce them again, and evict others -- every scan. Only
+        # findings their scanner did not report this cycle (a skipped or failed
+        # scanner's standing findings) are eligible, oldest first.
         if len(self._last_findings) > self._MAX_FINDINGS:
             excess = len(self._last_findings) - self._MAX_FINDINGS
-            oldest_keys = list(self._last_findings.keys())[:excess]
-            for k in oldest_keys:
+            evictable = [k for k in self._last_findings if k not in current_keys][:excess]
+            for k in evictable:
                 del self._last_findings[k]
                 self._finding_scanner.pop(k, None)
 
@@ -1294,7 +1340,13 @@ class ClusterMonitor:
         # not just the new ones: a cause detected three cycles ago must still
         # be able to absorb a symptom that only appeared now.
         try:
-            opened = await asyncio.to_thread(self._correlate_episodes, list(self._last_findings.values()))
+            # Not the noise-suppressed ones: a finding hidden from the feed for
+            # flapping must not head an episode (and page) or be absorbed as
+            # someone's symptom either.
+            correlatable = [
+                f for f in self._last_findings.values() if float(f.get("noiseScore") or 0) < self._noise_threshold
+            ]
+            opened = await asyncio.to_thread(self._correlate_episodes, correlatable)
             for episode_id, cause in opened:
                 # One message for one event. The symptoms underneath it stay
                 # silent — see the suppression in webhook._send_webhook.
@@ -1319,6 +1371,7 @@ class ClusterMonitor:
         # filter to hide exactly the conditions Pulse keeps fixing, so the third
         # recurrence of a fix that does not hold was suppressed instead of shown.
         self_healed_keys: set[str] = set()
+        episodes_to_close: list[dict] = []
         for key in stale_keys:
             self._finding_scanner.pop(key, None)
             resolved_finding = self._last_findings.pop(key)
@@ -1383,10 +1436,23 @@ class ClusterMonitor:
                 logger.debug("Learning gate on resolution failed", exc_info=True)
 
             self._first_seen.pop(key, None)
-            asyncio.get_running_loop().run_in_executor(None, _close_episode_for, resolved_finding)
+            episodes_to_close.append(resolved_finding)
             if finding_id:
                 asyncio.get_running_loop().run_in_executor(None, mark_finding_actions_resolved, finding_id)
                 asyncio.get_running_loop().run_in_executor(None, _resolve_finding_inbox, finding_id, resolved_finding)
+
+        # An episode is keyed on its cause's resource, and one resource can
+        # carry several conditions (a node with MemoryPressure and NotReady).
+        # Closing it when any one of them resolved, while another still stood,
+        # closed and re-opened the episode -- and re-announced it -- on every
+        # flap. Close only when nothing standing still heads it.
+        if episodes_to_close:
+            from ..inbox import _finding_corr_key
+
+            standing_keys = {_finding_corr_key(f) for f in self._last_findings.values()}
+            for resolved_finding in episodes_to_close:
+                if _finding_corr_key(resolved_finding) not in standing_keys:
+                    asyncio.get_running_loop().run_in_executor(None, _close_episode_for, resolved_finding)
 
         # One reconciliation per process, after the first scan has settled.
         #
@@ -1444,10 +1510,16 @@ class ClusterMonitor:
             logger.exception("Promoting matured learning candidates failed")
 
         # Track transient findings
+        changed_noise: dict[str, int] = {}
         for key in stale_keys:
             if key in self_healed_keys:
                 self._transient_counts[key] = self._transient_counts.get(key, 0) + 1
+                changed_noise[key] = self._transient_counts[key]
             self._investigation_fingerprints.pop(key, None)
+        if changed_noise:
+            from .noise_store import save_counts
+
+            asyncio.get_running_loop().run_in_executor(None, save_counts, changed_noise)
 
         if len(self._recent_fix_ids) > 500:
             self._recent_fix_ids = set(list(self._recent_fix_ids)[-500:])
@@ -1479,10 +1551,22 @@ class ClusterMonitor:
                     )
                 )
 
+        # A restart empties _last_findings, so the first scan reports every
+        # standing problem as new. Its UI broadcast is right (a fresh process
+        # has to tell clients what stands); paging again is not. A critical
+        # condition whose inbox item is still open was announced by the
+        # process that opened it.
+        already_announced: set[str] = set()
+        if not self._first_scan_announced:
+            self._first_scan_announced = True
+            critical = [f for f in new_findings if f.get("severity") == SEVERITY_CRITICAL]
+            if critical:
+                already_announced = await asyncio.to_thread(_announced_before, critical)
+
         # Push new findings via broadcast (per-client scanner filtering applies)
         for f in new_findings:
             await self.broadcast(f)
-            if f.get("severity") == SEVERITY_CRITICAL:
+            if f.get("severity") == SEVERITY_CRITICAL and f.get("id") not in already_announced:
                 await _send_webhook(f)
 
         # Every finding still standing, including those whose scanner skipped
@@ -1506,7 +1590,10 @@ class ClusterMonitor:
         await self._broadcast_raw(
             {
                 "type": "monitor_status",
-                "activeWatches": [cat for cat, _ in ALL_SCANNERS],
+                # Every scanner that runs, not the eleven original ones.
+                "activeWatches": [
+                    s.meta.name for s in get_all_scanner_instances() if s.meta.name not in globally_disabled
+                ],
                 "lastScan": _ts(),
                 "findingsCount": len(self._last_findings),
                 "nextScan": _ts() + self.scan_interval * 1000,

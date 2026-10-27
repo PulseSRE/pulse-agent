@@ -1301,9 +1301,17 @@ class TestBriefing:
         assert result["actions"]["total"] >= 0
 
     def test_briefing_empty_db(self):
+        from unittest.mock import MagicMock, patch
+
         from sre_agent.monitor import get_briefing
 
-        result = get_briefing(hours=1)
+        # A monitor that has scanned and found nothing, with every scanner
+        # healthy. Without one the briefing runs scanners itself; here they
+        # cannot reach a cluster, which is "failing", not "all quiet".
+        monitor = MagicMock(_last_findings={}, _last_scanner_results=[{"name": "alerts", "status": "clean"}])
+        monitor._noise_threshold = 0.7
+        with patch("sre_agent.monitor.cluster_monitor.get_cluster_monitor_sync", return_value=monitor):
+            result = get_briefing(hours=1)
         assert result["summary"] == "All quiet — no issues detected."
         assert result["actions"]["completed"] == 0
 

@@ -46,6 +46,11 @@ CATEGORY_LAYER: dict[str, int] = {
     "stuck": L_PLATFORM,
     "hot_loop": L_PLATFORM,
     "daemonsets": L_PLATFORM,
+    # A failing admission webhook blocks pod creation everywhere it matches; a
+    # broken storage class or CSI driver leaves every claim on it Pending.
+    # Unlisted, both defaulted to workload level and could never be a cause.
+    "webhooks": L_PLATFORM,
+    "storage": L_PLATFORM,
     # ── workload ──────────────────────────────────────────────────────────
     "crashloop": L_WORKLOAD,
     "workloads": L_WORKLOAD,
@@ -53,6 +58,7 @@ CATEGORY_LAYER: dict[str, int] = {
     "image_pull": L_WORKLOAD,
     "scheduling": L_WORKLOAD,
     "hpa": L_WORKLOAD,
+    "ingress": L_WORKLOAD,
     # ── signal ────────────────────────────────────────────────────────────
     "alerts": L_SIGNAL,
     "slo_burn": L_SIGNAL,
@@ -65,6 +71,8 @@ CATEGORY_LAYER: dict[str, int] = {
     "audit_deployment": L_SIGNAL,
     "audit_events": L_SIGNAL,
     "audit_auth": L_SIGNAL,
+    "anomaly": L_SIGNAL,  # deviation from a workload's baseline: an observation
+    "maintenance": L_SIGNAL,  # a PDB or setting that would block a drain
 }
 
 # Findings about Pulse itself. They are never anyone's symptom and never
@@ -87,6 +95,7 @@ NON_CAUSAL_CATEGORIES = frozenset(
         "disk_pressure",  # predict_linear forecast
         "security",  # standing posture, not an event
         "monitoring",  # observations about the monitoring stack
+        "maintenance",  # would block a future drain; has not broken anything
     }
 )
 

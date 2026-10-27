@@ -191,6 +191,24 @@ def _has_live_ai_backend() -> bool:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_noise_memory(request, monkeypatch):
+    """Keep the monitor's persisted noise counts out of unrelated tests.
+
+    The scan loop loads and saves them through the shared test database, so one
+    test's flapping finding would arrive pre-suppressed in the next. Tests of
+    the store itself opt back in with ``@pytest.mark.real_noise_store``.
+    """
+    if request.node.get_closest_marker("real_noise_store"):
+        yield
+        return
+    from sre_agent.monitor import noise_store
+
+    monkeypatch.setattr(noise_store, "load_counts", lambda: {})
+    monkeypatch.setattr(noise_store, "save_counts", lambda counts: None)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _stub_async_anthropic_client(monkeypatch):
     """Prevent any test from constructing a real async Anthropic client."""
     if _has_live_ai_backend():
@@ -494,3 +512,7 @@ def mock_security_k8s():
             "networking": networking_mock,
             "custom": custom_mock,
         }
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "real_noise_store: use the real persisted noise counts")
