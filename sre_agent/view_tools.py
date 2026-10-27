@@ -113,11 +113,16 @@ def create_dashboard(
 
     # The view is written after this turn ends, so this result cannot claim it
     # is saved; the UI opens it once the save succeeds, or shows an error.
+    # It also says the view cannot be looked up yet: told only "will be saved",
+    # the model called get_view_details/list_saved_views to check, found
+    # nothing, and kept going (the view_incident_triage replay went 18 -> 26
+    # tool calls and failed its budget).
     message = (
-        f"Dashboard '{title}' (ID {view_id}) will be saved when your reply finishes, "
-        f"and it opens for the user once it is saved. "
-        f"Tell the user the dashboard is being saved and ask whether they would like any changes. "
-        f"Do not say it is already saved."
+        f"Dashboard '{title}' (ID {view_id}) is complete. It is saved and opened for the user "
+        f"when your reply ends; if saving fails, they see an error. "
+        f"Do not look it up with list_saved_views or get_view_details — it does not exist until "
+        f"your reply ends. Finish your reply now: tell the user the dashboard is opening and ask "
+        f"whether they would like any changes."
     )
     if advisory:
         notes = "\n".join(f"- {a}" for a in advisory[:6])

@@ -432,7 +432,9 @@ class TestChatViews:
 
         src = inspect.getsource(view_tools)
         assert "now saved" not in src
-        assert "Do not say it is already saved" in src
+        assert "when your reply ends" in src
+        # Looking the view up before it exists sent the model in circles.
+        assert "Do not look it up" in src
 
 
 # -------------------------------------------------------------- namespace_summary
