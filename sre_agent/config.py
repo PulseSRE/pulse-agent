@@ -23,6 +23,10 @@ class AgentConfig(BaseModel):
     prompt_experiment: str = ""
     dev_user: str = ""
     tool_timeout: int = 30
+    # Per-turn ceilings for the agent loop (0 = off). The loop always enforced
+    # its iteration cap; these make the token and wall-clock limits reachable.
+    loop_max_input_tokens: int = 0
+    loop_max_seconds: float = 0.0
     cb_threshold: int = 3
     cb_timeout: float = 60.0
     token_forwarding: bool = True
@@ -179,6 +183,8 @@ class PulseAgentSettings(BaseSettings):
     dev_user: str = ""
     cb_threshold: int = 3
     cb_timeout: float = 60.0
+    loop_max_input_tokens: int = 0
+    loop_max_seconds: float = 0.0
     tool_timeout: int = 30
     token_forwarding: bool = True
     protected_namespaces: str = "production,openshift-*,kube-system"
@@ -276,6 +282,8 @@ class PulseAgentSettings(BaseSettings):
             prompt_experiment=self.prompt_experiment,
             dev_user=self.dev_user,
             tool_timeout=self.tool_timeout,
+            loop_max_input_tokens=self.loop_max_input_tokens,
+            loop_max_seconds=self.loop_max_seconds,
             cb_threshold=self.cb_threshold,
             cb_timeout=self.cb_timeout,
             token_forwarding=self.token_forwarding,

@@ -474,6 +474,14 @@ def build_orchestrated_config(mode: str, query: str = "") -> dict:
         for _name in ALWAYS_INCLUDE:
             if _name not in merged_map and _name in TOOL_REGISTRY:
                 merged_map[_name] = TOOL_REGISTRY[_name]
+        # Same memory tools the skill configs get (build_config_from_skill).
+        from .config import get_settings
+
+        if get_settings().agent.memory:
+            from .memory.memory_tools import MEMORY_TOOLS
+
+            for _tool in MEMORY_TOOLS:
+                merged_map.setdefault(getattr(_tool, "name", ""), _tool)
         merged_defs = [t.to_dict() for t in merged_map.values()]
         combined_prompt = (
             SRE_PROMPT + "\n\nYou also have security scanning tools available. "

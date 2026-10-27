@@ -686,6 +686,20 @@ def select_tools(query: str, all_tools: list, all_tool_map: dict, mode: str = "s
     return [t.to_dict() for t in ordered], tool_map, list(tool_map.keys())
 
 
+def _memory_tools() -> list:
+    from .memory.memory_tools import MEMORY_TOOLS
+
+    return list(MEMORY_TOOLS)
+
+
+def guaranteed_tool_names(skill) -> set[str]:
+    """Tools a skill keeps even when adaptive selection does not predict them."""
+    names = set(ALWAYS_INCLUDE) | set(_SELF_DESCRIBE_TOOLS) | {t.name for t in _memory_tools()}
+    if skill is not None:
+        names |= set(skill.requires_tools or [])
+    return names
+
+
 def build_config_from_skill(skill: Skill, query: str = "") -> dict:
     """Build agent config from a skill — same format as orchestrator.build_orchestrated_config().
 
@@ -786,6 +800,17 @@ def build_config_from_skill(skill: Skill, query: str = "") -> dict:
     else:
         # Strip write tools entirely — prevents calling dangerous tools without confirmation.
         tool_map = {n: t for n, t in tool_map.items() if n not in WRITE_TOOL_NAMES}
+
+    # Memory tools: past incidents, learned runbooks, cluster facts and past
+    # conversations. They were only wired into the CLI, so the server agent
+    # could not call search_past_incidents even though the SRE skill tells it
+    # to. Read-only towards the cluster; remember_environment_fact writes only
+    # to Pulse's own memory.
+    from .config import get_settings
+
+    if get_settings().agent.memory:
+        for tool in _memory_tools():
+            tool_map.setdefault(tool.name, tool)
 
     tool_defs = [t.to_dict() for t in tool_map.values()]
     write_tools = set(WRITE_TOOL_NAMES) if skill.write_tools else set()

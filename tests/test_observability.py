@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from sre_agent.observability import (
     ACTIVE_FINDINGS,
     AUTOFIX_TOTAL,
@@ -42,11 +44,26 @@ class TestMetricRegistration:
 
 
 class TestTokenPricing:
-    def test_prices_defined(self):
-        assert TOKEN_PRICES["input"] == 15.0
-        assert TOKEN_PRICES["output"] == 75.0
-        assert TOKEN_PRICES["cache_read"] == 1.875
-        assert TOKEN_PRICES["cache_write"] == 18.75
+    """Prices follow the configured model family; they used to be Opus for every model."""
+
+    def test_prices_follow_the_model_family(self):
+        from sre_agent.observability import token_prices
+
+        assert token_prices("claude-opus-5")["input"] == 15.0
+        sonnet = token_prices("claude-sonnet-5")
+        assert (sonnet["input"], sonnet["output"]) == (3.0, 15.0)
+        assert sonnet["cache_read"] == pytest.approx(0.3)
+        assert sonnet["cache_write"] == pytest.approx(3.75)
+        assert token_prices("claude-haiku-5")["output"] == 5.0
+
+    def test_contract_rates_override(self, monkeypatch):
+        from sre_agent.observability import token_prices
+
+        monkeypatch.setenv("PULSE_AGENT_PRICE_INPUT_PER_MTOK", "2.5")
+        assert token_prices("claude-sonnet-5")["input"] == 2.5
+
+    def test_legacy_constant_still_importable(self):
+        assert set(TOKEN_PRICES) == {"input", "output", "cache_read", "cache_write"}
 
 
 class TestRecordTokenMetrics:
@@ -65,7 +82,9 @@ class TestRecordTokenMetrics:
         record_token_metrics(input_tokens=1_000_000)
 
         after = COST_USD_TOTAL.labels(type="input")._value.get()
-        assert abs((after - before) - 15.0) < 0.01
+        from sre_agent.observability import token_prices
+
+        assert abs((after - before) - token_prices()["input"]) < 0.01
 
     def test_skips_zero_tokens(self):
         before_cr = TOKENS_TOTAL.labels(type="cache_read")._value.get()

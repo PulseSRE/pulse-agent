@@ -534,13 +534,19 @@ class MonitorRepository(BaseRepository):
             cutoff,
         )
 
-    async def async_delete_processed_handoffs(self, cutoff: int) -> None:
-        """Delete processed handoff requests (async — uses asyncpg)."""
+    async def async_delete_processed_handoffs(self, ids: list[int]) -> None:
+        """Delete the handoff requests that were processed (async — uses asyncpg).
+
+        By id: the fetch takes 5 at a time, and deleting everything inside the
+        time window silently dropped a sixth request that was never read.
+        """
+        if not ids:
+            return
         adb = await self.get_async_db()
         await adb.execute(
-            "DELETE FROM context_entries WHERE category = ? AND timestamp > ?",
+            "DELETE FROM context_entries WHERE category = ? AND id = ANY(?)",
             "handoff_request",
-            cutoff,
+            [int(i) for i in ids],
         )
 
     # ── Handoffs ─────────────────────────────────────────────────────────
@@ -553,10 +559,15 @@ class MonitorRepository(BaseRepository):
             ("handoff_request", cutoff),
         )
 
-    def delete_processed_handoffs(self, cutoff: int) -> None:
-        """Delete processed handoff requests."""
+    def delete_processed_handoffs(self, ids: list[int]) -> None:
+        """Delete the handoff requests that were processed, by id."""
+        if not ids:
+            return
         db = self.db
-        db.execute("DELETE FROM context_entries WHERE category = ? AND timestamp > ?", ("handoff_request", cutoff))
+        db.execute(
+            "DELETE FROM context_entries WHERE category = ? AND id = ANY(?)",
+            ("handoff_request", [int(i) for i in ids]),
+        )
         db.commit()
 
     # ── KPI queries (monitor_rest.py) ────────────────────────────────────────

@@ -93,7 +93,7 @@ make release VERSION=X.Y.Z            # agent-only version/badge commit + tag; s
 - Morning briefing: `GET /briefing` endpoint aggregates recent activity with time-aware greeting, live scanner data, and trend findings with priority items
 - Simulation preview: `POST /simulate` predicts impact, risk, duration, reversibility
 - WebSocket `feedback` message type for UI-driven memory learning (thumbs up/down)
-- Approved confirmations recorded as implicit positive feedback for memory
+- Feedback scores the most recent turn of the session it was given in (memory turn state is per session); approving a write is not treated as feedback
 - Fix history persisted to the database (`PULSE_AGENT_DATABASE_URL`)
 - `_sanitize_for_prompt()` on all cluster data in investigation prompts with `--- BEGIN/END CLUSTER DATA ---` delimiters
 

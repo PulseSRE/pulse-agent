@@ -150,19 +150,29 @@ class CircuitBreaker:
         self.state = self.CLOSED
         self.failure_count = 0
         self.last_failure_time: float = 0
+        self._probe_started: float = 0
         self._lock = threading.Lock()
 
     def allow_request(self) -> bool:
         with self._lock:
             if self.state == self.CLOSED:
                 return True
+            now = time.time()
             if self.state == self.OPEN:
-                if time.time() - self.last_failure_time >= self.recovery_timeout:
+                if now - self.last_failure_time >= self.recovery_timeout:
                     self.state = self.HALF_OPEN
+                    self._probe_started = now
                     logger.info("Circuit breaker: HALF_OPEN — testing recovery")
                     return True
                 return False
-            return True
+            # HALF_OPEN: one probe is already out. Everything else waits for its
+            # verdict (it returned True to every caller, so a recovering API took
+            # the full load at once). A probe that never reports back is assumed
+            # lost after another recovery period, and a new one is allowed.
+            if now - self._probe_started >= self.recovery_timeout:
+                self._probe_started = now
+                return True
+            return False
 
     def record_success(self):
         with self._lock:
@@ -707,7 +717,12 @@ async def run_agent_streaming(
     from .loop_budget import LoopBudget, compact_tool_results
     from .tool_images import drop_stale_images, result_content
 
-    budget = LoopBudget(max_iterations=MAX_ITERATIONS)
+    _agent_cfg = get_settings().agent
+    budget = LoopBudget(
+        max_iterations=MAX_ITERATIONS,
+        max_input_tokens=int(_agent_cfg.loop_max_input_tokens),
+        max_seconds=float(_agent_cfg.loop_max_seconds),
+    )
 
     # Fresh per-turn signals: the offered tool set and any skills loaded by
     # name, read back by the caller when it records the turn for learning.
@@ -735,10 +750,15 @@ async def run_agent_streaming(
         last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
         if isinstance(last_user, str) and last_user:
             # Adaptive selection: TF-IDF → LLM → category fallback
-            from .skill_loader import MODE_CATEGORIES
+            from .skill_loader import MODE_CATEGORIES, guaranteed_tool_names
+            from .skill_loader import get_skill as _get_mode_skill
             from .tool_predictor import select_tools_adaptive
 
-            fallback_cats = MODE_CATEGORIES.get(mode)
+            _mode_skill = _get_mode_skill(mode)
+            # A custom skill (slo_management, capacity_planner, ...) has no
+            # MODE_CATEGORIES entry, so the fallback was None and the second
+            # pass could cut its tools down to the always-include five.
+            fallback_cats = list(_mode_skill.categories) if _mode_skill else MODE_CATEGORIES.get(mode)
             original_tool_map = tool_map
             # Off the event loop: below high TF-IDF confidence this makes a
             # blocking LLM call, which stalled every other WebSocket and the
@@ -750,6 +770,13 @@ async def run_agent_streaming(
                 fallback_categories=fallback_cats,
             )
             tool_map = {**filtered_map}
+            # The tools a skill must always have (its requires_tools, the
+            # always-include set, memory tools, self-describe tools when the
+            # caller offered them) were guaranteed when the skill config was
+            # built; this second pass dropped them again unless predicted.
+            for name in guaranteed_tool_names(_mode_skill):
+                if name in original_tool_map and name not in tool_map:
+                    tool_map[name] = original_tool_map[name]
             # Preserve write tools — skill declared them, confirmation gate handles safety
             if write_tools:
                 for wt in write_tools:
@@ -767,7 +794,14 @@ async def run_agent_streaming(
     turn_signals.offered_tools = list(tool_map.keys())
 
     # --- Harness: Cached system prompt with cluster context ---
-    if use_harness:
+    if use_harness and isinstance(system_prompt, list) and system_prompt:
+        # The caller already assembled the prompt as cache blocks: the skill
+        # prompt plus what only it knows (memory of past incidents, the UI
+        # style hint, shared context, runbooks). Rebuilding from the skill
+        # here discarded all of it, so in chat and in monitor investigations
+        # memory never reached the model.
+        effective_system = system_prompt
+    elif use_harness:
         # Use prompt builder for unified assembly (intent prefix + components + context)
         try:
             from .prompt_builder import assemble_prompt as _assemble
@@ -820,6 +854,11 @@ async def run_agent_streaming(
         effective_system = _with_system_note(effective_system, _policy_note)
 
     while iterations < MAX_ITERATIONS:
+        # The token and wall-clock ceilings end the turn here, before another
+        # model call. The loop only ever checked its iteration count, so these
+        # limits were reported after the fact but never enforced.
+        if (budget.max_input_tokens or budget.max_seconds) and budget.exhausted():
+            break
         iterations += 1
         budget.record_iteration()
 
@@ -934,6 +973,11 @@ async def run_agent_streaming(
         # Extract token usage from API response
         _usage = getattr(response, "usage", None)
         if _usage:
+            # Counted against the turn's token ceiling (record_iteration was
+            # never given a count, so the token budget could not trigger).
+            budget.input_tokens += int(getattr(_usage, "input_tokens", 0) or 0) + int(
+                getattr(_usage, "cache_read_input_tokens", 0) or 0
+            )
             await event_bus.on_usage(
                 input_tokens=getattr(_usage, "input_tokens", 0),
                 output_tokens=getattr(_usage, "output_tokens", 0),
