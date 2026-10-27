@@ -132,58 +132,35 @@ async def try_plan_execution(monitor: ClusterMonitor, finding: dict) -> bool:
             except Exception:
                 logger.debug("Postmortem generation failed", exc_info=True)
 
-        # Scaffold skill + plan template from resolution
-        try:
-            from ..skill_scaffolder import (
-                save_scaffolded_skill,
-                scaffold_plan_template,
-                scaffold_skill_from_resolution,
-            )
+        # The investigation this plan amounts to: its diagnosis, the evidence
+        # behind it, and the confidence derived from that evidence. Plans ran
+        # the common categories (crashloop, oom, image_pull, nodes, ...) and
+        # reported only phase progress — no investigation_report, nothing in
+        # the investigations table, no evidence for the inbox to show.
+        report = await _report_plan_investigation(monitor, finding, template, result)
 
-            tools = [t for out in result.phase_outputs.values() for t in out.actions_taken]
-            conf = max((o.confidence for o in result.phase_outputs.values()), default=0)
-            if tools:
-                diagnose_out = result.phase_outputs.get("diagnose")
-                skill_content = scaffold_skill_from_resolution(
-                    query=finding.get("title", ""),
-                    tools_called=tools,
-                    investigation_summary=diagnose_out.evidence_summary if diagnose_out else "",
-                    root_cause=diagnose_out.findings.get("root_cause", "unknown") if diagnose_out else "unknown",
-                    confidence=conf,
-                )
-                tokens = finding.get("title", "unknown").lower().split()[:3]
-                skill_name = "-".join(t for t in tokens if t.isalnum())[:40] or "auto-skill"
-                save_scaffolded_skill(skill_content, skill_name)
+        # Learning goes through the verified-trajectory gate like every other
+        # investigation. This used to scaffold a skill here, from an unverified
+        # plan run, named after the finding title's first words — bypassing
+        # "learn only from fixes that held" entirely.
+        if report and report.get("confidence", 0) >= 0.75 and report.get("suspected_cause"):
+            try:
+                from ..trajectory import LearningCandidate, candidate_key, get_learner
 
-                phase_ids = [p.id for p in template.phases]
-                # Keyed on the template that just ran, never the raw finding
-                # category. "alerts" or "workloads" never matched a reviewed
-                # template by name, so each run wrote an unreviewed copy keyed
-                # on the raw category — and the next match_template() found it
-                # first, shadowing the reviewed plan from then on. The template
-                # that ran already exists, so this no longer duplicates it.
-                scaffold_plan_template(
-                    skill_name=skill_name,
-                    plan_phases=phase_ids,
-                    incident_type=template.incident_type,
-                    confidence=conf,
-                )
-
-                try:
-                    from ..eval_scaffolder import scaffold_eval_from_plan
-
-                    scaffold_eval_from_plan(
-                        skill_name=skill_name,
-                        finding=finding,
-                        plan_result=result,
-                        tools_called=tools,
-                        confidence=conf,
-                        duration_seconds=result.total_duration_ms / 1000.0,
+                get_learner().record(
+                    LearningCandidate(
+                        key=candidate_key(finding.get("category", ""), finding.get("resources", [])),
+                        category=finding.get("category", ""),
+                        title=finding.get("title", ""),
+                        root_cause=report["suspected_cause"],
+                        summary=report.get("summary", ""),
+                        confidence=float(report["confidence"]),
+                        evidence=list(report.get("evidenceDetail") or []),
+                        tools_called=[t for out in result.phase_outputs.values() for t in out.actions_taken],
                     )
-                except Exception:
-                    logger.debug("Eval scaffolding from plan failed", exc_info=True)
-        except Exception:
-            logger.debug("Skill scaffolding failed", exc_info=True)
+                )
+            except Exception:
+                logger.debug("Recording plan learning candidate failed", exc_info=True)
 
         logger.info(
             "Plan execution complete: %s status=%s phases=%d/%d",
@@ -197,3 +174,70 @@ async def try_plan_execution(monitor: ClusterMonitor, finding: dict) -> bool:
     except Exception:
         logger.debug("Plan execution failed", exc_info=True)
         return False
+
+
+async def _report_plan_investigation(monitor: ClusterMonitor, finding: dict, template, result) -> dict | None:
+    """Turn a finished plan into an investigation report: saved, broadcast, on the inbox item."""
+    import asyncio
+    import uuid
+
+    from .actions import save_investigation
+    from .findings import _ts
+
+    outputs = result.phase_outputs or {}
+    if not outputs:
+        return None
+    diagnose = outputs.get("diagnose") or outputs.get("node_diagnostics") or outputs.get("change_analysis")
+    lead = diagnose or next(reversed(list(outputs.values())))
+    findings = lead.findings if isinstance(lead.findings, dict) else {}
+    cause = str(findings.get("root_cause") or findings.get("suspected_cause") or "")
+    if cause.lower() in ("unknown", "n/a", "none"):
+        cause = ""
+    evidence_detail = [e for out in outputs.values() for e in (out.evidence or [])][:10]
+    alternatives = [str(a) for a in (findings.get("alternatives_considered") or [])][:10]
+    remediation = outputs.get("remediate") or outputs.get("remediation")
+    fix = ""
+    if remediation is not None:
+        fix = str(remediation.findings.get("recommended_fix") or remediation.evidence_summary or "")[:500]
+
+    report_id = f"i-{uuid.uuid4().hex[:12]}"
+    report = {
+        "type": "investigation_report",
+        "id": report_id,
+        "finding_id": finding.get("id", ""),
+        "findingId": finding.get("id", ""),
+        "category": finding.get("category", ""),
+        "status": "completed" if result.status in ("complete", "completed", "partial") else "failed",
+        "summary": (lead.evidence_summary or "")[:1000],
+        "suspected_cause": cause,
+        "suspectedCause": cause,
+        "recommended_fix": fix,
+        "recommendedFix": fix,
+        # The diagnosing phase's confidence, which plan_runtime now derives
+        # from that phase's evidence instead of defaulting to 0.7.
+        "confidence": float(lead.confidence or 0.0),
+        "evidence": [str(e.get("observation", "")) for e in evidence_detail if e.get("observation")],
+        "evidenceDetail": evidence_detail,
+        "alternatives_considered": alternatives,
+        "alternativesConsidered": alternatives,
+        "planId": template.id,
+        "timestamp": _ts(),
+    }
+    try:
+        await asyncio.to_thread(save_investigation, report, finding)
+        await monitor._broadcast_raw(report)
+        from ..inbox import attach_investigation_to_finding
+
+        result_like = {
+            "summary": report["summary"],
+            "suspected_cause": cause,
+            "recommended_fix": fix,
+            "confidence": report["confidence"],
+            "evidence": report["evidence"],
+            "evidence_detail": evidence_detail,
+            "alternatives_considered": alternatives,
+        }
+        await asyncio.to_thread(attach_investigation_to_finding, finding, result_like, report_id)
+    except Exception:
+        logger.debug("Reporting plan investigation failed", exc_info=True)
+    return report

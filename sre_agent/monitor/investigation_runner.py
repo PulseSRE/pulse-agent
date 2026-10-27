@@ -243,6 +243,7 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
             )
             _sc = result.get("suspected_cause", "")
             _rf = result.get("recommended_fix", "")
+            _alts = result.get("alternatives_considered", []) or []
             report.update(
                 {
                     "status": "completed",
@@ -252,8 +253,23 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
                     "recommended_fix": _rf,
                     "recommendedFix": _rf,
                     "confidence": result.get("confidence", 0.0),
+                    # The evidence the confidence was derived from. It was
+                    # returned by the investigation and dropped here, so the
+                    # database stored [] and the UI always showed "No
+                    # supporting evidence reported for this hypothesis."
+                    "evidence": result.get("evidence", []) or [],
+                    "evidenceDetail": result.get("evidence_detail", []) or [],
+                    "alternatives_considered": _alts,
+                    "alternativesConsidered": _alts,
+                    "viewPlan": result.get("view_plan", []) or [],
                 }
             )
+            try:
+                from ..inbox import attach_investigation_to_finding
+
+                await asyncio.to_thread(attach_investigation_to_finding, finding, result, report["id"])
+            except Exception:
+                logger.debug("Attaching investigation to inbox failed", exc_info=True)
             investigations_run += 1
             monitor._daily_investigation_count += 1
             if _METRICS_AVAILABLE:

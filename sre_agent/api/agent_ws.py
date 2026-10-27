@@ -478,7 +478,11 @@ async def _run_agent_ws_inner(
                         existing = candidate
                         break
             if not existing and finding_id:
-                existing = _db.get_view_by_finding(finding_id)
+                # A finding can have views owned by several people; only merge
+                # into this user's own, never into someone else's private view.
+                by_finding = _db.get_view_by_finding(finding_id)
+                if by_finding and by_finding.get("owner") == current_user:
+                    existing = by_finding
             if not existing:
                 existing = _db.get_view_by_title(current_user, view_title)
             if existing:
@@ -493,9 +497,15 @@ async def _run_agent_ws_inner(
                 update_kwargs: dict = {"layout": merged_layout, "description": view_desc}
                 if positions:
                     update_kwargs["positions"] = positions
-                # Use view's actual owner for update (identity may differ)
-                actual_owner = existing.get("owner", current_user)
-                _db.update_view(existing["id"], actual_owner, _snapshot=True, _action="agent_update", **update_kwargs)
+                updated = _db.update_view(
+                    existing["id"], current_user, _snapshot=True, _action="agent_update", **update_kwargs
+                )
+                if not updated:
+                    logger.warning("View %s was not updated; not sending view_spec", existing["id"])
+                    await websocket.send_json(
+                        {"type": "error", "message": f"The dashboard '{view_title}' could not be saved."}
+                    )
+                    continue
                 _view_updated_ids.add(existing["id"])
                 logger.info(
                     "Updated existing view: id=%s title=%s (+%d components)",
@@ -518,7 +528,7 @@ async def _run_agent_ws_inner(
                 await websocket.send_json({"type": "view_spec", "spec": spec})
                 # Don't clear session_components -- agent may call create_dashboard again in same turn
             else:
-                _db.save_view(
+                saved_id = _db.save_view(
                     current_user,
                     view_id,
                     view_title,
@@ -531,6 +541,14 @@ async def _run_agent_ws_inner(
                     finding_id=finding_id,
                     visibility=view_visibility,
                 )
+                if not saved_id:
+                    # Only announce a view the database actually holds.
+                    logger.warning("View %s was not saved; not sending view_spec", view_id)
+                    await websocket.send_json(
+                        {"type": "error", "message": f"The dashboard '{view_title}' could not be saved."}
+                    )
+                    continue
+                view_id = saved_id
                 _view_updated_ids.add(view_id)
                 logger.info(
                     "Saved new view: id=%s title=%s type=%s components=%d",
