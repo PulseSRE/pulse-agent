@@ -28,6 +28,9 @@ _SCANNER_CATEGORIES = {
     "slo_burn": ["slo_burn"],
     "security_posture": ["security"],
     "predictive_trends": ["trend_memory", "trend_disk", "trend_hpa", "trend_errors", "trend_degraded"],
+    "liveness": ["stuck", "webhooks", "hot_loop", "control_plane", "degraded"],
+    "blind_spots": ["storage", "ingress", "maintenance"],
+    "baseline_anomaly": ["anomaly"],
 }
 
 
@@ -45,10 +48,11 @@ def get_scanner_coverage(days: int = 7) -> dict:
         - categories: list of {name, covered, scanners}
         - per_scanner: list of {name, enabled, finding_count, actionable_count, noise_pct}
     """
-    from ..monitor import _get_all_scanners
+    from ..monitor.scanners import get_all_scanner_instances
 
-    # Get all scanners
-    all_scanners = _get_all_scanners()
+    # The scanners the monitor actually runs. The old list omitted five of
+    # them, so the coverage page under-counted what was being watched.
+    all_scanners = [(s.meta.name, s) for s in get_all_scanner_instances()]
     scanner_ids = {scanner_id for scanner_id, _ in all_scanners}
     total_scanners = len(all_scanners)
 

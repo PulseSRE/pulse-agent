@@ -517,6 +517,11 @@ def scan_firing_alerts() -> list[dict]:
     try:
         data = get_prometheus_client().request("api/v1/rules", {"type": "alert"}, 15, PrometheusBackend.LOCAL)
         if data.get("status") != "success":
+            # An unanswered query is not "no alerts firing". Returning [] here
+            # read as clean, so every firing alert resolved as "self-healed" on
+            # one Prometheus blip, re-raised on the next scan, and after a few
+            # blips the noise filter hid those alerts for good.
+            report_failure(f"Prometheus alert query failed: {data.get('error', data.get('status', 'unknown'))}")
             return findings
         for group in data.get("data", {}).get("groups", []):
             for rule in group.get("rules", []):
@@ -564,6 +569,7 @@ def scan_firing_alerts() -> list[dict]:
                         )
                     )
     except PrometheusConfigError as e:
+        report_failure(f"Prometheus not configured: {e}")
         findings.append(
             _make_finding(
                 severity="warning",
@@ -575,6 +581,7 @@ def scan_firing_alerts() -> list[dict]:
         )
     except Exception as e:
         logger.warning("Alert scan failed (Prometheus runtime error): %s", e)
+        report_failure(f"Alert scan failed: {type(e).__name__}: {e}")
         findings.append(
             _make_finding(
                 severity="info",

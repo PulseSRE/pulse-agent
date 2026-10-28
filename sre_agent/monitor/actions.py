@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
 from typing import Any
 
 from ..repositories.monitor_repo import get_monitor_repo
@@ -116,53 +115,11 @@ def get_briefing(hours: int = 12) -> dict:
         investigations = repo.get_investigations_since(since)
         total_investigations = len(investigations)
 
-        # Live scanner runs: fast current state scanners
-        current_findings: list[dict] = []
-        try:
-            from .scanners import (
-                scan_crashlooping_pods,
-                scan_firing_alerts,
-                scan_oom_killed_pods,
-                scan_pending_pods,
-            )
-
-            scanners: list[Callable[[], list[dict]]] = [
-                scan_crashlooping_pods,
-                scan_pending_pods,
-                scan_oom_killed_pods,
-                scan_firing_alerts,
-            ]
-            for scanner in scanners:
-                try:
-                    current_findings.extend(scanner())
-                except Exception as e:
-                    logger.debug("Scanner %s failed in briefing: %s", scanner.__name__, e)
-        except ImportError:
-            logger.debug("Scanners not available for briefing")
-
-        # Live trend scanner runs: predictive findings
-        trend_findings: list[dict] = []
-        try:
-            from .trend_scanners import (
-                scan_disk_pressure_forecast,
-                scan_error_rate_acceleration,
-                scan_hpa_exhaustion_trend,
-                scan_memory_pressure_forecast,
-            )
-
-            trend_scanners: list[Callable[[], list[dict]]] = [
-                scan_memory_pressure_forecast,
-                scan_disk_pressure_forecast,
-                scan_hpa_exhaustion_trend,
-                scan_error_rate_acceleration,
-            ]
-            for scanner in trend_scanners:
-                try:
-                    trend_findings.extend(scanner())
-                except Exception as e:
-                    logger.debug("Trend scanner %s failed in briefing: %s", scanner.__name__, e)
-        except ImportError:
-            logger.debug("Trend scanners not available for briefing")
+        # What the monitor currently holds, not a fresh run of a few
+        # scanners. The briefing re-ran 8 of 32 and swallowed their failures,
+        # so it missed most standing problems and could not say when it was
+        # blind.
+        current_findings, trend_findings, unwatched = _standing_state()
 
         # Priority ranking: sort by severity weight
         all_findings = current_findings + trend_findings
@@ -181,11 +138,23 @@ def get_briefing(hours: int = 12) -> dict:
         else:
             greeting = "Good evening"
 
-        # Build summary sentence
-        if total_actions == 0 and total_investigations == 0:
+        # Build summary sentence. "All quiet" was chosen from actions and
+        # investigations alone, so it headed briefings listing critical items.
+        critical_now = sum(1 for f in current_findings if f.get("severity") == "critical")
+        warning_now = sum(1 for f in current_findings if f.get("severity") == "warning")
+        parts = []
+        if critical_now:
+            parts.append(f"{critical_now} critical issue{'s' if critical_now != 1 else ''} open")
+        if warning_now:
+            parts.append(f"{warning_now} warning{'s' if warning_now != 1 else ''} open")
+        if unwatched:
+            parts.append(
+                f"{len(unwatched)} scanner{'s' if len(unwatched) != 1 else ''} failing "
+                f"({', '.join(sorted(unwatched)[:3])}{'…' if len(unwatched) > 3 else ''})"
+            )
+        if not parts and total_actions == 0 and total_investigations == 0:
             summary = "All quiet — no issues detected."
         else:
-            parts = []
             if completed:
                 parts.append(f"{completed} issue{'s' if completed != 1 else ''} auto-fixed")
             if failed:
@@ -194,7 +163,7 @@ def get_briefing(hours: int = 12) -> dict:
                 parts.append(
                     f"{total_investigations} investigation{'s' if total_investigations != 1 else ''} completed"
                 )
-            summary = ", ".join(parts) + "."
+            summary = ", ".join(parts) + "." if parts else "No open issues."
 
         return {
             "greeting": greeting,
@@ -206,6 +175,7 @@ def get_briefing(hours: int = 12) -> dict:
             "currentFindings": current_findings,
             "trendFindings": trend_findings,
             "priorityItems": priority_items,
+            "unwatchedScanners": sorted(unwatched),
         }
     except Exception as e:
         logger.error("Failed to build briefing: %s", e)
@@ -219,7 +189,67 @@ def get_briefing(hours: int = 12) -> dict:
             "currentFindings": [],
             "trendFindings": [],
             "priorityItems": [],
+            "unwatchedScanners": [],
         }
+
+
+# The scanners the briefing runs itself when no monitor has scanned yet:
+# (scanner name, module, function).
+_FALLBACK_SCANNERS = (
+    ("crashloop", "scanners", "scan_crashlooping_pods"),
+    ("pending", "scanners", "scan_pending_pods"),
+    ("oom", "scanners", "scan_oom_killed_pods"),
+    ("alerts", "scanners", "scan_firing_alerts"),
+    ("trend_memory", "trend_scanners", "scan_memory_pressure_forecast"),
+    ("trend_disk", "trend_scanners", "scan_disk_pressure_forecast"),
+    ("trend_hpa", "trend_scanners", "scan_hpa_exhaustion_trend"),
+    ("trend_errors", "trend_scanners", "scan_error_rate_acceleration"),
+)
+
+
+def _standing_state() -> tuple[list[dict], list[dict], set[str]]:
+    """(current findings, trend findings, failing scanner names).
+
+    From the running monitor when it has completed a scan: everything it holds,
+    minus noise-suppressed findings, and the scanners that errored on its last
+    scan. Before the first scan, the briefing runs a few fast scanners itself
+    and reports any that fail rather than treating them as clean.
+    """
+    from .cluster_monitor import get_cluster_monitor_sync
+
+    monitor = get_cluster_monitor_sync()
+    results = getattr(monitor, "_last_scanner_results", None) if monitor is not None else None
+    if monitor is not None and results is not None:
+        threshold = getattr(monitor, "_noise_threshold", 1.0)
+        standing = [f for f in list(monitor._last_findings.values()) if float(f.get("noiseScore") or 0) < threshold]
+        current = [f for f in standing if f.get("findingType", "current") == "current"]
+        trend = [f for f in standing if f.get("findingType") == "trend"]
+        unwatched = {r["name"] for r in results if r.get("status") == "error"}
+        return current, trend, unwatched
+
+    import importlib
+
+    from .scanner_health import _failures_this_cycle, get_failure, scanning
+
+    ran_current: list[dict] = []
+    ran_trend: list[dict] = []
+    failing: set[str] = set()
+    for name, module_name, func_name in _FALLBACK_SCANNERS:
+        scan = getattr(importlib.import_module(f"{__package__}.{module_name}"), func_name)
+        _failures_this_cycle.pop(name, None)
+        try:
+            with scanning(name):
+                found = scan() or []
+                failed = get_failure(name)
+        except Exception as e:
+            logger.debug("Scanner %s failed in briefing: %s", name, e)
+            failing.add(name)
+            continue
+        if failed:
+            failing.add(name)
+        for f in found:
+            (ran_trend if f.get("findingType") == "trend" else ran_current).append(f)
+    return ran_current, ran_trend, failing
 
 
 def get_action_detail(action_id: str) -> dict | None:

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent is the Python backend for Pulse SRE. The packaged version is defined in `pyproject.toml` (currently 2.34.0), Protocol v2, Python 3.11+. Read [current architecture](docs/ARCHITECTURE.md), [testing](TESTING.md), [security](SECURITY.md), and [release process](RELEASE.md). Dynamic tool/scanner/test counts and previous gate scores must be remeasured, not copied as health guarantees. PostgreSQL migrations currently end at 039. Deployment is owned by pulse-operator, not a local Helm chart.
+Pulse Agent is the Python backend for Pulse SRE. The packaged version is defined in `pyproject.toml` (currently 2.34.0), Protocol v2, Python 3.11+. Read [current architecture](docs/ARCHITECTURE.md), [testing](TESTING.md), [security](SECURITY.md), and [release process](RELEASE.md). Dynamic tool/scanner/test counts and previous gate scores must be remeasured, not copied as health guarantees. PostgreSQL migrations currently end at 040. Deployment is owned by pulse-operator, not a local Helm chart.
 
 Tests reset the public schema: use only a disposable `PULSE_AGENT_TEST_DATABASE_URL`. The user's kubeconfig, development database, and running cluster are not test fixtures.
 
@@ -88,9 +88,11 @@ make release VERSION=X.Y.Z            # agent-only version/badge commit + tag; s
 - Confidence scores on all findings, investigations, and action proposals
 - `resolution` events emitted when findings resolve (auto-fix or self-healed)
 - Reasoning chains: investigation prompt requests evidence + alternatives_considered
-- Noise learning: tracks transient findings, assigns `noiseScore` to suppress flaky alerts
+- Noise learning: tracks transient findings, assigns `noiseScore` to suppress flaky alerts. Counts persist in `monitor_noise` (`monitor/noise_store.py`, migration 040) so a restart does not reset them; noise-suppressed findings are kept out of episode correlation
+- Restart: the first scan of a process does not re-page a critical finding whose inbox item is still open (`_announced_before`). Above `_MAX_FINDINGS`, only findings not reported this cycle are evicted
+- Episodes: a symptom must start within `_ONSET_SPREAD_SECONDS` of the cause (also for findings without their own onset), and a cause in an application namespace only explains symptoms in that namespace (cluster-scoped and `openshift-*`/`kube-*` causes reach everywhere). An episode closes only when no standing finding still has its correlation key. `webhooks`/`storage` are platform-layer causes; `maintenance`/`anomaly` are signals
 - `findings_snapshot` event for stale finding cleanup
-- Morning briefing: `GET /briefing` endpoint aggregates recent activity with time-aware greeting, live scanner data, and trend findings with priority items
+- Morning briefing: `GET /briefing` reports the running monitor's standing findings and the scanners that failed its last scan (`unwatchedScanners`); "All quiet" only when nothing is open and nothing is failing. Before the first scan it runs a few fast scanners itself and reports their failures
 - Simulation preview: `POST /monitor/simulate` returns a static guide to a tool's impact, risk, duration and reversibility (`basis: "static"`; not a cluster-specific forecast)
 - WebSocket `feedback` message type for UI-driven memory learning (thumbs up/down)
 - Feedback scores the most recent turn of the session it was given in (memory turn state is per session); approving a write is not treated as feedback

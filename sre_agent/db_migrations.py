@@ -382,6 +382,13 @@ def _migrate_039_fix_outcomes(db: Database) -> None:
     db.executescript(FIX_OUTCOMES_SCHEMA)
 
 
+def _migrate_040_monitor_noise(db: Database) -> None:
+    """How often each finding has gone away on its own, kept across restarts."""
+    from .db_schema import NOISE_MEMORY_SCHEMA
+
+    db.executescript(NOISE_MEMORY_SCHEMA)
+
+
 def _migrate_025_rekey_inbox_correlation_keys(db: Database) -> None:
     """Re-key inbox items left orphaned when correlation keys gained a namespace.
 
@@ -607,4 +614,5 @@ MIGRATIONS = [
     (37, "grid_12", _migrate_037_grid_12),
     (38, "decaying_tool_counts", _migrate_038_decaying_tool_counts),
     (39, "fix_outcomes", _migrate_039_fix_outcomes),
+    (40, "monitor_noise", _migrate_040_monitor_noise),
 ]
