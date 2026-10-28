@@ -244,6 +244,7 @@ class ClusterMonitor:
         # Per-scanner results of the last completed scan (the briefing reads
         # which scanners are failing). None until a scan completes.
         self._last_scanner_results: list[dict] | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         # The first scan of a process sees every standing problem as new.
         self._first_scan_announced = False
         self._noise_threshold = get_settings().monitor.noise_threshold
@@ -1684,6 +1685,8 @@ class ClusterMonitor:
     async def run_loop(self) -> None:
         """Main monitor loop — scan periodically until stopped."""
         self.running = True
+        # Lets code on worker threads (the inbox) broadcast to subscribers.
+        self._loop = asyncio.get_running_loop()
         await self.run_scan()
 
         while self.running:
@@ -1717,6 +1720,21 @@ async def get_cluster_monitor() -> ClusterMonitor:
 def get_cluster_monitor_sync() -> ClusterMonitor | None:
     """Get the singleton ClusterMonitor if it exists (non-async, no creation)."""
     return _cluster_monitor
+
+
+def broadcast_threadsafe(message: dict) -> bool:
+    """Send a message to every monitor subscriber, from any thread.
+
+    REST handlers and worker threads change state the UI shows (inbox items,
+    approved fixes) without being on the monitor's event loop. Returns False
+    when no monitor loop is running, which is not an error: nobody is listening.
+    """
+    monitor = _cluster_monitor
+    loop = getattr(monitor, "_loop", None) if monitor is not None else None
+    if monitor is None or loop is None or loop.is_closed():
+        return False
+    asyncio.run_coroutine_threadsafe(monitor._broadcast_raw(message), loop)
+    return True
 
 
 def reset_cluster_monitor() -> None:

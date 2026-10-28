@@ -158,6 +158,7 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
         report.update(status="failed", error=remediation, durationMs=_ts() - started)
         logger.warning("Approved fix blocked by RBAC preflight: action=%s — %s", action_id, remediation)
         save_action(report, category=category, resources=finding.get("resources", []), finding=finding)
+        _announce(report)
         return report
 
     try:
@@ -228,7 +229,22 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
             "strategy": plan.strategy,
             "cause": plan.cause_category,
         }
+    _announce(report)
     return report
+
+
+def _announce(report: dict[str, Any]) -> None:
+    """Tell connected UIs the proposal is answered.
+
+    An approval over REST never reached /ws/monitor, so every open tab kept the
+    proposal in its pending list (and its badge) until reload.
+    """
+    try:
+        from .cluster_monitor import broadcast_threadsafe
+
+        broadcast_threadsafe({"type": "action_report", **report})
+    except Exception:
+        logger.debug("Could not announce approved action %s", report.get("id"), exc_info=True)
 
 
 def expire_orphaned_proposals() -> int:

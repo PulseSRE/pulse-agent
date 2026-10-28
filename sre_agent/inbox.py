@@ -53,6 +53,23 @@ def _publish_event(event_type: str, item_id: str, data: dict[str, Any] | None = 
     from .api.view_events import publish_view_event
 
     publish_view_event(event_type, item_id, "system", data)
+    _relay_to_monitor_clients(event_type, item_id, data)
+
+
+def _relay_to_monitor_clients(event_type: str, item_id: str, data: dict[str, Any] | None) -> None:
+    """Send an inbox event to the UI over the monitor WebSocket.
+
+    The UI listens for ``inbox_item_*`` on /ws/monitor, but these events only
+    went to the view event bus, which nothing subscribes to — so the inbox
+    loaded once and never updated live. Called from worker threads as well as
+    the event loop, hence run_coroutine_threadsafe onto the monitor's loop.
+    """
+    try:
+        from .monitor.cluster_monitor import broadcast_threadsafe
+
+        broadcast_threadsafe({"type": event_type, "id": item_id, **(data or {}), "timestamp": int(time.time() * 1000)})
+    except Exception:
+        logger.debug("Could not relay %s for %s to monitor clients", event_type, item_id, exc_info=True)
 
 
 def record_interaction(

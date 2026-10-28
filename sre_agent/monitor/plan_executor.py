@@ -32,6 +32,11 @@ async def try_plan_execution(monitor: ClusterMonitor, finding: dict) -> bool:
 
         async def _on_start(pid, sn):
             logger.info("Plan phase '%s' starting (skill=%s)", pid, sn)
+            # The UI shows "Investigating: <skill>" from this event, which was
+            # handled but never sent.
+            await monitor._broadcast_raw(
+                {"type": "skill_activity", "skill_name": sn, "status": "running", "timestamp": int(time.time() * 1000)}
+            )
             for p in all_phases:
                 if p["id"] == pid:
                     p["status"] = "running"
@@ -70,12 +75,17 @@ async def try_plan_execution(monitor: ClusterMonitor, finding: dict) -> bool:
                 }
             )
 
-        result = await runtime.execute(
-            template,
-            incident=finding,
-            on_phase_start=_on_start,
-            on_phase_complete=_on_complete,
-        )
+        try:
+            result = await runtime.execute(
+                template,
+                incident=finding,
+                on_phase_start=_on_start,
+                on_phase_complete=_on_complete,
+            )
+        finally:
+            await monitor._broadcast_raw(
+                {"type": "skill_activity", "skill_name": "", "status": "idle", "timestamp": int(time.time() * 1000)}
+            )
 
         # Generate postmortem from all phase outputs
         if result.phase_outputs:
