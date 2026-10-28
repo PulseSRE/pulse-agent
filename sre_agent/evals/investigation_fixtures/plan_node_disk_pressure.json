@@ -1,0 +1,52 @@
+{
+  "name": "plan_node_disk_pressure",
+  "description": "DiskPressure on worker-3: a log-shipper pod at trace log level filled /var/log/pods.",
+  "finding": {
+    "type": "finding",
+    "id": "f-plan_node_di",
+    "severity": "critical",
+    "autoFixable": false,
+    "category": "nodes",
+    "title": "Node worker-3 has DiskPressure",
+    "summary": "Node worker-3 condition DiskPressure=True for 25m; kubelet is evicting pods",
+    "resources": [
+      {
+        "kind": "Node",
+        "name": "worker-3"
+      }
+    ]
+  },
+  "recorded_responses": {
+    "describe_resource": "{\"kind\": \"Node\", \"name\": \"worker-3\", \"conditions\": [{\"type\": \"Ready\", \"status\": \"True\"}, {\"type\": \"DiskPressure\", \"status\": \"True\", \"reason\": \"KubeletHasDiskPressure\", \"message\": \"kubelet has disk pressure\"}, {\"type\": \"MemoryPressure\", \"status\": \"False\"}], \"taints\": [{\"key\": \"node.kubernetes.io/disk-pressure\", \"effect\": \"NoSchedule\"}]}",
+    "get_node_metrics": "worker-1  CPU%=41%  Mem%=60%  Disk(/var)=48%\nworker-2  CPU%=39%  Mem%=57%  Disk(/var)=51%\nworker-3  CPU%=44%  Mem%=62%  Disk(/var)=94%",
+    "get_prometheus_query": "node_filesystem_avail_bytes{instance=\"worker-3\",mountpoint=\"/var\"}: 6.1GiB of 100GiB; fell 31GiB in the last 6h. Largest growth: /var/log/pods/batch_log-shipper-* (+29GiB)",
+    "get_events": "5m ago  Warning  Evicted  Pod/batch/report-gen-55f  The node was low on resource: ephemeral-storage. Container report-gen was using 120Mi\n6m ago  Warning  EvictionThresholdMet  Node/worker-3  Attempting to reclaim ephemeral-storage\n25m ago  Warning  FreeDiskSpaceFailed  Node/worker-3  failed to garbage collect required amount of images",
+    "list_pods": "batch/log-shipper-7d9f-q2x  Status=Running  Node=worker-3  Restarts=0  Age=6h\nbatch/report-gen-55f  Status=Failed  Reason=Evicted  Node=worker-3",
+    "get_pod_logs": "2026-10-27T09:00:00Z [DEBUG] shipping batch 1 of 1 ... (debug logging enabled: LOG_LEVEL=trace)\n2026-10-27T09:00:00Z [TRACE] payload=...(repeated 4.1M times in 6h)"
+  },
+  "expected": {
+    "path": "plan",
+    "plan_id": "node-pressure-v1",
+    "root_cause": [
+      [
+        "disk",
+        "ephemeral",
+        "filesystem",
+        "storage"
+      ],
+      [
+        "log"
+      ]
+    ],
+    "should_not_use_tools": [
+      "delete_pod",
+      "scale_deployment",
+      "restart_deployment",
+      "rollback_deployment",
+      "apply_yaml",
+      "drain_node",
+      "cordon_node"
+    ],
+    "max_tool_calls": 40
+  }
+}

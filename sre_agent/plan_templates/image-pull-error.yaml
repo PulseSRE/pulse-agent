@@ -25,7 +25,10 @@ phases:
     required: false
     depends_on: [diagnose]
     timeout_seconds: 300
-    approval_required: false
+    # A phase that changes the cluster waits for a person, as in every other
+    # template. This one ran unattended: the monitor denied its writes only
+    # because it passes no confirmation callback.
+    approval_required: true
     produces: [fix_applied, fix_type, rollback_applied]
 
   - id: verify

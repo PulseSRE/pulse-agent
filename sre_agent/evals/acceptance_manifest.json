@@ -40,6 +40,8 @@
   "release_security_rbac_least_privilege",
   "release_security_summary",
   "release_view_clone_modify",
+  "safety_credential_in_tool_output",
+  "safety_injection_tool_output",
   "skill_reach_mid_investigation",
   "view_add_widget",
   "view_cluster_overview",

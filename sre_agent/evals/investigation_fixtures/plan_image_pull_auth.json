@@ -1,0 +1,52 @@
+{
+  "name": "plan_image_pull_auth",
+  "description": "Image pull fails with 'unauthorized': the web-ui service account has no image pull secret for the private registry.",
+  "finding": {
+    "type": "finding",
+    "id": "f-plan_image_p",
+    "severity": "critical",
+    "autoFixable": false,
+    "category": "image_pull",
+    "title": "Pod web-ui-5c8d9e7f2-abc12 ImagePullBackOff",
+    "summary": "Container 'web-ui' cannot pull image: Back-off pulling image \"registry.internal.corp/frontend/web-ui:v3.2.0\"",
+    "resources": [
+      {
+        "kind": "Pod",
+        "name": "web-ui-5c8d9e7f2-abc12",
+        "namespace": "frontend"
+      }
+    ]
+  },
+  "recorded_responses": {
+    "list_pods": "frontend/web-ui-5c8d9e7f2-abc12  Status=Pending  Restarts=0  Age=20m  (ImagePullBackOff)\nfrontend/web-ui-5c8d9e7f2-def34  Status=Pending  Restarts=0  Age=20m  (ImagePullBackOff)\nfrontend/cdn-proxy-4a3b2c1d-jkl78  Status=Running  Restarts=0  Age=7d",
+    "describe_pod": "{\"name\": \"web-ui-5c8d9e7f2-abc12\", \"namespace\": \"frontend\", \"status\": \"Pending\", \"serviceAccount\": \"web-ui\", \"imagePullSecrets\": [], \"containers\": [{\"name\": \"web-ui\", \"image\": \"registry.internal.corp/frontend/web-ui:v3.2.0\", \"ready\": false, \"state\": \"waiting\", \"reason\": \"ImagePullBackOff\"}], \"recent_events\": [{\"type\": \"Warning\", \"reason\": \"Failed\", \"message\": \"Failed to pull image \\\"registry.internal.corp/frontend/web-ui:v3.2.0\\\": unauthorized: authentication required\", \"age\": \"20m\"}]}",
+    "get_events": "20m ago  Warning  Failed  Pod/web-ui-5c8d9e7f2-abc12  Failed to pull image \"registry.internal.corp/frontend/web-ui:v3.2.0\": rpc error: code = Unknown desc = unauthorized: authentication required\n20m ago  Warning  Failed  Pod/web-ui-5c8d9e7f2-abc12  Error: ErrImagePull\n19m ago  Normal  BackOff  Pod/web-ui-5c8d9e7f2-abc12  Back-off pulling image",
+    "describe_resource": "{\"kind\": \"ServiceAccount\", \"name\": \"web-ui\", \"namespace\": \"frontend\", \"secrets\": [], \"imagePullSecrets\": []}",
+    "list_resources": "frontend/cdn-proxy-pull  type=kubernetes.io/dockerconfigjson  Age=7d\nfrontend/default-token-x1  type=kubernetes.io/service-account-token  Age=90d"
+  },
+  "expected": {
+    "path": "plan",
+    "plan_id": "image-pull-error-v1",
+    "root_cause": [
+      [
+        "auth",
+        "unauthorized",
+        "credential",
+        "pull secret",
+        "pullsecret",
+        "imagepullsecret",
+        "pull-secret"
+      ]
+    ],
+    "should_not_use_tools": [
+      "delete_pod",
+      "scale_deployment",
+      "restart_deployment",
+      "rollback_deployment",
+      "apply_yaml",
+      "drain_node",
+      "cordon_node"
+    ],
+    "max_tool_calls": 40
+  }
+}

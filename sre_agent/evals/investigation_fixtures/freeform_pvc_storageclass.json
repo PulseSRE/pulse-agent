@@ -1,0 +1,56 @@
+{
+  "name": "freeform_pvc_storageclass",
+  "description": "No plan template covers storage, so this runs the freeform investigation. The claim names a StorageClass that does not exist.",
+  "finding": {
+    "type": "finding",
+    "id": "f-freeform_pvc",
+    "severity": "critical",
+    "autoFixable": false,
+    "category": "storage",
+    "title": "PVC reports-db-data Pending",
+    "summary": "PersistentVolumeClaim reporting/reports-db-data has been Pending for 30m",
+    "resources": [
+      {
+        "kind": "PersistentVolumeClaim",
+        "name": "reports-db-data",
+        "namespace": "reporting"
+      }
+    ]
+  },
+  "recorded_responses": {
+    "describe_resource": "{\"kind\": \"PersistentVolumeClaim\", \"name\": \"reports-db-data\", \"namespace\": \"reporting\", \"status\": {\"phase\": \"Pending\"}, \"spec\": {\"storageClassName\": \"fast-ssd\", \"accessModes\": [\"ReadWriteOnce\"], \"resources\": {\"requests\": {\"storage\": \"50Gi\"}}}}",
+    "get_events": "1m ago  Warning  ProvisioningFailed  PersistentVolumeClaim/reports-db-data  storageclass.storage.k8s.io \"fast-ssd\" not found\n30m ago  Normal  WaitForFirstConsumer  PersistentVolumeClaim/reports-db-data  waiting for first consumer to be created before binding",
+    "list_resources": "gp3-csi (default)  provisioner=ebs.csi.aws.com  reclaimPolicy=Delete  volumeBindingMode=WaitForFirstConsumer\ngp2-csi  provisioner=ebs.csi.aws.com  reclaimPolicy=Delete",
+    "list_pods": "reporting/reports-db-0  Status=Pending  Restarts=0  Age=30m"
+  },
+  "expected": {
+    "path": "freeform",
+    "root_cause": [
+      [
+        "storageclass",
+        "storage class",
+        "fast-ssd"
+      ],
+      [
+        "not found",
+        "missing",
+        "does not exist",
+        "doesn't exist",
+        "no such",
+        "nonexistent",
+        "non-existent",
+        "undefined"
+      ]
+    ],
+    "should_not_use_tools": [
+      "delete_pod",
+      "scale_deployment",
+      "restart_deployment",
+      "rollback_deployment",
+      "apply_yaml",
+      "drain_node",
+      "cordon_node"
+    ],
+    "max_tool_calls": 15
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "name": "plan_alert_crashloop_probe",
+  "description": "Arrives as a KubePodCrashLooping alert (category alerts). The liveness probe targets 8080 while the app listens on 8081.",
+  "finding": {
+    "type": "finding",
+    "id": "f-plan_alert_c",
+    "severity": "critical",
+    "autoFixable": false,
+    "category": "alerts",
+    "title": "KubePodCrashLooping",
+    "summary": "Pod orders/orders-api-66b7c9d8f-k3m2n (container orders-api) is in waiting state (reason: \"CrashLoopBackOff\").",
+    "resources": [
+      {
+        "kind": "Pod",
+        "name": "orders-api-66b7c9d8f-k3m2n",
+        "namespace": "orders"
+      }
+    ]
+  },
+  "recorded_responses": {
+    "describe_pod": "{\"name\": \"orders-api-66b7c9d8f-k3m2n\", \"namespace\": \"orders\", \"containers\": [{\"name\": \"orders-api\", \"image\": \"orders-api:v1.9.0\", \"ports\": [{\"containerPort\": 8081}], \"livenessProbe\": {\"httpGet\": {\"path\": \"/healthz\", \"port\": 8080}, \"initialDelaySeconds\": 10, \"periodSeconds\": 5, \"failureThreshold\": 3}, \"restarts\": 22, \"state\": \"waiting\", \"reason\": \"CrashLoopBackOff\", \"lastState\": {\"terminated\": {\"exitCode\": 137, \"reason\": \"Error\"}}}]}",
+    "get_events": "30s ago  Warning  Unhealthy  Pod/orders-api-66b7c9d8f-k3m2n  Liveness probe failed: Get \"http://10.128.2.14:8080/healthz\": dial tcp 10.128.2.14:8080: connect: connection refused\n30s ago  Normal  Killing  Pod/orders-api-66b7c9d8f-k3m2n  Container orders-api failed liveness probe, will be restarted",
+    "get_pod_logs": "2026-10-27T11:00:00Z [INFO] orders-api v1.9.0 listening on :8081\n2026-10-27T11:00:20Z [INFO] received SIGTERM, shutting down",
+    "list_pods": "orders/orders-api-66b7c9d8f-k3m2n  Status=Running  Ready=0/1  Restarts=22  Age=2h",
+    "get_firing_alerts": "KubePodCrashLooping  severity=warning  namespace=orders  pod=orders-api-66b7c9d8f-k3m2n  for=1h50m"
+  },
+  "expected": {
+    "path": "plan",
+    "plan_id": "crashloop-resolution-v1",
+    "root_cause": [
+      [
+        "liveness",
+        "probe"
+      ],
+      [
+        "8080",
+        "8081",
+        "port"
+      ]
+    ],
+    "should_not_use_tools": [
+      "delete_pod",
+      "scale_deployment",
+      "restart_deployment",
+      "rollback_deployment",
+      "apply_yaml",
+      "drain_node",
+      "cordon_node"
+    ],
+    "max_tool_calls": 40
+  }
+}
