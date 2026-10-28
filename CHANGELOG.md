@@ -2,6 +2,57 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## v2.35.0 (2026-10-27)
+
+Paired with pulse-ui v2.35.0; runs with pulse-operator v0.11.0. **Migrations 038–040** (forward-only): `decaying_tool_counts`, `fix_outcomes`, `monitor_noise`. Pull requests #183–#196: the self-learning fixes, then the six batches of the October functionality review (each claim in README/docs traced to the code; every defect below has a regression test that fails on the previous code), then the eval gaps it exposed.
+
+**Behaviour changes**
+- Memory now reaches the model on the server. The agent loop used to rebuild the prompt from the skill alone, dropping memory of past incidents, the UI style hint and shared context, and memory tools were wired only into the CLI. `PULSE_AGENT_MEMORY=0` turns both off
+- Approving a monitor fix runs exactly what was proposed: if fix learning would now choose a different strategy, approval returns 409 and nothing runs. Pause and `PULSE_AGENT_AUTOFIX_ENABLED=false` now stop approvals from the inbox and fix history too
+- Plan remediation in `image-pull-error-v1` and `latency-degradation-v1` waits for approval, like every other template
+- SLO targets ≥ 1 are read as percentages (`99.9` = 0.999); budget is (1 − SLI)/(1 − target) and alerting uses the last hour's burn rate (critical ≥ 14.4x, warning ≥ 6x). SLOs without data are listed as `no_data` instead of disappearing
+- Every skill prompt tells the model never to repeat credential values seen in tool output
+
+### Security
+- Rollback refuses to overwrite changes made after the fix: the snapshot records the post-fix `generation`/`resourceVersion` and the restore checks it atomically. It used to compare the live object with itself and silently revert a later hotfix or scale
+- `fleet_compare_resource` no longer returns Secret values, and managed-cluster reads run with the user's token; interactive writes no longer fall back to the service account when no token was forwarded
+- The `apply_yaml` allowlist no longer admits pod templates with privileged/host fields; validation rejects out-of-range values instead of clamping them; `/monitor/resume` needs an admin; `record_audit_entry` is a confirmed write; forged prompt delimiters are neutralised and plan phase prompts are sanitised
+- Chat `create_dashboard` could merge into another user's private view through `finding_id`; claiming an inbox item could overwrite another incident's view with the same title. Both are owner-checked now
+- `search_conversations` took `owner` from the model; memory text is sanitised before it enters a prompt; `/memory/import` and environment-fact writes need an admin (with `PULSE_AGENT_ADMIN_USERS` unset, any authenticated user counts), and learned runbooks, patterns and incidents can be deleted (`DELETE /memory/{kind}/{id}`)
+
+### Learning
+- Approved fixes teach: a finding cleared by a human-approved fix was labelled self-healed and its learning candidate discarded, so at the default trust level nothing was learned. Learned skills are written to the user skills directory as `learned-<category>` and reloaded at once; they still need a person's review before they route
+- A skill is learned only after its fix outlasts the recurrence window (`PULSE_AGENT_RECURRENCE_WINDOW`), and a later verified case deepens the existing skill instead of cloning it
+- Which fix holds per cause (`fix_learning.py`, `fix_outcomes`): a strategy that keeps failing gives way to a safe alternative or is escalated to a person, with the reason in the plan. `python -m sre_agent.evals.learning_sim` runs scripted incidents through the real learning code
+- Skill routing and tool prediction learn from real outcomes (channel scores, overrides, decaying counts), not from their own guesses
+
+### Investigations and evidence
+- Plan runs (crashloop, OOM, image pull, nodes, …) produce an investigation report with evidence and alternatives, saved and attached to the inbox item. Phase confidence is derived from evidence instead of a fixed 0.7, and an unmet phase contract stops remediation (`needs_escalation`)
+- The plan report takes its diagnosis from the phase whose contract promises a root cause. It looked phases up by three fixed ids, so OOM and latency plans reported the verify phase: no cause, and verify's confidence
+- Claiming an inbox item builds its evidence view off the event loop, with the user's token; the view shows evidence with its stance and source, alternatives, and a confidence of 0
+- `namespace_summary` reports unreadable resources as unknown, not 0
+
+### Monitor
+- A Prometheus failure no longer clears every firing alert as self-healed; a failed scanner resolves nothing
+- Episodes: a symptom must start within 2h of its cause, and an application-namespace cause explains only its own namespace. An episode closes only when nothing still carries its key
+- Restarts no longer re-page standing critical findings, and noise counts persist (`monitor_noise`). Above 500 findings, only findings not reported this cycle are evicted
+- The briefing says "All quiet" only when nothing is open and no scanner failed (`unwatchedScanners`)
+
+### Ops
+- An inbox generator that cannot read its source keeps its open items instead of auto-resolving them; items carry a `due_date` and measured values (cert `notAfter`, operator transition time, SLO burn). The readiness stub is removed (16 generators)
+- The SLO burn generator works (it read a key that does not exist); trend items come from the monitor
+- The quota forecast's CPU estimate was off ~1000x; the timeline tool survives a 403
+
+### API
+- Inbox events reach `/ws/monitor` clients, so the UI inbox updates live. REST fix approvals are announced as `action_report`; `skill_activity` is sent while plans run
+- `/memory/import` returns 503 when memory is off, list endpoints carry `enabled`, and fact add/remove return real error statuses
+
+### Evals
+- **Live investigation replay (new release gate):** the monitor's own plan and freeform investigations, real model, 11 recorded scenarios. Gates on root cause, evidence citing tools actually called, no write attempts, injected instructions not followed (on every attempt), and calibration: confidence ≤ 0.5 where nothing could be read, Brier ≤ 0.25. First run: 11/11, Brier 0.05
+- Live chat safety fixtures for injection in tool output and a credential in logs (`should_not_mention`, enforced on every attempt by `acceptance_cli`); the fixture-only safety suite is labelled non-gating
+- Dashboard fixtures are two-turn and must build the dashboard; `view-designer` no longer gets memory tools (`memory_tools: false`)
+- `tests/fixtures/ui_contract/investigation.json` pins the investigation payloads the UI renders
+
 ## v2.34.0 (2026-10-22)
 
 Paired with pulse-ui v2.34.0 and pulse-operator v0.11.0. No new migrations. **Behaviour change:** Prometheus queries made for a person (chat, `/query`) now run with that person's token, so users without monitoring access get a 403 for metrics in chat, matching the UI's own Prometheus proxy; the monitor's scans still use the service account. Durable-execution fixes take effect only where Temporal is enabled. Pull requests #167–#174.
