@@ -42,6 +42,12 @@ def forecast_quota_exhaustion(namespace: str) -> str:
     Args:
         namespace: Namespace to forecast.
     """
+    from .k8s_tools.validators import _validate_k8s_namespace
+
+    # It is interpolated into PromQL below.
+    err = _validate_k8s_namespace(namespace) if namespace else "Error: namespace is required."
+    if err:
+        return err
     core = get_core_client()
 
     quotas = safe(lambda: core.list_namespaced_resource_quota(namespace))
@@ -98,7 +104,10 @@ def forecast_quota_exhaustion(namespace: str) -> str:
                     f'namespace_cpu:kube_pod_container_resource_requests:sum{{namespace="{namespace}"}}',
                 )
                 if rate and rate > 0 and remaining > 0:
-                    hours_until_limit = remaining / rate
+                    # The recording rule is in cores; the quota was parsed to
+                    # millicores. Dividing one by the other overstated the time
+                    # left a thousandfold.
+                    hours_until_limit = remaining / (rate * 1000)
                     trend_source = "prometheus"
             elif resource in ("memory", "requests.memory", "limits.memory"):
                 rate = _query_prometheus_trend(
@@ -180,14 +189,17 @@ def analyze_hpa_thrashing(namespace: str = "ALL") -> str:
             if cond.type == "ScalingLimited" and cond.status == "True":
                 issues.append(f"Scaling limited: {cond.message}")
 
-        # Wide range between min and current suggests potential thrashing
+        # A wide range with the current count well above min *may* mean the
+        # HPA swings a lot. This is a heuristic on one snapshot -- no scaling
+        # history is read -- and is labelled as such rather than as detected
+        # thrashing.
         if max_r > 0 and min_r > 0:
             range_ratio = max_r / min_r
             if range_ratio >= 5 and current > min_r * 2:
                 suggested_min = max(min_r, current // 2)
                 issues.append(
-                    f"Wide scaling range ({min_r}-{max_r}, currently {current}). "
-                    f"Suggested min-replicas: {suggested_min} to reduce thrashing"
+                    f"Possible thrashing (heuristic, from the current snapshot only): wide scaling range "
+                    f"({min_r}-{max_r}, currently {current}). A min-replicas of {suggested_min} would narrow it"
                 )
 
         # Current metrics

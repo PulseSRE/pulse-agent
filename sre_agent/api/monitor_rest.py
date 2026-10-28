@@ -282,6 +282,7 @@ async def get_slo_status(_auth=Depends(verify_token)):
                 "current_value": s.current_value,
                 "error_budget_remaining": s.error_budget_remaining,
                 "burn_rate": s.burn_rate,
+                "budget_remaining_hours": s.budget_remaining_hours,
                 "alert_level": s.alert_level,
             }
             for s in statuses

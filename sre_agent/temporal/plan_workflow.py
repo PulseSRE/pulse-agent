@@ -411,6 +411,17 @@ class PlanWorkflow:
                         for dep in phase.get("depends_on", [])
                         if self._outputs.get(dep, {}).get("status") not in ("complete", "partial")
                     ]
+                    if workflow.patched("writes-need-met-contracts"):
+                        # A diagnosis that came back partial because it did
+                        # not produce its contract (no root cause) is not
+                        # something to act on either.
+                        unsettled += [
+                            dep
+                            for dep in phase.get("depends_on", [])
+                            if dep not in unsettled
+                            and self._outputs.get(dep, {}).get("status") == "partial"
+                            and self._outputs.get(dep, {}).get("contract_missing")
+                        ]
                     if unsettled:
                         self._outputs[phase["id"]] = {
                             **_escalation_output(

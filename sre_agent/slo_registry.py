@@ -22,6 +22,13 @@ class SLODefinition:
     window_days: int = 30  # rolling window
     description: str = ""
 
+    def __post_init__(self) -> None:
+        # The API accepts a target "between 0 and 100", and 99.9 is how people
+        # write an SLO. Taken literally it made the error budget negative, and
+        # check_burn_rate answered "ok" for every such SLO forever.
+        if self.target >= 1.0:
+            self.target = round(self.target / 100.0, 9)
+
 
 @dataclass
 class SLOStatus:
@@ -30,8 +37,18 @@ class SLOStatus:
     definition: SLODefinition
     current_value: float = 0.0
     error_budget_remaining: float = 1.0  # 0.0 = exhausted, 1.0 = full
-    burn_rate: float = 0.0  # current burn rate (1.0 = normal)
+    burn_rate: float = 0.0  # multiple of the sustainable rate (1.0 = budget lasts exactly the window)
     alert_level: str = "ok"  # "ok" | "warning" | "critical"
+    # Hours until the budget is gone at the current burn rate; None when not burning.
+    budget_remaining_hours: float | None = None
+
+
+# Multiwindow burn-rate thresholds from the Google SRE workbook: burning 14.4x
+# spends 2% of a 30-day budget in an hour (page); 6x spends 5% in six hours.
+CRITICAL_BURN = 14.4
+WARNING_BURN = 6.0
+# The short window the current burn rate is measured over.
+BURN_WINDOW = "1h"
 
 
 class SLORegistry:
@@ -81,24 +98,36 @@ class SLORegistry:
     def list_all(self) -> list[SLODefinition]:
         return list(self._slos.values())
 
-    def check_burn_rate(self, slo: SLODefinition, current_value: float) -> SLOStatus:
-        """Evaluate current burn rate for an SLO.
+    def check_burn_rate(self, slo: SLODefinition, current_value: float, recent_value: float | None = None) -> SLOStatus:
+        """Evaluate an SLO from its measured SLI.
 
         Args:
             slo: The SLO definition
-            current_value: Current measured value (e.g., 0.998 for 99.8% availability)
+            current_value: The SLI over the SLO window (e.g. 0.998 = 99.8% good)
+            recent_value: The SLI over the last hour, for the current burn rate.
+                Without it the window average is used.
+
+        The error budget is the share of bad events the target allows (0.1% for
+        99.9%). Budget consumed is the share actually bad over the window
+        divided by that. This used to measure only the shortfall *below the
+        target*, so a service at 99.95% against 99.9% showed a full budget when
+        it had spent half of it.
         """
         error_budget_total = 1.0 - slo.target  # e.g., 0.001 for 99.9% SLO
         if error_budget_total <= 0:
-            return SLOStatus(definition=slo, alert_level="ok")
+            return SLOStatus(definition=slo, current_value=current_value, alert_level="ok")
 
-        error_used = max(0, slo.target - current_value)
-        error_budget_remaining = max(0, 1.0 - (error_used / error_budget_total))
-        burn_rate = error_used / error_budget_total if error_budget_total > 0 else 0
+        consumed = max(0.0, 1.0 - current_value) / error_budget_total
+        error_budget_remaining = max(0.0, 1.0 - consumed)
+        recent = current_value if recent_value is None else recent_value
+        burn_rate = max(0.0, 1.0 - recent) / error_budget_total
 
-        if error_budget_remaining < 0.1:
+        window_hours = slo.window_days * 24
+        remaining_hours = (error_budget_remaining * window_hours / burn_rate) if burn_rate > 0 else None
+
+        if error_budget_remaining < 0.1 or burn_rate >= CRITICAL_BURN:
             alert_level = "critical"
-        elif error_budget_remaining < 0.3:
+        elif error_budget_remaining < 0.3 or burn_rate >= WARNING_BURN:
             alert_level = "warning"
         else:
             alert_level = "ok"
@@ -109,27 +138,33 @@ class SLORegistry:
             error_budget_remaining=round(error_budget_remaining, 4),
             burn_rate=round(burn_rate, 4),
             alert_level=alert_level,
+            budget_remaining_hours=round(remaining_hours, 1) if remaining_hours is not None else None,
         )
 
-    def evaluate_all(self, current_values: dict[str, float]) -> list[SLOStatus]:
+    def evaluate_all(
+        self, current_values: dict[str, float], recent_values: dict[str, float] | None = None
+    ) -> list[SLOStatus]:
         """Evaluate all registered SLOs against current values.
 
         Args:
-            current_values: Map of "service:type" -> current measured value
+            current_values: Map of "service:type" -> SLI over the SLO window
+            recent_values: Map of "service:type" -> SLI over the last hour
         """
+        recent_values = recent_values or {}
         results: list[SLOStatus] = []
         for key, slo in self._slos.items():
             # No measurement is no verdict. Assuming the target here reported
             # every unmeasured SLO as healthy.
             if key not in current_values:
                 continue
-            results.append(self.check_burn_rate(slo, current_values[key]))
+            results.append(self.check_burn_rate(slo, current_values[key], recent_values.get(key)))
         return results
 
-    def query_prometheus_values(self) -> dict[str, float]:
+    def query_prometheus_values(self, window: str | None = None) -> dict[str, float]:
         """Query Prometheus for current SLO metric values.
 
-        Returns map of "service:type" -> current_value.
+        Returns map of "service:type" -> SLI, over each SLO's own window or,
+        when ``window`` is given (e.g. "1h"), over that window instead.
         """
         if not self._slos:
             return {}
@@ -144,7 +179,7 @@ class SLORegistry:
             return values
 
         for key, slo in self._slos.items():
-            query = self._build_prom_query(slo)
+            query = self._build_prom_query(slo, window)
             if not query:
                 continue
             # The raw API result, not the get_prometheus_query tool: that
@@ -169,42 +204,48 @@ class SLORegistry:
 
         return values
 
-    def _build_prom_query(self, slo: SLODefinition) -> str:
-        """Build a PromQL query for an SLO metric.
+    def _build_prom_query(self, slo: SLODefinition, window: str | None = None) -> str:
+        """Build a PromQL query for an SLO's SLI: a good-events ratio in [0, 1].
 
-        Uses kube-state-metrics (available on all OpenShift clusters)
-        instead of http_requests_total (requires app instrumentation).
+        Uses kube-state-metrics and API-server metrics (scraped on every
+        OpenShift cluster) rather than http_requests_total, which needs app
+        instrumentation. A type with no honest ratio for this service returns
+        "" (no data, no verdict). Restart *rates* used to stand in for latency
+        and error ratios; compared with a 0.999 target they read as a 0.0 SLI,
+        so every such SLO was permanently critical.
         """
         svc = slo.service_name
-        window = f"{slo.window_days}d"
+        window = window or f"{slo.window_days}d"
+        apiserver = svc in ("kube-apiserver", "apiserver")
         if slo.slo_type == "availability":
-            # Pod uptime ratio — how often was at least 1 ready pod available
+            # Ready replicas over desired, averaged over the window.
             return (
                 f"avg_over_time(kube_deployment_status_replicas_available"
                 f'{{deployment="{svc}"}}[{window}]) / '
                 f"avg_over_time(kube_deployment_spec_replicas"
                 f'{{deployment="{svc}"}}[{window}])'
             )
-        if slo.slo_type == "latency":
-            if svc in ("kube-apiserver", "apiserver"):
-                # Real latency SLI: fraction of (non-watch) API requests served
-                # under 1s — a ratio directly comparable to the SLO target,
-                # from metrics every OpenShift cluster already scrapes.
-                return (
-                    f'sum(rate(apiserver_request_duration_seconds_bucket{{le="1",verb!~"WATCH|CONNECT"}}[{window}])) / '
-                    f'sum(rate(apiserver_request_duration_seconds_count{{verb!~"WATCH|CONNECT"}}[{window}]))'
-                )
-            # Container restart duration as latency proxy
-            return f'rate(kube_pod_container_status_restarts_total{{pod=~"{svc}.*"}}[{window}])'
-        if slo.slo_type == "error_rate":
-            # Restart rate as error proxy
-            return f'sum(rate(kube_pod_container_status_restarts_total{{pod=~"{svc}.*"}}[1h]))'
+        if slo.slo_type == "latency" and apiserver:
+            # Fraction of (non-watch) API requests served under 1s.
+            return (
+                f'sum(rate(apiserver_request_duration_seconds_bucket{{le="1",verb!~"WATCH|CONNECT"}}[{window}])) / '
+                f'sum(rate(apiserver_request_duration_seconds_count{{verb!~"WATCH|CONNECT"}}[{window}]))'
+            )
+        if slo.slo_type == "error_rate" and apiserver:
+            # Fraction of API requests that did not fail with a 5xx.
+            return (
+                f'1 - (sum(rate(apiserver_request_total{{code=~"5.."}}[{window}])) / '
+                f"sum(rate(apiserver_request_total[{window}])))"
+            )
         return ""
 
     def evaluate_with_prometheus(self) -> list[SLOStatus]:
-        """Evaluate all SLOs using live Prometheus data."""
+        """Evaluate all SLOs using live Prometheus data: the window, and the last hour."""
         values = self.query_prometheus_values()
-        return self.evaluate_all(values)
+        if not values:
+            return []
+        recent = self.query_prometheus_values(BURN_WINDOW)
+        return self.evaluate_all(values, recent)
 
     def get_context_for_selector(self) -> str:
         """Generate context text for the skill selector about SLO status."""
@@ -313,7 +354,11 @@ def list_slo_definitions() -> list[dict]:
 
 
 def query_slo_burn_rate(slo_id: str) -> dict | None:
-    """Query burn rate for a specific SLO by id (service:type)."""
+    """Measured burn rate for one SLO by id (service:type), or None without data.
+
+    This returned ``window_days * 24 * (1 - target)`` — 0.72 for every 99.9%
+    SLO, whatever the service was doing — labelled as hours of budget left.
+    """
     registry = get_slo_registry()
     parts = slo_id.split(":", 1)
     if len(parts) != 2:
@@ -321,12 +366,19 @@ def query_slo_burn_rate(slo_id: str) -> dict | None:
     slo = registry.get(parts[0], parts[1])
     if not slo:
         return None
-    return {
-        "slo_id": slo_id,
-        "target": slo.target,
-        "window_days": slo.window_days,
-        "budget_remaining_hours": slo.window_days * 24 * (1.0 - slo.target),
-    }
+    for status in registry.evaluate_with_prometheus():
+        if status.definition is slo:
+            return {
+                "slo_id": slo_id,
+                "target": slo.target,
+                "window_days": slo.window_days,
+                "current_value": status.current_value,
+                "error_budget_remaining": status.error_budget_remaining,
+                "burn_rate": status.burn_rate,
+                "alert_level": status.alert_level,
+                "budget_remaining_hours": status.budget_remaining_hours,
+            }
+    return None
 
 
 def _report_scan_failure(message: str) -> None:

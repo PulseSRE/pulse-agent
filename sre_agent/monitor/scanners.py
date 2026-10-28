@@ -1193,8 +1193,13 @@ def scan_slo_burn_rate() -> list[dict]:
                     title=f"SLO {s.alert_level}: {s.definition.service_name} {s.definition.slo_type}",
                     summary=(
                         f"{s.definition.service_name} {s.definition.slo_type} SLO "
-                        f"({s.definition.target:.1%} target) has {budget_pct}% error budget remaining. "
-                        f"Burn rate: {s.burn_rate:.2%}."
+                        f"({s.definition.target:.1%} target) has {budget_pct}% error budget remaining, "
+                        f"burning at {s.burn_rate:.1f}x the sustainable rate over the last hour"
+                        + (
+                            f" ({s.budget_remaining_hours:.0f}h until exhausted)."
+                            if s.budget_remaining_hours is not None
+                            else "."
+                        )
                     ),
                     resources=[{"kind": "Service", "name": s.definition.service_name}],
                     auto_fixable=False,

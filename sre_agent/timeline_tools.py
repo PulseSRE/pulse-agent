@@ -40,9 +40,31 @@ def correlate_incident(
     Returns:
         Tuple of (text summary, timeline component dict)
     """
+    from .errors import ToolError
+    from .k8s_tools.validators import _validate_k8s_name, _validate_k8s_namespace
+
+    if namespace.upper() != "ALL":
+        err = _validate_k8s_namespace(namespace)
+        if err:
+            return (err, {})
+    if resource_name:
+        err = _validate_k8s_name(resource_name)
+        if err:
+            return (err, {})
     minutes_back = min(max(1, minutes_back), 120)
     cutoff = datetime.now(UTC) - timedelta(minutes=minutes_back)
     timeline: list[dict] = []
+    # Sources that could not be read. safe() returns a ToolError, not a str,
+    # so the old ``isinstance(x, str)`` guard let a 403 through to ``.items``
+    # and the tool crashed; skipping silently would instead present an
+    # incomplete timeline as the whole story.
+    unreadable: list[str] = []
+
+    def _readable(result, source: str) -> bool:
+        if isinstance(result, (str, ToolError)):
+            unreadable.append(f"{source} ({result})")
+            return False
+        return True
 
     core = get_core_client()
     apps = get_apps_client()
@@ -53,7 +75,7 @@ def correlate_incident(
         kwargs["field_selector"] = f"involvedObject.name={resource_name}"
     events_result = safe_list(core.list_event_for_all_namespaces, core.list_namespaced_event, namespace, **kwargs)
 
-    if not isinstance(events_result, str):
+    if _readable(events_result, "events"):
         for e in events_result.items:
             ts = e.last_timestamp or e.event_time
             if ts is None:
@@ -76,7 +98,7 @@ def correlate_incident(
     # 2. Deployment rollouts (probable cause)
     deploys = safe_list(apps.list_deployment_for_all_namespaces, apps.list_namespaced_deployment, namespace)
 
-    if not isinstance(deploys, str):
+    if _readable(deploys, "deployments"):
         for dep in deploys.items:
             for cond in dep.status.conditions or []:
                 if cond.last_transition_time is None:
@@ -102,7 +124,7 @@ def correlate_incident(
     # 3. ReplicaSet creation (tracks image changes)
     rs_result = safe_list(apps.list_replica_set_for_all_namespaces, apps.list_namespaced_replica_set, namespace)
 
-    if not isinstance(rs_result, str):
+    if _readable(rs_result, "replicasets"):
         for rs in rs_result.items:
             ts = rs.metadata.creation_timestamp
             if ts is None:
@@ -209,8 +231,9 @@ def correlate_incident(
     except (ApiException, Exception):
         logger.debug("ArgoCD not installed or inaccessible", exc_info=True)
 
+    gap_note = ("\nCould not read: " + "; ".join(unreadable) + ". This timeline is incomplete.") if unreadable else ""
     if not timeline:
-        empty_text = f"No events found in the last {minutes_back} minutes."
+        empty_text = f"No events found in the last {minutes_back} minutes.{gap_note}"
         empty_component = {
             "kind": "timeline",
             "title": f"Incident Timeline — {namespace} (last {minutes_back}m)",
@@ -253,7 +276,7 @@ def correlate_incident(
         for note in correlation_notes:
             lines.append(note)
 
-    text_summary = "\n".join(lines)
+    text_summary = "\n".join(lines) + gap_note
 
     # Build component
     category_map = {
