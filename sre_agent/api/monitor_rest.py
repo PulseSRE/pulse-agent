@@ -270,25 +270,39 @@ async def get_slo_status(_auth=Depends(verify_token)):
         return {"slos": [], "total": 0}
 
     statuses = registry.evaluate_with_prometheus()
+    measured = {(s.definition.service_name, s.definition.slo_type): s for s in statuses}
 
-    return {
-        "slos": [
-            {
-                "service": s.definition.service_name,
-                "type": s.definition.slo_type,
-                "target": s.definition.target,
-                "window_days": s.definition.window_days,
-                "description": s.definition.description,
-                "current_value": s.current_value,
-                "error_budget_remaining": s.error_budget_remaining,
-                "burn_rate": s.burn_rate,
-                "budget_remaining_hours": s.budget_remaining_hours,
-                "alert_level": s.alert_level,
-            }
-            for s in statuses
-        ],
-        "total": len(statuses),
-    }
+    rows = []
+    for slo in slos:
+        status = measured.get((slo.service_name, slo.slo_type))
+        row = {
+            "service": slo.service_name,
+            "type": slo.slo_type,
+            "target": slo.target,
+            "window_days": slo.window_days,
+            "description": slo.description,
+        }
+        if status is None:
+            # An SLO with no measurement was dropped from the list, and the UI
+            # said "No SLOs defined" for SLOs that existed. No data is an answer.
+            row.update(
+                current_value=None,
+                error_budget_remaining=None,
+                burn_rate=None,
+                budget_remaining_hours=None,
+                alert_level="no_data",
+            )
+        else:
+            row.update(
+                current_value=status.current_value,
+                error_budget_remaining=status.error_budget_remaining,
+                burn_rate=status.burn_rate,
+                budget_remaining_hours=status.budget_remaining_hours,
+                alert_level=status.alert_level,
+            )
+        rows.append(row)
+
+    return {"slos": rows, "total": len(rows)}
 
 
 _VALID_SLO_TYPES = {"availability", "latency", "error_rate"}

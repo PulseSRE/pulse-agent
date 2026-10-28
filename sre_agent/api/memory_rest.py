@@ -39,7 +39,8 @@ async def import_memory(body: dict, _admin: str = Depends(require_admin)):
 
     manager = get_manager()
     if not manager:
-        return {"imported_runbooks": 0, "imported_patterns": 0, "error": "Memory system not enabled"}
+        # A 200 with zeros read as "imported nothing" rather than "memory is off".
+        raise HTTPException(status_code=503, detail="Memory system not enabled")
     runbooks = body.get("runbooks", [])
     patterns = body.get("patterns", [])
     imported_rb = manager.store.import_runbooks(runbooks) if runbooks else 0
@@ -71,7 +72,8 @@ async def memory_runbooks(limit: int = Query(20, ge=1, le=100), _auth=Depends(ve
 
     manager = get_manager()
     if not manager:
-        return {"runbooks": []}
+        # "enabled": the UI can say memory is off instead of "nothing learned yet".
+        return {"runbooks": [], "enabled": False}
     runbooks = manager.store.list_runbooks()[:limit]
     for rb in runbooks:
         # Normalize trigger_keywords from space-separated string to array
@@ -88,7 +90,7 @@ async def memory_runbooks(limit: int = Query(20, ge=1, le=100), _auth=Depends(ve
                 rb["tool_sequence"] = []
         elif isinstance(ts, list):
             rb["tool_sequence"] = [t["name"] if isinstance(t, dict) else str(t) for t in ts]
-    return {"runbooks": runbooks}
+    return {"runbooks": runbooks, "enabled": True}
 
 
 @router.get("/memory/incidents")
@@ -102,14 +104,15 @@ async def memory_incidents(
 
     manager = get_manager()
     if not manager:
-        return {"incidents": []}
+        # "enabled": the UI can say memory is off instead of "nothing learned yet".
+        return {"incidents": [], "enabled": False}
     if search:
         incidents = manager.store.search_incidents(search, limit=limit)
     else:
         # No search query -- return most recent incidents
         rows = manager.store.db.fetchall("SELECT * FROM incidents ORDER BY timestamp DESC LIMIT ?", (limit,))
         incidents = [dict(r) for r in rows] if rows else []
-    return {"incidents": incidents}
+    return {"incidents": incidents, "enabled": True}
 
 
 @router.get("/memory/patterns")
@@ -119,13 +122,14 @@ async def memory_patterns(_auth=Depends(verify_token)):
 
     manager = get_manager()
     if not manager:
-        return {"patterns": []}
+        # "enabled": the UI can say memory is off instead of "nothing learned yet".
+        return {"patterns": [], "enabled": False}
     patterns = manager.store.list_patterns()
     # Convert keywords from space-separated string to array for frontend
     for p in patterns:
         kw = p.get("keywords", "")
         p["keywords"] = kw.split() if isinstance(kw, str) else kw
-    return {"patterns": patterns}
+    return {"patterns": patterns, "enabled": True}
 
 
 @router.get("/memory/summary")
@@ -200,7 +204,7 @@ async def record_environment_fact(payload: dict, admin: str = Depends(require_ad
     key = str(payload.get("key", "")).strip()
     value = str(payload.get("value", "")).strip()
     if not key or not value:
-        return {"ok": False, "error": "key and value are required"}
+        raise HTTPException(status_code=400, detail="key and value are required")
 
     ok = get_cluster_memory().remember_fact(
         key,
@@ -211,7 +215,10 @@ async def record_environment_fact(payload: dict, admin: str = Depends(require_ad
         source=f"operator:{admin}",
         confidence=float(payload.get("confidence") or 0.9),
     )
-    return {"ok": ok}
+    if not ok:
+        # It was a 200 {"ok": false}, which the UI showed as saved.
+        raise HTTPException(status_code=500, detail="The fact could not be saved")
+    return {"ok": True}
 
 
 @router.delete("/memory/environment/{scope}/{key}")
@@ -219,7 +226,9 @@ async def forget_environment_fact(scope: str, key: str, _admin: str = Depends(re
     """Drop a fact that has stopped being true."""
     from ..memory.environment import get_cluster_memory
 
-    return {"ok": get_cluster_memory().forget_fact(key, scope)}
+    if not get_cluster_memory().forget_fact(key, scope):
+        raise HTTPException(status_code=404, detail=f"No fact '{key}' in scope '{scope}'")
+    return {"ok": True}
 
 
 @router.get("/memory/baselines")

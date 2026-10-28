@@ -921,6 +921,29 @@ Sent after each scan cycle. Contains the IDs of all currently active findings. T
 }
 ```
 
+`activeWatches` lists every scanner that runs and is not disabled (32 by default), not only the original eleven.
+
+#### `inbox_item_created` / `inbox_item_updated` / `inbox_item_claimed` / `inbox_item_resolved` — Ops Inbox changes
+
+Relayed from the inbox so the UI can refresh without polling. `id` is the inbox item id; the other fields depend on the event.
+
+```json
+{"type": "inbox_item_created", "id": "inb-1a2b3c", "title": "Pod api crashlooping", "severity": "critical", "item_type": "finding", "timestamp": 1711540800000}
+{"type": "inbox_item_updated", "id": "inb-1a2b3c", "status": "triaged", "timestamp": 1711540801000}
+{"type": "inbox_item_claimed", "id": "inb-1a2b3c", "claimed_by": "alice", "claimed_at": 1711540802, "timestamp": 1711540802000}
+{"type": "inbox_item_resolved", "id": "inb-1a2b3c", "resolved_at": 1711540900, "timestamp": 1711540900000}
+```
+
+#### `skill_activity` — The skill a monitor investigation is running
+
+Sent as each plan phase starts (`status: "running"`), and with an empty `skill_name` and `status: "idle"` when the plan finishes.
+
+```json
+{"type": "skill_activity", "skill_name": "sre", "status": "running", "timestamp": 1711540800000}
+```
+
+An approval made over REST (`POST /fix-history/{id}/approve`) is announced as an `action_report` with the new status, so every open UI clears it from its pending list.
+
 #### `scan_report` — Per-scanner timing and results
 
 Emitted after each scan cycle completes. Includes per-scanner timing, findings count, and status.

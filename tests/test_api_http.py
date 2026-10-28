@@ -274,7 +274,27 @@ class TestMemoryEndpoints:
             headers={**api_headers, "X-Forwarded-User": "admin"},
             json={"runbooks": [], "patterns": []},
         )
-        assert r.status_code == 200
+        # Memory is off in this fixture. That was a 200 with zero counts, which
+        # the UI showed as a successful import of nothing.
+        assert r.status_code == 503
+
+    def test_memory_lists_say_when_memory_is_off(self, api_client, api_headers):
+        for kind in ("runbooks", "patterns", "incidents"):
+            r = api_client.get(f"/memory/{kind}", headers=api_headers)
+            assert r.status_code == 200
+            assert r.json()["enabled"] is False, kind
+
+    def test_environment_fact_errors_are_http_errors(self, api_client, api_headers):
+        admin = {**api_headers, "X-Forwarded-User": "admin"}
+        r = api_client.post("/memory/environment", headers=admin, json={"key": "", "value": ""})
+        assert r.status_code == 400
+        with patch("sre_agent.memory.environment.get_cluster_memory") as mem:
+            mem.return_value.remember_fact.return_value = False
+            mem.return_value.forget_fact.return_value = False
+            r = api_client.post("/memory/environment", headers=admin, json={"key": "owner", "value": "team-a"})
+            assert r.status_code == 500
+            r = api_client.delete("/memory/environment/cluster/owner", headers=admin)
+            assert r.status_code == 404
 
     def test_memory_runbooks(self, api_client, api_headers):
         r = api_client.get("/memory/runbooks", headers=api_headers)
