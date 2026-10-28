@@ -14,6 +14,25 @@ from typing import Any
 logger = logging.getLogger("pulse_agent.inbox_generators")
 
 
+class GeneratorUnavailableError(Exception):
+    """A generator could not check its condition this cycle.
+
+    Distinct from "checked, found nothing": the cycle auto-resolves a
+    generator's open items when it stops producing them, so a fetcher that
+    turned a 403 or a timeout into ``[]`` resolved every item it owned and hid
+    them for a day.
+    """
+
+
+def _checked(result: Any, what: str) -> Any:
+    """Raise if ``safe()`` returned an error instead of a result."""
+    from .errors import ToolError
+
+    if isinstance(result, (str, ToolError)):
+        raise GeneratorUnavailableError(f"{what}: {result}")
+    return result
+
+
 def _make_assessment(
     title: str,
     summary: str,
@@ -36,258 +55,297 @@ def _make_assessment(
         "resources": resources or [],
         "correlation_key": correlation_key or f"{generator}:{namespace or 'cluster'}",
         "created_by": "system:monitor",
+        # Urgency only ranks an item through its due date; without one an
+        # expiring cert and a week-old posture note sorted the same.
+        "due_date": int(time.time() + urgency_hours * 3600),
         "metadata": {"generator": generator, "urgency_hours": urgency_hours},
     }
 
 
 # -- Data fetchers --
+#
+# A fetcher that cannot answer raises (GeneratorUnavailableError, or whatever the
+# client raised) rather than returning []. run_all_generators records the
+# generator as failed and the cycle leaves its open items alone.
+
+
+def _parse_k8s_time(value: Any) -> float | None:
+    from datetime import datetime
+
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.timestamp()
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
 
 
 def _get_tls_secrets() -> list[dict]:
+    from .k8s_client import get_core_client, safe
+
+    result = _checked(
+        safe(lambda: get_core_client().list_secret_for_all_namespaces(field_selector="type=kubernetes.io/tls")),
+        "list TLS secrets",
+    )
+    secrets = []
+    for s in result.items:
+        annotations = s.metadata.annotations or {}
+        expiry = _parse_k8s_time(annotations.get("cert-manager.io/certificate-expiry-time"))
+        if expiry is None:
+            # Not cert-manager managed: read the certificate itself.
+            expiry = _cert_not_after((s.data or {}).get("tls.crt"), base64_encoded=True)
+        if expiry is not None:
+            secrets.append(
+                {"name": s.metadata.name, "namespace": s.metadata.namespace, "expiry_timestamp": int(expiry)}
+            )
+    return secrets
+
+
+def _cert_not_after(pem: str | None, *, base64_encoded: bool = False) -> float | None:
+    """Expiry of the first certificate in a PEM bundle, or None if unreadable."""
+    if not pem:
+        return None
     try:
-        from .k8s_client import get_core_client, safe
+        import base64
 
-        result = safe(lambda: get_core_client().list_secret_for_all_namespaces(field_selector="type=kubernetes.io/tls"))
-        if isinstance(result, str):
-            return []
-        secrets = []
-        for s in result.items:
-            annotations = s.metadata.annotations or {}
-            expiry_str = annotations.get("cert-manager.io/certificate-expiry-time")
-            if expiry_str:
-                from datetime import datetime
+        from cryptography import x509
 
-                try:
-                    expiry = datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
-                    secrets.append(
-                        {
-                            "name": s.metadata.name,
-                            "namespace": s.metadata.namespace,
-                            "expiry_timestamp": int(expiry.timestamp()),
-                        }
-                    )
-                except (ValueError, OSError):
-                    logger.debug("Failed to parse cert expiry for secret", exc_info=True)
-        return secrets
+        raw = base64.b64decode(pem) if base64_encoded else pem.encode()
+        cert = x509.load_pem_x509_certificate(raw)
+        return cert.not_valid_after_utc.timestamp()
     except Exception:
-        logger.debug("Failed to fetch expiring certs", exc_info=True)
-        return []
+        logger.debug("Unreadable certificate", exc_info=True)
+        return None
+
+
+# How far ahead each trend scanner forecasts, read from its title ("in 3 days").
+_TREND_HORIZON = re.compile(r"in (\d+) days?")
 
 
 def _get_trend_findings() -> list[dict]:
-    try:
-        from .monitor.cluster_monitor import get_cluster_monitor_sync
+    """The monitor's standing trend findings.
 
-        monitor = get_cluster_monitor_sync()
-        if monitor and hasattr(monitor, "_trend_findings"):
-            return monitor._trend_findings
-    except Exception:
-        logger.debug("Failed to fetch trend findings from cluster monitor", exc_info=True)
-    return []
+    This read ``monitor._trend_findings``, which nothing ever set, so trend
+    items never appeared. Trend findings live in ``_last_findings`` with
+    ``findingType == "trend"`` like everything else the monitor holds.
+    """
+    from .monitor.cluster_monitor import get_cluster_monitor_sync
+
+    monitor = get_cluster_monitor_sync()
+    if monitor is None or getattr(monitor, "_last_scanner_results", None) is None:
+        # No completed scan yet: nothing is known, which is not "no trends".
+        raise GeneratorUnavailableError("monitor has not completed a scan")
+    threshold = getattr(monitor, "_noise_threshold", 1.0)
+    return [
+        f
+        for f in list(monitor._last_findings.values())
+        if f.get("findingType") == "trend" and float(f.get("noiseScore") or 0) < threshold
+    ]
 
 
 def _get_degraded_operators() -> list[dict]:
-    try:
-        from .k8s_client import get_custom_client, safe
+    from .k8s_client import get_custom_client, safe
 
-        result = safe(
-            lambda: get_custom_client().list_cluster_custom_object("config.openshift.io", "v1", "clusteroperators")
-        )
-        if isinstance(result, str):
-            return []
-        degraded = []
-        for op in result.get("items", []):
-            conditions = {c["type"]: c for c in op.get("status", {}).get("conditions", [])}
-            deg = conditions.get("Degraded", {})
-            if deg.get("status") == "True":
-                degraded.append({"name": op["metadata"]["name"], "degraded_duration_hours": 1})
-        return degraded
-    except Exception:
-        return []
+    result = _checked(
+        safe(lambda: get_custom_client().list_cluster_custom_object("config.openshift.io", "v1", "clusteroperators")),
+        "list ClusterOperators",
+    )
+    now = time.time()
+    degraded = []
+    for op in result.get("items", []):
+        conditions = {c["type"]: c for c in op.get("status", {}).get("conditions", [])}
+        deg = conditions.get("Degraded", {})
+        if deg.get("status") == "True":
+            since = _parse_k8s_time(deg.get("lastTransitionTime"))
+            degraded.append(
+                {
+                    "name": op["metadata"]["name"],
+                    # Measured from the condition, not a constant 1h.
+                    "degraded_duration_hours": round((now - since) / 3600, 1) if since else None,
+                    "message": deg.get("message", ""),
+                }
+            )
+    return degraded
 
 
 def _get_available_updates() -> list[dict]:
-    try:
-        from .k8s_client import get_custom_client, safe
+    from .k8s_client import get_custom_client, safe
 
-        result = safe(
+    result = _checked(
+        safe(
             lambda: get_custom_client().get_cluster_custom_object(
                 "config.openshift.io", "v1", "clusterversions", "version"
             )
-        )
-        if isinstance(result, str):
-            return []
-        updates = result.get("status", {}).get("availableUpdates") or []
-        return [{"version": u.get("version"), "channel": u.get("channel", "")} for u in updates]
-    except Exception:
-        return []
+        ),
+        "get ClusterVersion",
+    )
+    updates = result.get("status", {}).get("availableUpdates") or []
+    return [{"version": u.get("version"), "channel": u.get("channel", "")} for u in updates]
+
+
+# Hours of error budget left below which an SLO becomes an inbox item.
+_SLO_HORIZON_HOURS = 72
 
 
 def _get_slo_burn_rates() -> list[dict]:
-    try:
-        from .slo_registry import list_slo_definitions, query_slo_burn_rate
+    """SLOs burning toward exhaustion, from one live evaluation of all of them.
 
-        slos = list_slo_definitions()
-        burning = []
-        for slo in slos:
-            rate = query_slo_burn_rate(slo["id"])
-            if rate and rate.get("budget_remaining_hours", 999) < 72:
-                burning.append(
-                    {
-                        "name": slo["name"],
-                        "budget_remaining_hours": rate["budget_remaining_hours"],
-                        "burn_rate": rate.get("burn_rate", 0),
-                    }
-                )
-        return burning
-    except Exception:
+    This read ``slo["name"]`` (the dicts have no such key, so every call raised
+    and the generator never produced anything), and the budget it compared was
+    a constant derived from the target rather than a measurement.
+    """
+    from .slo_registry import get_slo_registry
+
+    registry = get_slo_registry()
+    if not registry.list_all():
         return []
+    burning = []
+    for status in registry.evaluate_with_prometheus():
+        hours = status.budget_remaining_hours
+        if status.alert_level == "ok" and (hours is None or hours >= _SLO_HORIZON_HOURS):
+            continue
+        slo = status.definition
+        burning.append(
+            {
+                "name": f"{slo.service_name} {slo.slo_type}",
+                "service": slo.service_name,
+                "budget_remaining_hours": hours,
+                "budget_remaining": status.error_budget_remaining,
+                "burn_rate": status.burn_rate,
+                "alert_level": status.alert_level,
+            }
+        )
+    return burning
 
 
 def _get_node_capacity() -> list[dict]:
-    try:
-        from .k8s_client import get_core_client, safe
+    """Nodes reporting memory, disk or PID pressure right now.
 
-        nodes = safe(lambda: get_core_client().list_node())
-        if isinstance(nodes, str):
-            return []
-        near_full = []
-        for node in nodes.items:
-            conditions = {c.type: c for c in (node.status.conditions or [])}
-            pressure = conditions.get("MemoryPressure")
-            if pressure and pressure.status == "True":
-                near_full.append({"node": node.metadata.name, "cpu_pct": 95, "hours_to_full": 4})
-        return near_full
-    except Exception:
-        return []
+    Each used to be reported as "95% CPU, full in 4h" — constants, attached to
+    any node with MemoryPressure. The condition is what is actually known.
+    """
+    from .k8s_client import get_core_client, safe
+
+    nodes = _checked(safe(lambda: get_core_client().list_node()), "list nodes")
+    pressured = []
+    for node in nodes.items:
+        conditions = {c.type: c for c in (node.status.conditions or [])}
+        kinds = [
+            k
+            for k in ("MemoryPressure", "DiskPressure", "PIDPressure")
+            if getattr(conditions.get(k), "status", "") == "True"
+        ]
+        if kinds:
+            pressured.append({"node": node.metadata.name, "pressure": kinds})
+    return pressured
 
 
 def _get_stale_findings() -> list[dict]:
-    try:
-        from .repositories import get_monitor_repo
+    from .repositories import get_monitor_repo
 
-        cutoff = int(time.time()) - 72 * 3600
-        rows = get_monitor_repo().fetch_stale_inbox_items(cutoff)
-        return [
-            {"title": r["title"], "hours_stale": (time.time() - r["created_at"]) / 3600, "finding_id": r["id"]}
-            for r in rows
-        ]
-    except Exception:
-        return []
+    cutoff = int(time.time()) - 72 * 3600
+    rows = get_monitor_repo().fetch_stale_inbox_items(cutoff)
+    return [
+        {"title": r["title"], "hours_stale": (time.time() - r["created_at"]) / 3600, "finding_id": r["id"]}
+        for r in rows
+    ]
 
 
 def _get_privileged_workloads() -> list[dict]:
-    try:
-        from .k8s_client import get_core_client, safe
+    from .k8s_client import get_core_client, safe
 
-        pods = safe(lambda: get_core_client().list_pod_for_all_namespaces())
-        if isinstance(pods, str):
-            return []
-        privileged = []
-        for pod in pods.items:
-            for c in pod.spec.containers:
-                sc = c.security_context
-                if sc and (getattr(sc, "privileged", False) or getattr(sc, "run_as_user", None) == 0):
-                    privileged.append(
-                        {"pod": pod.metadata.name, "namespace": pod.metadata.namespace, "container": c.name}
-                    )
-                    break
-        return privileged
-    except Exception:
-        return []
+    pods = _checked(safe(lambda: get_core_client().list_pod_for_all_namespaces()), "list pods")
+    privileged = []
+    for pod in pods.items:
+        for c in pod.spec.containers:
+            sc = c.security_context
+            if sc and (getattr(sc, "privileged", False) or getattr(sc, "run_as_user", None) == 0):
+                privileged.append({"pod": pod.metadata.name, "namespace": pod.metadata.namespace, "container": c.name})
+                break
+    return privileged
 
 
 def _get_rbac_drift() -> list[dict]:
-    try:
-        from .k8s_client import get_rbac_client, safe
+    from .k8s_client import get_rbac_client, safe
 
-        bindings = safe(lambda: get_rbac_client().list_cluster_role_binding())
-        if isinstance(bindings, str):
-            return []
-        drift = []
-        for b in bindings.items:
-            if b.role_ref.name == "cluster-admin":
-                for subject in b.subjects or []:
-                    if subject.kind == "User":
-                        drift.append({"binding": b.metadata.name, "user": subject.name})
-        return drift
-    except Exception:
-        return []
+    bindings = _checked(safe(lambda: get_rbac_client().list_cluster_role_binding()), "list ClusterRoleBindings")
+    drift = []
+    for b in bindings.items:
+        if b.role_ref.name == "cluster-admin":
+            for subject in b.subjects or []:
+                if subject.kind == "User":
+                    drift.append({"binding": b.metadata.name, "user": subject.name})
+    return drift
 
 
 def _get_network_policy_gaps() -> list[dict]:
-    try:
-        from .k8s_client import get_core_client, get_networking_client, is_system_namespace, safe
+    from .k8s_client import get_core_client, get_networking_client, is_system_namespace, safe
 
-        namespaces = safe(lambda: get_core_client().list_namespace())
-        if isinstance(namespaces, str):
-            return []
+    namespaces = _checked(safe(lambda: get_core_client().list_namespace()), "list namespaces")
+    # Fetch all network policies cluster-wide in a single call
+    all_policies = _checked(
+        safe(lambda: get_networking_client().list_network_policy_for_all_namespaces()), "list NetworkPolicies"
+    )
+    ns_with_policies = {p.metadata.namespace for p in all_policies.items}
 
-        # Fetch all network policies cluster-wide in a single call
-        all_policies = safe(lambda: get_networking_client().list_network_policy_for_all_namespaces())
-        if isinstance(all_policies, str):
-            return []
+    gaps = []
+    for ns in namespaces.items:
+        name = ns.metadata.name
+        if is_system_namespace(name, include_default=False):
+            continue
+        if name not in ns_with_policies:
+            gaps.append({"namespace": name})
+    return gaps
 
-        ns_with_policies = {p.metadata.namespace for p in all_policies.items}
 
-        gaps = []
-        for ns in namespaces.items:
-            name = ns.metadata.name
-            if is_system_namespace(name, include_default=False):
-                continue
-            if name not in ns_with_policies:
-                gaps.append({"namespace": name})
-        return gaps
-    except Exception:
-        return []
+# Routes whose certificate expires within this many hours become an item.
+_ROUTE_CERT_HORIZON_HOURS = 30 * 24
 
 
 def _get_route_cert_expiry() -> list[dict]:
-    try:
-        from .k8s_client import get_custom_client, safe
+    """Routes whose inline certificate expires soon, read from the certificate.
 
-        routes = safe(lambda: get_custom_client().list_cluster_custom_object("route.openshift.io", "v1", "routes"))
-        if isinstance(routes, str):
-            return []
-        expiring = []
-        for r in routes.get("items", []):
-            tls = r.get("spec", {}).get("tls", {})
-            if tls.get("certificate"):
-                expiring.append(
-                    {
-                        "name": r["metadata"]["name"],
-                        "namespace": r["metadata"]["namespace"],
-                        "hours_until_expiry": 168,
-                    }
-                )
-        return expiring
-    except Exception:
-        return []
+    Every route with an inline certificate was reported as expiring in 168h —
+    a constant, so a cert good for two years raised the same item as one due
+    on Friday.
+    """
+    from .k8s_client import get_custom_client, safe
+
+    routes = _checked(
+        safe(lambda: get_custom_client().list_cluster_custom_object("route.openshift.io", "v1", "routes")),
+        "list Routes",
+    )
+    now = time.time()
+    expiring = []
+    for r in routes.get("items", []):
+        tls = r.get("spec", {}).get("tls") or {}
+        not_after = _cert_not_after(tls.get("certificate"))
+        if not_after is None:
+            continue
+        hours = (not_after - now) / 3600
+        if hours <= _ROUTE_CERT_HORIZON_HOURS:
+            expiring.append(
+                {"name": r["metadata"]["name"], "namespace": r["metadata"]["namespace"], "hours_until_expiry": hours}
+            )
+    return expiring
 
 
 def _get_service_endpoint_gaps() -> list[dict]:
-    try:
-        from .k8s_client import get_core_client, is_system_namespace, safe
+    from .k8s_client import get_core_client, is_system_namespace, safe
 
-        endpoints = safe(lambda: get_core_client().list_endpoints_for_all_namespaces())
-        if isinstance(endpoints, str):
-            return []
-        gaps = []
-        for ep in endpoints.items:
-            ns = ep.metadata.namespace
-            if is_system_namespace(ns, include_default=False):
-                continue
-            subsets = ep.subsets or []
-            ready = sum(len(s.addresses or []) for s in subsets)
-            if ready == 0:
-                gaps.append({"service": ep.metadata.name, "namespace": ns})
-        return gaps
-    except Exception:
-        return []
-
-
-def _get_readiness_regressions() -> list[dict]:
-    return []
+    endpoints = _checked(safe(lambda: get_core_client().list_endpoints_for_all_namespaces()), "list Endpoints")
+    gaps = []
+    for ep in endpoints.items:
+        ns = ep.metadata.namespace
+        if is_system_namespace(ns, include_default=False):
+            continue
+        subsets = ep.subsets or []
+        ready = sum(len(s.addresses or []) for s in subsets)
+        if ready == 0:
+            gaps.append({"service": ep.metadata.name, "namespace": ns})
+    return gaps
 
 
 # -- Generator functions --
@@ -325,7 +383,10 @@ def gen_trend_prediction() -> list[dict[str, Any]]:
     findings = _get_trend_findings()
     items = []
     for f in findings:
-        hours = f.get("metadata", {}).get("predicted_hours", 72)
+        # The forecast horizon the scanner used ("exhaustion predicted in 3
+        # days"): the condition is expected no later than that.
+        m = _TREND_HORIZON.search(str(f.get("title", "")))
+        hours = int(m.group(1)) * 24 if m else 168
         items.append(
             _make_assessment(
                 title=f["title"],
@@ -335,6 +396,8 @@ def gen_trend_prediction() -> list[dict[str, Any]]:
                 generator="trend_prediction",
                 resources=f.get("resources", []),
                 confidence=f.get("confidence", 0.7),
+                # One item per forecast, not one per generator.
+                correlation_key=f"trend_prediction:{f.get('category', '')}:{f.get('title', '')}",
             )
         )
     return items
@@ -344,7 +407,13 @@ def gen_degraded_operator() -> list[dict[str, Any]]:
     operators = _get_degraded_operators()
     if not operators:
         return []
-    names = ", ".join(op["name"] for op in operators[:10])
+
+    def _describe(op: dict) -> str:
+        hours = op.get("degraded_duration_hours")
+        return f"{op['name']} ({hours:.0f}h)" if hours is not None else op["name"]
+
+    operators.sort(key=lambda op: -(op.get("degraded_duration_hours") or 0))
+    names = ", ".join(_describe(op) for op in operators[:10])
     if len(operators) > 10:
         names += f" (+{len(operators) - 10} more)"
     resources = [{"kind": "ClusterOperator", "name": op["name"], "namespace": ""} for op in operators[:20]]
@@ -381,14 +450,21 @@ def gen_slo_burn() -> list[dict[str, Any]]:
     burns = _get_slo_burn_rates()
     items = []
     for b in burns:
-        severity = "critical" if b["budget_remaining_hours"] < 24 else "warning"
+        hours = b["budget_remaining_hours"]
+        severity = "critical" if b["alert_level"] == "critical" or (hours is not None and hours < 24) else "warning"
+        when = f"exhausting in {int(hours)}h" if hours is not None else f"{b['budget_remaining']:.0%} budget left"
         items.append(
             _make_assessment(
-                title=f"SLO '{b['name']}' budget exhausting in {int(b['budget_remaining_hours'])}h",
-                summary=f"Burn rate: {b['burn_rate']:.1f}x. Reduce error rate or adjust SLO.",
+                title=f"SLO '{b['name']}' error budget {when}",
+                summary=(
+                    f"Burning at {b['burn_rate']:.1f}x the sustainable rate over the last hour, "
+                    f"{b['budget_remaining']:.0%} of the budget left. Reduce the error rate or revisit the SLO."
+                ),
                 severity=severity,
-                urgency_hours=b["budget_remaining_hours"],
+                urgency_hours=hours if hours is not None else 24,
                 generator="slo_burn",
+                resources=[{"kind": "Deployment", "name": b["service"], "namespace": ""}],
+                correlation_key=f"slo_burn:{b['name']}",
             )
         )
     return items
@@ -398,17 +474,16 @@ def gen_capacity_projection() -> list[dict[str, Any]]:
     nodes = _get_node_capacity()
     if not nodes:
         return []
-    nodes.sort(key=lambda n: n["hours_to_full"])
-    node_list = ", ".join(f"{n['node']} ({n['cpu_pct']}%)" for n in nodes[:10])
+    node_list = ", ".join(f"{n['node']} ({', '.join(n['pressure'])})" for n in nodes[:10])
     if len(nodes) > 10:
         node_list += f" (+{len(nodes) - 10} more)"
     resources = [{"kind": "Node", "name": n["node"], "namespace": ""} for n in nodes[:20]]
     return [
         _make_assessment(
-            title=f"{len(nodes)} nodes approaching capacity (nearest: {nodes[0]['hours_to_full']}h)",
-            summary=f"Nodes at high utilization: {node_list}",
+            title=f"{len(nodes)} node{'s' if len(nodes) != 1 else ''} under resource pressure",
+            summary=f"Kubelet reports pressure on: {node_list}. Pods may be evicted until it clears.",
             severity="warning",
-            urgency_hours=nodes[0]["hours_to_full"],
+            urgency_hours=0,
             generator="capacity_projection",
             resources=resources,
         )
@@ -533,10 +608,6 @@ def gen_service_endpoint_gaps() -> list[dict[str, Any]]:
             resources=resources,
         )
     ]
-
-
-def gen_readiness_regressions() -> list[dict[str, Any]]:
-    return []
 
 
 def gen_skill_curation() -> list[dict[str, Any]]:
@@ -736,7 +807,6 @@ TASK_GENERATORS: list[tuple[str, Any]] = [
     ("network_policy_gaps", gen_network_policy_gaps),
     ("route_cert_expiry", gen_route_cert_expiry),
     ("service_endpoint_gaps", gen_service_endpoint_gaps),
-    ("readiness_regressions", gen_readiness_regressions),
     ("skill_gaps", gen_skill_gaps),
     ("skill_low_performers", gen_skill_low_performers),
     ("skill_curation", gen_skill_curation),
@@ -744,13 +814,21 @@ TASK_GENERATORS: list[tuple[str, Any]] = [
 ]
 
 
-def run_all_generators() -> list[dict[str, Any]]:
-    """Run all registered generators and return combined items."""
+def run_all_generators(failed: set[str] | None = None) -> list[dict[str, Any]]:
+    """Run all registered generators and return combined items.
+
+    Names of generators that could not check their condition are added to
+    ``failed``; their absence from the output is not a reason to resolve
+    their open items.
+    """
     all_items: list[dict[str, Any]] = []
     for name, gen_fn in TASK_GENERATORS:
         try:
             items = gen_fn()
             all_items.extend(items)
-        except Exception:
-            logger.debug("Generator %s failed", name, exc_info=True)
+        except Exception as e:
+            if failed is not None:
+                failed.add(name)
+            logger.info("Generator %s could not run this cycle: %s", name, e)
+            logger.debug("Generator %s failure", name, exc_info=True)
     return all_items

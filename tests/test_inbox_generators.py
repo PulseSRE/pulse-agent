@@ -34,19 +34,21 @@ class TestTrendPredictionGenerator:
     def test_converts_trend_findings(self, mock_trends):
         from sre_agent.inbox_generators import gen_trend_prediction
 
+        # The shape trend_scanners produces: the horizon is in the title.
         mock_trends.return_value = [
             {
-                "title": "Memory pressure predicted in 18h",
+                "title": "Node worker-03 memory exhaustion predicted in 3 days",
+                "category": "memory_pressure",
                 "severity": "warning",
                 "confidence": 0.85,
                 "resources": [{"kind": "Node", "name": "worker-03", "namespace": ""}],
-                "metadata": {"predicted_hours": 18},
+                "findingType": "trend",
             },
         ]
         items = gen_trend_prediction()
         assert len(items) == 1
         assert items[0]["item_type"] == "task"
-        assert items[0]["metadata"]["urgency_hours"] == 18
+        assert items[0]["metadata"]["urgency_hours"] == 72
 
 
 class TestDegradedOperatorGenerator:
@@ -90,7 +92,14 @@ class TestSLOBurnGenerator:
         from sre_agent.inbox_generators import gen_slo_burn
 
         mock_slos.return_value = [
-            {"name": "api-availability", "budget_remaining_hours": 12, "burn_rate": 2.5},
+            {
+                "name": "api availability",
+                "service": "api",
+                "budget_remaining_hours": 12,
+                "budget_remaining": 0.2,
+                "burn_rate": 2.5,
+                "alert_level": "warning",
+            },
         ]
         items = gen_slo_burn()
         assert len(items) == 1
@@ -103,7 +112,7 @@ class TestCapacityProjectionGenerator:
         from sre_agent.inbox_generators import gen_capacity_projection
 
         mock_capacity.return_value = [
-            {"node": "worker-01", "cpu_pct": 92, "hours_to_full": 6},
+            {"node": "worker-01", "pressure": ["MemoryPressure"]},
         ]
         items = gen_capacity_projection()
         assert len(items) == 1
@@ -186,10 +195,11 @@ class TestServiceEndpointGapsGenerator:
 
 
 class TestGeneratorRegistration:
-    def test_all_17_registered(self):
+    def test_all_16_registered(self):
         from sre_agent.inbox_generators import TASK_GENERATORS
 
-        assert len(TASK_GENERATORS) == 17
+        # readiness_regressions was a stub that always returned [] and is gone.
+        assert len(TASK_GENERATORS) == 16
         names = [n for n, _ in TASK_GENERATORS]
         assert "skill_gaps" in names
         assert "skill_low_performers" in names

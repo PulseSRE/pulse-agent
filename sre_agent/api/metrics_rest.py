@@ -29,16 +29,28 @@ async def metrics_response_latency(
     period: int = Query(30, ge=1, le=365, description="Period in days"),
     _auth=Depends(verify_token),
 ):
-    """Agent response p95 latency from tool usage data."""
+    """Tool-call latency percentiles (from tool_usage).
+
+    This measures how long individual tool calls take, not how long the agent
+    takes to answer; it was labelled "agent response latency".
+    """
     from ..repositories import get_analytics_repo
 
     try:
         row = get_analytics_repo().fetch_response_latency(period)
         if not row or row["cnt"] == 0:
-            return {"period_days": period, "p50_ms": None, "p95_ms": None, "p99_ms": None, "count": 0}
+            return {
+                "period_days": period,
+                "measures": "tool_call",
+                "p50_ms": None,
+                "p95_ms": None,
+                "p99_ms": None,
+                "count": 0,
+            }
 
         return {
             "period_days": period,
+            "measures": "tool_call",
             "p50_ms": round(row["p50"], 1) if row["p50"] is not None else None,
             "p95_ms": round(row["p95"], 1) if row["p95"] is not None else None,
             "p99_ms": round(row["p99"], 1) if row["p99"] is not None else None,

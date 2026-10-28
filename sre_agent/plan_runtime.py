@@ -31,6 +31,21 @@ from .skill_plan import (
 logger = logging.getLogger("pulse_agent.plan_runtime")
 
 
+def _phase_can_write(phase) -> bool:
+    """Whether a phase may change the cluster: gated, or run by a skill with write tools."""
+    if phase.approval_required or phase.id in ("remediate", "remediation", "fix"):
+        return True
+    try:
+        from .skill_loader import get_skill
+
+        skill = get_skill(phase.skill_name)
+        return bool(skill and skill.write_tools)
+    except Exception:
+        # Unknown is treated as able to write: holding a read-only phase back
+        # costs a report; letting a write through costs a change.
+        return True
+
+
 class PlanRuntime:
     """Executes skill plans with phased control flow."""
 
@@ -136,6 +151,41 @@ class PlanRuntime:
                                 phase.skill_name,
                                 branch_value,
                             )
+
+            # A phase that can change the cluster does not act on a diagnosis
+            # that did not meet its contract. "partial" let it through: a
+            # diagnose phase that returned no root cause still unblocked
+            # remediation, which then fixed whatever it guessed.
+            settled_ready = []
+            for phase in ready:
+                unmet = [
+                    dep
+                    for dep in phase.depends_on
+                    if completed_outputs[dep].status == "partial" and completed_outputs[dep].contract_missing
+                ]
+                if unmet and _phase_can_write(phase):
+                    missing = sorted({m for dep in unmet for m in completed_outputs[dep].contract_missing})
+                    logger.info("Phase '%s' not run: %s did not meet its contract", phase.id, unmet)
+                    output = SkillOutput(
+                        skill_id=phase.skill_name,
+                        phase_id=phase.id,
+                        status="needs_escalation",
+                        evidence_summary=(
+                            f"Phase '{phase.id}' not run: {', '.join(unmet)} did not produce "
+                            f"{', '.join(missing)}, so there is nothing verified to act on"
+                        ),
+                        confidence=0.0,
+                    )
+                    completed_outputs[phase.id] = output
+                    result.phase_outputs[phase.id] = output
+                    result.phases_completed += 1
+                    if on_phase_complete:
+                        r = on_phase_complete(phase.id, output)
+                        if asyncio.iscoroutine(r):
+                            await r
+                else:
+                    settled_ready.append(phase)
+            ready = settled_ready
 
             # Check approval gates — skip phases requiring approval or using high-risk skills
             approved_ready = []

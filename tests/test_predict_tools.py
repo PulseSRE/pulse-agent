@@ -130,8 +130,10 @@ class TestAnalyzeHpaThrashing:
             items=[hpa]
         )
         result = analyze_hpa_thrashing.call({"namespace": "ALL"})
-        assert "Wide scaling range" in result
-        assert "Suggested min-replicas" in result
+        assert "wide scaling range" in result
+        # A heuristic on one snapshot, and it says so.
+        assert "heuristic" in result
+        assert "min-replicas of" in result
 
     def test_at_max_high_utilization(self, mock_predict):
         hpa = SimpleNamespace(

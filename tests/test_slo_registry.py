@@ -29,16 +29,44 @@ class TestBurnRate:
     def test_healthy_service(self):
         reg = SLORegistry()
         slo = SLODefinition(service_name="api", slo_type="availability", target=0.999)
-        status = reg.check_burn_rate(slo, current_value=0.9995)
+        status = reg.check_burn_rate(slo, current_value=0.9998)
         assert status.alert_level == "ok"
         assert status.error_budget_remaining > 0.5
 
     def test_warning_budget(self):
         reg = SLORegistry()
         slo = SLODefinition(service_name="api", slo_type="availability", target=0.999)
-        status = reg.check_burn_rate(slo, current_value=0.9982)
+        # 0.075% bad against a 0.1% budget: three quarters of it spent.
+        status = reg.check_burn_rate(slo, current_value=0.99925, recent_value=0.9995)
         assert status.error_budget_remaining < 0.3
         assert status.alert_level == "warning"
+
+    def test_budget_counts_all_bad_events_not_the_shortfall_below_target(self):
+        """99.95% against 99.9% has spent half the budget; it used to read as full."""
+        reg = SLORegistry()
+        slo = SLODefinition(service_name="api", slo_type="availability", target=0.999)
+        status = reg.check_burn_rate(slo, current_value=0.9995)
+        assert status.error_budget_remaining == 0.5
+
+    def test_overspent_budget_is_critical(self):
+        reg = SLORegistry()
+        slo = SLODefinition(service_name="api", slo_type="availability", target=0.999)
+        assert reg.check_burn_rate(slo, current_value=0.9982).alert_level == "critical"
+
+    def test_fast_burn_is_critical_even_with_budget_left(self):
+        """Burning 20x in the last hour pages, whatever the month looks like."""
+        reg = SLORegistry()
+        slo = SLODefinition(service_name="api", slo_type="availability", target=0.999)
+        status = reg.check_burn_rate(slo, current_value=0.9999, recent_value=0.98)
+        assert status.burn_rate == 20.0
+        assert status.alert_level == "critical"
+        assert status.budget_remaining_hours is not None and status.budget_remaining_hours < 48
+
+    def test_percentage_targets_are_normalised(self):
+        """99.9 used to make the budget negative and every check 'ok'."""
+        slo = SLODefinition(service_name="api", slo_type="availability", target=99.9)
+        assert slo.target == 0.999
+        assert SLORegistry().check_burn_rate(slo, current_value=0.99).alert_level == "critical"
 
     def test_critical_budget(self):
         reg = SLORegistry()
@@ -150,7 +178,20 @@ class TestApiserverLatencyQuery:
         assert "apiserver_request_duration_seconds_bucket" in q
         assert "restarts" not in q
 
-    def test_other_services_keep_the_generic_latency_proxy(self):
+    def test_other_services_have_no_latency_or_error_sli(self):
+        """A restart *rate* compared with a 0.99 target read as a 0.0 SLI: permanently critical."""
         reg = SLORegistry()
-        slo = SLODefinition(service_name="checkout", slo_type="latency", target=0.99)
-        assert "restarts" in reg._build_prom_query(slo)
+        for slo_type in ("latency", "error_rate"):
+            slo = SLODefinition(service_name="checkout", slo_type=slo_type, target=0.99)
+            assert reg._build_prom_query(slo) == ""
+
+    def test_apiserver_error_rate_is_a_ratio(self):
+        reg = SLORegistry()
+        q = reg._build_prom_query(SLODefinition(service_name="kube-apiserver", slo_type="error_rate", target=0.999))
+        assert 'code=~"5.."' in q and q.startswith("1 - ")
+
+    def test_burn_window_query_uses_the_short_window(self):
+        reg = SLORegistry()
+        slo = SLODefinition(service_name="api", slo_type="availability", target=0.999)
+        assert "[1h]" in reg._build_prom_query(slo, "1h")
+        assert "[30d]" in reg._build_prom_query(slo)

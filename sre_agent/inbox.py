@@ -1902,7 +1902,8 @@ def run_generator_cycle() -> None:
     """Run all generators, upsert items, auto-resolve cleared conditions."""
     from .inbox_generators import run_all_generators
 
-    generated = run_all_generators()
+    failed_generators: set[str] = set()
+    generated = run_all_generators(failed_generators)
 
     generated_keys: set[str] = set()
     for item in generated:
@@ -1916,6 +1917,11 @@ def run_generator_cycle() -> None:
     generator_rows = [r for r in rows if _deserialize_row(r).get("metadata", {}).get("generator")]
     now = int(time.time())
     for row in generator_rows:
+        generator = _deserialize_row(row).get("metadata", {}).get("generator")
+        if generator in failed_generators:
+            # It could not look this cycle. Resolving on silence turned one
+            # 403 or timeout into "condition cleared" and hid the item for 24h.
+            continue
         if row["correlation_key"] and row["correlation_key"] not in generated_keys:
             repo.auto_resolve_generator_item(row["id"], now)
     repo.commit()

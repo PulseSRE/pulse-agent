@@ -212,6 +212,25 @@ def scan_rbac_changes() -> list[dict]:
     return findings
 
 
+def _previous_revision_image(apps, dep, revision: str) -> str:
+    """First container image of the ReplicaSet one revision back, or ""."""
+    try:
+        prev = str(int(revision) - 1)
+    except (TypeError, ValueError):
+        return ""
+    sets = safe(lambda: apps.list_namespaced_replica_set(dep.metadata.namespace))
+    if isinstance(sets, ToolError):
+        return ""
+    for rs in sets.items:
+        owners = rs.metadata.owner_references or []
+        if not any(o.kind == "Deployment" and o.name == dep.metadata.name for o in owners):
+            continue
+        if (rs.metadata.annotations or {}).get("deployment.kubernetes.io/revision") == prev:
+            for c in rs.spec.template.spec.containers or []:
+                return c.image or ""
+    return ""
+
+
 def scan_recent_deployments() -> list[dict]:
     """Detect deployment rollouts that may have caused issues."""
     findings: list[dict] = []
@@ -293,9 +312,14 @@ def scan_recent_deployments() -> list[dict]:
                                 for c in dep.spec.template.spec.containers or []:
                                     new_image = c.image or ""
                                     break
+                                # The image the previous revision ran. Without
+                                # it the image factor -- the biggest one -- never
+                                # scored, so every rollout looked equally safe.
+                                old_image = _previous_revision_image(apps, dep, revision)
                                 risk = score_deployment_change(
                                     deployment_name=dep.metadata.name,
                                     namespace=ns,
+                                    old_image=old_image,
                                     new_image=new_image,
                                 )
                                 finding["riskScore"] = risk.score
