@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Pulse Agent is the Python backend for Pulse SRE. The packaged version is defined in `pyproject.toml` (currently 2.34.0), Protocol v2, Python 3.11+. Read [current architecture](docs/ARCHITECTURE.md), [testing](TESTING.md), [security](SECURITY.md), and [release process](RELEASE.md). Dynamic tool/scanner/test counts and previous gate scores must be remeasured, not copied as health guarantees. PostgreSQL migrations currently end at 040. Deployment is owned by pulse-operator, not a local Helm chart.
+Pulse Agent is the Python backend for Pulse SRE. The packaged version is defined in `pyproject.toml` (currently 2.35.0), Protocol v2, Python 3.11+. Read [current architecture](docs/ARCHITECTURE.md), [testing](TESTING.md), [security](SECURITY.md), and [release process](RELEASE.md). Dynamic tool/scanner/test counts and previous gate scores must be remeasured, not copied as health guarantees. PostgreSQL migrations currently end at 040. Deployment is owned by pulse-operator, not a local Helm chart.
 
 Tests reset the public schema: use only a disposable `PULSE_AGENT_TEST_DATABASE_URL`. The user's kubeconfig, development database, and running cluster are not test fixtures.
 
