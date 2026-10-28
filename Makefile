@@ -31,6 +31,8 @@ perf-baseline:
 evals:
 	@echo "Replay harness check (plumbing only)..."
 	python3 -m sre_agent.evals.replay_cli --all --dry-run
+	@echo "Investigation replay harness check (plumbing only)..."
+	python3 -m sre_agent.evals.investigation_replay_cli --all --dry-run
 	@echo "Fixture suite reports (non-gating)..."
 	-python3 -m sre_agent.evals.cli --suite release
 	-python3 -m sre_agent.evals.cli --suite core
@@ -43,6 +45,8 @@ eval-gate:
 	@echo "Running live judged replay (costs API calls)..."
 	python3 -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-5 --concurrency 4 --judge-min 60 --judge-samples 3 \
 		--baseline sre_agent/evals/baselines/replay.json
+	@echo "Running live investigation replay (monitor plan/freeform paths, costs API calls)..."
+	python3 -m sre_agent.evals.investigation_replay_cli --all --model claude-sonnet-5 --concurrency 4 --retries 1
 
 evals-full: evals
 	@echo "Running LLM-judged evals (requires API key)..."

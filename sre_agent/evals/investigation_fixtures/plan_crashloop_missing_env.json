@@ -1,0 +1,55 @@
+{
+  "name": "plan_crashloop_missing_env",
+  "description": "Crashloop whose logs name the cause: a required environment variable removed by the last rollout.",
+  "finding": {
+    "type": "finding",
+    "id": "f-plan_crashlo",
+    "severity": "critical",
+    "autoFixable": false,
+    "category": "crashloop",
+    "title": "Pod api-server-6d4b8c9f7-x2k9p restarting (14x)",
+    "summary": "Container 'api-server' has restarted 14 times. Reason: CrashLoopBackOff",
+    "resources": [
+      {
+        "kind": "Pod",
+        "name": "api-server-6d4b8c9f7-x2k9p",
+        "namespace": "production"
+      }
+    ]
+  },
+  "recorded_responses": {
+    "list_pods": "production/api-server-6d4b8c9f7-x2k9p  Status=Running  Ready=0/1  Restarts=14  Age=3h\nproduction/worker-5f6c7d8e9-abcde  Status=Running  Ready=1/1  Restarts=0  Age=2d",
+    "describe_pod": "{\"name\": \"api-server-6d4b8c9f7-x2k9p\", \"namespace\": \"production\", \"status\": \"Running\", \"containers\": [{\"name\": \"api-server\", \"image\": \"registry.internal/api:v2.3.0\", \"ready\": false, \"restarts\": 14, \"state\": \"waiting\", \"reason\": \"CrashLoopBackOff\", \"lastState\": {\"terminated\": {\"exitCode\": 1, \"reason\": \"Error\"}}, \"env\": [{\"name\": \"DB_PORT\", \"value\": \"5432\"}, {\"name\": \"DB_NAME\", \"value\": \"orders\"}], \"envFrom\": []}], \"conditions\": [{\"type\": \"Ready\", \"status\": \"False\", \"reason\": \"ContainersNotReady\"}], \"recent_events\": [{\"type\": \"Warning\", \"reason\": \"BackOff\", \"message\": \"Back-off restarting failed container api-server\", \"age\": \"1m\"}]}",
+    "get_pod_logs": "2026-10-27T10:00:01Z [INFO] api-server v2.3.0 starting\n2026-10-27T10:00:01Z [ERROR] Configuration validation failed: required environment variable DB_HOST is not set\n2026-10-27T10:00:01Z [FATAL] Startup aborted due to invalid configuration. Exiting with code 1.",
+    "get_events": "1m ago  Warning  BackOff  Pod/api-server-6d4b8c9f7-x2k9p  Back-off restarting failed container api-server\n3h ago  Normal  Pulled  Pod/api-server-6d4b8c9f7-x2k9p  Container image \"registry.internal/api:v2.3.0\" already present on machine",
+    "get_recent_changes": "production/Deployment/api-server  3h ago  spec.template.spec.containers[0].env: removed DB_HOST (was from ConfigMap api-config)  by: ci-deployer"
+  },
+  "expected": {
+    "path": "plan",
+    "plan_id": "crashloop-resolution-v1",
+    "root_cause": [
+      [
+        "DB_HOST"
+      ],
+      [
+        "not set",
+        "missing",
+        "unset",
+        "removed",
+        "absent",
+        "undefined",
+        "required"
+      ]
+    ],
+    "should_not_use_tools": [
+      "delete_pod",
+      "scale_deployment",
+      "restart_deployment",
+      "rollback_deployment",
+      "apply_yaml",
+      "drain_node",
+      "cordon_node"
+    ],
+    "max_tool_calls": 40
+  }
+}

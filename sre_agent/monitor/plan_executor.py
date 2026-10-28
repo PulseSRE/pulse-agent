@@ -93,11 +93,7 @@ async def try_plan_execution(monitor: ClusterMonitor, finding: dict) -> bool:
                 from ..postmortem import Postmortem, save_postmortem
 
                 triage_out = result.phase_outputs.get("triage")
-                diagnose_out = (
-                    result.phase_outputs.get("diagnose")
-                    or result.phase_outputs.get("node_diagnostics")
-                    or result.phase_outputs.get("change_analysis")
-                )
+                diagnose_out = _diagnosing_output(template, result.phase_outputs)
 
                 timeline_parts = []
                 for pid, out in result.phase_outputs.items():
@@ -186,6 +182,25 @@ async def try_plan_execution(monitor: ClusterMonitor, finding: dict) -> bool:
         return False
 
 
+def _diagnosing_output(template, outputs: dict):
+    """The phase output that holds the plan's diagnosis.
+
+    The phase whose contract promises a ``root_cause``, in template order. This
+    used to be looked up by three hard-coded phase ids, so a plan naming its
+    diagnosis anything else (oom's ``memory_analysis``, latency's
+    ``investigate``) reported the *last* phase instead — verify, which declares
+    no cause — and the report carried no cause and verify's confidence.
+    """
+    phases = list(getattr(template, "phases", None) or [])
+    for wanted in ("root_cause", "confidence"):
+        for phase in phases:
+            out = outputs.get(phase.id)
+            if out is not None and wanted in (phase.produces or []) and out.status != "needs_escalation":
+                return out
+    named = outputs.get("diagnose") or outputs.get("node_diagnostics") or outputs.get("change_analysis")
+    return named or next(reversed(list(outputs.values())))
+
+
 async def _report_plan_investigation(monitor: ClusterMonitor, finding: dict, template, result) -> dict | None:
     """Turn a finished plan into an investigation report: saved, broadcast, on the inbox item."""
     import asyncio
@@ -197,8 +212,7 @@ async def _report_plan_investigation(monitor: ClusterMonitor, finding: dict, tem
     outputs = result.phase_outputs or {}
     if not outputs:
         return None
-    diagnose = outputs.get("diagnose") or outputs.get("node_diagnostics") or outputs.get("change_analysis")
-    lead = diagnose or next(reversed(list(outputs.values())))
+    lead = _diagnosing_output(template, outputs)
     findings = lead.findings if isinstance(lead.findings, dict) else {}
     cause = str(findings.get("root_cause") or findings.get("suspected_cause") or "")
     if cause.lower() in ("unknown", "n/a", "none"):

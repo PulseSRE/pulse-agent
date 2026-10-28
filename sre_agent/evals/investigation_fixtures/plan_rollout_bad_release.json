@@ -1,0 +1,61 @@
+{
+  "name": "plan_rollout_bad_release",
+  "description": "A rollout to checkout:v4.1.0 crashes on startup with a NullPointerException; v4.0.2 ran for five days.",
+  "finding": {
+    "type": "finding",
+    "id": "f-plan_rollout",
+    "severity": "critical",
+    "autoFixable": false,
+    "category": "workloads",
+    "title": "Deployment checkout-service has 0/3 replicas ready",
+    "summary": "Deployment staging/checkout-service: 0 of 3 replicas available for 40m",
+    "resources": [
+      {
+        "kind": "Deployment",
+        "name": "checkout-service",
+        "namespace": "staging"
+      }
+    ]
+  },
+  "recorded_responses": {
+    "describe_deployment": "{\"name\": \"checkout-service\", \"namespace\": \"staging\", \"replicas\": {\"desired\": 3, \"ready\": 0, \"unavailable\": 3}, \"strategy\": \"RollingUpdate\", \"containers\": [{\"name\": \"checkout\", \"image\": \"checkout:v4.1.0\"}], \"conditions\": [{\"type\": \"Available\", \"status\": \"False\", \"reason\": \"MinimumReplicasUnavailable\"}, {\"type\": \"Progressing\", \"status\": \"False\", \"reason\": \"ProgressDeadlineExceeded\"}], \"revision\": 4, \"revisionHistory\": [{\"revision\": 3, \"image\": \"checkout:v4.0.2\", \"created\": \"5d ago\"}, {\"revision\": 4, \"image\": \"checkout:v4.1.0\", \"created\": \"45m ago\"}]}",
+    "list_pods": "staging/checkout-service-7b5d9f8c4-abc12  Status=Running  Ready=0/1  Restarts=9  Age=44m\nstaging/checkout-service-7b5d9f8c4-def34  Status=Running  Ready=0/1  Restarts=9  Age=44m",
+    "get_pod_logs": "2026-10-27T14:30:01Z [INFO] checkout v4.1.0 starting\n2026-10-27T14:30:02Z [ERROR] java.lang.NullPointerException: Cannot invoke \"PaymentClient.init()\" because \"this.paymentClient\" is null\n\tat CheckoutHandler.<init>(CheckoutHandler.java:41)\n2026-10-27T14:30:02Z [FATAL] Application failed to start. Shutting down.",
+    "get_events": "44m ago  Normal  ScalingReplicaSet  Deployment/checkout-service  Scaled up replica set checkout-service-7b5d9f8c4 to 1\n40m ago  Warning  BackOff  Pod/checkout-service-7b5d9f8c4-abc12  Back-off restarting failed container",
+    "get_recent_changes": "staging/Deployment/checkout-service  45m ago  image checkout:v4.0.2 -> checkout:v4.1.0 (revision 3 -> 4)  by: argocd"
+  },
+  "expected": {
+    "path": "plan",
+    "plan_id": "deployment-failure-v1",
+    "root_cause": [
+      [
+        "v4.1.0",
+        "new image",
+        "new release",
+        "new version",
+        "revision 4",
+        "rollout",
+        "release"
+      ],
+      [
+        "nullpointer",
+        "null pointer",
+        "npe",
+        "paymentclient",
+        "crash",
+        "fails to start",
+        "failed to start"
+      ]
+    ],
+    "should_not_use_tools": [
+      "delete_pod",
+      "scale_deployment",
+      "restart_deployment",
+      "rollback_deployment",
+      "apply_yaml",
+      "drain_node",
+      "cordon_node"
+    ],
+    "max_tool_calls": 40
+  }
+}

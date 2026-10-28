@@ -1,0 +1,54 @@
+{
+  "name": "plan_scheduling_cpu",
+  "description": "Unschedulable: the pod requests 2 CPU and neither worker has 2 CPU of unrequested allocatable left.",
+  "finding": {
+    "type": "finding",
+    "id": "f-plan_schedul",
+    "severity": "critical",
+    "autoFixable": false,
+    "category": "scheduling",
+    "title": "Pod web-app-7c9d5b8f4-zz123 pending for 45m",
+    "summary": "Pod has been Pending for 45 minutes: 0/3 nodes are available",
+    "resources": [
+      {
+        "kind": "Pod",
+        "name": "web-app-7c9d5b8f4-zz123",
+        "namespace": "staging"
+      }
+    ]
+  },
+  "recorded_responses": {
+    "list_pods": "staging/web-app-7c9d5b8f4-zz123  Status=Pending  Restarts=0  Age=45m",
+    "describe_pod": "{\"name\": \"web-app-7c9d5b8f4-zz123\", \"namespace\": \"staging\", \"status\": \"Pending\", \"node\": null, \"containers\": [{\"name\": \"web\", \"image\": \"web-app:v3.1\", \"resources\": {\"requests\": {\"cpu\": \"2\", \"memory\": \"1Gi\"}}}], \"conditions\": [{\"type\": \"PodScheduled\", \"status\": \"False\", \"reason\": \"Unschedulable\", \"message\": \"0/3 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/master: }, 2 Insufficient cpu. preemption: 0/3 nodes are available: 3 No preemption victims found for incoming pod.\"}]}",
+    "get_events": "2m ago  Warning  FailedScheduling  Pod/web-app-7c9d5b8f4-zz123  0/3 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/master: }, 2 Insufficient cpu.",
+    "list_resources": "master-1  Roles=master  Ready=True  CPU(alloc/requested)=4/3.6  Mem(alloc/requested)=16Gi/10Gi\nworker-1  Roles=worker  Ready=True  CPU(alloc/requested)=7800m/7300m  Mem(alloc/requested)=28Gi/19Gi\nworker-2  Roles=worker  Ready=True  CPU(alloc/requested)=7900m/7500m  Mem(alloc/requested)=30Gi/21Gi",
+    "get_node_metrics": "master-1  CPU=2800m  CPU%=70%  Mem%=66%\nworker-1  CPU=5100m  CPU%=65%  Mem%=58%\nworker-2  CPU=5300m  CPU%=67%  Mem%=61%"
+  },
+  "expected": {
+    "path": "plan",
+    "plan_id": "scheduling-failure-v1",
+    "root_cause": [
+      [
+        "cpu"
+      ],
+      [
+        "insufficient",
+        "capacity",
+        "not enough",
+        "no node",
+        "exhausted",
+        "request"
+      ]
+    ],
+    "should_not_use_tools": [
+      "delete_pod",
+      "scale_deployment",
+      "restart_deployment",
+      "rollback_deployment",
+      "apply_yaml",
+      "drain_node",
+      "cordon_node"
+    ],
+    "max_tool_calls": 40
+  }
+}

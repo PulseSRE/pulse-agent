@@ -22,7 +22,8 @@ jobs:
     # (6h) default, so a hang (e.g. a DB lock wait) silently occupies a
     # runner for hours instead of failing fast. 45m covers unit tests, lint,
     # deterministic eval gates, and the live LLM judge run (daily cron/tags).
-    timeout-minutes: 45
+    # 60 since the investigation replay lane joined the live gates.
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:16
@@ -231,6 +232,49 @@ jobs:
             --baseline sre_agent/evals/baselines/replay.json \
             --format json > artifacts/live_judge.json
 
+      # The scripted lane runs on every PR, with no credentials: it drives the
+      # monitor's real investigation code (plan runtime, phase contracts, the
+      # report it saves) with a stand-in model, so it catches a report that
+      # loses its diagnosis or a phase that writes without approval — without
+      # saying anything about the model.
+      - name: Investigation replay harness check (dry-run)
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          python -m sre_agent.evals.investigation_replay_cli --all --dry-run --concurrency 4 | tee artifacts/investigation_replay_dry.txt
+
+      # THE MONITOR'S RELEASE GATE. The chat replay above never ran the code the
+      # monitor uses when it investigates a finding by itself — the phased plan
+      # path and the freeform investigation — though that is what writes a
+      # diagnosis and a confidence onto the inbox and feeds the learning gate.
+      # Gates on: the right cause, evidence citing tools actually called, no
+      # write attempts, injected instructions not followed (on every attempt —
+      # a retry never forgives an unsafe one), and calibration: low confidence
+      # where the evidence was unreadable, Brier score no worse than always
+      # answering 0.5.
+      - name: Live investigation replay (RELEASE GATE)
+        if: >-
+          (github.event_name == 'schedule')
+          || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+          || (github.event_name == 'workflow_dispatch' && inputs.run_live_judge)
+          || (steps.prompt_changes.outputs.has_changes == 'true')
+          || startsWith(github.ref, 'refs/tags/v')
+        env:
+          ANTHROPIC_VERTEX_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
+          CLOUD_ML_REGION: ${{ secrets.VERTEX_REGION }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          mkdir -p artifacts
+          if [ -z "$ANTHROPIC_VERTEX_PROJECT_ID" ] || [ -z "$GCP_SA_KEY" ]; then
+            echo "::error::Live investigation replay is a release gate, but Vertex AI credentials are not configured."
+            exit 1
+          fi
+          echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
+          trap 'rm -f /tmp/gcp-sa-key.json' EXIT
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json
+          python -m sre_agent.evals.investigation_replay_cli --all --model claude-sonnet-5 \
+            --concurrency 4 --retries 1 --format json > artifacts/investigation_replay.json
+
       # Deterministic lane: the live agent against SRE-Bench's simulated cluster
       # fixtures. No judge in the gate — resolution/efficiency/safety come from
       # the observing backend (verification_passed only on a post-fix read the
@@ -292,7 +336,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$BENCH_GATE_STATUS"
 
-      - name: Run safety and integration evals (non-gating)
+      # Fixture scoring only: these suites grade hand-written scenario JSON and
+      # never run the agent. Live safety is gated by the safety_* replay
+      # fixtures (forbidden tools and repeated credentials, enforced on every
+      # attempt by acceptance_cli) and by the investigation replay lane.
+      - name: Fixture scoring, safety and integration suites (non-gating; agent not run)
         run: |
           python -m sre_agent.evals.cli --suite safety --format json --output artifacts/safety.json
           python -m sre_agent.evals.cli --suite integration --format json --output artifacts/integration.json
@@ -337,6 +385,7 @@ jobs:
           view_designer = read_json(artifacts / "view_designer.json")
           outcomes = read_json(artifacts / "outcomes.json")
           live_judge = read_json(artifacts / "live_judge.json")
+          investigation = read_json(artifacts / "investigation_replay.json")
 
           if live_judge and isinstance(live_judge, list):
               passed_n = sum(1 for r in live_judge if r.get("score", {}).get("passed"))
@@ -352,6 +401,22 @@ jobs:
           else:
               lines.append("- **live judged replay: did not run**")
 
+          if investigation and isinstance(investigation, dict):
+              rows = investigation.get("fixtures", [])
+              gate = investigation.get("verdict", {})
+              calib = gate.get("calibration") or {}
+              passed_i = sum(1 for r in rows if r.get("score", {}).get("passed"))
+              lines.append(
+                  f"- **investigation replay: {'PASS' if gate.get('passed') else 'FAIL'}** "
+                  f"({passed_i}/{len(rows)} fixtures; unsafe: {', '.join(gate.get('unsafe') or []) or 'none'}; "
+                  f"brier={calib.get('brier')} over {calib.get('samples')} attempts, "
+                  f"confidence right={calib.get('mean_confidence_when_right')} "
+                  f"wrong={calib.get('mean_confidence_when_wrong')}; "
+                  f"overconfident: {', '.join(calib.get('overconfident') or []) or 'none'}) — blocks the build"
+              )
+          else:
+              lines.append("- **investigation replay: did not run**")
+
           if release:
               lines.append(
                   f"- release fixtures (non-gating, cannot fail): "
@@ -359,7 +424,7 @@ jobs:
               )
           if safety:
               lines.append(
-                  f"- safety suite: {'PASS' if safety.get('gate_passed') else 'FAIL'} "
+                  f"- safety fixture scoring (agent not run, non-gating): {'PASS' if safety.get('gate_passed') else 'FAIL'} "
                   f"(scenarios={safety.get('scenario_count')})"
               )
           if integration:

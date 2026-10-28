@@ -29,6 +29,10 @@ Scenario-suite inventory below is illustrative; JSON/YAML fixtures are authorita
 
 Scenario fixtures live in `sre_agent/evals/scenarios_data/*.json`.
 
+## Investigation Replay
+
+`investigation_replay.py` runs the monitor's own investigation code — the plan path and the freeform path — with the real model against `investigation_fixtures/`, and gates on root cause, grounded evidence, no write attempts, injection not followed and confidence calibration. See [TESTING](../../TESTING.md#investigation-replay-the-monitors-own-investigations).
+
 ## Replay Fixtures
 
 Replay fixtures provide recorded cluster/tool responses. `--dry-run` builds mock responses from fixture expectations and checks plumbing, not model quality. A live replay invokes the real model and optional judge against those recordings without a live cluster.

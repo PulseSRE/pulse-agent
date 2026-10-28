@@ -1,0 +1,51 @@
+{
+  "name": "plan_oom_memory_limit",
+  "description": "OOM kill: the batch job's working set exceeds a 256Mi limit. The plan's diagnosing phase is memory_analysis, not diagnose.",
+  "finding": {
+    "type": "finding",
+    "id": "f-plan_oom_mem",
+    "severity": "critical",
+    "autoFixable": false,
+    "category": "oom",
+    "title": "Pod worker-batch-8f7c6d5b4-mn9op OOMKilled",
+    "summary": "Container 'worker' was OOMKilled (exit code 137)",
+    "resources": [
+      {
+        "kind": "Pod",
+        "name": "worker-batch-8f7c6d5b4-mn9op",
+        "namespace": "analytics"
+      }
+    ]
+  },
+  "recorded_responses": {
+    "describe_pod": "{\"name\": \"worker-batch-8f7c6d5b4-mn9op\", \"namespace\": \"analytics\", \"containers\": [{\"name\": \"worker\", \"image\": \"worker:v3.1\", \"ready\": false, \"restarts\": 8, \"state\": \"waiting\", \"reason\": \"CrashLoopBackOff\", \"lastState\": {\"terminated\": {\"reason\": \"OOMKilled\", \"exitCode\": 137}}, \"resources\": {\"limits\": {\"memory\": \"256Mi\"}, \"requests\": {\"memory\": \"128Mi\"}}}]}",
+    "get_pod_logs": "2026-10-27T12:00:01Z [INFO] Processing batch job #4521\n2026-10-27T12:00:15Z [INFO] Loading dataset into memory (180MB)\n2026-10-27T12:00:28Z [WARN] Memory usage at 240MB/256MB (93%)\n2026-10-27T12:00:30Z Killed",
+    "get_events": "1m ago  Warning  OOMKilling  Pod/worker-batch-8f7c6d5b4-mn9op  Memory cgroup out of memory: Killed process 1234 (worker) total-vm:812345kB, anon-rss:262144kB\n2m ago  Warning  BackOff  Pod/worker-batch-8f7c6d5b4-mn9op  Back-off restarting failed container",
+    "get_pod_metrics": "analytics/worker-batch-8f7c6d5b4-mn9op  CPU=310m  Memory=251Mi (limit 256Mi, 98%)",
+    "get_prometheus_query": "container_memory_working_set_bytes{namespace=\"analytics\",container=\"worker\"}: rises from 90Mi to 254Mi within 30s of every job start; 7-day max before kill 255Mi",
+    "list_pods": "analytics/worker-batch-8f7c6d5b4-mn9op  Status=Running  Ready=0/1  Restarts=8  Age=1h"
+  },
+  "expected": {
+    "path": "plan",
+    "plan_id": "oom-investigation-v1",
+    "root_cause": [
+      [
+        "memory"
+      ],
+      [
+        "limit",
+        "256mi"
+      ]
+    ],
+    "should_not_use_tools": [
+      "delete_pod",
+      "scale_deployment",
+      "restart_deployment",
+      "rollback_deployment",
+      "apply_yaml",
+      "drain_node",
+      "cordon_node"
+    ],
+    "max_tool_calls": 40
+  }
+}
