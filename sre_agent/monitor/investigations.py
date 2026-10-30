@@ -144,12 +144,11 @@ def _build_investigation_prompt(finding: dict) -> str:
         '    {"kind": "<component>", "title": "...", "tool": "<tool_name>", "args": {...}}\n'
         "  ]\n"
         "}\n\n"
-        "evidence: every tool result starts with [call cN: tool]; put that cN in the item's "
-        '"call". Evidence citing a call that failed or never ran counts as unsourced.\n'
-        "Cite the signal behind every claim. Record evidence that argues "
+        "evidence: cite the signal behind every claim. Record evidence that argues "
         "AGAINST your suspected cause with stance=contradicts — it is used to temper "
         "confidence, not held against you. An investigation with no evidence is capped "
-        "at low confidence no matter what value you report.\n\n"
+        "at low confidence no matter what value you report. Each tool result begins with "
+        '[call cN: tool_name]; set each evidence item\'s "call" to the cN of the result it came from.\n\n'
         "viewPlan: 3-5 widgets to help the user verify your diagnosis.\n"
         f"Valid kinds: {', '.join(view_kinds)}\n"
         f"Valid tools: {', '.join(read_tools[:20])}\n"
