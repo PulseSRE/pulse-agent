@@ -2,9 +2,9 @@
 
 > Historical project narrative. Dates, benchmark counts, operational claims, and deployment lessons describe earlier releases and are not current guarantees. Use [current documentation](README.md) for deployment and security.
 
-How two repos, 2,555 commits, and 152 days built an AI-powered SRE platform from scratch.
+How four repos, ~3,200 commits, and 232 days built an AI-powered SRE platform from scratch — and then spent the last third of that time making it tell the truth about itself.
 
-**Repos:** [pulse-agent](https://github.com/PulseSRE/pulse-agent) | [pulse-ui](https://github.com/PulseSRE/pulse-ui)
+**Repos:** [pulse-agent](https://github.com/PulseSRE/pulse-agent) (Python agent and monitor) | [pulse-ui](https://github.com/PulseSRE/pulse-ui) (React console) | [pulse-operator](https://github.com/PulseSRE/pulse-operator) (Go operator that deploys both, from August) | [sre-bench](https://github.com/PulseSRE/sre-bench) (the public benchmark extracted from the agent's evals, from August)
 
 **Key docs:** [DESIGN_PRINCIPLES.md](../DESIGN_PRINCIPLES.md) | [ARCHITECTURE.md](ARCHITECTURE.md) | [API_CONTRACT.md](../API_CONTRACT.md) | [SECURITY.md](../SECURITY.md) | [TESTING.md](../TESTING.md) | [DATABASE.md](../DATABASE.md) | [CHANGELOG.md](../CHANGELOG.md)
 
@@ -129,33 +129,81 @@ This phase was about taking a working prototype and making it maintainable and e
 - **SRE prompt rewrite:** The system prompt was rewritten to emphasize "diagnose fast, act decisively" — the agent was being too cautious, requesting dry-runs before every action. The new prompt has a 5-tool-call budget for diagnosis before it must commit to a fix. Commits: `[ea6411a](https://github.com/alimobrem/pulse-agent/commit/ea6411a)`, `[c86d03e](https://github.com/alimobrem/pulse-agent/commit/c86d03e)`.
 - **Investigation views:** Views auto-created from monitor findings. Spec: [design](superpowers/specs/2026-04-22-investigation-view-plan-design.md). Plan: [implementation](superpowers/plans/2026-04-22-investigation-view-plan.md).
 
+### Phase 6: The Operator, and Trust You Can Audit (August 19 – August 25)
+
+**What we built:** A release gate that runs the real model, restorable snapshots, verification contracts, verified-trajectory learning, and the move to an operator.
+
+August was when Pulse stopped being judged by what it claimed and started being judged by what it did.
+
+- **Live judged replay became the release gate** (pulse-agent #48, #55, #59). Until then the "release" eval suite scored hand-written scenario JSON whose `verification_passed` was set in the fixture — it could not fail. The replay harness was rebuilt to run Pulse's *real* configuration (routed skill prompt, real tool schemas) against recorded cluster responses, with an LLM judge for correctness and structure checks for safety. Regressions are confirmed by re-running before they block (#117), because judge variance, not agent variance, was flipping borderline fixtures.
+- **Confidence derived from evidence** (#68). Investigations returned a confidence the model asserted about itself; nothing connected it to the evidence list. `evidence.derive_confidence` makes the model's figure a ceiling and caps unsupported claims at 0.35.
+- **Learning gated on outcomes, not confidence** (#70, #105, #110). Investigations record a `LearningCandidate`; only a fix the monitor verified is promoted to a skill. The candidates were an in-memory dict until #105 — a pod restart erased everything the agent was about to learn.
+- **Restorable snapshots and verification contracts** (#113, v2.24.0). Rollback used to restore from a human-readable sentence. Auto-fix now captures the resource before writing it (migration 034), and the five most-used interactive write tools gained preconditions and tool-specific postconditions.
+- **pulse-operator is born** (v0.1.0, Aug 14). One `OpenShiftPulse` custom resource reconciles the whole stack — agent, UI and OAuth proxy, PostgreSQL, MCP, RBAC, Routes, NetworkPolicies. Within a week it had per-component status conditions and automatic rollback to the last healthy image (v0.3.0), a self-heal loop and an agent-version compatibility gate (v0.4.0), and an OLM catalog built in CI so a tag is something people can actually install (v0.4.1). Its first big fix was the root cause of every WebSocket connection failure: oauth-proxy request logging (v0.2.0).
+- **The Helm chart was removed** (#99). [pulse-operator](https://github.com/PulseSRE/pulse-operator) owns deployment through an `OpenShiftPulse` CR. The first bug this surfaced: the CR's `trustLevel` had been a no-op on every deployment because the operator injected a different variable name than the agent read (v2.24.0).
+- **SRE-Bench is extracted** (Aug 23). The agent's eval scenarios and rubric became [sre-bench](https://github.com/PulseSRE/sre-bench): 121 Kubernetes/OpenShift operations tasks across 13 suites, scored on resolution, efficiency, safety and speed, open to any agent. v0.2.0 scored knowing when *not* to act (refuse, degrade, no-op). v0.3.0 replaced self-reported flags with `SimCluster`, a deterministic backend that observes the run and decides for itself whether a fix was verified or a trap was triggered.
+- **Model migration to `claude-sonnet-5`** (v2.25.0) and the **SRE-Bench simulation lane** in the agent's CI: the production agent against those simulated clusters. It caught the model swap quietly changing the agent's safety posture, which led to a deny policy the model cannot argue past (v2.26.0). SRE-Bench's pinned three-way comparison put numbers on it: the Pulse stack beat plain Sonnet 5 on the diagnostic suite, trap compliance tracked the model rather than the harness, and no agent verified its own fix unprompted.
+
+### Phase 7: Durable Execution (August 25 – October 3)
+
+**What we built:** Runtime artifacts that survive restarts, Temporal-backed plans and fix lifecycles, and a full plan language.
+
+- **Nothing written at runtime survived a restart** (v2.27.0). Skills, plans and eval drafts the agent authored lived on the container filesystem. They are now persisted in the database and restored at startup.
+- **Plans and fixes on Temporal** (agent v2.28.0–v2.31.0, operator v0.6.0–v0.8.x, which provisions Temporal on the same PostgreSQL, routes auto-fix through the durable workflow, and exposes the Temporal UI as an audit trail): durable plan runs, an incident lifecycle workflow (snapshot → apply → verify → wait for recurrence → settle, compensating on failure or cancel), waves, branching and sub-plans, and the learning flywheel on Temporal Schedules. All of it is inert until `PULSE_AGENT_TEMPORAL_HOST` is set, and workflow changes are patch-guarded so histories already in flight replay unchanged.
+- **Approval, caller identity and preconditions preserved across every path** (#132–#139): chat, plans, monitor and MCP. A plan-only turn is not offered write tools at all (#147, #156).
+- **SRE-Bench v0.4.0: evals for what survives.** `sre-bench durable` probes claims no trajectory can witness — an approval gate that really waits, a cancel that stops a parked run, a failure that still records a verdict. Its first live run found that creating plans from the UI had been broken on-cluster (runtime YAML written into the read-only package directory) while every local test passed.
+- **The operator caught a version split** (v0.5.1): agent v2.25.0 had run against UI v2.24.0 for weeks with everything green. The CR now reports an `AgentUIVersionsMatch` condition.
+
+### Phase 8: Seeing Clearly (October 16 – October 22)
+
+**What we built:** A view designer that looks at what it builds, a monitor that says what it cannot see, and a security boundary review.
+
+- **The view designer sees the page** (v2.32.0, with the render service deployed by operator v0.9.0's `spec.render`). `preview_dashboard` renders the draft through a render service and hands the model a screenshot plus the widgets that came out empty or broken; every widget's live query runs before saving; dashboards moved to a 12-column grid (migration 037). A nightly rendered-page eval scores what a person would actually see.
+- **"A scanner that cannot see is not clean"** (v2.33.0). Stable finding identity, honest resolution (only the owning scanner can resolve a finding), a `degraded` scanner that turns blind spots into findings with a remedy, per-workload baselines, and a ranked "what changed before this" list for every incident.
+- **The operator's own boundary** (v0.10.0–v0.11.0): read-only RBAC for the new scanners, and a PostgreSQL NetworkPolicy whose selector had matched no pod — any pod could reach the database. Disabling MCP or Temporal now removes what was created for it.
+- **The UI → agent → cluster boundary** (v2.34.0): a non-admin could rewrite the system prompt through a view action; `/log-counts` and `/query` ran as the service account; `describe_resource` returned Secret values. Each fix shipped with a test that fails on the previous code. Chat sessions also learned to survive API errors: retries had never actually run, because the error is raised when the stream is entered, outside the retry block.
+
+### Phase 9: Does It Really Do It? (October 23 – October 27)
+
+**What we built:** Learning that waits for proof, a six-batch functionality review, and an eval for the monitor's own investigations. Released as agent and UI v2.35.0; it runs on operator v0.11.0 unchanged (its three migrations run when the agent starts).
+
+- **Self-learning, end to end** (#183–#187). Approved fixes had never taught anything: a finding cleared by a human-approved fix was labelled *self-healed* and its learning candidate discarded, so at the default trust level nothing verified was ever learned. Skill routing and tool prediction claimed to learn and did not (the predictor learned from its own guesses). `fix_learning.py` (migration 039) records which fix holds for which cause and escalates to a person when a strategy keeps failing. A learning simulator then showed skills being learned from fixes that recurred, so learning now waits until a fix outlasts the recurrence window.
+- **The functionality review** (kept in the Pulse project workspace, not in this repo). Six parallel reviews traced every claim in the README, docs and site to the code and reproduced each defect against a disposable database. Six batches of fixes followed (#188–#195, pulse-ui #151–#153), each with a test file that fails on the code before it:
+  - **Safety:** rollback compared the live object with itself, so it silently reverted later hotfixes; pause did not stop approvals; an approval could run a different strategy than the one proposed.
+  - **Evidence:** the common incident types took the plan path, which reported a fixed 0.7 confidence and no evidence, so the UI always showed "No supporting evidence".
+  - **Memory:** memory never reached the model on the server — the agent loop rebuilt the prompt from the skill alone and threw the memory away.
+  - **Detection:** a Prometheus blip cleared every firing alert as "self-healed"; every restart re-paged every critical finding (noise counts now persist, migration 040).
+  - **Ops:** one failed API call auto-resolved open inbox items; the SLO burn generator could never produce anything.
+  - **UI honesty:** failures and "memory switched off" rendered as empty or successful states.
+- **Evals for what was not measured** (#196, pulse-ui #153). A new release gate replays the monitor's *own* investigations — the plan and freeform paths — with the real model and gates on the right cause, evidence citing tools actually called, no write attempts, injected instructions not followed, and calibration (Brier score; low confidence where every read fails). On its first run it found that OOM and latency plans reported the *verify* phase instead of the diagnosis, and that two templates ran remediation without approval. The agent now generates the investigation payloads the UI renders, and the UI renders that same file in its tests.
+
 ---
 
 ## The Numbers
 
 
-| Metric                        | Value                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Total commits (both repos)    | 2,555 (1,107 agent + 1,448 UI)                                                                                                                                                                                                                                                                                                                                                                                  |
-| Calendar days                 | 152 (UI: Mar 9 – Aug 7, Agent: Mar 24 – Aug 7)                                                                                                                                                                                                                                                                                                                                                                 |
-| Releases                      | 87 (39 agent + 48 UI)                                                                                                                                                                                                                                                                                                                                                                                           |
-| Backend tests                 | 2,455                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Frontend tests                | ~2,069                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Native tools                  | 118                                                                                                                                                                                                                                                                                                                                                                                                             |
-| MCP tools                     | 36                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Skills                        | 7 ([SRE](../sre_agent/skills/sre/skill.md), [Security](../sre_agent/skills/security/skill.md), [View Designer](../sre_agent/skills/view-designer/skill.md), [Capacity Planner](../sre_agent/skills/capacity-planner/skill.md), [Plan Builder](../sre_agent/skills/plan-builder/skill.md), [Postmortem](../sre_agent/skills/postmortem/skill.md), [SLO Management](../sre_agent/skills/slo-management/skill.md)) |
-| Scanners                      | 23 (11 reactive + 5 audit + 1 SLO burn + 1 security posture + 5 predictive trend) — see `[sre_agent/monitor/](../sre_agent/monitor/)`                                                                                                                                                                                                                                                                           |
-| PromQL recipes                | 83 — see `[sre_agent/promql_recipes.py](../sre_agent/promql_recipes.py)`                                                                                                                                                                                                                                                                                                                                        |
-| Eval suites                   | 16                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Eval scenarios                | 192 — see `[TESTING.md](../TESTING.md)`                                                                                                                                                                                                                                                                                                                                                                         |
-| Database tables               | 24 — see `[DATABASE.md](../DATABASE.md)`                                                                                                                                                                                                                                                                                                                                                                        |
-| Migrations                    | 22                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Design specs written          | 23 — see `[docs/superpowers/specs/](superpowers/specs/)`                                                                                                                                                                                                                                                                                                                                                        |
-| Implementation plans          | 23 — see `[docs/superpowers/plans/](superpowers/plans/)`                                                                                                                                                                                                                                                                                                                                                        |
-| Architecture Decision Records | 15 — see `[docs/ARCHITECTURE.md](ARCHITECTURE.md)`                                                                                                                                                                                                                                                                                                                                                              |
-| Lines of Python (agent)       | ~52,700                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Lines of TypeScript (UI)      | ~55,000                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Metric | Value (measured at v2.35.0, Oct 27 2026) |
+| --- | --- |
+| Total commits | 3,184 (1,386 agent + 1,612 UI + 168 operator + 18 sre-bench) |
+| Calendar days | 232 (UI from Mar 9, agent from Mar 24, operator from Aug 14, sre-bench from Aug 23; all to Oct 27) |
+| Tagged releases | 182 (85 agent + 79 UI, including the UI's pre-rename v1–v6 line, + 18 operator; sre-bench v0.1.0–v0.4.0 are changelog releases) |
+| Backend tests | 4,225 collected |
+| Frontend tests | 2,504 (215 files) |
+| Registered native tools | 108 (19 writes) — see `/tools` on a running agent |
+| MCP tools | 36 (OpenShift MCP server sidecar) |
+| Skills | 7 built-in ([SRE](../sre_agent/skills/sre/skill.md), [Security](../sre_agent/skills/security/skill.md), [View Designer](../sre_agent/skills/view-designer/skill.md), [Capacity Planner](../sre_agent/skills/capacity-planner/skill.md), [Plan Builder](../sre_agent/skills/plan-builder/skill.md), [Postmortem](../sre_agent/skills/postmortem/skill.md), [SLO Management](../sre_agent/skills/slo-management/skill.md)), plus runtime-authored and learned skills |
+| Scanners | 32 (reactive, liveness, audit and predictive trend) — see `/monitor/scanners` |
+| Plan templates | 12 |
+| Inbox generators | 16 |
+| Live replay fixtures | 53 chat + 11 monitor-investigation, plus the SRE-Bench simulation lane |
+| SRE-Bench | 121 tasks across 13 suites; 11 simulated-cluster fixtures for `core` and `errors` |
+| Fixture-scoring suites | 16 (reports, not gates) |
+| Database tables / migrations | ~43 / 40 — see [DATABASE.md](../DATABASE.md) |
+| Design specs / implementation plans | 24 / 23 — see [docs/superpowers/](superpowers/) |
+| Lines of Python (agent package) | ~77,600 |
+| Lines of TypeScript (UI `src/`, including tests) | ~118,500 |
 
+These are a snapshot. Counts change with every release; measure them again rather than quoting them.
 
 ---
 
@@ -242,6 +290,38 @@ This phase was about taking a working prototype and making it maintainable and e
 **Why:** SREs spend their time in terminals and dashboards. We're not replacing those — we're adding a layer that understands intent. "Why is my app slow?" should produce a diagnosis with supporting charts, not a wall of YAML.
 
 **Ref:** [DESIGN_PRINCIPLES.md](../DESIGN_PRINCIPLES.md)
+
+### 11. Live replay as the release gate, fixtures as reports
+
+**Decision:** A release is gated by the real model running against recorded cluster state — chat replay, monitor-investigation replay and the SRE-Bench simulation lane — not by scored scenario JSON.
+
+**Why:** The fixture suites could not fail: their outcome fields were written by hand. A gate that can only pass is not a gate. Live replay costs provider calls and has judge variance, so regressions are re-run before they count; safety checks (forbidden tools, repeated credentials, write attempts) are never forgiven by a retry.
+
+**Ref:** [TESTING.md](../TESTING.md), `[.github/workflows/evals.yml](../.github/workflows/evals.yml)`, `[sre_agent/evals/acceptance_cli.py](../sre_agent/evals/acceptance_cli.py)`
+
+### 12. Learn from outcomes, not from confidence
+
+**Decision:** Nothing is learned from an investigation until the fix it led to has been verified and has outlasted the recurrence window. Which fix to use for a cause is learned from the same verdicts.
+
+**Why:** Self-assessed confidence is exactly what a wrong model is confident about. Learning from it turns one bad diagnosis into a reusable bad skill. A symptom-treating fix passes verification and then comes back, so verification alone is not enough either.
+
+**Ref:** `[sre_agent/trajectory.py](../sre_agent/trajectory.py)`, `[sre_agent/fix_learning.py](../sre_agent/fix_learning.py)`, `[sre_agent/evals/learning_sim.py](../sre_agent/evals/learning_sim.py)`
+
+### 13. The operator owns deployment
+
+**Decision:** Remove the Helm chart; deploy through pulse-operator and an `OpenShiftPulse` CR.
+
+**Why:** Database credentials, the OAuth proxy, RBAC, NetworkPolicies, MCP and Temporal all need reconciliation, not a one-shot template. The trade-off is that every knob is now a contract between two repos, which is how the trust-level variable mismatch went unnoticed — so cross-repo settings get an end-to-end check.
+
+**Ref:** [pulse-operator](https://github.com/PulseSRE/pulse-operator), [RELEASE.md](../RELEASE.md)
+
+### 14. "Couldn't check" is never "fine"
+
+**Decision:** A scanner, generator, list or query that could not read its source reports that it could not — as a `degraded` finding, an unavailable generator, or a load error in the UI — and never as an empty, healthy result.
+
+**Why:** Most of the functionality review's high-severity findings were one bug in different clothes: a failure turned into an empty list, and an empty list read as "all clear". An SRE tool that says "nothing wrong" when it is blind is worse than one that says nothing.
+
+**Ref:** `[sre_agent/monitor/scanner_health.py](../sre_agent/monitor/scanner_health.py)`, `[sre_agent/inbox_generators.py](../sre_agent/inbox_generators.py)`
 
 ---
 
@@ -357,6 +437,46 @@ This phase was about taking a working prototype and making it maintainable and e
 
 **Lesson:** Startup probes need to account for application initialization time, not just container startup.
 
+### 12. Claims the code did not keep
+
+**The mistake:** The README and docs described behaviour — rollback rejects concurrent changes, memory makes the agent better, investigations show their evidence — that unit tests "covered" because the tests mocked the private functions where the claim broke.
+
+**The consequence:** Rollback could silently revert a hotfix made after the fix. Memory never reached the model on the server. The UI showed "No supporting evidence" for every monitor investigation. None of it failed a test.
+
+**The fix:** The October functionality review traced each claim to the code and reproduced each defect before fixing it. Every fix ships with a test that fails on the previous code, checked by stashing the fix and re-running.
+
+**Lesson:** A test that mocks the seam where a claim could break proves the mock. Test the claim.
+
+### 13. Evals that could not fail
+
+**The mistake:** The "release" suite scored hand-written scenarios with the outcome already in them; single-turn dashboard fixtures passed whether or not a dashboard was built; the "safety suite" never ran the agent.
+
+**The consequence:** Green gates over real regressions — including a dashboard fix that made the model look up a view that did not exist yet, caught only when the live gate went red on `main`.
+
+**The fix:** Live replay is the gate; fixtures that cannot fail are labelled as reports. Dashboard fixtures are two-turn and must call `create_dashboard`. Safety is gated live, on every attempt.
+
+**Lesson:** Before trusting a gate, make it fail once on purpose.
+
+### 14. A knob with no end-to-end check
+
+**The mistake:** The operator set `PULSE_AGENT_TRUST_LEVEL`; the agent read `PULSE_AGENT_MAX_TRUST_LEVEL`. Both defaulted to 2.
+
+**The consequence:** `spec.agent.trustLevel` was a no-op on every deployment, invisible because the defaults agreed.
+
+**The fix:** The agent accepts both names, and settings that cross a repo boundary get a test that the value set is the value read.
+
+**Lesson:** Matching defaults hide a broken wire.
+
+### 15. A failure that looked like success
+
+**The mistake:** `safe()` returns a `ToolError` object, and callers checked `isinstance(result, str)`. Fetchers returned `[]` on error; UI queries ignored `isError`.
+
+**The consequence:** One 403 auto-resolved every open inbox item a generator owned and hid it for 24 hours; a Prometheus blip cleared every firing alert as self-healed; the UI said "No SLOs defined" when the request failed.
+
+**The fix:** See design decision 14. Failures are typed (`GeneratorUnavailableError`, `report_failure`, `AgentHttpError`) and rendered as failures.
+
+**Lesson:** "Couldn't check" and "checked, nothing there" must never share a representation.
+
 ---
 
 ## The AI-Assisted Development Story
@@ -377,6 +497,7 @@ This project was built almost entirely with AI assistance (Claude Code / Claude 
 - **Silent failures from defensive coding.** Three code review agents missed the `except: pass` bug because it looked like correct defensive programming. AI reviewers need to be specifically instructed to flag this pattern.
 - **UI dead-ends.** The AI consistently tested the happy path but missed edge-case UI states. We learned to explicitly enumerate all status variants before shipping.
 - **CSS visual issues.** AI can write correct CSS that renders incorrectly due to library-specific quirks (Recharts height, scrollbar specificity). Visual testing in a real browser is non-negotiable.
+- **Believing its own summaries.** An AI session will report a fix as done when the code it changed is not the code that runs. The October review worked because it did the opposite: trace the claim to the code, reproduce the failure, fix it, and prove the new test fails without the fix. It also caught the AI's own mistakes — including a misdiagnosis it had to retract, and a learning bug its own simulator exposed one PR after it was introduced.
 
 ---
 
@@ -384,27 +505,23 @@ This project was built almost entirely with AI assistance (Claude Code / Claude 
 
 ### Near-Term (Weeks)
 
-1. **Thanos/ACM compatibility** — Auto-detect Thanos and provide compatible PromQL variants. This is a real gap blocking ACM cluster deployments. See `[sre_agent/promql_recipes.py](../sre_agent/promql_recipes.py)`.
-2. **MCP server token forwarding** — The MCP server fork needs changes to consume the `Authorization` header from the agent. Currently MCP tools run with the ServiceAccount, not the user's identity. See `[sre_agent/mcp_client.py](../sre_agent/mcp_client.py)`.
-3. **Remaining code quality items** — `as Unknown as` type casts, silent catches in edge paths, and view test coverage gaps.
-4. **Toast tier system refinement** — Error/warning/info toasts need consistent visual treatment and auto-dismiss behavior.
+1. **Prove the review fixes on a real cluster.** v2.35.0 is tested against mocks, a disposable database and recorded cluster data. Five items need a real environment: the ACM proxy path for fleet tools, `X-Forwarded-User` spoofing when the UI is reachable without the OAuth proxy, OpenShift service-serving certificates in cert-expiry checks, whether prompt caching actually hits, and the cost of 7-day trend queries on large clusters.
+2. **Measure whether memory helps.** Memory now reaches the model; nothing yet shows it improves investigations. Run the investigation replay with memory on and off, with a seeded past incident.
+3. **Persist structured evidence.** Investigations stream evidence with its stance and source, but the saved record keeps prose only, so a reloaded card loses which evidence contradicted the cause.
+4. **Thanos/ACM PromQL compatibility** and **MCP token forwarding** remain open from earlier phases.
 
 ### Medium-Term (Months)
 
-1. **Multi-cluster topology** — The topology graph (see `[sre_agent/dependency_graph.py](../sre_agent/dependency_graph.py)`) currently shows a single cluster. With ACM integration, we could show cross-cluster dependencies — a service in cluster A depends on a database in cluster B.
-2. **Runbook execution** — The 10 built-in runbooks (see `[sre_agent/runbooks.py](../sre_agent/runbooks.py)`) are injected into the system prompt as text. They could become executable workflows — step-by-step investigation plans with checkpoints and rollback, extending the plan runtime (`[sre_agent/plan_runtime.py](../sre_agent/plan_runtime.py)`).
-3. **Natural language alerting rules** — "Alert me when any namespace uses more than 80% of its CPU quota" should create a real PrometheusRule, not just a monitor finding.
-4. **Collaborative incident response** — Multiple users claiming and working on the same incident view. Real-time cursor presence, shared investigation state, handoff annotations. The ViewEventBus (`[sre_agent/api/view_events.py](../sre_agent/api/view_events.py)`) already supports multi-user events.
-5. **Cost intelligence** — Beyond Vertex AI cost tracking: correlate cluster resource costs (node hours, PVC storage, egress) with workload owners. "This namespace costs $847/month and 60% of that is unused memory requests."
-6. **Drift detection** — Compare live cluster state against a golden baseline (Git-stored manifests, policy-as-code). Surface drift as inbox items (`[sre_agent/inbox.py](../sre_agent/inbox.py)`) with one-click remediation.
+1. **Calibration as a product feature.** The investigation gate now measures calibration offline; the inbox could show how often a confidence level has been right on *this* cluster.
+2. **Multi-cluster topology and incidents** through ACM, once the fleet proxy path is verified.
+3. **Natural-language alerting rules** that create real PrometheusRules.
+4. **Collaborative incident response** on the existing ViewEventBus and live inbox events.
 
 ### Long-Term (Vision)
 
-1. **Voice-first SRE** — The [design principles](../DESIGN_PRINCIPLES.md) say "conversational-first." The next step is literal voice interaction — describe a problem verbally, get a diagnosis and fix proposal. Useful for on-call scenarios where you're on your phone at 3am.
-2. **Predictive capacity with ML** — The 4 trend scanners (see `[sre_agent/trend_scanners.py](../sre_agent/monitor/trend_scanners.py)`) use `predict_linear()` for simple extrapolation. Real ML models could learn seasonal patterns, workload correlations, and predict capacity needs weeks out.
-3. **Self-healing clusters** — The auto-fix system (see [autonomous remediation spec](superpowers/specs/2026-04-17-autonomous-remediation-design.md)) currently handles individual pod/deployment issues. A self-healing cluster would handle infrastructure-level problems: scaling node pools before predicted capacity shortfalls, rebalancing workloads across availability zones, and coordinating rolling updates with zero user intervention.
-4. **Plugin ecosystem** — Skills are already drop-in `.md` files (see [SKILL_DEVELOPER_GUIDE.md](SKILL_DEVELOPER_GUIDE.md)). The next step is a skill marketplace where teams can share and discover skills — "install the Kafka SRE skill" or "install the GPU cluster management skill." The scaffolder (`[sre_agent/skill_scaffolder.py](../sre_agent/skill_scaffolder.py)`) already generates skills from usage patterns.
-5. **Compliance-as-conversation** — "Are we SOC 2 compliant?" should produce a real-time audit with evidence links, gap analysis, and remediation suggestions. The security scanner (`[sre_agent/security_tools.py](../sre_agent/security_tools.py)`) already has the primitives; it needs a compliance framework layer.
+1. **Self-healing that earns its trust level.** Fix learning already escalates a strategy that keeps failing; the next step is promoting categories to automatic fixes only on a measured hold rate.
+2. **A skill ecosystem** built on reviewed, outcome-verified skills rather than generated ones.
+3. **Compliance-as-conversation** on top of the security tools.
 
 ---
 
@@ -441,14 +558,15 @@ This project was built almost entirely with AI assistance (Claude Code / Claude 
 
 ## Final Thoughts
 
-Pulse started as a cluster browser and became an AI SRE platform in 47 days. The velocity was real but so were the mistakes — silent failures, CSS wars, Helm gotchas, and prompt engineering dead-ends. Every mistake became a memory file, every memory file prevented a repeat.
+Pulse started as a cluster browser and became an AI SRE platform in 47 days. The next six months were about something harder: making it true. Velocity produced a long list of features; the August and October work found how many of them only appeared to work — fixes that taught nothing, memory that never reached the model, evidence that never reached the screen, gates that could not fail.
 
-The most important design decision wasn't any single technical choice. It was the feedback loop: build -> deploy -> discover bugs on a real cluster -> write a memory -> never make that mistake again. The project improved not just in features but in the *process* of building features.
+The most important design decision wasn't any single technical choice. It was the feedback loop, and it changed shape. Early on it was build → deploy → discover a bug → write a memory. Now it is claim → trace to code → reproduce → fix → prove the test fails without the fix → gate it live. The project improved not just in features but in how it knows whether a feature works.
 
-The codebase today is 2,455 backend tests, 2,069 frontend tests, 16 eval suites, 192 scenarios, and 35 memory files. But the real output isn't the code — it's the confidence that when a cluster page tells you something is wrong, the agent actually knows what to do about it.
+The real output isn't the code. It's that when Pulse says a pod is crash-looping because a rollout removed `DB_HOST`, at 0.56 confidence, citing the log line it read — that sentence is something you can check.
 
 ---
 
-*Last updated: August 7, 2026*
-*Pulse Agent v2.8.0 | OpenShift Pulse v2.8.0*
-*1,107 + 1,448 = 2,555 commits across 87 releases*
+*Last updated: October 27, 2026*
+*Pulse Agent v2.35.0 | Pulse UI v2.35.0*
+*Pulse operator v0.11.0 | SRE-Bench v0.4.0*
+*1,386 + 1,612 + 168 + 18 = 3,184 commits*

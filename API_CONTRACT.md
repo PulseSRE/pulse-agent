@@ -27,16 +27,17 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/eval/status` | token | Cached quality gate snapshot (release, safety, integration, outcomes, view_designer) with `dimension_averages` and `prompt_audit` data |
 | `GET` | `/eval/history` | token | Paginated eval run history for trend charts (query params: `suite`, `days`, `limit`) |
 | `GET` | `/eval/trend` | token | Eval score trend summary with sparkline data (query params: `suite`, `days`) |
-| `GET` | `/briefing` | token | Cluster activity summary for last N hours (greeting, actions, investigations) |
+| `GET` | `/briefing` | token | Cluster summary: the running monitor's standing findings, the last N hours of actions and investigations, and `unwatchedScanners` (scanners that failed the last scan). "All quiet" only when nothing is open and no scanner failed |
 | `GET` | `/memory/export` | token | Export learned runbooks and patterns as JSON |
-| `POST` | `/memory/import` | token | Import runbooks and patterns from another pod's export |
+| `POST` | `/memory/import` | admin | Import runbooks and patterns from another pod's export. Returns `imported_runbooks`/`imported_patterns`; 503 when memory is off |
+| `DELETE` | `/memory/{kind}/{id}` | admin | Forget one learned runbook, pattern or incident (`kind`: `runbooks`, `patterns`, `incidents`); 404 for an unknown kind or id, 503 when memory is off. Memory list responses carry `enabled` |
 | `GET` | `/memory/stats` | token | Memory system stats: incident count, runbook count, pattern count |
 | `GET` | `/memory/runbooks` | token | List learned runbooks sorted by success rate |
 | `GET` | `/memory/incidents` | token | Search past incidents by query similarity |
 | `GET` | `/memory/patterns` | token | List detected recurring patterns |
 | `GET` | `/monitor/capabilities` | token | Max trust level and supported auto-fix categories |
 | `POST` | `/monitor/pause` | token | Emergency kill switch — pause all auto-fix actions |
-| `POST` | `/monitor/resume` | token | Resume auto-fix actions after a pause |
+| `POST` | `/monitor/resume` | admin | Resume auto-fix actions after a pause |
 | `GET` | `/tools/usage/chains` | token | Discovered tool call chains (common sequences via bigram analysis) |
 | `GET` | `/views` | token | List saved views. Query params: `view_type`, `visibility`, `exclude_status` |
 | `GET` | `/views/:id` | token | Get a single saved view |
@@ -70,7 +71,7 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/plan-templates` | token | List investigation plan templates |
 | `GET` | `/plan-templates/{type}` | token | Get a single plan template by incident type |
 | `GET` | `/fix-history/resolutions` | token | Recent resolution outcomes with verification status (query: `days`, `limit`) |
-| `GET` | `/slo` | token | Current SLO status with live Prometheus burn rates |
+| `GET` | `/slo` | token | SLO status: budget consumed = (1−SLI)/(1−target), burn rate from the last hour (critical ≥14.4x, warning ≥6x), `budget_remaining_hours`; targets ≥1 are percentages; SLOs without data are listed with `alert_level: "no_data"` |
 | `POST` | `/slo` | token | Register new SLO definition |
 | `DELETE` | `/slo/{service}/{slo_type}` | token | Remove SLO definition |
 | `GET` | `/analytics/fix-strategies` | token | Fix strategy effectiveness per category+tool (query: `days` 1-365) |
@@ -768,7 +769,7 @@ A client that subscribes receives every standing finding at once, then new ones 
   "findingId": "f-abc123",
   "tool": "restart_deployment",
   "input": {"namespace": "production", "name": "api-server"},
-  "status": "applied",
+  "status": "completed",
   "beforeState": "replicas=3, ready=1",
   "afterState": "replicas=3, ready=3",
   "reasoning": "Pod was crash-looping; restart cleared the bad in-memory state",
@@ -803,18 +804,16 @@ A client that subscribes receives every standing finding at once, then new ones 
   "confidence": 0.82,
   "evidence": ["ConfigMap 'app-config' key 'DB_HOST' missing since rollout at 14:32", "Pod logs show KeyError on startup"],
   "alternativesConsidered": ["Image pull failure ruled out — image exists and pulled successfully"],
+  "evidenceDetail": [
+    {"observation": "Pod logs show KeyError on startup", "kind": "log", "source": "get_pod_logs", "stance": "supports", "confidence": 0.9},
+    {"observation": "Restarts began before the rollout", "kind": "event", "source": "get_events", "stance": "contradicts", "confidence": 0.6}
+  ],
+  "planId": "crashloop-resolution-v1",
   "timestamp": 1711540800
 }
 ```
 
-Optional fields (per design): `evidence` (list of facts supporting the diagnosis), `alternativesConsidered` (hypotheses checked and ruled out).
-
-> **Known gap:** as of this writing, `investigations.py` computes `evidence`
-> and `alternatives_considered` internally, but `investigation_runner.py`'s
-> outbound payload construction does not copy them onto the broadcast
-> `investigation_report` event -- they are silently dropped before reaching
-> the UI. Either wire them through or remove them from this doc; tracked
-> here so it isn't lost.
+`evidence` is the observations as text; `evidenceDetail` is the structured form the confidence was derived from, with each item's `stance` (`supports`, `contradicts`, `context`) and `source` (the tool or query it came from). `alternativesConsidered` lists hypotheses ruled out. `planId` is present when a plan template produced the report. Both the plan path and the freeform investigation send these fields, and `tests/fixtures/ui_contract/investigation.json` pins the exact payload the UI renders. A `confidence` of 0 means nothing supported the cause, and is shown, not hidden.
 
 #### `verification_report` — Next-scan validation after a fix action
 
@@ -847,7 +846,7 @@ Emitted when a previously active finding disappears from the scan results. Enabl
 }
 ```
 
-`resolvedBy` values: `"auto-fix"` (monitor applied a fix), `"self-healed"` (issue disappeared without intervention).
+`resolvedBy` values: `"auto-fix"` (monitor applied a fix, automatically or after a person approved it), `"self-healed"` (issue disappeared without intervention).
 
 #### `view_spec` — AI-generated custom dashboard
 
@@ -1245,7 +1244,7 @@ Source-derived paths below supplement the table above. Authentication names iden
 
 | Method | Path | Dependencies | Purpose |
 |---|---|---|---|
-| `POST` | `/fix-history/{action_id}/approve` | `require_admin` | Run a fix that was proposed while nobody was connected to approve it. |
+| `POST` | `/fix-history/{action_id}/approve` | `require_admin` | Run a fix that was proposed while nobody was connected to approve it. Returns 409 and runs nothing if the proposal is stale, monitoring is paused or `PULSE_AGENT_AUTOFIX_ENABLED=false`, or fix learning would now choose a different strategy than the one proposed. |
 | `POST` | `/inbox/reset` | `require_admin` | Re-baseline the inbox: archive what is open, then rescan from now. |
 | `POST` | `/admin/skills/{name}/pin` | `require_admin` | Exempt an agent-created skill from curator lifecycle proposals. |
 | `POST` | `/admin/skills/{name}/unpin` | `require_admin` | Return a pinned skill to normal curator lifecycle. |
@@ -1254,8 +1253,8 @@ Source-derived paths below supplement the table above. Authentication names iden
 | `GET` | `/admin/skills/archived` | `require_admin` | Archived skills available for restore. |
 | `GET` | `/memory/summary` | `verify_token` | Get summary stats for the agent intelligence page. |
 | `GET` | `/memory/environment` | `verify_token` | Facts Pulse holds about this cluster — ownership, retention, conventions. |
-| `POST` | `/memory/environment` | `verify_token` | Record or correct a fact. Operators can fix what the agent believes. |
-| `DELETE` | `/memory/environment/{scope}/{key}` | `verify_token` | Drop a fact that has stopped being true. |
+| `POST` | `/memory/environment` | `require_admin` | Record or correct a fact. Operators can fix what the agent believes. |
+| `DELETE` | `/memory/environment/{scope}/{key}` | `require_admin` | Drop a fact that has stopped being true. |
 | `GET` | `/memory/baselines` | `verify_token` | Learned norms per workload, with whether each is backed by enough samples. |
 | `GET` | `/memory/learning` | `verify_token` | How the verified-trajectory gate is behaving. |
 | `POST` | `/episodes/{episode_id}/dismiss` | `get_owner` | Close an episode an operator says is over. |

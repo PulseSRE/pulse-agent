@@ -14,7 +14,7 @@
 <body>
 <header class="wrap"><nav class="sites" aria-label="Pulse projects">
 <a class="mark" href="https://github.com/PulseSRE"><svg viewBox="0 0 68 36" aria-hidden="true"><path d="M0 20 H18 L22 24 L28 3 L34 32 L38 20 H50 L54 15 L58 20 H68" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/></svg><span>Pulse</span></a>
-<a class="site" href="https://pulsesre.github.io/pulse-agent/" aria-current="page">Agent</a><a class="site" href="https://pulsesre.github.io/pulse-ui/">UI</a><a class="site" href="https://pulsesre.github.io/pulse-operator/">Operator</a><a class="site" href="https://pulsesre.github.io/sre-bench/">SRE-Bench</a><span class="ver">agent v2.34.0</span>
+<a class="site" href="https://pulsesre.github.io/pulse-agent/" aria-current="page">Agent</a><a class="site" href="https://pulsesre.github.io/pulse-ui/">UI</a><a class="site" href="https://pulsesre.github.io/pulse-operator/">Operator</a><a class="site" href="https://pulsesre.github.io/sre-bench/">SRE-Bench</a><span class="ver">agent v2.35.0</span>
 </nav></header>
 <main>
 <section class="hero wrap" aria-labelledby="title">
@@ -47,7 +47,7 @@
 <figure>
 <video controls preload="none" playsinline poster="media/poster.jpg" aria-describedby="film-cap">
 <source src="media/pulse-30s.mp4" type="video/mp4">
-<a href="media/pulse-30s.mp4">Watch the 30-second overview (MP4)</a>
+<a href="media/pulse-30s.mp4">Watch the 36-second overview (MP4)</a>
 </video>
 <figcaption id="film-cap"><b>See it in 36 seconds.</b> One bad rollout sets off 38 alerts. Pulse turns them into one incident, shows you the proof, works out the fix with you, and checks that it held. Sample data, with sound and a voice-over.</figcaption>
 </figure>
@@ -135,14 +135,15 @@
 <section class="block" aria-labelledby="evidence">
 <div class="wrap">
 <h2 id="evidence">Measured on the release commit</h2>
-<p class="intro">Every release runs recorded incidents against the live model and a judge, plus a simulated cluster. These are the numbers for v2.34.0; not every scenario passes, and the gate is that none gets worse.</p>
+<p class="intro">Every release runs recorded incidents against the live model and a judge, plus a simulated cluster. These are the numbers for v2.35.0; not every scenario passes, and the gate is that none gets worse.</p>
 <div class="results">
-<div><strong>39/51</strong><span>recorded incidents passed, up from 28 at the baseline</span></div>
-<div><strong>84</strong><span>average judge score for diagnosis quality, out of 100</span></div>
+<div><strong>42/53</strong><span>recorded incidents passed, up from 28 at the baseline</span></div>
+<div><strong>83</strong><span>average judge score for diagnosis quality, out of 100</span></div>
+<div><strong>11/11</strong><span>of the monitor's own investigations found the right cause, with honest confidence (Brier 0.12)</span></div>
 <div><strong>11/11</strong><span>simulated incidents resolved, including tool errors and denied permissions</span></div>
 <div><strong>5/5</strong><span>safety scenarios passed in the simulated cluster</span></div>
 </div>
-<p class="caption">Live judged replay with claude-sonnet-5, and the SRE-Bench simulation, from <a href="https://github.com/PulseSRE/pulse-agent/actions/runs/39834893992">this CI run</a>. A real-cluster check is a separate step.</p>
+<p class="caption">Live judged replay, the monitor-investigation replay with claude-sonnet-5, and the SRE-Bench simulation, from <a href="https://github.com/PulseSRE/pulse-agent/actions/runs/40633493184">this CI run</a>. A real-cluster check is a separate step.</p>
 </div>
 </section>
 
@@ -150,12 +151,12 @@
 <div class="wrap">
 <h2 id="new">What's new</h2>
 <div class="release">
-<p class="when"><strong>v2.34.0</strong>22 October 2026<br>Pairs with UI v2.34.0 and operator v0.11.0</p>
+<p class="when"><strong>v2.35.0</strong>27 October 2026<br>Pairs with UI v2.35.0 and operator v0.11.0<br>Migrations 038–040 run on start</p>
 <ul>
-<li style="--c:var(--trace)"><b>Tighter security boundary.</b> <span>Only admins can use the tools that change the agent itself. Metrics queried from chat run with your permissions, not the agent's. Secret values are redacted before anything reaches the model.</span></li>
-<li style="--c:var(--ok)"><b>Chat survives API trouble.</b> <span>Rate limits and dropped connections are retried, and one failed turn no longer breaks the rest of the conversation. Cut-off answers say so.</span></li>
-<li style="--c:var(--ask)"><b>Approvals reach people.</b> <span>A durable plan waiting on approval becomes an inbox item you can answer there, instead of only from the panel that started it.</span></li>
-<li style="--c:var(--ink)"><b>Pod logs show the end.</b> <span>The agent reads the most recent log lines, where a crash is, instead of startup noise.</span></li>
+<li style="--c:var(--trace)"><b>Learns only from fixes that held.</b> <span>Approved fixes now teach, but a skill is learned only after its fix outlasts the recurrence window, and a fix that keeps failing for a cause is swapped out or handed to a person.</span></li>
+<li style="--c:var(--ok)"><b>Every diagnosis shows its proof.</b> <span>Plan runs report their evidence, with confidence derived from it, and the person who claims the incident sees what supports the cause and what contradicts it.</span></li>
+<li style="--c:var(--ask)"><b>Memory reaches the model.</b> <span>Past incidents and learned runbooks used to be dropped before the model saw them. An approval runs exactly the fix that was proposed.</span></li>
+<li style="--c:var(--ink)"><b>Couldn't check is never "fine".</b> <span>A Prometheus blip no longer clears alerts, a failed read no longer resolves inbox items, and a restart no longer re-pages everything.</span></li>
 </ul>
 </div>
 <p class="intro"><a href="https://github.com/PulseSRE/pulse-agent/blob/main/CHANGELOG.md">Full changelog</a></p>
@@ -174,8 +175,8 @@
   <span class="k">namespace:</span> openshiftpulse
 <span class="k">spec:</span>
   <span class="k">vertexAI:</span> { <span class="k">projectId:</span> my-gcp-project, <span class="k">region:</span> us-east5, <span class="k">credentialSecret:</span> gcp-sa-key }
-  <span class="k">agent:</span> { <span class="k">image:</span> <span class="v">quay.io/amobrem/pulse-agent:v2.34.0</span>, <span class="k">trustLevel:</span> 2 }
-  <span class="k">ui:</span>    { <span class="k">image:</span> <span class="v">quay.io/amobrem/openshiftpulse:v2.34.0</span> }</code></pre>
+  <span class="k">agent:</span> { <span class="k">image:</span> <span class="v">quay.io/amobrem/pulse-agent:v2.35.0</span>, <span class="k">trustLevel:</span> 2 }
+  <span class="k">ui:</span>    { <span class="k">image:</span> <span class="v">quay.io/amobrem/openshiftpulse:v2.35.0</span> }</code></pre>
 <ul class="links">
 <li><a href="https://github.com/PulseSRE/pulse-operator#install-via-olm">Install guide</a><span>The canonical steps, in the operator README</span></li>
 <li><a href="https://github.com/PulseSRE/pulse-agent/blob/main/docs/ARCHITECTURE.md">Architecture</a><span>How the agent loop, monitor and skills fit together</span></li>
@@ -188,7 +189,7 @@
 </section>
 </main>
 <footer><div class="wrap">
-<span>Pulse agent v2.34.0. MIT licensed.</span>
+<span>Pulse agent v2.35.0. MIT licensed.</span>
 <span><a href="https://github.com/PulseSRE/pulse-agent">Source</a> &nbsp; <a href="https://github.com/PulseSRE/pulse-agent/releases">Releases</a> &nbsp; <a href="https://github.com/PulseSRE/pulse-agent/blob/main/CHANGELOG.md">Changelog</a></span>
 </div></footer>
 </body>

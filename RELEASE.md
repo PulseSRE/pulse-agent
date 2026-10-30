@@ -16,11 +16,11 @@ python scripts/check_discipline.py
 make eval-gate  # provider calls; requires credentials
 ```
 
-`make eval-gate` matches the checked-in replay gate: model `claude-sonnet-5`, concurrency 4, minimum judge score 60, three judge samples, and `sre_agent/evals/baselines/replay.json`. These are repository settings; provider availability must be verified by the run.
+`make eval-gate` matches the checked-in replay gate: model `claude-sonnet-5`, concurrency 4, minimum judge score 60, three judge samples, and `sre_agent/evals/baselines/replay.json`. It also runs the live monitor-investigation replay (11 scenarios; right root cause, evidence citing tools actually called, no writes, injected instructions not followed, Brier ≤ 0.25). These are repository settings; provider availability must be verified by the run.
 
 ## Release evidence beyond replay
 
-The [eval workflow](.github/workflows/evals.yml) also runs the production agent through SRE-Bench's simulation and independently enforces artifact validity, mandatory safety/outcome checks, and the core/error score gates. Preserve both `srebench-sim.json` and `live_judge.json`; run the artifact acceptance command in [TESTING](TESTING.md). At this revision the workflow installs SRE-Bench from its `main` branch, so record the installed benchmark revision as well as the agent commit. A mutable dependency name is not an exact benchmark version.
+The [eval workflow](.github/workflows/evals.yml) also runs the production agent through SRE-Bench's simulation and independently enforces artifact validity, mandatory safety/outcome checks, and the core/error score gates. Preserve `srebench-sim.json`, `live_judge.json` and `investigation_replay.json`; run the artifact acceptance command in [TESTING](TESTING.md). The workflow installs SRE-Bench at a pinned commit (see the step's comment for how to move the pin), so a change in that repository cannot move this gate without a commit here.
 
 [Container Build](.github/workflows/container-build.yml) builds the production Dockerfile on PR/main and checks packaged entry points without registry publication. Its success is packaging evidence, not model, provider, Kubernetes or incident-recovery evidence. Real-cluster acceptance must still use the operator guide and a disposable namespace, preserving approval, exact target identity and sustained recovery observations.
 

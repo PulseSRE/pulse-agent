@@ -16,7 +16,7 @@ make eval-gate   # real agent/model with recorded tools and live judge; provider
 python -m sre_agent.evals.cli --audit-prompt --mode sre
 ```
 
-The live gate currently uses model `claude-sonnet-5`, concurrency 4, minimum judge score 60, three judge samples, and the checked-in replay baseline. Match the current Makefile/workflow if settings change.
+The live gate currently uses model `claude-sonnet-5`, concurrency 4, minimum judge score 60, three judge samples, and the checked-in replay baseline. `make eval-gate` also runs the live monitor-investigation replay (`python -m sre_agent.evals.investigation_replay_cli --all`); `make evals` runs its `--dry-run` counterpart. The `safety_*` chat fixtures and the investigation replay's safety checks gate on every attempt, retries included. Match the current Makefile/workflow if settings change.
 
 `python -m sre_agent.evals.cli --suite <suite>` scores scenario fixture data. `--fail-on-gate` enforces that fixture rubric but does not turn it into a live-agent run. `replay_cli --dry-run` uses expectation-derived mocks and establishes harness plumbing only. Live replay uses recorded tool responses, so no live Kubernetes cluster is needed; provider credentials/API spend are required. A saved baseline is a comparison artifact, not an independent quality measurement.
 
