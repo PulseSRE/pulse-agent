@@ -177,6 +177,15 @@ August was when Pulse stopped being judged by what it claimed and started being 
   - **UI honesty:** failures and "memory switched off" rendered as empty or successful states.
 - **Evals for what was not measured** (#196, pulse-ui #153). A new release gate replays the monitor's *own* investigations — the plan and freeform paths — with the real model and gates on the right cause, evidence citing tools actually called, no write attempts, injected instructions not followed, and calibration (Brier score; low confidence where every read fails). On its first run it found that OOM and latency plans reported the *verify* phase instead of the diagnosis, and that two templates ran remediation without approval. The agent now generates the investigation payloads the UI renders, and the UI renders that same file in its tests.
 
+### Phase 10: Evidence You Can Trace, a Gate You Can Trust (October 28 – October 30)
+
+**What we built:** Evidence that names the exact tool call behind it, one pipeline for every investigation, and a release gate that judges pass rates instead of single runs (agent #199–#207, pulse-ui #156–#157).
+
+- **Confidence only from what was read** (#199). Any evidence item with a `source` counted as fully sourced, so citing "prometheus" without running a query raised confidence. Grounding now checks the source against the tools the run called, and saved investigations keep their structured evidence (migration 041), so a reloaded card still shows what contradicted the cause.
+- **Evidence cites the call** (#200, pulse-ui #157). Investigation tool results are labelled `[call c3: get_pod_logs]`, and a ledger records each call as it finishes. Evidence cites the call, and grounding checks the citation against the ledger: a call that errored no longer counts as read, and the UI shows each item as the call with its arguments.
+- **One investigation pipeline** (#201, #205). Plan and freeform investigations had separate reporting, saving, memory and learning code, and had drifted: plans had no timeout and reported nothing on failure; freeform runs fed memory a placeholder tool list and learned a missing cause as "unknown"; agent handoffs ran an investigation and threw the result away; inbox triage had no timeout. Every entry point now goes through `investigate()` and one `InvestigationOutcome`.
+- **The gate was red on main and nobody knew** (#202, #207). The live investigation gate had failed on the v2.35.0 release push and the two merges after it; pull requests kept passing it. Ten-attempt measurements showed why: the disk-pressure investigation passed 2/10 on main and 5/10 with the fixes, so a pass-or-retry gate was a coin toss either way. Two real defects came out of it (monitor plan phases were offered write tools they could never use; a disk diagnosis could stop at "image GC failed" without finding what filled the disk, #206). The gate now attempts each fixture several times and fails only on a significant drop against a baseline pass rate, any unsafe attempt, or Brier above 0.25; failures on main open an issue.
+
 ---
 
 ## The Numbers
@@ -322,6 +331,14 @@ These are a snapshot. Counts change with every release; measure them again rathe
 **Why:** Most of the functionality review's high-severity findings were one bug in different clothes: a failure turned into an empty list, and an empty list read as "all clear". An SRE tool that says "nothing wrong" when it is blind is worse than one that says nothing.
 
 **Ref:** `[sre_agent/monitor/scanner_health.py](../sre_agent/monitor/scanner_health.py)`, `[sre_agent/inbox_generators.py](../sre_agent/inbox_generators.py)`
+
+### 15. Gate a stochastic agent on rates, not samples
+
+**Decision:** The live investigation gate attempts every fixture several times and fails a pull request only when a fixture is significantly below its baseline pass rate (one-sided binomial, p < 0.05), when any attempt is unsafe, or when calibration is poor. Main's nightly run measures the baseline.
+
+**Why:** The same model on the same code answers differently run to run. A single pass-or-retry made a 50% fixture red about one run in four, on main and on pull requests alike: noise that trained everyone to ignore red, while a real regression from 90% to 60% would usually have passed. Safety is the exception: one unsafe attempt is one too many, so it stays absolute.
+
+**Ref:** `[sre_agent/evals/investigation_replay.py](../sre_agent/evals/investigation_replay.py)` (`statistical_verdict`), `[sre_agent/evals/investigation_baseline.json](../sre_agent/evals/investigation_baseline.json)`, [TESTING.md](../TESTING.md)
 
 ---
 
@@ -477,6 +494,16 @@ These are a snapshot. Counts change with every release; measure them again rathe
 
 **Lesson:** "Couldn't check" and "checked, nothing there" must never share a representation.
 
+### 16. A green pull request is not a green main
+
+**The mistake:** The live gate ran on pull requests and on pushes to main, but only the nightly run reported its failures. The release PR for v2.35.0 passed; the push that released it failed, and so did the next two merges.
+
+**The consequence:** We announced v2.35.0's gates as green from the PR run. Main was red for two days before anyone looked, and follow-up PRs inherited a failure that was not theirs.
+
+**The fix:** Failures on main open or update an issue, and the gate judges pass rates (decision 15), so red means something changed.
+
+**Lesson:** Read the run on the branch that ships, not the one that proposed it.
+
 ---
 
 ## The AI-Assisted Development Story
@@ -507,7 +534,7 @@ This project was built almost entirely with AI assistance (Claude Code / Claude 
 
 1. **Prove the review fixes on a real cluster.** v2.35.0 is tested against mocks, a disposable database and recorded cluster data. Five items need a real environment: the ACM proxy path for fleet tools, `X-Forwarded-User` spoofing when the UI is reachable without the OAuth proxy, OpenShift service-serving certificates in cert-expiry checks, whether prompt caching actually hits, and the cost of 7-day trend queries on large clusters.
 2. **Measure whether memory helps.** Memory now reaches the model; nothing yet shows it improves investigations. Run the investigation replay with memory on and off, with a seeded past incident.
-3. **Persist structured evidence.** Investigations stream evidence with its stance and source, but the saved record keeps prose only, so a reloaded card loses which evidence contradicted the cause.
+3. **Find what filled the disk** (#206). The node-pressure investigation names the disk consumer about half the time; the rest stop at "image garbage collection failed". Measure any fix with the repeat workflow (10 attempts minimum).
 4. **Thanos/ACM PromQL compatibility** and **MCP token forwarding** remain open from earlier phases.
 
 ### Medium-Term (Months)
