@@ -4,9 +4,20 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## Unreleased
 
+## v2.36.0 (2026-10-30)
+
+Paired with pulse-ui v2.36.0; runs with pulse-operator v0.11.0 (operator #109, the self-heal fix, is independent). **Migration 041** (forward-only): `investigations.evidence_detail`. Pull requests #198–#207. The release gate on main (a5d0783) passed under the new pass-rate rule: monitor investigations 31/33 attempts with no fixture regressed and nothing unsafe (Brier 0.19), chat replay 42/53 (judge average 83, no regression against the baseline), SRE-Bench simulation core 6/6 and errors 5/5. Known weak case: `plan_node_disk_pressure` passes about half the time (#206).
+
+**Behaviour changes**
+- Investigation evidence cites the exact tool call it came from; a call that failed or never ran no longer counts as evidence
+- Every investigation (monitor plans, freeform, agent handoffs, inbox triage) goes through one pipeline: one timeout, failures reported, the same memory and learning rules
+- Monitor plan phases, which cannot approve a write, are no longer offered write tools
+- The node-pressure plan's diagnosis must name the top consumer of the resource under pressure
+
+**Details**
 - The postmortem skill's prompt gains the credential rule every other skill prompt carries.
 - The SLO management skill's burn-rate guidance matches the code: critical at ≥14.4x, warning at ≥6x, targets of 1 or more read as percentages, and an SLO with no data is `no_data`, not critical. It told the model >10x / 2–10x.
-- Docs brought up to v2.35.0 across the repo (journey, API contract, security, database, architecture, README, Pages, release and testing guides).
+- Docs kept current across the repos (#198 after v2.35.0, and this release: journey, API contract, security, architecture, testing, release guide, Pages).
 - **Confidence counts only evidence that was read.** Any evidence item with a `source` was weighed as fully sourced, so a source the investigation never called ("prometheus" with no query run) raised confidence on nothing. Plan phases and freeform investigations now keep a cited source only if it names a tool the run called; otherwise the item counts as unsourced and the claim is kept in `unverified_source`. The investigation replay uses the same rule.
 - **Saved investigations keep their structured evidence** (**migration 041**, `investigations.evidence_detail`). A card reloaded from history lost which evidence contradicted the cause; `GET /inbox/{id}/investigation` now returns `evidence_detail`.
 - **Evidence cites the tool call it came from.** Monitor investigations and plan phases label every tool result (`[call c3: get_pod_logs]`) and evidence names the call it rests on. Grounding checks the citation against a ledger recorded as each call finished (`evidence.CallLedger`, fed by `on_tool_result`), so a call that errored no longer counts as read, and two calls to the same tool are told apart. Grounded items carry `call_ref` and `call_input`. Labelling is opt-in (`run_agent_streaming(label_tool_calls=True)`); chat results are unchanged. The investigation replay reports how much evidence cites a call (not gated).
@@ -22,7 +33,7 @@ All notable changes to Pulse Agent are documented in this file.
   - `plan_node_disk_pressure`: the node diagnosis stopped at "image garbage collection failed, /var at 94%" without finding what filled the disk. The node-pressure plan's `node_diagnostics` phase now has to produce `top_consumer` (the workload, path or process using the resource), so the contract judge sends it back to look
   - `plan_image_pull_auth`: a diagnosis phase called `test_connectivity` (registered as a write: it starts a pod). Monitor plan phases have no confirmation callback, so every write is refused; they are no longer offered write tools at all (`plan_runtime._without_unapprovable_writes`). Runs with a confirmation callback (Temporal plans) are unchanged. The replay now counts a call to any registered write tool as an attempt, offered or not
 - **The live investigation gate judges pass rates.** One pass (plus a retry) per fixture was red at random: at 5/10, `plan_node_disk_pressure` failed it about 1 run in 4, on main and on pull requests. CI now attempts every fixture 3 times (the nightly run 10) and fails only when a fixture is significantly below its pass rate in `sre_agent/evals/investigation_baseline.json` (one-sided binomial, p < 0.05), when any attempt is unsafe, or when Brier exceeds 0.25. Infrastructure errors are not counted as the model failing. `investigation_replay_cli --repeat N [--write-baseline FILE]`; the nightly run publishes a fresh baseline as an artifact
-- Evals report the model version that actually answered (the agent loop's `on_usage` now carries `model`), and every live lane reads one `EVAL_MODEL` setting, so an alias moving to a newer version shows up instead of looking like a code regression
+- Evals record the model id the provider returned (the agent loop's `on_usage` now carries `model`), and every live lane reads one `EVAL_MODEL` setting. On Vertex AI the returned id has been the requested alias (`claude-sonnet-5`), so this does not yet show which version answered
 - Eval failures on pushes to main now open or update an issue ("Evals are failing on main"), not only the nightly run's: the gate was red on the v2.35.0 release push and two merges after it without anyone being told
 - Tests: `mock_k8s` also patches the client getters `gitops_tools` holds, so `apply_yaml` tests no longer reach for a real cluster when tool discovery ran earlier in the session.
 

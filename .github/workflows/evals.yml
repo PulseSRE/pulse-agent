@@ -40,11 +40,12 @@ jobs:
           --health-retries 5
     env:
       PULSE_AGENT_DATABASE_URL: postgresql://pulse:pulse@localhost:5433/pulse_test
-      # The model every live lane runs, in one place. `claude-sonnet-5` is an
-      # alias the provider can move to a newer version with no change here,
-      # which turns a model update into an unexplained gate change. The
-      # investigation replay reports the version that actually answered
-      # ("Model(s) that answered"); pin that here, and change it in its own PR.
+      # The model every live lane runs, in one place, so changing it is one
+      # reviewed line with the eval run as its evidence. The replays record the
+      # model id the provider returned ("Model(s) that answered"). On Vertex AI
+      # that has so far been the id requested (`claude-sonnet-5`), so it does
+      # not reveal which version served the call: if the provider offers
+      # versioned ids, request one here to pin it.
       EVAL_MODEL: claude-sonnet-5
     steps:
       - name: Checkout

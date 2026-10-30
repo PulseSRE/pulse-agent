@@ -105,9 +105,11 @@ and compared with the pass rate in `sre_agent/evals/investigation_baseline.json`
   not counted as failures; a fixture whose every attempt errored fails
 
 The nightly run writes a fresh baseline to its `investigation_baseline.json`
-artifact; commit it when it reflects main. The report lists the model version
-that actually answered, so an alias moving to a new version is visible: pin
-`EVAL_MODEL` in `.github/workflows/evals.yml` to it. One fixture can be measured
+artifact; commit it when it reflects main. The report records the model id the
+provider returned; on Vertex AI that has been the id requested, so it does not
+show which version served the call. All live lanes read `EVAL_MODEL` in
+`.github/workflows/evals.yml`; change the model there, in its own PR.
+One fixture can be measured
 on its own with `.github/workflows/investigation-repeat.yml`.
 
 `tests/fixtures/ui_contract/investigation.json` pins what the agent sends the UI for an
