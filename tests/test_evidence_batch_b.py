@@ -109,7 +109,7 @@ class TestPlanReport:
 
     def test_plan_run_reports_its_investigation(self, monkeypatch):
         from sre_agent.monitor import actions
-        from sre_agent.monitor import plan_executor as pe
+        from sre_agent.monitor import investigation_pipeline as pipeline
 
         saved, attached = [], []
         monkeypatch.setattr(actions, "save_investigation", lambda r, f: saved.append(r))
@@ -119,11 +119,11 @@ class TestPlanReport:
         monitor = SimpleNamespace(_broadcast_raw=MagicMock(side_effect=lambda r: asyncio.sleep(0)))
         ev = [{"observation": "OOMKilled x4", "kind": "event", "source": "get_events", "stance": "supports"}]
 
-        report = asyncio.run(
-            pe._report_plan_investigation(
-                monitor, {"id": "f1", "category": "oom"}, SimpleNamespace(id="oom-plan"), self._result(ev)
-            )
-        )
+        monkeypatch.setattr(pipeline, "_hold_for_learning", lambda *a: None)
+        monkeypatch.setattr(pipeline, "_remember", lambda *a: None)
+        monkeypatch.setattr(pipeline, "_save", lambda r, f: asyncio.sleep(0, result=saved.append(r)))
+        outcome = pipeline.outcome_from_plan(SimpleNamespace(id="oom-plan"), self._result(ev))
+        report = asyncio.run(pipeline.complete_investigation(monitor, {"id": "f1", "category": "oom"}, outcome))
 
         assert report["suspected_cause"] == "memory limit too low"
         assert report["recommended_fix"] == "raise the limit to 512Mi"
@@ -137,9 +137,10 @@ class TestPlanReport:
     def test_plan_run_no_longer_scaffolds_unverified_skills(self):
         import inspect
 
-        from sre_agent.monitor import plan_executor
+        from sre_agent.monitor import investigation_pipeline, plan_executor
 
-        src = inspect.getsource(plan_executor)
+        assert "save_scaffolded_skill" not in inspect.getsource(plan_executor)
+        src = inspect.getsource(investigation_pipeline)
         assert "save_scaffolded_skill" not in src
         assert "LearningCandidate" in src
 

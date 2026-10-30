@@ -1,18 +1,19 @@
-"""Proactive investigation runner — Claude-powered root-cause analysis for findings."""
+"""Which findings get investigated, and when.
+
+Eligibility, budgets, cooldowns and concurrency. How an investigation runs and
+what happens to its result is ``investigation_pipeline``, for both strategies.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-import uuid
 from typing import TYPE_CHECKING
 
-from ..async_db import ASYNC_DB_ERRORS as _ASYNC_DB_ERRORS
 from ..config import get_settings
 from .confidence import _finding_key
-from .findings import _ts
-from .investigations import _run_proactive_investigation, _run_security_followup
+from .investigation_pipeline import investigate
 from .registry import SEVERITY_CRITICAL, SEVERITY_WARNING
 
 try:
@@ -96,15 +97,10 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
             logger.debug("Cost budget check failed", exc_info=True)
 
     max_per_scan = _settings.monitor.investigations_max_per_scan
-    timeout_seconds = _settings.monitor.investigation_timeout
     cooldown_seconds = _settings.monitor.investigation_cooldown
     allowed_categories = {
         item.strip() for item in _settings.monitor.investigation_categories.split(",") if item.strip()
     }
-
-    security_followup_enabled = _settings.monitor.security_followup
-    security_followup_cooldown = 600
-    security_followup_done_this_scan = False
 
     investigations_run = 0
     now = time.time()
@@ -158,265 +154,59 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
         except Exception:
             logger.debug("Log fingerprinting failed for finding", exc_info=True)
 
-        # Spawn plan-based investigation as background task
         try:
-            from ..plan_templates import match_template
-            from .alert_plans import plan_category_for
+            from .plan_executor import template_for
 
-            # The same mapping plan_executor uses to pick the plan. With the raw
-            # category, an alert finding ("alerts") matched no template, so
-            # firing alerts never started a plan-based investigation.
-            template = match_template(category=plan_category_for(finding))
-            if template:
-                monitor._investigation_tasks = [t for t in monitor._investigation_tasks if not t.done()]
-                if len(monitor._investigation_tasks) >= get_settings().monitor.max_concurrent_investigations:
-                    logger.info(
-                        "Skipping investigation for %s — %d tasks already running",
-                        finding.get("title", "")[:40],
-                        len(monitor._investigation_tasks),
-                    )
-                    continue
-                monitor._recent_investigations[key] = now
-                monitor._investigation_fingerprints[key] = content_hash
-                investigations_run += 1
-                monitor._daily_investigation_count += 1
-                if _METRICS_AVAILABLE:
-                    INVESTIGATIONS_TOTAL.inc()
-                    INVESTIGATION_BUDGET_REMAINING.set(max(0, max_daily - monitor._daily_investigation_count))
-                task = asyncio.create_task(
-                    monitor._try_plan_execution(finding),
-                    name=f"plan-{finding.get('id', 'unknown')[:12]}",
-                )
-                monitor._investigation_tasks.append(task)
+            template = template_for(finding)
+        except Exception:
+            logger.debug("Plan template lookup failed", exc_info=True)
+            template = None
 
-                finding_ref = finding
-
-                def _on_plan_done(t: asyncio.Task, f=finding_ref) -> None:
-                    try:
-                        if t.cancelled() or not t.result():
-                            logger.warning(
-                                "Plan execution failed for %s — finding may need manual investigation",
-                                f.get("title", "")[:40],
-                            )
-                    except Exception:
-                        logger.warning("Plan execution raised for %s", f.get("title", "")[:40], exc_info=True)
-
-                task.add_done_callback(_on_plan_done)
+        if template is not None:
+            monitor._investigation_tasks = [t for t in monitor._investigation_tasks if not t.done()]
+            if len(monitor._investigation_tasks) >= _settings.monitor.max_concurrent_investigations:
                 logger.info(
-                    "Spawned async investigation for %s (template=%s)",
+                    "Skipping investigation for %s — %d tasks already running",
                     finding.get("title", "")[:40],
-                    template.name,
+                    len(monitor._investigation_tasks),
                 )
                 continue
-        except Exception:
-            logger.debug("Plan execution spawn failed", exc_info=True)
 
-        report = {
-            "type": "investigation_report",
-            "id": f"i-{uuid.uuid4().hex[:12]}",
-            "finding_id": finding.get("id", ""),
-            "findingId": finding.get("id", ""),
-            "category": finding.get("category", ""),
-            "status": "failed",
-            "summary": "",
-            "suspected_cause": "",
-            "suspectedCause": "",
-            "recommended_fix": "",
-            "recommendedFix": "",
-            "confidence": 0.0,
-            "timestamp": _ts(),
-        }
-        try:
-            # Deliberately NOT monitor._client. That client is long-lived and
-            # reused across every investigation; asyncio.wait_for below can
-            # cancel this call mid-stream on timeout, and cancelling an
-            # in-flight streamed HTTP call on a *shared* Anthropic client can
-            # corrupt its connection pool for the rest of the process (every
-            # investigation after that keeps failing near-instantly with
-            # "Connection error.", never touching the network again). A fresh
-            # client is cheap to create for the handful of investigations run
-            # per scan, and borrow_async_client() always closes it afterwards
-            # — including on cancellation — so a timed-out investigation only
-            # ever damages a client nobody else will use.
-            result = await asyncio.wait_for(
-                _run_proactive_investigation(finding, client=None),
-                timeout=timeout_seconds,
-            )
-            _sc = result.get("suspected_cause", "")
-            _rf = result.get("recommended_fix", "")
-            _alts = result.get("alternatives_considered", []) or []
-            report.update(
-                {
-                    "status": "completed",
-                    "summary": result.get("summary", ""),
-                    "suspected_cause": _sc,
-                    "suspectedCause": _sc,
-                    "recommended_fix": _rf,
-                    "recommendedFix": _rf,
-                    "confidence": result.get("confidence", 0.0),
-                    # The evidence the confidence was derived from. It was
-                    # returned by the investigation and dropped here, so the
-                    # database stored [] and the UI always showed "No
-                    # supporting evidence reported for this hypothesis."
-                    "evidence": result.get("evidence", []) or [],
-                    "evidenceDetail": result.get("evidence_detail", []) or [],
-                    "alternatives_considered": _alts,
-                    "alternativesConsidered": _alts,
-                    "viewPlan": result.get("view_plan", []) or [],
-                }
-            )
+        # Counted when it starts, for both strategies: a failed or timed-out
+        # investigation spent its tokens too. Freeform runs used to count only
+        # on success, so one that kept failing was retried every scan, outside
+        # the daily budget and the cooldown.
+        monitor._recent_investigations[key] = now
+        monitor._investigation_fingerprints[key] = content_hash
+        investigations_run += 1
+        monitor._daily_investigation_count += 1
+        if _METRICS_AVAILABLE:
+            INVESTIGATIONS_TOTAL.inc()
+            INVESTIGATION_BUDGET_REMAINING.set(max(0, max_daily - monitor._daily_investigation_count))
+
+        if template is None:
+            # One read-only agent run; short enough to run inside the scan.
+            await investigate(monitor, finding)
+            continue
+
+        # A plan runs several phases, so it runs beside the scan. Timeout,
+        # failure reporting, saving and learning are the same as above:
+        # investigation_pipeline.investigate does both.
+        task = asyncio.create_task(
+            monitor._try_plan_execution(finding),
+            name=f"plan-{finding.get('id', 'unknown')[:12]}",
+        )
+        monitor._investigation_tasks.append(task)
+
+        def _on_plan_done(t: asyncio.Task, f=finding) -> None:
             try:
-                from ..inbox import attach_investigation_to_finding
-
-                await asyncio.to_thread(attach_investigation_to_finding, finding, result, report["id"])
-            except Exception:
-                logger.debug("Attaching investigation to inbox failed", exc_info=True)
-            investigations_run += 1
-            monitor._daily_investigation_count += 1
-            if _METRICS_AVAILABLE:
-                INVESTIGATIONS_TOTAL.inc()
-                INVESTIGATION_BUDGET_REMAINING.set(max(0, max_daily - monitor._daily_investigation_count))
-            monitor._recent_investigations[key] = now
-            monitor._investigation_fingerprints[key] = content_hash
-
-            from ..context_bus import ContextEntry, get_context_bus
-
-            bus = get_context_bus()
-            bus.publish(
-                ContextEntry(
-                    source="monitor",
-                    category="investigation",
-                    summary=f"Investigated {finding.get('category')}: {result.get('summary', '')}",
-                    details={
-                        "suspected_cause": result.get("suspected_cause", ""),
-                        "recommended_fix": result.get("recommended_fix", ""),
-                        "confidence": result.get("confidence", 0),
-                    },
-                    namespace=finding.get("resources", [{}])[0].get("namespace", ""),
-                    resources=finding.get("resources", []),
-                )
-            )
-
-            if (
-                security_followup_enabled
-                and not security_followup_done_this_scan
-                and now - monitor._last_security_followup >= security_followup_cooldown
-            ):
-                try:
-                    # Same reasoning as above: a fresh client per call, not the
-                    # shared monitor._client, so a cancelled followup can't
-                    # poison it either.
-                    sec_result = await asyncio.wait_for(
-                        _run_security_followup(finding, client=None),
-                        timeout=timeout_seconds,
-                    )
-                    report["securityFollowup"] = {
-                        "issues": sec_result.get("security_issues", []),
-                        "riskLevel": sec_result.get("risk_level", "unknown"),
-                    }
-                    security_followup_done_this_scan = True
-                    monitor._last_security_followup = now
-                    logger.info("Security followup completed for finding %s", finding.get("id", ""))
-                except TimeoutError:
-                    logger.warning("Security followup timed out for finding %s", finding.get("id", ""))
-                except Exception as e:
+                if t.cancelled() or not t.result():
                     logger.warning(
-                        "Security followup failed for finding %s: %s", finding.get("id", ""), e, exc_info=True
+                        "Plan investigation did not complete for %s — see its investigation report",
+                        f.get("title", "")[:40],
                     )
+            except Exception:
+                logger.warning("Plan investigation raised for %s", f.get("title", "")[:40], exc_info=True)
 
-            if get_settings().agent.memory and result.get("confidence", 0) >= 0.7:
-                try:
-                    from ..memory import get_manager
-
-                    manager = get_manager()
-                    if manager:
-                        inv_namespace = ""
-                        inv_resource_type = ""
-                        f_resources = finding.get("resources", [])
-                        if f_resources:
-                            inv_namespace = f_resources[0].get("namespace", "")
-                            inv_resource_type = f_resources[0].get("kind", "").lower()
-                        inv_incident = {
-                            "query": f"Investigation: {finding.get('title', '')}",
-                            "tool_sequence": ["proactive_investigation"],
-                            "resolution": result.get("summary", ""),
-                            "namespace": inv_namespace,
-                            "resource_type": inv_resource_type,
-                            "error_type": finding.get("category", ""),
-                        }
-                        manager.store_incident(inv_incident, confirmed=False)
-                        logger.info(
-                            "Stored high-confidence investigation: %s (confidence=%.2f)",
-                            finding.get("title", ""),
-                            result.get("confidence", 0),
-                        )
-                except Exception as e:
-                    logger.warning("Failed to store investigation: %s", e)
-
-            # Hold the trajectory rather than learning from it now. Scaffolding used
-            # to fire here, on the diagnosis alone, before any fix had been applied
-            # — so a confidently wrong root cause became a skill that then routed
-            # future incidents. The verification pipeline promotes this candidate
-            # only once the finding is confirmed resolved.
-            #
-            # This used to be skipped for any category with a built-in plan
-            # template. Every category auto-fix can handle has one, so the path
-            # that verifies fixes most often could never learn anything. A
-            # template says how to run the plan; the candidate is what this
-            # cluster taught about the cause, which a template does not know.
-            if result.get("confidence", 0) >= 0.75:
-                try:
-                    from ..trajectory import LearningCandidate, candidate_key, get_learner
-
-                    get_learner().record(
-                        LearningCandidate(
-                            key=candidate_key(finding.get("category", ""), finding.get("resources", [])),
-                            category=finding.get("category", ""),
-                            title=finding.get("title", ""),
-                            root_cause=result.get("suspected_cause", "unknown"),
-                            summary=result.get("summary", ""),
-                            confidence=float(result.get("confidence", 0) or 0),
-                            evidence=list(result.get("evidence_detail", []) or []),
-                            tools_called=list(result.get("tools_called") or []),
-                        )
-                    )
-                except Exception:
-                    logger.debug("Recording learning candidate failed", exc_info=True)
-
-        except TimeoutError:
-            report["error"] = f"Investigation timed out after {timeout_seconds}s"
-            logger.warning(
-                "Investigation timed out after %ds for finding %s (category=%s, title=%s)",
-                timeout_seconds,
-                finding.get("id", ""),
-                finding.get("category", ""),
-                finding.get("title", "")[:60],
-            )
-        except Exception as e:
-            report["error"] = str(e)
-            # This used to be silent: report["error"] carried the message to the
-            # database, but nothing surfaced it in application logs, and the
-            # Anthropic SDK itself only logs the underlying exception at DEBUG.
-            # That's how a shared client stuck failing with "Connection error."
-            # ran for hundreds of consecutive investigations without a single
-            # log line pointing at it.
-            logger.exception(
-                "Investigation failed for finding %s (category=%s, title=%s)",
-                finding.get("id", ""),
-                finding.get("category", ""),
-                finding.get("title", "")[:60],
-            )
-
-        await monitor._broadcast_raw(report)
-        try:
-            from ..repositories.monitor_repo import get_monitor_repo
-
-            await get_monitor_repo().async_save_investigation(
-                report=report,
-                finding=finding,
-                timestamp=report.get("timestamp", _ts()),
-            )
-        except _ASYNC_DB_ERRORS:
-            from .actions import save_investigation
-
-            save_investigation(report, finding)
+        task.add_done_callback(_on_plan_done)
+        logger.info("Spawned plan investigation for %s (template=%s)", finding.get("title", "")[:40], template.name)

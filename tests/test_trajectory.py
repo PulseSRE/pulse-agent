@@ -379,9 +379,9 @@ class TestMonitorWiring:
     def test_investigation_records_a_candidate(self):
         import inspect
 
-        from sre_agent.monitor import investigation_runner
+        from sre_agent.monitor import investigation_pipeline
 
-        src = inspect.getsource(investigation_runner)
+        src = inspect.getsource(investigation_pipeline)
         assert "LearningCandidate" in src, "an investigation must record a candidate"
         assert "get_learner" in src
         assert "scaffold_skill_from_resolution" not in src, (

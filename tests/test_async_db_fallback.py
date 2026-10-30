@@ -42,7 +42,7 @@ class TestAsyncDbErrorsTuple:
     def test_all_modules_share_same_tuple(self):
         from sre_agent.async_db import ASYNC_DB_ERRORS
         from sre_agent.monitor.handoff_processor import _ASYNC_DB_ERRORS as HP_ERRORS
-        from sre_agent.monitor.investigation_runner import _ASYNC_DB_ERRORS as IR_ERRORS
+        from sre_agent.monitor.investigation_pipeline import _ASYNC_DB_ERRORS as IR_ERRORS
         from sre_agent.monitor.verification_pipeline import _ASYNC_DB_ERRORS as VP_ERRORS
 
         assert HP_ERRORS is ASYNC_DB_ERRORS
@@ -137,16 +137,16 @@ class TestHandoffProcessorFallback:
 
 
 class TestInvestigationRunnerFallback:
-    """Verify investigation_runner falls back to sync save on _ASYNC_DB_ERRORS."""
+    """Verify the investigation pipeline falls back to sync save on _ASYNC_DB_ERRORS."""
 
     def test_catches_db_errors(self):
-        from sre_agent.monitor.investigation_runner import _ASYNC_DB_ERRORS
+        from sre_agent.monitor.investigation_pipeline import _ASYNC_DB_ERRORS
 
         assert issubclass(ConnectionError, tuple(_ASYNC_DB_ERRORS))
         assert OSError in _ASYNC_DB_ERRORS
 
     def test_unexpected_error_not_in_tuple(self):
-        from sre_agent.monitor.investigation_runner import _ASYNC_DB_ERRORS
+        from sre_agent.monitor.investigation_pipeline import _ASYNC_DB_ERRORS
 
         assert TypeError not in _ASYNC_DB_ERRORS
         assert KeyError not in _ASYNC_DB_ERRORS

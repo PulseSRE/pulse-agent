@@ -2,9 +2,9 @@
 
 The chat replay lane (``replay.py``) drives ``/ws/agent``'s loop. Nothing drove
 the code the monitor runs when it investigates a finding by itself: the phased
-plan path (``PlanRuntime`` + ``plan_executor._report_plan_investigation``) for
+plan strategy (``investigation_pipeline.diagnose`` with a template) for
 the common categories, and the single-call freeform investigation
-(``investigations._run_proactive_investigation``) for the rest. That is the
+(the same call without one) for the rest. That is the
 code whose output is shown to an operator as a diagnosis with a confidence
 score, written to the inbox, and fed to the learning gate — and it had no live
 eval at all. A plan whose report quoted the verify phase instead of the
@@ -145,16 +145,6 @@ def _wrap_streaming(original):
     return _replayed
 
 
-class _Monitor:
-    """What ``_report_plan_investigation`` needs from a monitor: somewhere to broadcast."""
-
-    def __init__(self) -> None:
-        self.broadcasts: list[dict] = []
-
-    async def _broadcast_raw(self, message: dict) -> None:
-        self.broadcasts.append(message)
-
-
 def _noop(*_args, **_kwargs):
     return None
 
@@ -216,30 +206,18 @@ async def run_investigation(fixture: dict, client) -> dict:
     run = _Run(recorded=fixture["recorded_responses"])
     token = _active.set(run)
     try:
-        if template is not None:
-            from ..monitor.plan_executor import _report_plan_investigation
-            from ..plan_runtime import PlanRuntime
+        from ..monitor.investigation_pipeline import diagnose
 
-            # Exactly how try_plan_execution builds it: no on_confirm, so writes are denied.
-            result = await PlanRuntime(client=client).execute(template, incident=finding)
-            report = await _report_plan_investigation(_Monitor(), finding, template, result) or {}  # type: ignore[arg-type]
+        # The production pipeline's diagnosis and report, for either strategy.
+        # A plan gets no on_confirm, exactly as in the monitor, so writes are denied.
+        outcome = await diagnose(finding, template=template, client=client)
+        report = outcome.to_report(finding)
+        plan = None
+        if template is not None and outcome.plan_result is not None:
+            result = outcome.plan_result
             plan = {"id": template.id, "status": result.status, "phases": _phase_summary(result)}
-        else:
-            from ..monitor.investigations import _run_proactive_investigation
-
-            res = await _run_proactive_investigation(finding, client=client)
-            # The fields investigation_runner copies onto the report it saves and broadcasts.
-            report = {
-                "status": "completed",
-                "summary": res.get("summary", ""),
-                "suspected_cause": res.get("suspected_cause", ""),
-                "recommended_fix": res.get("recommended_fix", ""),
-                "confidence": res.get("confidence", 0.0),
-                "evidence": res.get("evidence", []) or [],
-                "evidenceDetail": res.get("evidence_detail", []) or [],
-                "alternatives_considered": res.get("alternatives_considered", []) or [],
-            }
-            plan = None
+        elif template is not None:
+            plan = {"id": template.id, "status": "failed", "phases": {}}
     finally:
         _active.reset(token)
 

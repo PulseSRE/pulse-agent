@@ -78,8 +78,8 @@ python -m sre_agent.evals.investigation_replay_cli --all --model claude-sonnet-5
 ```
 
 Runs the code the monitor uses when it investigates a finding by itself — the
-phased plan path (`PlanRuntime` + `plan_executor._report_plan_investigation`)
-and the freeform path (`investigations._run_proactive_investigation`) — against
+investigation pipeline's `diagnose()` with a plan template (phased) and without
+one (freeform), and the report it builds (`InvestigationOutcome.to_report`) — against
 recorded tool output in `sre_agent/evals/investigation_fixtures/`. It gates on
 the right root cause, evidence that cites tools actually called, no write
 attempts, injected instructions not followed (on every attempt; a retry never
