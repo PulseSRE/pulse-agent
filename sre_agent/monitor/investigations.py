@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from typing import Any
@@ -345,9 +346,12 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
     # checks the citation here rather than trusting the model's account.
     ledger = CallLedger()
 
-    def on_tool_result(info: dict) -> None:
+    async def on_tool_result(info: dict) -> None:
         ledger.record(info)
-        record_usage(info)
+        # The audit handler may be sync or async (the replay's is async).
+        pending = record_usage(info)
+        if inspect.isawaitable(pending):
+            await pending
 
     # The tools the investigation actually used. A skill learned from this
     # trajectory records them as its procedure; the placeholder it used to get

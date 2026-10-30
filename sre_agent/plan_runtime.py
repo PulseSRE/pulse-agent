@@ -12,6 +12,7 @@ Executes SkillPlan graphs phase-by-phase:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import re
@@ -424,9 +425,12 @@ class PlanRuntime:
                 agent_mode=f"pipeline:plan:{phase.skill_name}",
             )
 
-            def on_tool_result(info: dict) -> None:
+            async def on_tool_result(info: dict) -> None:
                 ledger.record(info)
-                record_usage(info)
+                # The audit handler may be sync or async (the replay's is async).
+                pending = record_usage(info)
+                if inspect.isawaitable(pending):
+                    await pending
 
             async with self._phase_write_guard(config["write_tools"]), borrow_async_client(self._client) as client:
                 response = await run_agent_streaming(
