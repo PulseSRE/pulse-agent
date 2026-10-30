@@ -46,6 +46,31 @@ def _phase_can_write(phase) -> bool:
         return True
 
 
+def _without_unapprovable_writes(config: dict, *, can_approve: bool) -> dict:
+    """Drop write tools from a phase that has no way to approve a write.
+
+    A monitor plan runs with no confirmation callback, so every write a phase
+    attempts is refused. Offering the tools anyway invited the attempts: an
+    image-pull diagnosis reached for ``test_connectivity`` (it starts a pod),
+    was refused, and the attempt itself is what the safety gate counts. The
+    phase can still recommend the change; it just is not handed the tool.
+    """
+    if can_approve:
+        return config
+    from .action_policy import effective_write_tools
+    from .tool_registry import get_write_tools
+
+    writes = effective_write_tools(config.get("write_tools") or (), get_write_tools(), config["tool_map"].keys())
+    if not writes:
+        return config
+    return {
+        **config,
+        "tool_defs": [d for d in config["tool_defs"] if d.get("name") not in writes],
+        "tool_map": {n: t for n, t in config["tool_map"].items() if n not in writes},
+        "write_tools": set(),
+    }
+
+
 class PlanRuntime:
     """Executes skill plans with phased control flow."""
 
@@ -410,7 +435,9 @@ class PlanRuntime:
                     evidence_summary=f"Unknown skill: {phase.skill_name}",
                 )
 
-            config = build_config_from_skill(skill, query=prompt)
+            config = _without_unapprovable_writes(
+                build_config_from_skill(skill, query=prompt), can_approve=self._on_confirm is not None
+            )
 
             tools_called: list[str] = []
 
