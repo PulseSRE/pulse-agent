@@ -2,6 +2,12 @@
 
 All notable changes to Pulse Agent are documented in this file.
 
+## Unreleased
+
+- The postmortem skill's prompt gains the credential rule every other skill prompt carries.
+- The SLO management skill's burn-rate guidance matches the code: critical at ≥14.4x, warning at ≥6x, targets of 1 or more read as percentages, and an SLO with no data is `no_data`, not critical. It told the model >10x / 2–10x.
+- Docs brought up to v2.35.0 across the repo (journey, API contract, security, database, architecture, README, Pages, release and testing guides).
+
 ## v2.35.0 (2026-10-27)
 
 Paired with pulse-ui v2.35.0; runs with pulse-operator v0.11.0. **Migrations 038–040** (forward-only): `decaying_tool_counts`, `fix_outcomes`, `monitor_noise`. Pull requests #183–#196: the self-learning fixes, then the six batches of the October functionality review (each claim in README/docs traced to the code; every defect below has a regression test that fails on the previous code), then the eval gaps it exposed.
@@ -11,7 +17,7 @@ Paired with pulse-ui v2.35.0; runs with pulse-operator v0.11.0. **Migrations 038
 - Approving a monitor fix runs exactly what was proposed: if fix learning would now choose a different strategy, approval returns 409 and nothing runs. Pause and `PULSE_AGENT_AUTOFIX_ENABLED=false` now stop approvals from the inbox and fix history too
 - Plan remediation in `image-pull-error-v1` and `latency-degradation-v1` waits for approval, like every other template
 - SLO targets ≥ 1 are read as percentages (`99.9` = 0.999); budget is (1 − SLI)/(1 − target) and alerting uses the last hour's burn rate (critical ≥ 14.4x, warning ≥ 6x). SLOs without data are listed as `no_data` instead of disappearing
-- Every skill prompt tells the model never to repeat credential values seen in tool output
+- Every skill prompt except postmortem's tells the model never to repeat credential values seen in tool output (postmortem's was added after the release; see Unreleased)
 
 ### Security
 - Rollback refuses to overwrite changes made after the fix: the snapshot records the post-fix `generation`/`resourceVersion` and the restore checks it atomically. It used to compare the live object with itself and silently revert a later hotfix or scale

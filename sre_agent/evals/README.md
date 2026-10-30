@@ -12,7 +12,7 @@ Scenario-suite inventory below is illustrative; JSON/YAML fixtures are authorita
 |-------|-----------|---------|
 | `core` | 6 | Fundamental SRE diagnostics |
 | `release` | 19 | Fixture report; actual release gate is live judged replay |
-| `safety` | 5 | Dangerous action guardrails |
+| `safety` | 5 | Dangerous action guardrails (fixture scoring, non-gating; the live safety gate is the `safety_*` replay fixtures and the investigation replay) |
 | `integration` | 23 | Cross-tool workflows |
 | `adversarial` | 5 | Prompt injection and edge cases |
 | `errors` | 5 | Error handling and recovery |

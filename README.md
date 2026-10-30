@@ -68,20 +68,24 @@ Complex incidents are resolved through multi-phase plans that progress through s
 
 ### Plan Templates
 
-10 built-in plan templates cover the most common incident types:
+12 built-in plan templates cover the most common incident types:
 
 | Template | Scanner Category | Phases |
 |----------|-----------------|--------|
 | `crashloop-resolution` | `crashloop` | triage, diagnose, remediate, verify |
-| `oom-investigation` | `oom` | triage, diagnose, remediate, verify |
+| `oom-investigation` | `oom` | triage, memory_analysis, patch_resources, verify |
 | `node-pressure` | `nodes` | triage, node_diagnostics, drain_cordon, verify |
 | `deployment-failure` | `workloads` | triage, change_analysis, rollback_decision, verify |
 | `image-pull-error` | `image_pull` | triage, diagnose, remediate, verify |
 | `scheduling-failure` | `scheduling` | triage, diagnose, remediate, verify |
 | `cert-expiry` | `cert_expiry` | triage, diagnose, verify |
 | `operator-degraded` | `operators` | triage, diagnose, verify |
-| `security-incident` | `security` | triage, diagnose, remediate, verify |
-| `latency-degradation` | `latency` | triage, diagnose, remediate, verify |
+| `security-incident` | `security` | triage, security_scan, rbac_audit, remediation_plan, verify |
+| `latency-degradation` | `latency` | triage, trace_source, investigate, remediate, verify |
+| `control-plane-pressure` | `control_plane` | triage, diagnose, relief, verify |
+| `hpa-saturation` | `hpa` | triage, diagnose, verify |
+
+Every phase that changes the cluster is `approval_required`, and a phase that does not produce what its contract promises stops remediation (`needs_escalation`). A finished plan becomes an investigation report whose diagnosis comes from the phase that promises a `root_cause`.
 
 When no template matches, the plan builder skill dynamically constructs a plan from the query context.
 
@@ -136,8 +140,8 @@ See [docs/SKILL_DEVELOPER_GUIDE.md](docs/SKILL_DEVELOPER_GUIDE.md) for creating 
 - **Normal For This Workload** -- 7-day per-workload baselines (p50/p95 memory, CPU, restarts) refreshed every 6 hours, so a finding can say "3x this workload's normal" and investigations start from what is unusual
 - **What Changed** -- Investigations and incident episodes lead with the changes around the incident (rollouts, ConfigMap edits, Argo syncs, cluster upgrades), ranked by how likely they are related
 - **Auto-Fix** -- The server trust setting controls remediation: level 2 asks, levels 3/4 allow automatic fixes. Browser selections cannot lower the server level; current category subsets do not restrict level-3 handlers. See [security limitations](SECURITY.md#monitor-trust-levels). Answering a proposal needs a known person on an ask-first client; an approval is refused if the finding cleared or the server stopped allowing fixes while it waited. Rate-limited to 3 fixes per scan with a per-resource attempt cap, and a database-backed kill switch (`POST /monitor/pause`) that survives pod restarts
-- **Confidence Scores** -- Every finding, investigation, and action includes a 0-100% confidence score
-- **Noise Learning** -- Tracks transient findings and assigns noise scores to suppress flaky alerts
+- **Confidence Scores** -- Every finding, investigation, and action includes a 0-100% confidence score; investigation and plan confidence is derived from the evidence gathered, and 0 is shown when nothing supported the cause
+- **Noise Learning** -- Tracks transient findings and assigns noise scores to suppress flaky alerts. Counts persist across restarts (`monitor_noise`)
 - **Simulation Preview** -- Predict impact, risk, and duration before executing a fix
 
 ### Durable Plan Execution (Temporal)
@@ -172,6 +176,7 @@ Verification contracts cover five native write tools. They check first, capture 
 - **ServiceMonitor** -- deployed automatically by the [pulse-operator](https://github.com/PulseSRE/pulse-operator) for Prometheus Operator scraping (`spec.monitoring.enabled`, default `true`)
 
 ### Self-Improving Agent
+- **Memory in every chat** -- Past incidents and learned runbooks reach the model on the server, and memory tools are offered per skill (`memory_tools`). `PULSE_AGENT_MEMORY=0` turns both off
 - **Incident Memory** -- Every interaction stored with query, tool sequence, resolution, and outcome
 - **Learned Runbooks** -- Confirmed resolutions are extracted as reusable runbooks
 - **Pattern Detection** -- Identifies recurring issues and time-based patterns
@@ -327,7 +332,7 @@ Consolidated management page with 8 tabs:
 
 | Tab | Purpose |
 |-----|---------|
-| **Catalog** | All 154 tools organized by agent and category |
+| **Catalog** | All native and MCP tools, organized by agent and category |
 | **Skills** | 7 loaded skills with status, keywords, and handoff configuration |
 | **Plans** | Plan templates and active plan executions |
 | **SLOs** | SLO registry, error budgets, and burn rate status |
@@ -390,7 +395,7 @@ sre_agent/
   # Tools
   k8s_tools/           Kubernetes tool modules
   security_tools.py    Security scanning tools
-  fleet_tools.py       5 multi-cluster tools
+  fleet_tools.py       7 multi-cluster tools (user token; Secret values never returned)
   gitops_tools.py      6 ArgoCD tools
   predict_tools.py     3 predictive analytics tools
   timeline_tools.py    Incident correlation
@@ -400,7 +405,7 @@ sre_agent/
   tool_registry.py     Central registry (all tools register at import)
 
   # Monitor
-  monitor/             32 modules: session, scanners, baselines, change correlation, investigations, auto-fix, ...
+  monitor/             33 modules: session, scanners, baselines, change correlation, investigations, auto-fix, ...
 
   # Intelligence
   intelligence.py      Analytics feedback loop into system prompt
@@ -410,7 +415,7 @@ sre_agent/
   promql_recipes.py    83 PromQL recipes
 
   # Infrastructure
-  db.py                PostgreSQL abstraction + migrations (v037)
+  db.py                PostgreSQL abstraction + migrations (v040)
   memory/              Self-improving agent (incidents, runbooks, patterns)
   mcp_client.py        MCP server connections (SSE transport)
   orchestrator.py      Typo correction (~130 K8s misspellings)
@@ -430,7 +435,7 @@ All WebSocket endpoints require `?token=...` query parameter (constant-time comp
 ---
 
 <p align="center">
-  <strong>108 native tools + MCP</strong> &bull; <strong>7 skills</strong> &bull; <strong>32 scanners</strong> &bull; <strong>13 runbooks</strong> &bull; <strong>83 PromQL recipes</strong> &bull; <strong>16 eval suites (192 scenarios)</strong> &bull; <strong>3,910 tests</strong> &bull; <strong>Migration v037</strong> &bull; <strong>Protocol v2</strong>
+  <strong>108 native tools + MCP</strong> &bull; <strong>7 skills</strong> &bull; <strong>32 scanners</strong> &bull; <strong>13 runbooks</strong> &bull; <strong>83 PromQL recipes</strong> &bull; <strong>16 eval suites (192 scenarios)</strong> &bull; <strong>4,225 tests</strong> &bull; <strong>Migration v040</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

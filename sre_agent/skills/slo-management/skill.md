@@ -80,12 +80,14 @@ Help users monitor and analyze Service Level Objectives via Prometheus queries.
 - **Error Rate**: Maximum acceptable error percentage (e.g., < 1% for critical services)
 
 ### Burn Rate Analysis
-- **Fast burn (>10x)**: Error budget will exhaust in hours → P1, immediate action
-- **Moderate burn (2-10x)**: Budget depleting faster than expected → P2, investigate
-- **Slow burn (1-2x)**: Budget on track to exhaust before window ends → monitor closely
+- **Fast burn (≥14.4x, critical)**: Spends 2% of a 30-day budget per hour → P1, immediate action
+- **Moderate burn (≥6x, warning)**: Budget depleting faster than expected → P2, investigate
+- **Slow burn (1-6x)**: Budget on track to exhaust before window ends → monitor closely
 - **Healthy (<1x)**: Budget is sustainable → no action needed
 
 ### When to escalate
 - Error budget < 10% remaining → P1 incident, freeze deployments
 - Error budget < 30% remaining → P2 investigation, review recent changes
-- Burn rate > 10x normal → immediate action, check for outage
+- Burn rate ≥ 14.4x → immediate action, check for outage
+
+Targets of 1 or more are percentages (99.9 = 0.999). An SLO with no data is `no_data`, not critical.

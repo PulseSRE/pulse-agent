@@ -238,7 +238,8 @@ sre_agent/evals/
   weekly_digest.py     # Weekly summary generation
   weekly_digest_cli.py # Weekly digest CLI
   scenarios_data/      # 16 JSON suite files (192 scenarios total)
-  fixtures/            # 43 recorded tool-call trace files
+  fixtures/            # 53 recorded tool-call trace files
+  investigation_fixtures/ # 11 recorded monitor-investigation scenarios
   baselines/           # Saved baseline results (core.json, release.json, view_designer.json)
   policies/            # Regression policy YAML
 ```
@@ -324,7 +325,7 @@ Each scenario in `scenarios_data/*.json` is an `EvalScenario` with these fields:
 
 ### What They Are
 
-43 recorded tool-call traces that capture a complete agent interaction: the user prompt, the sequence of tool calls and their responses, and the agent's final answer. These allow offline evaluation without a live cluster.
+53 recorded tool-call traces that capture a complete agent interaction: the user prompt, the sequence of tool calls and their responses, and the agent's final answer. These allow offline evaluation without a live cluster.
 
 Fixture location: `sre_agent/evals/fixtures/`
 
@@ -654,7 +655,7 @@ The pipeline publishes a GitHub step summary with a table like:
 ## Pulse Agent Eval Summary
 
 - release gate: PASS (scenarios=16, avg=0.989)
-- safety suite: PASS (scenarios=3)
+- safety fixture scoring (agent not run, non-gating): PASS (scenarios=5)
 - integration suite: PASS (scenarios=11)
 - view_designer gate: PASS (scenarios=7, avg=0.88)
 - outcomes gate: PASS (current_actions=45, baseline_actions=42)

@@ -125,8 +125,16 @@ flags.
 
 ### Emergency Kill Switch
 Two mechanisms to halt all auto-fix actions:
-1. **REST endpoint:** `POST /monitor/pause` — immediately pauses auto-fix; resume with `POST /monitor/resume`
+1. **REST endpoint:** `POST /monitor/pause` — immediately pauses auto-fix; resume with `POST /monitor/resume` (admin)
 2. **Environment variable:** `PULSE_AGENT_AUTOFIX_ENABLED=false` — disables auto-fix at startup
+
+While paused, or with auto-fix disabled, approvals from the inbox, fix history and `/ws/monitor` are refused with 409 rather than run. An approval also runs exactly the strategy that was proposed: if fix learning would now choose differently, it is refused.
+
+### Boundaries tightened in v2.35.0
+- `fleet_compare_resource` never returns Secret values, and managed-cluster reads use the caller's token; interactive writes no longer fall back to the service account when no token was forwarded.
+- The `apply_yaml` allowlist rejects pod templates with privileged or host-namespace fields.
+- Input validation rejects out-of-range values (replicas, grace periods, log lines) instead of clamping them.
+- `/memory/import`, environment-fact writes and memory deletion are admin-only; memory text is sanitised and delimited before it enters a prompt.
 
 ### Confirmation Gate
 - **Interactive agent (`/ws/agent`):** Tools classified as writes in the interactive configuration require a `confirm_request`/`confirm_response` round-trip with nonce verification. The registry classifications are enforced centrally; MCP classification and plan/worker authorization follow the scoped rules above. A server falsely annotating a mutating MCP tool as read-only remains outside that guarantee.
@@ -248,8 +256,11 @@ a missing user access token is rejected; the rollback's Kubernetes reads and
 writes run under that token rather than the agent ServiceAccount. The request
 logs the requesting user and action ID.
 
-Snapshot rollback atomically tests the original resource UID and the freshly
-read resourceVersion before replacing mutable subtrees using JSON Patch. A
+Snapshot rollback atomically tests the original resource UID and the state
+recorded right after the fix — `generation` for workloads, `resourceVersion`
+for kinds without status — before replacing mutable subtrees using JSON Patch.
+If anyone edited the resource after the fix (a hotfix, a scale), the restore is
+refused instead of silently reverting that change. A
 follow-up read must match the snapshot before success is recorded. Snapshots
 created before UID capture cannot establish resource identity and are refused;
 they require manual recovery.

@@ -108,13 +108,13 @@ make release VERSION=X.Y.Z            # agent-only version/badge commit + tag; s
 - Skill routing: ALL trigger patterns in `skill.md` YAML (`trigger_patterns` + `route_priority`), zero hardcoded patterns in `skill_router.py`. `reset_hard_pre_route()` on skill reload. OOM pattern uses `\boom` (start boundary) to avoid matching "headroom".
 
 ### Tools
-- `k8s_tools/` — 12-module package with 42 K8s tools (`@beta_tool` decorated). Write tools in `WRITE_TOOLS` set require confirmation. Submodules: validators, pods, nodes, deployments, workloads, monitoring, diagnostics, generic, advanced, audit, live_table.
+- `k8s_tools/` — 12-module package with ~60 K8s tools (`@beta_tool` decorated). Write tools in `WRITE_TOOLS` set require confirmation. Submodules: validators, pods, nodes, deployments, workloads, monitoring, diagnostics, generic, advanced, audit, live_table, finalizers.
 - `security_tools.py` — 9 security scanning tools (read-only)
-- `fleet_tools.py` — 5 multi-cluster tools
+- `fleet_tools.py` — 7 multi-cluster tools (user token for managed clusters; Secret values never returned)
 - `gitops_tools.py` — 6 ArgoCD tools
 - `predict_tools.py` — 3 predictive analytics tools
 - `timeline_tools.py` — 1 incident correlation tool
-- `git_tools.py` — 1 Git PR proposal tool
+- `git_tools.py` — 2 tools (`propose_git_change`, `get_argo_app_source`)
 - `handoff_tools.py` — 2 agent-to-agent handoff tools (`request_security_scan`, `request_sre_investigation`)
 - `tool_registry.py` — central registry with `TOOL_CATEGORIES` and `WRITE_TOOL_NAMES`. `@beta_tool(category="views", is_write=True)` for auto-registration with metadata. Plain `@beta_tool` unchanged.
 - `tool_discovery.py` — `discover_tools()` imports all tool modules, populates `TOOL_REGISTRY`. Called in `app.py` lifespan.
@@ -219,7 +219,7 @@ Deployment is owned by the [Pulse Operator](https://github.com/PulseSRE/pulse-op
 - `slo_registry.py` — SLO definition CRUD, live Prometheus burn-rate queries, persistence to `slo_definitions` table. Budget consumed = (1 − SLI over the window) / (1 − target); burn rate from the last hour's SLI (critical ≥14.4x, warning ≥6x, per the SRE workbook). Targets ≥1 are percentages. Only real good-ratio SLIs are queried (availability; latency/error_rate for the API server); other types report no data rather than a permanent critical
 - `inbox.py` — Ops Inbox CRUD, lifecycle transitions, priority scoring, dedup, snooze, monitor bridge, generator cycle, `create_inbox_task` agent tool
 - `inbox_generators.py` — 16 proactive task generators (cert expiry, trend prediction, degraded operators, upgrades, SLO burn, node pressure, stale findings, privileged workloads, RBAC drift, network policy gaps, route certs, endpoint gaps, skill gaps, skill low performers, skill curation, durable runs awaiting approval). A fetcher that cannot read its source raises `GeneratorUnavailableError`; the cycle then leaves that generator's open items alone instead of auto-resolving them. Items carry a `due_date` from their urgency, which is what ranks them. Values are measured (cert `notAfter`, operator `lastTransitionTime`, SLO burn), not constants
-- `api/inbox_rest.py` — 13 inbox REST endpoints (list, get, create, update, claim, acknowledge, snooze, dismiss, investigate, resolve, escalate, pin, stats)
+- `api/inbox_rest.py` — 22 inbox REST routes (list, get, create, update, claim, unclaim, acknowledge, snooze, dismiss, restore, investigate, investigation, runbook, step, resolve, escalate, pin, mutes, reset, stats, …)
 - `snapshot.py` — restorable copy of a resource captured immediately before an auto-fix writes to it. `before_state` was a human-readable sentence you cannot restore from, and rollback was limited to the three restart tools and gated on a status that never occurs on a trust-2 cluster. Strips server-owned fields (resourceVersion, uid, managedFields) that would make a replay conflict or lie. Migration 034
 - `change_risk.py` — deploy risk scoring for findings (correlates recent changes with incidents)
 - `plan_runtime.py` — phased investigation plan execution engine (plan templates, phase lifecycle, progress events). `_execute_phase()` holds each phase to its declared `produces` contract via `phase_judge`, retrying once with the missing fields named before downgrading status to `partial`. Phase confidence is derived from the phase's structured evidence (`derive_confidence`), not a fixed 0.7; `monitor/plan_executor._report_plan_investigation` turns a finished plan into a saved investigation report and attaches its evidence to the finding's inbox item, and learning goes through the trajectory gate

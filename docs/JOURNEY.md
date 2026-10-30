@@ -2,9 +2,9 @@
 
 > Historical project narrative. Dates, benchmark counts, operational claims, and deployment lessons describe earlier releases and are not current guarantees. Use [current documentation](README.md) for deployment and security.
 
-How two repos, ~3,000 commits, and 232 days built an AI-powered SRE platform from scratch — and then spent the last third of that time making it tell the truth about itself.
+How four repos, ~3,200 commits, and 232 days built an AI-powered SRE platform from scratch — and then spent the last third of that time making it tell the truth about itself.
 
-**Repos:** [pulse-agent](https://github.com/PulseSRE/pulse-agent) | [pulse-ui](https://github.com/PulseSRE/pulse-ui)
+**Repos:** [pulse-agent](https://github.com/PulseSRE/pulse-agent) (Python agent and monitor) | [pulse-ui](https://github.com/PulseSRE/pulse-ui) (React console) | [pulse-operator](https://github.com/PulseSRE/pulse-operator) (Go operator that deploys both, from August) | [sre-bench](https://github.com/PulseSRE/sre-bench) (the public benchmark extracted from the agent's evals, from August)
 
 **Key docs:** [DESIGN_PRINCIPLES.md](../DESIGN_PRINCIPLES.md) | [ARCHITECTURE.md](ARCHITECTURE.md) | [API_CONTRACT.md](../API_CONTRACT.md) | [SECURITY.md](../SECURITY.md) | [TESTING.md](../TESTING.md) | [DATABASE.md](../DATABASE.md) | [CHANGELOG.md](../CHANGELOG.md)
 
@@ -139,28 +139,33 @@ August was when Pulse stopped being judged by what it claimed and started being 
 - **Confidence derived from evidence** (#68). Investigations returned a confidence the model asserted about itself; nothing connected it to the evidence list. `evidence.derive_confidence` makes the model's figure a ceiling and caps unsupported claims at 0.35.
 - **Learning gated on outcomes, not confidence** (#70, #105, #110). Investigations record a `LearningCandidate`; only a fix the monitor verified is promoted to a skill. The candidates were an in-memory dict until #105 — a pod restart erased everything the agent was about to learn.
 - **Restorable snapshots and verification contracts** (#113, v2.24.0). Rollback used to restore from a human-readable sentence. Auto-fix now captures the resource before writing it (migration 034), and the five most-used interactive write tools gained preconditions and tool-specific postconditions.
+- **pulse-operator is born** (v0.1.0, Aug 14). One `OpenShiftPulse` custom resource reconciles the whole stack — agent, UI and OAuth proxy, PostgreSQL, MCP, RBAC, Routes, NetworkPolicies. Within a week it had per-component status conditions and automatic rollback to the last healthy image (v0.3.0), a self-heal loop and an agent-version compatibility gate (v0.4.0), and an OLM catalog built in CI so a tag is something people can actually install (v0.4.1). Its first big fix was the root cause of every WebSocket connection failure: oauth-proxy request logging (v0.2.0).
 - **The Helm chart was removed** (#99). [pulse-operator](https://github.com/PulseSRE/pulse-operator) owns deployment through an `OpenShiftPulse` CR. The first bug this surfaced: the CR's `trustLevel` had been a no-op on every deployment because the operator injected a different variable name than the agent read (v2.24.0).
-- **Model migration to `claude-sonnet-5`** (v2.25.0) and the **SRE-Bench simulation lane**: the production agent against simulated clusters, scored by an observing backend rather than a judge. It caught the model swap quietly changing the agent's safety posture, which led to a deny policy the model cannot argue past (v2.26.0).
+- **SRE-Bench is extracted** (Aug 23). The agent's eval scenarios and rubric became [sre-bench](https://github.com/PulseSRE/sre-bench): 121 Kubernetes/OpenShift operations tasks across 13 suites, scored on resolution, efficiency, safety and speed, open to any agent. v0.2.0 scored knowing when *not* to act (refuse, degrade, no-op). v0.3.0 replaced self-reported flags with `SimCluster`, a deterministic backend that observes the run and decides for itself whether a fix was verified or a trap was triggered.
+- **Model migration to `claude-sonnet-5`** (v2.25.0) and the **SRE-Bench simulation lane** in the agent's CI: the production agent against those simulated clusters. It caught the model swap quietly changing the agent's safety posture, which led to a deny policy the model cannot argue past (v2.26.0). SRE-Bench's pinned three-way comparison put numbers on it: the Pulse stack beat plain Sonnet 5 on the diagnostic suite, trap compliance tracked the model rather than the harness, and no agent verified its own fix unprompted.
 
 ### Phase 7: Durable Execution (August 25 – October 3)
 
 **What we built:** Runtime artifacts that survive restarts, Temporal-backed plans and fix lifecycles, and a full plan language.
 
 - **Nothing written at runtime survived a restart** (v2.27.0). Skills, plans and eval drafts the agent authored lived on the container filesystem. They are now persisted in the database and restored at startup.
-- **Plans and fixes on Temporal** (v2.28.0–v2.31.0): durable plan runs, an incident lifecycle workflow (snapshot → apply → verify → wait for recurrence → settle, compensating on failure or cancel), waves, branching and sub-plans, and the learning flywheel on Temporal Schedules. All of it is inert until `PULSE_AGENT_TEMPORAL_HOST` is set, and workflow changes are patch-guarded so histories already in flight replay unchanged.
+- **Plans and fixes on Temporal** (agent v2.28.0–v2.31.0, operator v0.6.0–v0.8.x, which provisions Temporal on the same PostgreSQL, routes auto-fix through the durable workflow, and exposes the Temporal UI as an audit trail): durable plan runs, an incident lifecycle workflow (snapshot → apply → verify → wait for recurrence → settle, compensating on failure or cancel), waves, branching and sub-plans, and the learning flywheel on Temporal Schedules. All of it is inert until `PULSE_AGENT_TEMPORAL_HOST` is set, and workflow changes are patch-guarded so histories already in flight replay unchanged.
 - **Approval, caller identity and preconditions preserved across every path** (#132–#139): chat, plans, monitor and MCP. A plan-only turn is not offered write tools at all (#147, #156).
+- **SRE-Bench v0.4.0: evals for what survives.** `sre-bench durable` probes claims no trajectory can witness — an approval gate that really waits, a cancel that stops a parked run, a failure that still records a verdict. Its first live run found that creating plans from the UI had been broken on-cluster (runtime YAML written into the read-only package directory) while every local test passed.
+- **The operator caught a version split** (v0.5.1): agent v2.25.0 had run against UI v2.24.0 for weeks with everything green. The CR now reports an `AgentUIVersionsMatch` condition.
 
 ### Phase 8: Seeing Clearly (October 16 – October 22)
 
 **What we built:** A view designer that looks at what it builds, a monitor that says what it cannot see, and a security boundary review.
 
-- **The view designer sees the page** (v2.32.0). `preview_dashboard` renders the draft through a render service and hands the model a screenshot plus the widgets that came out empty or broken; every widget's live query runs before saving; dashboards moved to a 12-column grid (migration 037). A nightly rendered-page eval scores what a person would actually see.
+- **The view designer sees the page** (v2.32.0, with the render service deployed by operator v0.9.0's `spec.render`). `preview_dashboard` renders the draft through a render service and hands the model a screenshot plus the widgets that came out empty or broken; every widget's live query runs before saving; dashboards moved to a 12-column grid (migration 037). A nightly rendered-page eval scores what a person would actually see.
 - **"A scanner that cannot see is not clean"** (v2.33.0). Stable finding identity, honest resolution (only the owning scanner can resolve a finding), a `degraded` scanner that turns blind spots into findings with a remedy, per-workload baselines, and a ranked "what changed before this" list for every incident.
+- **The operator's own boundary** (v0.10.0–v0.11.0): read-only RBAC for the new scanners, and a PostgreSQL NetworkPolicy whose selector had matched no pod — any pod could reach the database. Disabling MCP or Temporal now removes what was created for it.
 - **The UI → agent → cluster boundary** (v2.34.0): a non-admin could rewrite the system prompt through a view action; `/log-counts` and `/query` ran as the service account; `describe_resource` returned Secret values. Each fix shipped with a test that fails on the previous code. Chat sessions also learned to survive API errors: retries had never actually run, because the error is raised when the stream is entered, outside the retry block.
 
 ### Phase 9: Does It Really Do It? (October 23 – October 27)
 
-**What we built:** Learning that waits for proof, a six-batch functionality review, and an eval for the monitor's own investigations. Released as v2.35.0.
+**What we built:** Learning that waits for proof, a six-batch functionality review, and an eval for the monitor's own investigations. Released as agent and UI v2.35.0; it runs on operator v0.11.0 unchanged (its three migrations run when the agent starts).
 
 - **Self-learning, end to end** (#183–#187). Approved fixes had never taught anything: a finding cleared by a human-approved fix was labelled *self-healed* and its learning candidate discarded, so at the default trust level nothing verified was ever learned. Skill routing and tool prediction claimed to learn and did not (the predictor learned from its own guesses). `fix_learning.py` (migration 039) records which fix holds for which cause and escalates to a person when a strategy keeps failing. A learning simulator then showed skills being learned from fixes that recurred, so learning now waits until a fix outlasts the recurrence window.
 - **The functionality review** (kept in the Pulse project workspace, not in this repo). Six parallel reviews traced every claim in the README, docs and site to the code and reproduced each defect against a disposable database. Six batches of fixes followed (#188–#195, pulse-ui #151–#153), each with a test file that fails on the code before it:
@@ -179,9 +184,9 @@ August was when Pulse stopped being judged by what it claimed and started being 
 
 | Metric | Value (measured at v2.35.0, Oct 27 2026) |
 | --- | --- |
-| Total commits (both repos) | 2,998 (1,386 agent + 1,612 UI) |
-| Calendar days | 232 (UI: Mar 9 – Oct 27, Agent: Mar 24 – Oct 27) |
-| Tagged releases | 164 (85 agent + 79 UI, including the UI's pre-rename v1–v6 line) |
+| Total commits | 3,184 (1,386 agent + 1,612 UI + 168 operator + 18 sre-bench) |
+| Calendar days | 232 (UI from Mar 9, agent from Mar 24, operator from Aug 14, sre-bench from Aug 23; all to Oct 27) |
+| Tagged releases | 182 (85 agent + 79 UI, including the UI's pre-rename v1–v6 line, + 18 operator; sre-bench v0.1.0–v0.4.0 are changelog releases) |
 | Backend tests | 4,225 collected |
 | Frontend tests | 2,504 (215 files) |
 | Registered native tools | 108 (19 writes) — see `/tools` on a running agent |
@@ -191,6 +196,7 @@ August was when Pulse stopped being judged by what it claimed and started being 
 | Plan templates | 12 |
 | Inbox generators | 16 |
 | Live replay fixtures | 53 chat + 11 monitor-investigation, plus the SRE-Bench simulation lane |
+| SRE-Bench | 121 tasks across 13 suites; 11 simulated-cluster fixtures for `core` and `errors` |
 | Fixture-scoring suites | 16 (reports, not gates) |
 | Database tables / migrations | ~43 / 40 — see [DATABASE.md](../DATABASE.md) |
 | Design specs / implementation plans | 24 / 23 — see [docs/superpowers/](superpowers/) |
@@ -562,4 +568,5 @@ The real output isn't the code. It's that when Pulse says a pod is crash-looping
 
 *Last updated: October 27, 2026*
 *Pulse Agent v2.35.0 | Pulse UI v2.35.0*
-*1,386 + 1,612 = 2,998 commits*
+*Pulse operator v0.11.0 | SRE-Bench v0.4.0*
+*1,386 + 1,612 + 168 + 18 = 3,184 commits*
