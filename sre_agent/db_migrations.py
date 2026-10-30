@@ -382,6 +382,17 @@ def _migrate_039_fix_outcomes(db: Database) -> None:
     db.executescript(FIX_OUTCOMES_SCHEMA)
 
 
+def _migrate_041_investigation_evidence_detail(db: Database) -> None:
+    """Keep each investigation's structured evidence, not only its prose.
+
+    The live report carried which evidence supported and which contradicted
+    the cause, and where each came from; the saved row kept the observations
+    as plain strings, so a card reloaded from history showed contradicting
+    evidence as if it supported the cause.
+    """
+    db.execute("ALTER TABLE investigations ADD COLUMN IF NOT EXISTS evidence_detail TEXT")
+
+
 def _migrate_040_monitor_noise(db: Database) -> None:
     """How often each finding has gone away on its own, kept across restarts."""
     from .db_schema import NOISE_MEMORY_SCHEMA
@@ -615,4 +626,5 @@ MIGRATIONS = [
     (38, "decaying_tool_counts", _migrate_038_decaying_tool_counts),
     (39, "fix_outcomes", _migrate_039_fix_outcomes),
     (40, "monitor_noise", _migrate_040_monitor_noise),
+    (41, "investigation_evidence_detail", _migrate_041_investigation_evidence_detail),
 ]

@@ -100,7 +100,8 @@ CREATE TABLE IF NOT EXISTS investigations (
     error TEXT,
     resources TEXT,
     evidence TEXT,
-    alternatives_considered TEXT
+    alternatives_considered TEXT,
+    evidence_detail TEXT
 );
 """
 

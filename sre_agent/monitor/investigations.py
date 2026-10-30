@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 from ..config import get_settings
-from ..evidence import derive_confidence, parse_evidence
+from ..evidence import derive_confidence, ground_evidence, parse_evidence
 from .confidence import _extract_json_object, _sanitize_for_prompt
 
 logger = logging.getLogger("pulse_agent.monitor")
@@ -404,7 +404,8 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
     # Confidence is derived from the evidence rather than taken from the model's
     # self-assessment. `asserted_confidence` is retained so the gap between what an
     # investigation claimed and what it could support stays observable.
-    parsed_evidence = parse_evidence(evidence)[:10]
+    # A cited source the investigation never called counts as unsourced.
+    parsed_evidence = ground_evidence(parse_evidence(evidence)[:10], tools_called)
     derived = derive_confidence(parsed_evidence, confidence)
 
     return {

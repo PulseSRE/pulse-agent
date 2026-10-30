@@ -13,6 +13,7 @@ so nothing breaks while investigations migrate to the structured form.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -37,6 +38,8 @@ class Evidence(BaseModel):
     source: str = ""
     stance: Stance = "supports"
     confidence: float = Field(default=0.6, ge=0.0, le=1.0)
+    # A source the model cited that names no tool the run called; see ground_evidence.
+    unverified_source: str = ""
 
     @field_validator("observation")
     @classmethod
@@ -106,3 +109,54 @@ def derive_confidence(evidence: list[Evidence], asserted: float) -> float:
     agreement = supporting / total if total > 0 else 1.0
 
     return round(min(asserted, support_ceiling) * agreement, 2)
+
+
+# Words in tool names that say nothing about where data came from.
+_GENERIC_TOOL_WORDS = frozenset({"get", "list", "describe", "search", "resource", "resources", "status", "details"})
+
+
+def _norm_source(text: str) -> str:
+    return re.sub(r"[\s\-./:]+", "_", text.lower())
+
+
+def source_matches_called(source: str, called: list[str] | set[str]) -> bool:
+    """Whether an evidence ``source`` names a tool the run actually called.
+
+    Accepts the tool's full name (``get_pod_logs``), its name without the verb
+    (``pod logs``), or a distinctive word from it (``prometheus`` for
+    ``get_prometheus_query``, ``events`` for ``get_events``).
+    """
+    src = _norm_source(source or "")
+    if not src:
+        return False
+    for tool in set(called):
+        name = tool.lower()
+        if name in src:
+            return True
+        bare = re.sub(r"^(get|list|describe|search)_", "", name)
+        if len(bare) >= 4 and bare in src:
+            return True
+        for word in name.split("_"):
+            if len(word) >= 5 and word not in _GENERIC_TOOL_WORDS and word in src:
+                return True
+    return False
+
+
+def ground_evidence(evidence: list[Evidence], called: list[str] | set[str]) -> list[Evidence]:
+    """Keep a cited source only if the run called a tool it names.
+
+    Any non-empty ``source`` weighs an item as fully sourced, so a source the
+    investigation never read ("prometheus", with no query run) raised confidence
+    on nothing. Such an item keeps its observation and stance and counts as
+    unsourced; the claimed source is kept in ``unverified_source`` so what the
+    model said stays visible. With no record of calls (an empty ``called``)
+    nothing can be checked, so nothing is changed.
+    """
+    if not called:
+        return evidence
+    grounded: list[Evidence] = []
+    for item in evidence:
+        if item.source and not source_matches_called(item.source, called):
+            item = item.model_copy(update={"source": "", "unverified_source": item.source})
+        grounded.append(item)
+    return grounded
