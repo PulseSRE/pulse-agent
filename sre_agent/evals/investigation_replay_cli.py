@@ -33,6 +33,17 @@ def _make_parser() -> argparse.ArgumentParser:
         default=1,
         help="Re-run a failing fixture this many times; a pass on retry counts, an unsafe attempt never does",
     )
+    p.add_argument(
+        "--repeat",
+        type=int,
+        default=0,
+        help=(
+            "Attempt every fixture this many times and gate on pass rates against the baseline "
+            "(investigation_baseline.json) instead of one pass. Replaces --retries"
+        ),
+    )
+    p.add_argument("--baseline", help="Baseline file for --repeat (default: the packaged one)")
+    p.add_argument("--write-baseline", help="With --repeat: write the measured pass rates to this file")
     p.add_argument("--format", choices=["json", "text"], default="text")
     return p
 
@@ -78,6 +89,7 @@ def _attempt(name: str, dry_run: bool) -> dict:
         "write_attempts": outcome["write_attempts"],
         "agent_runs": outcome["agent_runs"],
         "tool_attempts": outcome["tool_attempts"],
+        "models": outcome.get("models", []),
         "report": {
             "suspected_cause": str(report.get("suspected_cause") or "")[:500],
             "summary": str(report.get("summary") or "")[:500],
@@ -85,6 +97,13 @@ def _attempt(name: str, dry_run: bool) -> dict:
             "evidence": (report.get("evidenceDetail") or [])[:10],
         },
     }
+
+
+def _run_repeated(name: str, dry_run: bool, repeat: int) -> dict:
+    """``repeat`` independent attempts; the row shows the first passing one, all are kept."""
+    attempts = [_attempt(name, dry_run) for _ in range(repeat)]
+    final = next((a for a in attempts if a["score"]["passed"]), attempts[-1])
+    return {**final, "attempts": attempts}
 
 
 def _run_fixture(name: str, dry_run: bool, retries: int) -> dict:
@@ -107,6 +126,14 @@ def _format_text(rows: list[dict], gate: dict) -> str:
         for check in row["score"]["checks"]:
             if not check["passed"]:
                 lines.append(f"      x [{check['kind']}] {check['check']}")
+    if gate.get("mode") == "statistical":
+        lines.append("")
+        lines.append(f"Pass rates against the baseline (regression if p < {gate['alpha']}):")
+        for name, r in sorted(gate["fixtures"].items()):
+            base = r["baseline"]
+            was = f"{base['passes']}/{base['attempts']}" if base else "no baseline"
+            mark = "REGRESSED" if r["regressed"] else "ok"
+            lines.append(f"  {mark:9} {name}: {r['passes']}/{r['attempts']} (baseline {was}, p={r['p_value']})")
     calib = gate.get("calibration")
     if calib:
         lines.append("")
@@ -124,6 +151,8 @@ def _format_text(rows: list[dict], gate: dict) -> str:
     lines.append("")
     passed = sum(1 for r in rows if r["score"]["passed"])
     lines.append(f"{passed}/{len(rows)} fixtures passed; unsafe: {', '.join(gate['unsafe']) or 'none'}")
+    if gate.get("models_seen"):
+        lines.append(f"Model(s) that answered: {', '.join(gate['models_seen'])}")
     lines.append("GATE: " + ("PASS" if gate["passed"] else "FAIL"))
     return "\n".join(lines)
 
@@ -133,8 +162,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.list:
         print("\n".join(ir.list_fixtures()))
         return 0
-    if args.concurrency < 1 or args.retries < 0:
-        print("--concurrency must be >= 1 and --retries >= 0", file=sys.stderr)
+    if args.concurrency < 1 or args.retries < 0 or args.repeat < 0:
+        print("--concurrency must be >= 1, --retries and --repeat >= 0", file=sys.stderr)
+        return 2
+    if args.write_baseline and not args.repeat:
+        print("--write-baseline needs --repeat", file=sys.stderr)
         return 2
 
     import os
@@ -148,16 +180,40 @@ def main(argv: list[str] | None = None) -> int:
     _cfg._settings = None
 
     names = ir.list_fixtures() if args.all else [args.fixture]
+
+    def _one(name: str) -> dict:
+        if args.repeat:
+            return _run_repeated(name, args.dry_run, args.repeat)
+        return _run_fixture(name, args.dry_run, args.retries)
+
     with ir.investigation_isolation():
         if args.concurrency > 1 and len(names) > 1:
             from concurrent.futures import ThreadPoolExecutor
 
             with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
-                rows = list(pool.map(lambda n: _run_fixture(n, args.dry_run, args.retries), names))
+                rows = list(pool.map(_one, names))
         else:
-            rows = [_run_fixture(n, args.dry_run, args.retries) for n in names]
+            rows = [_one(n) for n in names]
 
-    gate = ir.verdict(rows, dry_run=args.dry_run)
+    models = sorted({m for r in rows for a in r.get("attempts", [r]) for m in (a.get("models") or [])})
+    if args.repeat:
+        from pathlib import Path
+
+        baseline = ir.load_baseline(Path(args.baseline) if args.baseline else None)
+        gate = ir.statistical_verdict(rows, baseline, dry_run=args.dry_run)
+        if args.write_baseline:
+            Path(args.write_baseline).write_text(
+                json.dumps(
+                    ir.baseline_from(
+                        rows, model=args.model, models_seen=models, commit=os.environ.get("GITHUB_SHA", "")
+                    ),
+                    indent=2,
+                )
+                + "\n"
+            )
+    else:
+        gate = ir.verdict(rows, dry_run=args.dry_run)
+    gate["models_seen"] = models
     if args.format == "json":
         print(json.dumps({"verdict": gate, "fixtures": rows}, indent=2, default=str))
     else:

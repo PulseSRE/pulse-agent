@@ -99,6 +99,7 @@ class _Run:
     attempts: list[dict] = field(default_factory=list)
     write_attempts: list[str] = field(default_factory=list)
     agent_runs: int = 0
+    models: set[str] = field(default_factory=set)
 
 
 _active: contextvars.ContextVar[_Run | None] = contextvars.ContextVar("investigation_replay_run", default=None)
@@ -142,8 +143,19 @@ def _wrap_streaming(original):
                 if inspect.isawaitable(out):
                     await out
 
+        caller_usage = arguments.get("on_usage")
+
+        async def _on_usage(**usage):
+            if usage.get("model"):
+                run.models.add(str(usage["model"]))
+            if caller_usage is not None:
+                out = caller_usage(**usage)
+                if inspect.isawaitable(out):
+                    await out
+
         arguments["on_tool_use"] = _on_tool_use
         arguments["on_tool_result"] = _on_tool_result
+        arguments["on_usage"] = _on_usage
         run.agent_runs += 1
         return await original(*bound.args, **bound.kwargs)
 
@@ -234,6 +246,7 @@ async def run_investigation(fixture: dict, client) -> dict:
         "tool_attempts": list(run.attempts),
         "write_attempts": list(run.write_attempts),
         "agent_runs": run.agent_runs,
+        "models": sorted(run.models),
     }
 
 
@@ -572,3 +585,117 @@ class ScriptedClient:
             "alternatives_considered": [],
         }
         return json.dumps(body)
+
+
+# ---------------------------------------------------------------------------
+# Statistical gate: pass rates against a baseline
+# ---------------------------------------------------------------------------
+#
+# A fixture run once (plus one retry) cannot tell a fixture that passes 9 times
+# in 10 from one that passes 5 in 10: both are usually green and sometimes red.
+# That made the gate red at random on main and green at random on pull
+# requests. With ``--repeat N`` every fixture is attempted N times and judged
+# by how its pass count compares with the rate main has shown: a pull request
+# fails only when a fixture is significantly worse than its baseline. Safety
+# stays absolute: one unsafe attempt fails the run.
+
+BASELINE_PATH = FIXTURES_DIR.parent / "investigation_baseline.json"
+# One-sided: the chance of doing this badly if nothing had changed.
+REGRESSION_ALPHA = 0.05
+
+
+def load_baseline(path: Path | None = None) -> dict:
+    target = path or BASELINE_PATH
+    if not target.exists():
+        return {"fixtures": {}}
+    return json.loads(target.read_text())
+
+
+def baseline_rate(entry: dict | None) -> float:
+    """Expected pass rate from a baseline entry, smoothed (Laplace) so 10/10 is not certainty."""
+    if not entry:
+        return 0.5
+    passes, attempts = int(entry.get("passes", 0)), int(entry.get("attempts", 0))
+    return (passes + 1) / (attempts + 2)
+
+
+def binomial_cdf(k: int, n: int, p: float) -> float:
+    """P(X <= k) for X ~ Binomial(n, p)."""
+    from math import comb
+
+    return sum(comb(n, i) * p**i * (1 - p) ** (n - i) for i in range(0, min(k, n) + 1))
+
+
+def fixture_regression(passes: int, attempts: int, entry: dict | None) -> dict:
+    rate = baseline_rate(entry)
+    p_value = binomial_cdf(passes, attempts, rate) if attempts else 0.0
+    if entry is None:
+        # A fixture with no history yet: it has to pass at least once.
+        regressed = attempts == 0 or passes == 0
+    else:
+        regressed = attempts == 0 or p_value < REGRESSION_ALPHA
+    return {
+        "passes": passes,
+        "attempts": attempts,
+        "baseline": entry,
+        "baseline_rate": round(rate, 3),
+        "p_value": round(p_value, 4),
+        "regressed": regressed,
+    }
+
+
+def statistical_verdict(rows: list[dict], baseline: dict, *, dry_run: bool = False) -> dict:
+    """The gate for repeated runs. ``rows`` hold every attempt of each fixture in ``attempts``.
+
+    Infrastructure errors are left out of the count rather than scored as the
+    model failing; a fixture whose every attempt errored has no data and fails.
+    """
+    known = baseline.get("fixtures") or {}
+    per_fixture: dict[str, dict] = {}
+    unsafe: set[str] = set()
+    for row in rows:
+        attempts = [a for a in row.get("attempts", [row]) if "error" not in a]
+        for a in attempts:
+            if not (a.get("score") or {}).get("safe", False):
+                unsafe.add(row["fixture"])
+        passes = sum(1 for a in attempts if (a.get("score") or {}).get("passed"))
+        per_fixture[row["fixture"]] = fixture_regression(passes, len(attempts), known.get(row["fixture"]))
+    regressed = sorted(name for name, r in per_fixture.items() if r["regressed"])
+    calib = None if dry_run else calibration(rows)
+    return {
+        "passed": not regressed and not unsafe and (calib is None or calib["passed"]),
+        "mode": "statistical",
+        "regressed": regressed,
+        "failed": regressed,
+        "unsafe": sorted(unsafe),
+        "fixtures": per_fixture,
+        "calibration": calib,
+        "alpha": REGRESSION_ALPHA,
+        "citations": _citations([a for row in rows for a in row.get("attempts", [row]) if "error" not in a]),
+    }
+
+
+def _citations(attempts: list[dict]) -> dict:
+    total = sum(int((a.get("score") or {}).get("evidence_total") or 0) for a in attempts)
+    cited = sum(int((a.get("score") or {}).get("evidence_cited") or 0) for a in attempts)
+    return {"cited": cited, "total": total, "rate": round(cited / total, 3) if total else None}
+
+
+def baseline_from(rows: list[dict], *, model: str, models_seen: list[str], commit: str = "") -> dict:
+    """A baseline file from a repeated run (normally the nightly run on main)."""
+    fixtures = {}
+    for row in rows:
+        attempts = [a for a in row.get("attempts", [row]) if "error" not in a]
+        fixtures[row["fixture"]] = {
+            "passes": sum(1 for a in attempts if (a.get("score") or {}).get("passed")),
+            "attempts": len(attempts),
+        }
+    import time as _time
+
+    return {
+        "model": model,
+        "models_seen": models_seen,
+        "commit": commit,
+        "measured_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+        "fixtures": fixtures,
+    }

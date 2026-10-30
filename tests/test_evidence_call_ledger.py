@@ -194,3 +194,51 @@ def test_evidence_view_names_the_call_and_what_was_not_read():
     )
     assert items[0]["detail"].endswith("source: get_events(namespace=shop)")
     assert items[1]["detail"].endswith("cites get_prometheus_query (c2 error), not read")
+
+
+def test_the_agent_loop_reports_which_model_answered():
+    """Evals record the resolved model, so an alias moving to a new version is visible."""
+    from unittest.mock import MagicMock
+
+    from sre_agent.agent import run_agent_streaming
+
+    class _Answer:
+        def __init__(self):
+            self._msg = SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="done")],
+                stop_reason="end_turn",
+                usage=SimpleNamespace(input_tokens=3, output_tokens=2),
+                model="claude-sonnet-5@20261001",
+            )
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def __aiter__(self):
+            async def gen():
+                if False:
+                    yield None
+
+            return gen()
+
+        async def get_final_message(self):
+            return self._msg
+
+    client = MagicMock()
+    client.messages.stream = MagicMock(return_value=_Answer())
+    seen: list[dict] = []
+    asyncio.run(
+        run_agent_streaming(
+            client=client,
+            messages=[{"role": "user", "content": "hi"}],
+            system_prompt="s",
+            tool_defs=[],
+            tool_map={},
+            on_usage=lambda **kw: seen.append(kw),
+            honor_plan_requests=False,
+        )
+    )
+    assert seen and seen[0]["model"] == "claude-sonnet-5@20261001"

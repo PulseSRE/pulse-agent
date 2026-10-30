@@ -40,6 +40,12 @@ jobs:
           --health-retries 5
     env:
       PULSE_AGENT_DATABASE_URL: postgresql://pulse:pulse@localhost:5433/pulse_test
+      # The model every live lane runs, in one place. `claude-sonnet-5` is an
+      # alias the provider can move to a newer version with no change here,
+      # which turns a model update into an unexplained gate change. The
+      # investigation replay reports the version that actually answered
+      # ("Model(s) that answered"); pin that here, and change it in its own PR.
+      EVAL_MODEL: claude-sonnet-5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -227,7 +233,7 @@ jobs:
           # and forced them non-gating. The judge re-scores a fixed transcript,
           # so three samples cost little, and the per-dimension median discards
           # the outlier grades that were doing the flipping.
-          python -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-5 \
+          python -m sre_agent.evals.replay_cli --all --judge --model "$EVAL_MODEL" \
             --concurrency 4 --judge-min 60 --judge-samples 3 \
             --baseline sre_agent/evals/baselines/replay.json \
             --format json > artifacts/live_judge.json
@@ -272,8 +278,21 @@ jobs:
           echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
           trap 'rm -f /tmp/gcp-sa-key.json' EXIT
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json
-          python -m sre_agent.evals.investigation_replay_cli --all --model claude-sonnet-5 \
-            --concurrency 4 --retries 1 --format json > artifacts/investigation_replay.json
+          # Every fixture is attempted several times and judged against the pass
+          # rate main has shown (sre_agent/evals/investigation_baseline.json):
+          # red only when a fixture is significantly worse than its baseline, or
+          # any attempt is unsafe. One pass-or-retry per fixture made the gate
+          # red at random on main and green at random on pull requests. The
+          # nightly run samples more and writes a fresh baseline as an artifact.
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            REPEAT=10
+            EXTRA="--write-baseline artifacts/investigation_baseline.json"
+          else
+            REPEAT=3
+            EXTRA=""
+          fi
+          python -m sre_agent.evals.investigation_replay_cli --all --model "$EVAL_MODEL" \
+            --concurrency 4 --repeat "$REPEAT" $EXTRA --format json > artifacts/investigation_replay.json
 
       # Deterministic lane: the live agent against SRE-Bench's simulated cluster
       # fixtures. No judge in the gate — resolution/efficiency/safety come from
@@ -406,9 +425,19 @@ jobs:
               gate = investigation.get("verdict", {})
               calib = gate.get("calibration") or {}
               passed_i = sum(1 for r in rows if r.get("score", {}).get("passed"))
+              rates = gate.get("fixtures") or {}
+              attempts_i = sum(r.get("attempts", 0) for r in rates.values())
+              passes_i = sum(r.get("passes", 0) for r in rates.values())
+              tally = (
+                  f"{passes_i}/{attempts_i} attempts passed; regressed vs baseline: "
+                  f"{', '.join(gate.get('regressed') or []) or 'none'}"
+                  if gate.get("mode") == "statistical"
+                  else f"{passed_i}/{len(rows)} fixtures"
+              )
               lines.append(
                   f"- **investigation replay: {'PASS' if gate.get('passed') else 'FAIL'}** "
-                  f"({passed_i}/{len(rows)} fixtures; unsafe: {', '.join(gate.get('unsafe') or []) or 'none'}; "
+                  f"({tally}; unsafe: {', '.join(gate.get('unsafe') or []) or 'none'}; "
+                  f"model: {', '.join(gate.get('models_seen') or []) or 'not reported'}; "
                   f"brier={calib.get('brier')} over {calib.get('samples')} attempts, "
                   f"confidence right={calib.get('mean_confidence_when_right')} "
                   f"wrong={calib.get('mean_confidence_when_wrong')}; "
@@ -486,13 +515,14 @@ jobs:
   # not by the board. A scheduled workflow that fails silently is worse than no
   # scheduled workflow: it produces the reassurance of coverage with none of it.
   #
-  # Deliberately limited to `schedule`. Push and pull_request failures are
-  # already visible to whoever pushed; it is the unattended run that needs a
-  # voice. Uses the built-in GITHUB_TOKEN, so it needs no secrets to be
+  # Also on pushes to main: the gate went red on the v2.35.0 release push and
+  # the two merges after it, and nobody was told, because only the nightly run
+  # opened an issue. A push to main has no reviewer watching its CI either.
+  # Pull request failures are visible to whoever opened the PR. Uses the built-in GITHUB_TOKEN, so it needs no secrets to be
   # configured before it starts working.
   notify-on-scheduled-failure:
     needs: [evals]
-    if: failure() && github.event_name == 'schedule'
+    if: failure() && (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -504,7 +534,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          TITLE="Nightly eval run is failing"
+          TITLE="Evals are failing on main"
 
           # One issue per outage, not one per night: comment on the existing
           # thread if it is already open, so seven weeks of failures is seven
@@ -518,7 +548,7 @@ jobs:
             "Run: $RUN_URL" \
             "Commit: \`${GITHUB_SHA:0:7}\`" \
             "" \
-            "This is the unattended nightly run, so no one is watching it by default." \
+            "Event: ${{ github.event_name }}. No one is watching runs on main by default." \
             "Closing this issue is fine once the run is green again — it will reopen a" \
             "new one if it breaks later.")
 

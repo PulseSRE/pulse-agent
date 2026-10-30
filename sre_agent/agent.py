@@ -1028,6 +1028,10 @@ async def run_agent_streaming(
                 output_tokens=getattr(_usage, "output_tokens", 0),
                 cache_read_tokens=getattr(_usage, "cache_read_input_tokens", 0),
                 cache_creation_tokens=getattr(_usage, "cache_creation_input_tokens", 0),
+                # The model that actually answered. A configured alias can
+                # resolve to a newer version without any change here; evals
+                # record this so a behaviour shift can be traced to it.
+                model=str(getattr(response, "model", "") or ""),
             )
 
         # API call succeeded — reset circuit breaker

@@ -1,0 +1,108 @@
+name: Investigation replay (repeat one fixture)
+
+# Measures how often one investigation fixture passes against the live model.
+# The release gate runs each fixture once (plus one retry), which cannot tell a
+# fixture that fails 1 time in 10 from one that fails 9 in 10. Run on demand,
+# or by opening a pull request that changes this file (it checks out the PR
+# head, not the merge commit, so the code measured is exactly the branch's).
+
+on:
+  workflow_dispatch:
+    inputs:
+      fixture:
+        description: "Fixture name (sre_agent/evals/investigation_fixtures/)"
+        default: plan_node_disk_pressure
+      repeat:
+        description: "Independent attempts"
+        default: "10"
+  pull_request:
+    paths:
+      - .github/workflows/investigation-repeat.yml
+
+jobs:
+  repeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pulse
+          POSTGRES_PASSWORD: pulse
+          POSTGRES_DB: pulse_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PULSE_AGENT_DATABASE_URL: postgresql://pulse:pulse@localhost:5433/pulse_test
+      FIXTURE: ${{ inputs.fixture || 'plan_node_disk_pressure' }}
+      REPEAT: ${{ inputs.repeat || '10' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+
+      - name: Run the fixture repeatedly
+        env:
+          ANTHROPIC_VERTEX_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
+          CLOUD_ML_REGION: ${{ secrets.VERTEX_REGION }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_VERTEX_PROJECT_ID" ] || [ -z "$GCP_SA_KEY" ]; then
+            echo "::error::Vertex AI credentials are not configured."
+            exit 1
+          fi
+          echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
+          trap 'rm -f /tmp/gcp-sa-key.json' EXIT
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json
+          mkdir -p artifacts/repeat
+          # Four at a time: API-bound, and within the provider's rate limits.
+          seq 1 "$REPEAT" | xargs -P 4 -I{} sh -c \
+            'python -m sre_agent.evals.investigation_replay_cli --fixture "$FIXTURE" --retries 0 --format json > artifacts/repeat/{}.json 2> artifacts/repeat/{}.log || true'
+
+      - name: Summarize
+        if: always()
+        run: |
+          python - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import glob, json, os
+          rows = []
+          for path in sorted(glob.glob("artifacts/repeat/*.json"), key=lambda p: int(os.path.basename(p)[:-5])):
+              try:
+                  data = json.load(open(path))
+              except Exception as e:
+                  rows.append(("error", None, str(e)[:80], []))
+                  continue
+              for fx in data.get("fixtures", []):
+                  s = fx["score"]
+                  report = fx.get("report") or {}
+                  rows.append((
+                      "PASS" if s["passed"] else "FAIL",
+                      s.get("confidence"),
+                      (report.get("suspected_cause") or "")[:140].replace("|", "/"),
+                      sorted(set(s.get("tool_calls") or [])),
+                  ))
+          passed = sum(1 for r in rows if r[0] == "PASS")
+          print(f"## {os.environ['FIXTURE']}: {passed}/{len(rows)} attempts passed ({os.environ.get('GITHUB_SHA','')[:7]})\n")
+          print("| # | result | confidence | tools | reported cause |\n|---|---|---|---|---|")
+          for i, (res, conf, cause, tools) in enumerate(rows, 1):
+              print(f"| {i} | {res} | {conf} | {', '.join(tools)} | {cause} |")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: investigation-repeat
+          path: artifacts/repeat/
