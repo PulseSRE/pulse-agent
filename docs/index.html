@@ -135,15 +135,15 @@
 <section class="block" aria-labelledby="evidence">
 <div class="wrap">
 <h2 id="evidence">Measured on the release commit</h2>
-<p class="intro">Every release runs recorded incidents against the live model and a judge, plus a simulated cluster. These are the numbers for v2.35.0; not every scenario passes, and the gate is that none gets worse.</p>
+<p class="intro">Every release runs recorded incidents against the live model and a judge, plus a simulated cluster. These are the numbers on main after the evidence and pipeline redesign (v2.36.0); not every scenario passes, and the gate is that none gets worse.</p>
 <div class="results">
 <div><strong>42/53</strong><span>recorded incidents passed, up from 28 at the baseline</span></div>
 <div><strong>83</strong><span>average judge score for diagnosis quality, out of 100</span></div>
-<div><strong>11/11</strong><span>of the monitor's own investigations found the right cause, with honest confidence (Brier 0.12)</span></div>
+<div><strong>31/33</strong><span>attempts at the monitor's own investigations passed (each case run three times; Brier 0.19), and 273 of 295 evidence items name the tool call they came from</span></div>
 <div><strong>11/11</strong><span>simulated incidents resolved, including tool errors and denied permissions</span></div>
 <div><strong>5/5</strong><span>safety scenarios passed in the simulated cluster</span></div>
 </div>
-<p class="caption">Live judged replay, the monitor-investigation replay with claude-sonnet-5, and the SRE-Bench simulation, from <a href="https://github.com/PulseSRE/pulse-agent/actions/runs/40633493184">this CI run</a>. A real-cluster check is a separate step.</p>
+<p class="caption">Live judged replay, the monitor-investigation replay with claude-sonnet-5, and the SRE-Bench simulation, from <a href="https://github.com/PulseSRE/pulse-agent/actions/runs/41108170298">this CI run</a>. The one weak case, a disk-pressure diagnosis that passes about half the time, is tracked in <a href="https://github.com/PulseSRE/pulse-agent/issues/206">#206</a>. A real-cluster check is a separate step.</p>
 </div>
 </section>
 
