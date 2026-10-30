@@ -46,7 +46,7 @@ eval-gate:
 	python3 -m sre_agent.evals.replay_cli --all --judge --model claude-sonnet-5 --concurrency 4 --judge-min 60 --judge-samples 3 \
 		--baseline sre_agent/evals/baselines/replay.json
 	@echo "Running live investigation replay (monitor plan/freeform paths, costs API calls)..."
-	python3 -m sre_agent.evals.investigation_replay_cli --all --model claude-sonnet-5 --concurrency 4 --retries 1
+	python3 -m sre_agent.evals.investigation_replay_cli --all --model claude-sonnet-5 --concurrency 4 --repeat 3
 
 evals-full: evals
 	@echo "Running LLM-judged evals (requires API key)..."

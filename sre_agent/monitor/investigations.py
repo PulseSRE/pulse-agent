@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from typing import Any
@@ -132,7 +133,8 @@ def _build_investigation_prompt(finding: dict) -> str:
         '  "evidence": [\n'
         '    {"observation": "p99 latency rose from 180ms to 730ms at 14:06",\n'
         '     "kind": "metric|log|event|resource|change|trace",\n'
-        '     "source": "the tool or signal this came from",\n'
+        '     "call": "c3",\n'
+        '     "source": "the tool this came from",\n'
         '     "stance": "supports|contradicts|context",\n'
         '     "confidence": 0.0}\n'
         "  ],\n"
@@ -145,7 +147,8 @@ def _build_investigation_prompt(finding: dict) -> str:
         "evidence: cite the signal behind every claim. Record evidence that argues "
         "AGAINST your suspected cause with stance=contradicts — it is used to temper "
         "confidence, not held against you. An investigation with no evidence is capped "
-        "at low confidence no matter what value you report.\n\n"
+        "at low confidence no matter what value you report. Each tool result begins with "
+        '[call cN: tool_name]; set each evidence item\'s "call" to the cN of the result it came from.\n\n'
         "viewPlan: 3-5 widgets to help the user verify your diagnosis.\n"
         f"Valid kinds: {', '.join(view_kinds)}\n"
         f"Valid tools: {', '.join(read_tools[:20])}\n"
@@ -330,13 +333,24 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
         except Exception:
             logger.debug("Memory augmentation failed for proactive investigation", exc_info=True)
 
+    from ..evidence import CallLedger
     from ..tool_usage import build_tool_result_handler
 
     finding_id = finding.get("id", "unknown")[:12]
-    on_tool_result = build_tool_result_handler(
+    record_usage = build_tool_result_handler(
         session_id=f"pipeline-{finding_id}",
         agent_mode="pipeline:investigate",
     )
+    # Every call as it finished: evidence cites these by ref, and grounding
+    # checks the citation here rather than trusting the model's account.
+    ledger = CallLedger()
+
+    async def on_tool_result(info: dict) -> None:
+        ledger.record(info)
+        # The audit handler may be sync or async (the replay's is async).
+        pending = record_usage(info)
+        if inspect.isawaitable(pending):
+            await pending
 
     # The tools the investigation actually used. A skill learned from this
     # trajectory records them as its procedure; the placeholder it used to get
@@ -366,6 +380,7 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
             on_tool_use=_note_tool,
             on_tool_result=on_tool_result,
             on_usage=_add_usage,
+            label_tool_calls=True,
         )
     _record_investigation_usage(finding, usage, list(readonly_map.keys()), tools_called)
 
@@ -404,8 +419,8 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
     # Confidence is derived from the evidence rather than taken from the model's
     # self-assessment. `asserted_confidence` is retained so the gap between what an
     # investigation claimed and what it could support stays observable.
-    # A cited source the investigation never called counts as unsourced.
-    parsed_evidence = ground_evidence(parse_evidence(evidence)[:10], tools_called)
+    # Evidence citing a call that failed or never ran counts as unsourced.
+    parsed_evidence = ground_evidence(parse_evidence(evidence)[:10], ledger)
     derived = derive_confidence(parsed_evidence, confidence)
 
     return {
@@ -419,6 +434,7 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
         "alternatives_considered": [str(a) for a in alternatives[:10]],
         "view_plan": view_plan,
         "tools_called": tools_called,
+        "tool_calls": ledger.as_list(),
     }
 
 

@@ -89,7 +89,13 @@ def _evidence_items(metadata: dict[str, Any]) -> list[dict[str, Any]]:
             parts: list[str] = [stance]
             if ev.get("kind") and ev.get("kind") != "unknown":
                 parts.append(str(ev["kind"]))
-            parts.append(f"source: {ev['source']}" if ev.get("source") else "source not recorded")
+            if ev.get("source"):
+                call = f"({ev['call_input']})" if ev.get("call_input") else ""
+                parts.append(f"source: {ev['source']}{call}")
+            elif ev.get("unverified_source"):
+                parts.append(f"cites {ev['unverified_source']}, not read")
+            else:
+                parts.append("source not recorded")
             items.append(
                 {"name": str(ev["observation"])[:300], "status": _STANCE_STATUS[stance], "detail": " · ".join(parts)}
             )

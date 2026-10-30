@@ -64,6 +64,9 @@ class SkillOutput:
     contract_missing: list[str] = field(default_factory=list)
     # Structured evidence (evidence.Evidence dicts) the confidence was derived from.
     evidence: list[dict] = field(default_factory=list)
+    # The tool calls the phase made (evidence.CallLedger.as_list()); evidence
+    # cites them by ref, prefixed with the phase id ("diagnose.c3").
+    tool_calls: list[dict] = field(default_factory=list)
 
 
 @dataclass

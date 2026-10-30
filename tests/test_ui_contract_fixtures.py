@@ -13,12 +13,10 @@ file to pulse-ui, where its rendering test will say whether the UI still copes.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 GOLDEN = Path(__file__).parent / "fixtures" / "ui_contract" / "investigation.json"
 
@@ -39,6 +37,8 @@ SUPPORTED = {
             "source": "get_pod_logs",
             "stance": "supports",
             "confidence": 0.9,
+            "call_ref": "c2",
+            "call_input": "namespace=shop, pod_name=api-server-7f9c",
         },
         {
             "observation": "Rollout at 10:02 removed DB_HOST from the container env",
@@ -53,6 +53,8 @@ SUPPORTED = {
             "source": "get_events",
             "stance": "contradicts",
             "confidence": 0.6,
+            "call_ref": "c1",
+            "call_input": "namespace=shop",
         },
         {
             "observation": "Node worker-2 has 30% memory headroom",
@@ -84,8 +86,8 @@ def _evidence_view(result: dict) -> list[dict]:
 
 
 def _investigation_report(result: dict) -> dict:
-    """The investigation_report a plan broadcasts, via _report_plan_investigation."""
-    from sre_agent.monitor.plan_executor import _report_plan_investigation
+    """The investigation_report a plan broadcasts (investigation_pipeline.outcome_from_plan)."""
+    from sre_agent.monitor.investigation_pipeline import outcome_from_plan
     from sre_agent.skill_plan import PlanResult, SkillOutput
 
     diagnose = SkillOutput(
@@ -108,15 +110,7 @@ def _investigation_report(result: dict) -> dict:
     plan.phase_outputs = {"diagnose": diagnose}
     finding = {"id": "f-contract", "category": "crashloop", "resources": []}
 
-    class _Monitor:
-        async def _broadcast_raw(self, _message):
-            return None
-
-    with (
-        patch("sre_agent.monitor.actions.save_investigation", lambda *a, **k: None),
-        patch("sre_agent.inbox.attach_investigation_to_finding", lambda *a, **k: None),
-    ):
-        report = asyncio.run(_report_plan_investigation(_Monitor(), finding, template, plan))
+    report = outcome_from_plan(template, plan).to_report(finding)
     assert report is not None
     # Generated per run; pinned so the golden compares.
     return {**report, "id": "i-contract", "timestamp": 1761600000000}

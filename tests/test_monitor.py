@@ -362,9 +362,11 @@ class TestSecurityFollowup:
         }
 
         with (
-            patch("sre_agent.monitor.investigation_runner._run_proactive_investigation", return_value=mock_inv_result),
             patch(
-                "sre_agent.monitor.investigation_runner._run_security_followup", return_value=mock_sec_result
+                "sre_agent.monitor.investigation_pipeline._run_proactive_investigation", return_value=mock_inv_result
+            ),
+            patch(
+                "sre_agent.monitor.investigation_pipeline._run_security_followup", return_value=mock_sec_result
             ) as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
@@ -417,8 +419,10 @@ class TestSecurityFollowup:
         }
 
         with (
-            patch("sre_agent.monitor.investigation_runner._run_proactive_investigation", return_value=mock_inv_result),
-            patch("sre_agent.monitor.investigation_runner._run_security_followup") as mock_sec,
+            patch(
+                "sre_agent.monitor.investigation_pipeline._run_proactive_investigation", return_value=mock_inv_result
+            ),
+            patch("sre_agent.monitor.investigation_pipeline._run_security_followup") as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
@@ -478,9 +482,11 @@ class TestSecurityFollowup:
         }
 
         with (
-            patch("sre_agent.monitor.investigation_runner._run_proactive_investigation", return_value=mock_inv_result),
             patch(
-                "sre_agent.monitor.investigation_runner._run_security_followup", return_value=mock_sec_result
+                "sre_agent.monitor.investigation_pipeline._run_proactive_investigation", return_value=mock_inv_result
+            ),
+            patch(
+                "sre_agent.monitor.investigation_pipeline._run_security_followup", return_value=mock_sec_result
             ) as mock_sec,
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
@@ -556,11 +562,11 @@ class TestInvestigationClientIsolation:
 
         with (
             patch(
-                "sre_agent.monitor.investigation_runner._run_proactive_investigation",
+                "sre_agent.monitor.investigation_pipeline._run_proactive_investigation",
                 side_effect=fake_investigation,
             ),
             patch(
-                "sre_agent.monitor.investigation_runner._run_security_followup",
+                "sre_agent.monitor.investigation_pipeline._run_security_followup",
                 side_effect=fake_security_followup,
             ),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
@@ -623,7 +629,7 @@ class TestInvestigationClientIsolation:
 
         with (
             patch(
-                "sre_agent.monitor.investigation_runner._run_proactive_investigation",
+                "sre_agent.monitor.investigation_pipeline._run_proactive_investigation",
                 side_effect=fake_investigation,
             ),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
@@ -671,7 +677,7 @@ class TestInvestigationClientIsolation:
 
         with (
             patch(
-                "sre_agent.monitor.investigation_runner._run_proactive_investigation",
+                "sre_agent.monitor.investigation_pipeline._run_proactive_investigation",
                 side_effect=hanging_investigation,
             ),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
@@ -714,7 +720,7 @@ class TestInvestigationClientIsolation:
 
         with (
             patch(
-                "sre_agent.monitor.investigation_runner._run_proactive_investigation",
+                "sre_agent.monitor.investigation_pipeline._run_proactive_investigation",
                 side_effect=failing_investigation,
             ),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
@@ -781,7 +787,9 @@ class TestMonitorAutoLearn:
         }
 
         with (
-            patch("sre_agent.monitor.investigation_runner._run_proactive_investigation", return_value=mock_inv_result),
+            patch(
+                "sre_agent.monitor.investigation_pipeline._run_proactive_investigation", return_value=mock_inv_result
+            ),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
@@ -840,7 +848,9 @@ class TestMonitorAutoLearn:
         }
 
         with (
-            patch("sre_agent.monitor.investigation_runner._run_proactive_investigation", return_value=mock_inv_result),
+            patch(
+                "sre_agent.monitor.investigation_pipeline._run_proactive_investigation", return_value=mock_inv_result
+            ),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch("sre_agent.plan_templates.match_template", return_value=None),
         ):
@@ -894,7 +904,9 @@ class TestMonitorAutoLearn:
         }
 
         with (
-            patch("sre_agent.monitor.investigation_runner._run_proactive_investigation", return_value=mock_inv_result),
+            patch(
+                "sre_agent.monitor.investigation_pipeline._run_proactive_investigation", return_value=mock_inv_result
+            ),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.plan_templates.match_template", return_value=None),
@@ -1534,17 +1546,22 @@ class TestEvalScaffoldingIntegration:
             resources=[{"kind": "Pod", "name": "web-1", "namespace": "prod"}],
         )
 
+        # The shape _run_proactive_investigation returns (snake_case). This
+        # mock used camelCase, which only passed because a missing cause was
+        # learned as "unknown".
         mock_inv_result = {
             "summary": "Novel pressure pattern detected",
-            "suspectedCause": "Resource contention from new workload",
-            "recommendedFix": "Investigate resource allocation",
+            "suspected_cause": "Resource contention from new workload",
+            "recommended_fix": "Investigate resource allocation",
             "confidence": 0.85,
         }
 
         eval_mock = MagicMock()
         fake_bus = MagicMock()
         with (
-            patch("sre_agent.monitor.investigation_runner._run_proactive_investigation", return_value=mock_inv_result),
+            patch(
+                "sre_agent.monitor.investigation_pipeline._run_proactive_investigation", return_value=mock_inv_result
+            ),
             patch("sre_agent.agent._circuit_breaker") as mock_cb,
             patch.object(monitor, "_try_plan_execution", return_value=False),
             patch("sre_agent.context_bus.get_context_bus", return_value=fake_bus),

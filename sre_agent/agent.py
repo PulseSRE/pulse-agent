@@ -664,6 +664,18 @@ def _execute_tool_with_timeout(
         return f"Error: {name} timed out after {timeout}s", None, meta
 
 
+def _label_result(content: Any, ref: str, tool_name: str) -> Any:
+    """Start a tool result with the reference evidence can cite it by."""
+    if not ref:
+        return content
+    label = f"[call {ref}: {tool_name}]"
+    if isinstance(content, str):
+        return f"{label}\n{content}"
+    if isinstance(content, list):
+        return [{"type": "text", "text": label}, *content]
+    return content
+
+
 async def run_agent_streaming(
     client,
     messages: list[dict],
@@ -683,6 +695,7 @@ async def run_agent_streaming(
     user_token: str | None = None,
     event_bus=None,
     honor_plan_requests: bool = True,
+    label_tool_calls: bool = False,
 ) -> str:
     """Run an agent turn with streaming, handling the tool loop manually.
 
@@ -709,6 +722,11 @@ async def run_agent_streaming(
         honor_plan_requests: When the person's latest message asks only for a
             plan or advice, refuse writes before confirmation. Callers whose
             messages are generated prompts rather than a person's words pass False.
+        label_tool_calls: Give every tool call a short reference (``c1``, ``c2``,
+            ...) and start its result with ``[call c1: tool_name]`` so the model
+            can cite the exact call an observation came from. The reference is
+            also in the ``on_tool_result`` metadata (``call_ref``), next to the
+            API's ``tool_use_id``. Off by default so chat results are unchanged.
 
     Returns the full final text response.
     """
@@ -733,6 +751,8 @@ async def run_agent_streaming(
     iterations = 0
     finished = False
     policy_denied_write = False
+    # Short per-turn references for tool calls (see label_tool_calls).
+    call_refs: dict[str, str] = {}
     # Asked for a plan, not a change: writes are refused before anyone is asked
     # to confirm them (see action_policy.requests_plan_only).
     # Only for turns a person wrote: callers that build their own prompts (plan
@@ -1008,6 +1028,10 @@ async def run_agent_streaming(
                 output_tokens=getattr(_usage, "output_tokens", 0),
                 cache_read_tokens=getattr(_usage, "cache_read_input_tokens", 0),
                 cache_creation_tokens=getattr(_usage, "cache_creation_input_tokens", 0),
+                # The model that actually answered. A configured alias can
+                # resolve to a newer version without any change here; evals
+                # record this so a behaviour shift can be traced to it.
+                model=str(getattr(response, "model", "") or ""),
             )
 
         # API call succeeded — reset circuit breaker
@@ -1034,6 +1058,8 @@ async def run_agent_streaming(
             tool_results = []
             _abort_401 = threading.Event()
             tool_blocks = [b for b in response.content if b.type == "tool_use"]
+            for b in tool_blocks:
+                call_refs.setdefault(b.id, f"c{len(call_refs) + 1}")
             read_blocks = [b for b in tool_blocks if b.name not in write_tools]
             write_blocks = [b for b in tool_blocks if b.name in write_tools]
             results_map: dict[str, tuple[str, dict | None]] = {}
@@ -1071,6 +1097,8 @@ async def run_agent_streaming(
                     await event_bus.on_tool_result(
                         {
                             "tool_name": block.name,
+                            "tool_use_id": block.id,
+                            "call_ref": call_refs.get(block.id, ""),
                             "input": block.input,
                             "status": "error",
                             "error_message": f"{block.name} timed out",
@@ -1093,6 +1121,8 @@ async def run_agent_streaming(
                         await event_bus.on_tool_result(
                             {
                                 "tool_name": block.name,
+                                "tool_use_id": block.id,
+                                "call_ref": call_refs.get(block.id, ""),
                                 "input": block.input,
                                 "status": exec_meta["status"],
                                 "error_message": exec_meta["error_message"],
@@ -1109,6 +1139,8 @@ async def run_agent_streaming(
                         await event_bus.on_tool_result(
                             {
                                 "tool_name": block.name,
+                                "tool_use_id": block.id,
+                                "call_ref": call_refs.get(block.id, ""),
                                 "input": block.input,
                                 "status": "error",
                                 "error_message": f"Error executing {block.name}",
@@ -1132,6 +1164,8 @@ async def run_agent_streaming(
                     await event_bus.on_tool_result(
                         {
                             "tool_name": block.name,
+                            "tool_use_id": block.id,
+                            "call_ref": call_refs.get(block.id, ""),
                             "input": block.input,
                             "status": "denied",
                             "error_message": reason,
@@ -1149,6 +1183,8 @@ async def run_agent_streaming(
                     await event_bus.on_tool_result(
                         {
                             "tool_name": block.name,
+                            "tool_use_id": block.id,
+                            "call_ref": call_refs.get(block.id, ""),
                             "input": block.input,
                             "status": "denied",
                             "error_message": PLAN_ONLY_REFUSAL,
@@ -1167,6 +1203,8 @@ async def run_agent_streaming(
                     await event_bus.on_tool_result(
                         {
                             "tool_name": block.name,
+                            "tool_use_id": block.id,
+                            "call_ref": call_refs.get(block.id, ""),
                             "input": block.input,
                             "status": "denied",
                             "error_message": None,
@@ -1199,6 +1237,8 @@ async def run_agent_streaming(
                 await event_bus.on_tool_result(
                     {
                         "tool_name": block.name,
+                        "tool_use_id": block.id,
+                        "call_ref": call_refs.get(block.id, ""),
                         "input": block.input,
                         "status": exec_meta["status"],
                         "error_message": exec_meta["error_message"],
@@ -1215,10 +1255,13 @@ async def run_agent_streaming(
                 if block.id not in results_map:
                     failed_ids.add(block.id)
                 text, component = results_map.get(block.id, (f"Error: no result for {block.name}", None))
+                content = result_content(text)
+                if label_tool_calls:
+                    content = _label_result(content, call_refs.get(block.id, ""), block.name)
                 result_block: dict[str, Any] = {
                     "type": "tool_result",
                     "tool_use_id": block.id,
-                    "content": result_content(text),
+                    "content": content,
                 }
                 if block.id in failed_ids:
                     result_block["is_error"] = True

@@ -13,7 +13,8 @@ from ..async_db import ASYNC_DB_ERRORS as _ASYNC_DB_ERRORS
 from ..config import get_settings
 from ..repositories.monitor_repo import get_monitor_repo
 from .confidence import _sanitize_for_prompt
-from .investigations import _run_proactive_investigation, _run_security_followup
+from .investigation_pipeline import investigate
+from .investigations import _run_security_followup
 
 if TYPE_CHECKING:
     from .cluster_monitor import ClusterMonitor
@@ -56,8 +57,10 @@ async def process_handoffs(monitor: ClusterMonitor) -> None:
                 "resources": [{"kind": "Namespace", "name": namespace, "namespace": namespace}],
             }
             try:
+                # A fresh client, not the monitor's shared one: wait_for can
+                # cancel this mid-stream, which can corrupt a shared client.
                 await asyncio.wait_for(
-                    _run_security_followup(finding, client=monitor._client),
+                    _run_security_followup(finding, client=None),
                     timeout=timeout_seconds,
                 )
                 logger.info("Handoff security scan completed for %s", namespace)
@@ -75,14 +78,13 @@ async def process_handoffs(monitor: ClusterMonitor) -> None:
                     {"kind": details.get("kind", ""), "name": details.get("name", ""), "namespace": namespace}
                 ],
             }
-            try:
-                await asyncio.wait_for(
-                    _run_proactive_investigation(finding, client=monitor._client),
-                    timeout=timeout_seconds,
-                )
-                logger.info("Handoff SRE investigation completed for %s", namespace)
-            except Exception as e:
-                logger.error("Handoff SRE investigation failed: %s", e)
+            # Through the investigation pipeline like any other: it was run
+            # here and its result thrown away (no report, nothing saved, no
+            # inbox), on the monitor's shared client under wait_for — the
+            # combination that can poison that client for every investigation
+            # after a timeout.
+            outcome = await investigate(monitor, finding)
+            logger.info("Handoff SRE investigation for %s: %s", namespace, outcome.status)
 
     processed_ids = [row["id"] for row in rows if row.get("id") is not None]
     if processed_ids:

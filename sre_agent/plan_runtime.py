@@ -12,6 +12,7 @@ Executes SkillPlan graphs phase-by-phase:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import re
@@ -19,6 +20,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
+from .evidence import CallLedger
 from .skill_plan import (
     PlanResult,
     SkillOutput,
@@ -44,6 +46,31 @@ def _phase_can_write(phase) -> bool:
         # Unknown is treated as able to write: holding a read-only phase back
         # costs a report; letting a write through costs a change.
         return True
+
+
+def _without_unapprovable_writes(config: dict, *, can_approve: bool) -> dict:
+    """Drop write tools from a phase that has no way to approve a write.
+
+    A monitor plan runs with no confirmation callback, so every write a phase
+    attempts is refused. Offering the tools anyway invited the attempts: an
+    image-pull diagnosis reached for ``test_connectivity`` (it starts a pod),
+    was refused, and the attempt itself is what the safety gate counts. The
+    phase can still recommend the change; it just is not handed the tool.
+    """
+    if can_approve:
+        return config
+    from .action_policy import effective_write_tools
+    from .tool_registry import get_write_tools
+
+    writes = effective_write_tools(config.get("write_tools") or (), get_write_tools(), config["tool_map"].keys())
+    if not writes:
+        return config
+    return {
+        **config,
+        "tool_defs": [d for d in config["tool_defs"] if d.get("name") not in writes],
+        "tool_map": {n: t for n, t in config["tool_map"].items() if n not in writes},
+        "write_tools": set(),
+    }
 
 
 class PlanRuntime:
@@ -410,19 +437,27 @@ class PlanRuntime:
                     evidence_summary=f"Unknown skill: {phase.skill_name}",
                 )
 
-            config = build_config_from_skill(skill, query=prompt)
+            config = _without_unapprovable_writes(
+                build_config_from_skill(skill, query=prompt), can_approve=self._on_confirm is not None
+            )
 
-            tools_called: list[str] = []
-
-            def on_tool(name):
-                tools_called.append(name)
-
+            from .evidence import CallLedger
             from .tool_usage import build_tool_result_handler
 
-            on_tool_result = build_tool_result_handler(
+            # What the phase ran, recorded as each call finished. Evidence
+            # cites these calls; grounding checks the citation against it.
+            ledger = CallLedger()
+            record_usage = build_tool_result_handler(
                 session_id=f"plan-{phase.id}",
                 agent_mode=f"pipeline:plan:{phase.skill_name}",
             )
+
+            async def on_tool_result(info: dict) -> None:
+                ledger.record(info)
+                # The audit handler may be sync or async (the replay's is async).
+                pending = record_usage(info)
+                if inspect.isawaitable(pending):
+                    await pending
 
             async with self._phase_write_guard(config["write_tools"]), borrow_async_client(self._client) as client:
                 response = await run_agent_streaming(
@@ -434,16 +469,16 @@ class PlanRuntime:
                     config["write_tools"],
                     on_confirm=self._on_confirm,
                     user_token=self._user_token,
-                    on_tool_use=on_tool,
                     on_tool_result=on_tool_result,
                     mode=phase.skill_name,
+                    label_tool_calls=True,
                     # The prompt is generated from the plan, not written by a person;
                     # phase writes are governed by _phase_write_guard instead.
                     honor_plan_requests=False,
                 )
 
             # Try to extract structured SkillOutput from response
-            output = self._parse_skill_output(response, phase, tools_called)
+            output = self._parse_skill_output(response, phase, ledger)
             return output
 
         except Exception as e:
@@ -455,10 +490,18 @@ class PlanRuntime:
                 evidence_summary=f"Execution error: {type(e).__name__}: {str(e)[:200]}",
             )
 
-    def _parse_skill_output(self, response: str, phase, tools_called: list[str]) -> SkillOutput:
-        """Parse agent response into SkillOutput — extract JSON if present, otherwise use raw text."""
+    def _parse_skill_output(self, response: str, phase, called: list[str] | CallLedger) -> SkillOutput:
+        """Parse agent response into SkillOutput — extract JSON if present, otherwise use raw text.
+
+        ``called`` is the phase's ``CallLedger`` (or, from older callers, a list
+        of tool names). Evidence citing a call is checked against it.
+        """
         import json
         import re
+
+        ledger = called if isinstance(called, CallLedger) else None
+        tools_called = called.tools_called if isinstance(called, CallLedger) else list(called)
+        tool_calls = [{**c, "ref": f"{phase.id}.{c['ref']}"} for c in ledger.as_list()] if ledger else []
 
         # Try to find structured JSON in response
         match = re.search(r"```json\s*(\{.*?\})\s*```", response, re.DOTALL)
@@ -471,7 +514,12 @@ class PlanRuntime:
                 # as a ceiling — the same rule the single-call investigation
                 # uses. Phases used to report a fixed 0.7 whatever they found.
                 # A cited source the phase never called counts as unsourced.
-                evidence = ground_evidence(parse_evidence(data.get("evidence", []))[:10], tools_called)
+                evidence = ground_evidence(parse_evidence(data.get("evidence", []))[:10], called)
+                # Refs restart at c1 in every phase; qualify them so a plan's
+                # combined evidence still says which call each item came from.
+                evidence = [
+                    e.model_copy(update={"call_ref": f"{phase.id}.{e.call_ref}"}) if e.call_ref else e for e in evidence
+                ]
                 try:
                     asserted = float(data.get("confidence", 0.0))
                 except (TypeError, ValueError):
@@ -494,6 +542,7 @@ class PlanRuntime:
                     risk_flags=data.get("risk_flags", []),
                     confidence=derive_confidence(evidence, asserted),
                     evidence=[e.model_dump() for e in evidence],
+                    tool_calls=tool_calls,
                 )
             except (json.JSONDecodeError, ValueError) as e:
                 logger.debug("Could not parse structured output for phase '%s': %s", phase.id, e)
@@ -508,6 +557,7 @@ class PlanRuntime:
             evidence_summary=response[:2000],
             actions_taken=tools_called,
             confidence=derive_confidence([], 0.7),
+            tool_calls=tool_calls,
         )
 
     def _compress_prior_outputs(self, outputs: dict[str, SkillOutput]) -> str:
@@ -783,12 +833,14 @@ class PlanRuntime:
             f'  "findings": {{{produces}}},\n'
             '  "evidence_summary": "two or three sentences",\n'
             '  "evidence": [{"observation": "what you saw", "kind": "metric|log|event|resource|change|trace", '
-            '"source": "the tool or query it came from", "stance": "supports|contradicts|context"}],\n'
+            '"call": "c3", "source": "the tool it came from", "stance": "supports|contradicts|context"}],\n'
             '  "alternatives_considered": ["causes you ruled out, and why"],\n'
             '  "confidence": 0.0,\n'
             '  "open_questions": []\n'
             "}\n"
             "```\n"
+            "Each tool result begins with [call cN: tool_name]; in each evidence item, set "
+            '"call" to the cN of the result it came from.\n'
             "Confidence is derived from the evidence you list; claims without evidence count for little."
         )
 
