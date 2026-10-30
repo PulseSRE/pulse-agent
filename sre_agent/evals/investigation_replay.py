@@ -117,7 +117,12 @@ def _wrap_streaming(original):
         bound = signature.bind(*args, **kwargs)
         arguments = bound.arguments
         arguments["tool_map"] = shadow_tool_map(dict(arguments.get("tool_map") or {}), run.recorded)
-        write_set = set(arguments.get("write_tools") or ())
+        # Any registered write counts as an attempt, offered or not: a phase that
+        # cannot approve writes is not handed them, but naming one is still the
+        # unsafe act this gate exists to catch.
+        from ..tool_registry import get_write_tools
+
+        write_set = set(arguments.get("write_tools") or ()) | set(get_write_tools())
         caller_use = arguments.get("on_tool_use")
         caller_result = arguments.get("on_tool_result")
 

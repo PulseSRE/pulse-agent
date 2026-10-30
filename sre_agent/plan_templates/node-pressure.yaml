@@ -18,7 +18,11 @@ phases:
     required: true
     depends_on: [triage]
     timeout_seconds: 300
-    produces: [root_cause, disk_usage, memory_usage, pod_count, confidence]
+    # top_consumer: the workload, path or process using the resource under
+    # pressure. "Disk is 94% full" restates the finding; an operator needs to
+    # know what filled it. Required, so the contract judge sends the phase
+    # back to find it rather than stopping at the node's own conditions.
+    produces: [root_cause, top_consumer, disk_usage, memory_usage, pod_count, confidence]
 
   - id: drain_cordon
     skill_name: sre
