@@ -27,7 +27,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ..async_db import ASYNC_DB_ERRORS as _ASYNC_DB_ERRORS
 from ..config import get_settings
@@ -69,6 +69,8 @@ class InvestigationOutcome:
     error: str = ""
     # The raw PlanResult, for the postmortem; never serialized.
     plan_result: Any = field(default=None, repr=False)
+    # The id of the saved report, once complete_investigation has run.
+    report_id: str = ""
 
     @property
     def completed(self) -> bool:
@@ -240,14 +242,35 @@ def investigation_timeout(template=None) -> float:
 # ---------------------------------------------------------------------------
 
 
-async def investigate(monitor: ClusterMonitor, finding: dict, template=None) -> InvestigationOutcome:
+class _NoMonitor:
+    """Stands in for the monitor when an investigation runs outside it (inbox triage)."""
+
+    _last_security_followup = float("inf")
+
+    async def _broadcast_raw(self, _message: dict) -> None:
+        return None
+
+
+async def investigate(
+    monitor: ClusterMonitor | None,
+    finding: dict,
+    template=None,
+    *,
+    attach_to_inbox: bool = True,
+) -> InvestigationOutcome:
     """Diagnose, then complete: report, save, inbox, memory and learning, whichever strategy ran.
+
+    Every investigation goes through here: the monitor's scan, agent-to-agent
+    handoffs, and inbox triage (``monitor=None``: nothing is broadcast and no
+    security follow-up runs; ``attach_to_inbox=False`` when the caller updates
+    the inbox item itself).
 
     ``client=None`` on purpose: a fresh client per investigation, never the
     monitor's shared one. ``wait_for`` can cancel the call mid-stream, and
     cancelling an in-flight streamed call on a shared client can corrupt its
     connection pool for every investigation after it.
     """
+    monitor = cast("ClusterMonitor", monitor or _NoMonitor())
     strategy = "plan" if template is not None else "freeform"
     plan_id = str(getattr(template, "id", "") or "")
     timeout = investigation_timeout(template)
@@ -292,13 +315,21 @@ async def investigate(monitor: ClusterMonitor, finding: dict, template=None) -> 
 
     if template is not None and outcome.plan_result is not None:
         _save_postmortem(finding, template, outcome.plan_result)
-    await complete_investigation(monitor, finding, outcome)
+    await complete_investigation(monitor, finding, outcome, attach_to_inbox=attach_to_inbox)
     return outcome
 
 
-async def complete_investigation(monitor: ClusterMonitor, finding: dict, outcome: InvestigationOutcome) -> dict:
+async def complete_investigation(
+    monitor: ClusterMonitor | None,
+    finding: dict,
+    outcome: InvestigationOutcome,
+    *,
+    attach_to_inbox: bool = True,
+) -> dict:
     """Everything after a diagnosis, the same for every strategy. Returns the report."""
+    monitor = cast("ClusterMonitor", monitor or _NoMonitor())
     report = outcome.to_report(finding)
+    outcome.report_id = report["id"]
 
     if outcome.completed:
         followup = await _security_followup(monitor, finding)
@@ -311,12 +342,13 @@ async def complete_investigation(monitor: ClusterMonitor, finding: dict, outcome
     if not outcome.completed:
         return report
 
-    try:
-        from ..inbox import attach_investigation_to_finding
+    if attach_to_inbox:
+        try:
+            from ..inbox import attach_investigation_to_finding
 
-        await asyncio.to_thread(attach_investigation_to_finding, finding, outcome.to_inbox_result(), report["id"])
-    except Exception:
-        logger.debug("Attaching investigation to inbox failed", exc_info=True)
+            await asyncio.to_thread(attach_investigation_to_finding, finding, outcome.to_inbox_result(), report["id"])
+        except Exception:
+            logger.debug("Attaching investigation to inbox failed", exc_info=True)
 
     _publish(finding, outcome)
     _remember(finding, outcome)

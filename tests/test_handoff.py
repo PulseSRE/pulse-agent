@@ -151,7 +151,7 @@ class TestProcessHandoffs:
         )
 
         with patch(
-            "sre_agent.monitor.handoff_processor._run_proactive_investigation",
+            "sre_agent.monitor.investigation_pipeline._run_proactive_investigation",
             return_value={"summary": "ok", "confidence": 0.5},
         ) as mock_sre:
             loop = asyncio.new_event_loop()
@@ -219,7 +219,7 @@ class TestProcessHandoffs:
         # Should not call either investigation function
         with (
             patch("sre_agent.monitor.handoff_processor._run_security_followup") as mock_sec,
-            patch("sre_agent.monitor.handoff_processor._run_proactive_investigation") as mock_sre,
+            patch("sre_agent.monitor.investigation_pipeline._run_proactive_investigation") as mock_sre,
         ):
             loop = asyncio.new_event_loop()
             try:

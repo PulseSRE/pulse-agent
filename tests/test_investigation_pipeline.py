@@ -236,3 +236,60 @@ def test_a_failing_freeform_investigation_is_not_retried_every_scan(monkeypatch,
 
     assert calls["n"] == 1, "the second scan should respect the cooldown"
     assert monitor._daily_investigation_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Every entry point goes through the pipeline
+# ---------------------------------------------------------------------------
+
+
+def test_a_handoff_investigation_is_reported_not_discarded(monkeypatch, quiet):
+    """process_handoffs ran the investigation and threw the result away."""
+    from sre_agent.monitor import handoff_processor
+
+    class _Repo:
+        async def async_get_pending_handoffs(self, cutoff):
+            return [
+                {
+                    "id": 1,
+                    "namespace": "shop",
+                    "details": {"target": "sre_agent", "namespace": "shop", "kind": "Pod", "name": "api"},
+                }
+            ]
+
+        async def async_delete_processed_handoffs(self, ids):
+            return None
+
+    clients: list = []
+
+    async def _freeform(finding, *, client=None):
+        clients.append(client)
+        return _freeform_result()
+
+    monkeypatch.setattr(handoff_processor, "get_monitor_repo", lambda: _Repo())
+    monkeypatch.setattr(pipeline, "_run_proactive_investigation", _freeform)
+    monitor = _Monitor()
+    monitor._client = object()
+    asyncio.run(handoff_processor.process_handoffs(monitor))
+
+    [report] = monitor.reports
+    assert report["status"] == "completed" and report["suspected_cause"]
+    assert quiet.saved and quiet.held
+    # Never the monitor's shared client under a timeout.
+    assert clients == [None]
+
+
+def test_inbox_triage_runs_the_pipeline_without_a_monitor(monkeypatch, quiet):
+    attached: list = []
+    monkeypatch.setattr("sre_agent.inbox.attach_investigation_to_finding", lambda *a: attached.append(a))
+
+    async def _freeform(finding, *, client=None):
+        return _freeform_result()
+
+    monkeypatch.setattr(pipeline, "_run_proactive_investigation", _freeform)
+    outcome = asyncio.run(pipeline.investigate(None, FINDING, attach_to_inbox=False))
+
+    assert outcome.completed and outcome.report_id.startswith("i-")
+    assert quiet.saved[0]["id"] == outcome.report_id
+    assert not attached, "the inbox updates its own item"
+    assert quiet.held, "inbox investigations reach the learning gate too"

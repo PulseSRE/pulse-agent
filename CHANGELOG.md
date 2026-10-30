@@ -15,6 +15,8 @@ All notable changes to Pulse Agent are documented in this file.
   - plan investigations never reached memory, the context bus or the security follow-up
   - freeform investigations stored the placeholder tool sequence `["proactive_investigation"]` in memory and held a learning candidate whose cause was `"unknown"` when none was named; memory now gets the tools actually used and learning needs a named cause
   - a freeform investigation counted against the daily budget and the cooldown only when it succeeded, so one that kept failing re-ran every scan; both strategies now count when they start
+  - an agent-to-agent handoff ran an SRE investigation and threw the result away (no report, nothing saved), on the monitor's shared client under a timeout — the combination that can poison that client; handoffs now go through the pipeline, and the security handoff uses a fresh client
+  - inbox triage called the freeform run directly with no timeout and saved the raw result; it now runs the pipeline (`investigate(None, ...)`), so its investigations are timed out, saved with a real id, remembered and held for learning like the monitor's
   The investigation replay drives the same `diagnose()` and report code.
 - **The live investigation gate was red on main** since the v2.35.0 merge (release push, #198 and #199 merge runs), on two fixtures:
   - `plan_node_disk_pressure`: the node diagnosis stopped at "image garbage collection failed, /var at 94%" without finding what filled the disk. The node-pressure plan's `node_diagnostics` phase now has to produce `top_consumer` (the workload, path or process using the resource), so the contract judge sends it back to look

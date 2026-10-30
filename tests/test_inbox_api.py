@@ -246,17 +246,15 @@ class TestInboxInvestigationPersistence:
             "may no longer be needed — re-check the save path"
         )
 
-    def test_inbox_writes_the_id_back_into_the_report(self):
-        """The computed id must land in the dict that gets persisted."""
+    def test_inbox_investigation_report_always_has_an_id(self):
+        """Inbox triage saves through the investigation pipeline, whose report always carries an id."""
         import inspect
 
         from sre_agent import inbox
+        from sre_agent.monitor.investigation_pipeline import failed_outcome, outcome_from_freeform
 
         src = inspect.getsource(inbox)
-        idx = src.find("investigation_id = result.get(")
-        assert idx != -1, "investigation id fallback not found"
-        window = src[idx : idx + 400]
-        assert 'result["id"] = investigation_id' in window, (
-            "the fallback id must be written back into `result` before "
-            "save_investigation persists it, or investigations.id is NULL"
-        )
+        assert "investigate(None, finding_dict, attach_to_inbox=False)" in src
+        assert "save_investigation(result" not in src, "inbox must not save the raw result itself"
+        for outcome in (outcome_from_freeform({"summary": "s"}), failed_outcome("freeform", "boom")):
+            assert outcome.to_report({"id": "f"})["id"].startswith("i-")

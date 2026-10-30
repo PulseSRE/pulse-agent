@@ -1651,10 +1651,17 @@ def _phase_b_investigate() -> int:
         try:
             import asyncio as _asyncio
 
-            from .monitor.actions import save_investigation
-            from .monitor.investigations import _run_proactive_investigation
+            from .monitor.investigation_pipeline import investigate
 
-            result = _asyncio.run(_run_proactive_investigation(finding_dict))
+            # The investigation pipeline, as the monitor runs it: one timeout,
+            # a saved report with a real id, memory and the learning gate. It
+            # used to call the freeform run directly with no timeout and save
+            # the raw result itself. The item is updated below, so the
+            # pipeline does not attach to it as well.
+            outcome = _asyncio.run(investigate(None, finding_dict, attach_to_inbox=False))
+            if not outcome.completed:
+                raise RuntimeError(outcome.error or "investigation failed")
+            result = outcome.to_inbox_result()
             tools_offered: list[str] = []
             try:
                 from .agent import TOOL_MAP as SRE_TOOL_MAP
@@ -1668,19 +1675,7 @@ def _phase_b_investigate() -> int:
                 logger.debug("Failed to select tools for inbox investigation", exc_info=True)
 
             if result.get("summary"):
-                # _run_proactive_investigation returns no "id" key, so this
-                # fallback is always the one used. It has to be written back
-                # into `result`: save_investigation persists report.get("id")
-                # into investigations.id, which is TEXT NOT NULL with no
-                # default, so passing the dict unchanged raised
-                # "null value in column id violates not-null constraint" and
-                # the investigation was dropped after the model had already
-                # been paid for. The monitor path never hit this because it
-                # builds its own report dict with an id (investigation_runner).
-                investigation_id = result.get("id") or f"inv-{item['id']}"
-                result["id"] = investigation_id
-                save_investigation(result, finding_dict)
-
+                investigation_id = outcome.report_id
                 metadata = item.get("metadata", {})
                 metadata.update(investigation_metadata(result, investigation_id))
                 metadata["skill_used"] = "sre"
