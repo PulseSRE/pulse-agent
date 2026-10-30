@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/license-MIT-6366f1?style=for-the-badge" alt="License">
 </p>
 
-<p align="center"><a href="https://pulsesre.github.io/pulse-agent/#film"><img src="docs/media/video-thumb.jpg" alt="Watch the 30-second overview of Pulse" width="640"></a><br><sub>30-second overview, no sound</sub></p>
+<p align="center"><a href="https://pulsesre.github.io/pulse-agent/#film"><img src="docs/media/video-thumb.jpg" alt="Watch the 36-second overview of Pulse" width="640"></a><br><sub>36-second overview, no sound</sub></p>
 
 <p align="center"><b>Finds what broke. Verifies it with you. Helps you fix it.</b></p>
 
