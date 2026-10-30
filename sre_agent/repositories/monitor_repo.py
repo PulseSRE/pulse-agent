@@ -23,6 +23,12 @@ logger = logging.getLogger("pulse_agent.monitor")
 # ---------------------------------------------------------------------------
 
 
+def _evidence_detail(report: dict) -> list:
+    """The structured evidence on a report, under either spelling it travels as."""
+    detail = report.get("evidenceDetail") or report.get("evidence_detail") or []
+    return detail if isinstance(detail, list) else []
+
+
 class MonitorRepository(BaseRepository):
     """Database operations for the monitor domain (actions, investigations, scan runs, handoffs)."""
 
@@ -323,13 +329,16 @@ class MonitorRepository(BaseRepository):
             """INSERT INTO investigations
                (id, finding_id, timestamp, category, severity, status, summary,
                 suspected_cause, recommended_fix, confidence, error, resources,
-                evidence, alternatives_considered)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                evidence, alternatives_considered, evidence_detail)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (id) DO UPDATE SET
                status = EXCLUDED.status, summary = EXCLUDED.summary,
                suspected_cause = EXCLUDED.suspected_cause,
                recommended_fix = EXCLUDED.recommended_fix,
-               confidence = EXCLUDED.confidence, error = EXCLUDED.error""",
+               confidence = EXCLUDED.confidence, error = EXCLUDED.error,
+               evidence = EXCLUDED.evidence,
+               alternatives_considered = EXCLUDED.alternatives_considered,
+               evidence_detail = EXCLUDED.evidence_detail""",
             (
                 report.get("id"),
                 report.get("findingId", ""),
@@ -345,6 +354,7 @@ class MonitorRepository(BaseRepository):
                 json.dumps(finding.get("resources", [])),
                 json.dumps(report.get("evidence", [])),
                 json.dumps(report.get("alternatives_considered", []) or report.get("alternativesConsidered", [])),
+                json.dumps(_evidence_detail(report)),
             ),
         )
         db.commit()
@@ -490,13 +500,16 @@ class MonitorRepository(BaseRepository):
             """INSERT INTO investigations
                (id, finding_id, timestamp, category, severity, status, summary,
                 suspected_cause, recommended_fix, confidence, error, resources,
-                evidence, alternatives_considered)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                evidence, alternatives_considered, evidence_detail)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (id) DO UPDATE SET
                status = EXCLUDED.status, summary = EXCLUDED.summary,
                suspected_cause = EXCLUDED.suspected_cause,
                recommended_fix = EXCLUDED.recommended_fix,
-               confidence = EXCLUDED.confidence, error = EXCLUDED.error""",
+               confidence = EXCLUDED.confidence, error = EXCLUDED.error,
+               evidence = EXCLUDED.evidence,
+               alternatives_considered = EXCLUDED.alternatives_considered,
+               evidence_detail = EXCLUDED.evidence_detail""",
             report.get("id"),
             report.get("findingId", ""),
             timestamp,
@@ -511,6 +524,7 @@ class MonitorRepository(BaseRepository):
             json.dumps(finding.get("resources", [])),
             json.dumps(report.get("evidence", [])),
             json.dumps(report.get("alternatives_considered", []) or report.get("alternativesConsidered", [])),
+            json.dumps(_evidence_detail(report)),
         )
 
     async def async_get_investigation_by_finding_id(self, finding_id: str) -> dict | None:

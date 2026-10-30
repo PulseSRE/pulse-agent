@@ -415,7 +415,7 @@ sre_agent/
   promql_recipes.py    83 PromQL recipes
 
   # Infrastructure
-  db.py                PostgreSQL abstraction + migrations (v040)
+  db.py                PostgreSQL abstraction + migrations (v041)
   memory/              Self-improving agent (incidents, runbooks, patterns)
   mcp_client.py        MCP server connections (SSE transport)
   orchestrator.py      Typo correction (~130 K8s misspellings)
@@ -435,7 +435,7 @@ All WebSocket endpoints require `?token=...` query parameter (constant-time comp
 ---
 
 <p align="center">
-  <strong>108 native tools + MCP</strong> &bull; <strong>7 skills</strong> &bull; <strong>32 scanners</strong> &bull; <strong>13 runbooks</strong> &bull; <strong>83 PromQL recipes</strong> &bull; <strong>16 eval suites (192 scenarios)</strong> &bull; <strong>4,225 tests</strong> &bull; <strong>Migration v040</strong> &bull; <strong>Protocol v2</strong>
+  <strong>108 native tools + MCP</strong> &bull; <strong>7 skills</strong> &bull; <strong>32 scanners</strong> &bull; <strong>13 runbooks</strong> &bull; <strong>83 PromQL recipes</strong> &bull; <strong>16 eval suites (192 scenarios)</strong> &bull; <strong>4,225 tests</strong> &bull; <strong>Migration v041</strong> &bull; <strong>Protocol v2</strong>
 </p>
 
 <p align="center">

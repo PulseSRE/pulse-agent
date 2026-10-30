@@ -266,29 +266,15 @@ CALIBRATION = "calibration"
 STRUCTURE = "structure"
 
 
-def _norm(text: str) -> str:
-    return re.sub(r"[\s\-./]+", "_", text.lower())
-
-
 def evidence_grounded(item: dict, called: list[str]) -> bool:
     """Whether an evidence item names a tool the investigation actually called.
 
-    Confidence is derived from evidence, and an item with any ``source`` at all
-    is weighted as fully sourced — so a cited source the run never touched
-    inflates confidence with nothing behind it.
+    The production rule (``evidence.source_matches_called``); a claimed source the
+    run never read is moved to ``unverified_source`` before confidence is derived.
     """
-    source = _norm(str(item.get("source") or ""))
-    if not source:
-        return False
-    for tool in set(called):
-        name = tool.lower()
-        if name in source:
-            return True
-        # "pod logs" / "get_pod_logs": the source spells the tool without its verb.
-        bare = re.sub(r"^(get|list|describe|search)_", "", name)
-        if len(bare) >= 4 and bare in source:
-            return True
-    return False
+    from ..evidence import source_matches_called
+
+    return source_matches_called(str(item.get("source") or ""), called)
 
 
 def _check(check: str, passed: bool, kind: str, **extra) -> dict:

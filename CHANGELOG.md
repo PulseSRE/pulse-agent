@@ -7,6 +7,9 @@ All notable changes to Pulse Agent are documented in this file.
 - The postmortem skill's prompt gains the credential rule every other skill prompt carries.
 - The SLO management skill's burn-rate guidance matches the code: critical at ≥14.4x, warning at ≥6x, targets of 1 or more read as percentages, and an SLO with no data is `no_data`, not critical. It told the model >10x / 2–10x.
 - Docs brought up to v2.35.0 across the repo (journey, API contract, security, database, architecture, README, Pages, release and testing guides).
+- **Confidence counts only evidence that was read.** Any evidence item with a `source` was weighed as fully sourced, so a source the investigation never called ("prometheus" with no query run) raised confidence on nothing. Plan phases and freeform investigations now keep a cited source only if it names a tool the run called; otherwise the item counts as unsourced and the claim is kept in `unverified_source`. The investigation replay uses the same rule.
+- **Saved investigations keep their structured evidence** (**migration 041**, `investigations.evidence_detail`). A card reloaded from history lost which evidence contradicted the cause; `GET /inbox/{id}/investigation` now returns `evidence_detail`.
+- Tests: `mock_k8s` also patches the client getters `gitops_tools` holds, so `apply_yaml` tests no longer reach for a real cluster when tool discovery ran earlier in the session.
 
 ## v2.35.0 (2026-10-27)
 

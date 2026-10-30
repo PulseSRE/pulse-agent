@@ -463,6 +463,13 @@ def mock_k8s():
         patch("sre_agent.k8s_client.get_version_client") as version,
         patch("sre_agent.k8s_client.get_networking_client") as networking,
         patch("sre_agent.k8s_tools.advanced.k8s_stream") as stream,
+        # apply_yaml calls gitops_tools.check_argo_auto_sync, and gitops_tools
+        # holds its own references to the getters (imported by value). When
+        # gitops_tools was imported before this fixture ran (anything that runs
+        # tool discovery, e.g. the eval replay modules), those references were
+        # the real getters and apply_yaml reached for a cluster with no host.
+        patch("sre_agent.gitops_tools.get_core_client") as gitops_core,
+        patch("sre_agent.gitops_tools.get_custom_client") as gitops_custom,
     ):
         core_mock = MagicMock()
         apps_mock = MagicMock()
@@ -472,6 +479,8 @@ def mock_k8s():
         core.return_value = core_mock
         apps.return_value = apps_mock
         custom.return_value = custom_mock
+        gitops_core.return_value = core_mock
+        gitops_custom.return_value = custom_mock
         version.return_value = version_mock
         networking.return_value = MagicMock()
 

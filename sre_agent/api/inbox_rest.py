@@ -283,7 +283,7 @@ async def rest_get_investigation(item_id: str):
     if row is None:
         raise HTTPException(status_code=404, detail="Investigation not found")
     result = dict(row)
-    for field in ("resources", "evidence", "alternatives_considered"):
+    for field in ("resources", "evidence", "alternatives_considered", "evidence_detail"):
         if field in result and isinstance(result[field], str):
             import json as _json
 

@@ -462,7 +462,7 @@ class PlanRuntime:
 
         # Try to find structured JSON in response
         match = re.search(r"```json\s*(\{.*?\})\s*```", response, re.DOTALL)
-        from .evidence import derive_confidence, parse_evidence
+        from .evidence import derive_confidence, ground_evidence, parse_evidence
 
         if match:
             try:
@@ -470,7 +470,8 @@ class PlanRuntime:
                 # Confidence comes from the evidence, with the model's own figure
                 # as a ceiling — the same rule the single-call investigation
                 # uses. Phases used to report a fixed 0.7 whatever they found.
-                evidence = parse_evidence(data.get("evidence", []))[:10]
+                # A cited source the phase never called counts as unsourced.
+                evidence = ground_evidence(parse_evidence(data.get("evidence", []))[:10], tools_called)
                 try:
                     asserted = float(data.get("confidence", 0.0))
                 except (TypeError, ValueError):

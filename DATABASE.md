@@ -122,7 +122,7 @@ Full DDL: `sre_agent/db_schema.py`
 
 ## Migrations
 
-Migrations are forward-only and recorded in `schema_migrations`. The current registry ends at **040**. The migration registry is authoritative, including changes to existing tables:
+Migrations are forward-only and recorded in `schema_migrations`. The current registry ends at **041**. The migration registry is authoritative, including changes to existing tables:
 
 | Version | Name |
 |---|---|
@@ -166,8 +166,9 @@ Migrations are forward-only and recorded in `schema_migrations`. The current reg
 | 038 | `decaying_tool_counts` (fractional tool-prediction counts) |
 | 039 | `fix_outcomes` |
 | 040 | `monitor_noise` |
+| 041 | `investigation_evidence_detail` (structured evidence on saved investigations) |
 
-Add the next unused integer and migration callable to `ALL_MIGRATIONS`; maintain the fresh-install DDL in `db_schema.py` too. Test fresh creation and upgrade behavior. Do not manually insert a migration row to silence a failing migration: that can leave the application using columns which do not exist.
+Add the next unused integer and migration callable to `MIGRATIONS` in `db_migrations.py`; maintain the fresh-install DDL in `db_schema.py` too. Test fresh creation and upgrade behavior. Do not manually insert a migration row to silence a failing migration: that can leave the application using columns which do not exist.
 
 ## Pooling and failures
 
