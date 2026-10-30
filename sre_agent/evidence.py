@@ -14,6 +14,7 @@ so nothing breaks while investigations migrate to the structured form.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -40,6 +41,10 @@ class Evidence(BaseModel):
     confidence: float = Field(default=0.6, ge=0.0, le=1.0)
     # A source the model cited that names no tool the run called; see ground_evidence.
     unverified_source: str = ""
+    # The tool call this came from, as the run labelled it (``c3``); see CallLedger.
+    call_ref: str = ""
+    # That call's arguments, filled in from the ledger ("namespace=shop, pod=api-7f").
+    call_input: str = ""
 
     @field_validator("observation")
     @classmethod
@@ -73,6 +78,11 @@ def parse_evidence(raw: Any) -> list[Evidence]:
             if text:
                 parsed.append(Evidence(observation=text))
         elif isinstance(item, dict):
+            item = dict(item)
+            # Prompts ask for "call"; the stored field is call_ref.
+            if "call" in item and "call_ref" not in item:
+                item["call_ref"] = item.pop("call")
+            item["call_ref"] = str(item.get("call_ref") or "").strip()
             try:
                 parsed.append(Evidence(**item))
             except Exception:  # malformed item, keep the rest
@@ -142,16 +152,102 @@ def source_matches_called(source: str, called: list[str] | set[str]) -> bool:
     return False
 
 
-def ground_evidence(evidence: list[Evidence], called: list[str] | set[str]) -> list[Evidence]:
-    """Keep a cited source only if the run called a tool it names.
+@dataclass
+class ToolCall:
+    """One tool call as it ran: what was asked and whether it returned data."""
+
+    ref: str
+    tool: str
+    tool_use_id: str = ""
+    status: str = "success"
+    error_category: str | None = None
+    input_summary: str = ""
+
+    @property
+    def read(self) -> bool:
+        """Whether the call returned something that could be read as evidence."""
+        return self.status == "success"
+
+
+@dataclass
+class CallLedger:
+    """The tool calls a run made, recorded when each one finished.
+
+    Built from the agent loop's ``on_tool_result`` metadata, so it is what ran,
+    not what the model later says ran. Evidence cites calls by ``ref``.
+    """
+
+    calls: dict[str, ToolCall] = field(default_factory=dict)
+
+    def record(self, meta: dict) -> None:
+        """``on_tool_result`` handler. Calls without a ref get one in arrival order."""
+        ref = str(meta.get("call_ref") or f"c{len(self.calls) + 1}")
+        self.calls[ref] = ToolCall(
+            ref=ref,
+            tool=str(meta.get("tool_name") or ""),
+            tool_use_id=str(meta.get("tool_use_id") or ""),
+            status=str(meta.get("status") or "success"),
+            error_category=meta.get("error_category"),
+            input_summary=_summarize_input(meta.get("input")),
+        )
+
+    def get(self, ref: str) -> ToolCall | None:
+        """The call a citation names; tolerates "C3", "call c3", "diagnose.c3"."""
+        match = re.search(r"c\d+", (ref or "").lower())
+        return self.calls.get(match.group(0)) if match else None
+
+    @property
+    def tools_read(self) -> list[str]:
+        """Tools with at least one successful call, in first-call order."""
+        seen: list[str] = []
+        for call in self.calls.values():
+            if call.read and call.tool not in seen:
+                seen.append(call.tool)
+        return seen
+
+    @property
+    def tools_called(self) -> list[str]:
+        seen: list[str] = []
+        for call in self.calls.values():
+            if call.tool not in seen:
+                seen.append(call.tool)
+        return seen
+
+    def as_list(self) -> list[dict]:
+        return [
+            {"ref": c.ref, "tool": c.tool, "status": c.status, "input": c.input_summary} for c in self.calls.values()
+        ]
+
+
+def _summarize_input(raw: Any, limit: int = 120) -> str:
+    if not isinstance(raw, dict) or not raw:
+        return ""
+    parts = [f"{k}={v}" for k, v in raw.items() if v not in ("", None, [], {})]
+    text = ", ".join(parts)
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def ground_evidence(evidence: list[Evidence], called: list[str] | set[str] | CallLedger) -> list[Evidence]:
+    """Keep a cited source only if the run read it.
 
     Any non-empty ``source`` weighs an item as fully sourced, so a source the
     investigation never read ("prometheus", with no query run) raised confidence
     on nothing. Such an item keeps its observation and stance and counts as
     unsourced; the claimed source is kept in ``unverified_source`` so what the
-    model said stays visible. With no record of calls (an empty ``called``)
-    nothing can be checked, so nothing is changed.
+    model said stays visible.
+
+    With a ``CallLedger`` the check is exact: an item citing a call (``c3``) that
+    succeeded is sourced to that call's tool; one citing a call that failed, or
+    one that never happened, is unsourced. An item without a citation falls back
+    to matching its ``source`` against tools that returned data, so a call that
+    errored no longer counts as read. With a plain list of tool names (no
+    ledger) the name match is all there is. With no record of calls at all,
+    nothing can be checked and nothing is changed.
     """
+    if isinstance(called, CallLedger):
+        if not called.calls:
+            return evidence
+        return [_ground_with_ledger(item, called) for item in evidence]
     if not called:
         return evidence
     grounded: list[Evidence] = []
@@ -160,3 +256,23 @@ def ground_evidence(evidence: list[Evidence], called: list[str] | set[str]) -> l
             item = item.model_copy(update={"source": "", "unverified_source": item.source})
         grounded.append(item)
     return grounded
+
+
+def _ground_with_ledger(item: Evidence, ledger: CallLedger) -> Evidence:
+    if item.call_ref:
+        call = ledger.get(item.call_ref)
+        if call is None:
+            claimed = item.source or item.call_ref
+            return item.model_copy(update={"source": "", "unverified_source": f"{claimed} (no call {item.call_ref})"})
+        if not call.read:
+            return item.model_copy(
+                update={
+                    "source": "",
+                    "call_ref": call.ref,
+                    "unverified_source": f"{call.tool} ({call.ref} {call.status})",
+                }
+            )
+        return item.model_copy(update={"source": call.tool, "call_ref": call.ref, "call_input": call.input_summary})
+    if item.source and not source_matches_called(item.source, ledger.tools_read):
+        return item.model_copy(update={"source": "", "unverified_source": item.source})
+    return item

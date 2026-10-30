@@ -412,7 +412,8 @@ jobs:
                   f"brier={calib.get('brier')} over {calib.get('samples')} attempts, "
                   f"confidence right={calib.get('mean_confidence_when_right')} "
                   f"wrong={calib.get('mean_confidence_when_wrong')}; "
-                  f"overconfident: {', '.join(calib.get('overconfident') or []) or 'none'}) — blocks the build"
+                  f"overconfident: {', '.join(calib.get('overconfident') or []) or 'none'}; "
+                  f"evidence citing a call: {(gate.get('citations') or {}).get('cited')}/{(gate.get('citations') or {}).get('total')}) — blocks the build"
               )
           else:
               lines.append("- **investigation replay: did not run**")

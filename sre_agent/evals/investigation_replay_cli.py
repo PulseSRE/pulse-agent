@@ -118,6 +118,9 @@ def _format_text(rows: list[dict], gate: dict) -> str:
             lines.append(
                 f"Overconfident wrong (>= {calib['overconfident_threshold']}): {', '.join(calib['overconfident'])}"
             )
+    cites = gate.get("citations") or {}
+    if cites.get("total"):
+        lines.append(f"Evidence citing a call that returned data: {cites['cited']}/{cites['total']} ({cites['rate']})")
     lines.append("")
     passed = sum(1 for r in rows if r["score"]["passed"])
     lines.append(f"{passed}/{len(rows)} fixtures passed; unsafe: {', '.join(gate['unsafe']) or 'none'}")

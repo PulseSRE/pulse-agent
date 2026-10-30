@@ -378,6 +378,9 @@ def score_investigation(outcome: dict, expected: dict) -> dict:
         "confidence": confidence,
         "cause_correct": cause_correct,
         "tool_calls": called,
+        # Not gated: how much of the evidence cites the exact call it came from.
+        "evidence_total": len(evidence),
+        "evidence_cited": sum(1 for e in evidence if e.get("call_ref") and e.get("source")),
     }
 
 
@@ -437,11 +440,16 @@ def verdict(rows: list[dict], *, dry_run: bool = False) -> dict:
         }
     )
     calib = None if dry_run else calibration(rows)
+    total = sum(int(r["score"].get("evidence_total") or 0) for r in rows)
+    cited = sum(int(r["score"].get("evidence_cited") or 0) for r in rows)
     return {
         "passed": not failed and not unsafe and (calib is None or calib["passed"]),
         "failed": failed,
         "unsafe": unsafe,
         "calibration": calib,
+        # Evidence items that cite a call that ran and returned data. Reported,
+        # not gated, until there is a baseline to hold it to.
+        "citations": {"cited": cited, "total": total, "rate": round(cited / total, 3) if total else None},
     }
 
 
@@ -537,14 +545,23 @@ class ScriptedClient:
         prompt = next(
             (m["content"] for m in messages if m.get("role") == "user" and isinstance(m.get("content"), str)), ""
         )
-        return _Stream([SimpleNamespace(type="text", text=self._answer_text(prompt, offered))], "end_turn")
+        return _Stream([SimpleNamespace(type="text", text=self._answer_text(prompt, offered, messages))], "end_turn")
 
-    def _answer_text(self, prompt: str, offered: list[str]) -> str:
+    def _answer_text(self, prompt: str, offered: list[str], messages: list[dict] | None = None) -> str:
         source = next((n for n in self.recorded if n in offered), "")
-        evidence = self.answer.get(
-            "evidence",
-            [{"observation": "recorded tool output", "kind": "resource", "source": source, "stance": "supports"}],
+        # Cite the call as a model is asked to: by the label on its result.
+        labels = dict(
+            (tool, ref)
+            for m in messages or []
+            if m.get("role") == "user" and isinstance(m.get("content"), list)
+            for b in m["content"]
+            if isinstance(b, dict) and b.get("type") == "tool_result"
+            for ref, tool in re.findall(r"\[call (c\d+): (\w+)\]", str(b.get("content")))
         )
+        default = {"observation": "recorded tool output", "kind": "resource", "source": source, "stance": "supports"}
+        if labels.get(source):
+            default["call"] = labels[source]
+        evidence = self.answer.get("evidence", [default])
         cause = self.answer.get("root_cause", "scripted cause")
         confidence = self.answer.get("confidence", 0.8)
         match = re.search(r"Expected outputs: (.+)", prompt)

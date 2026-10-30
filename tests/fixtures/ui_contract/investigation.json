@@ -34,7 +34,7 @@
         "props": {
           "items": [
             {
-              "detail": "supports \u00b7 log \u00b7 source: get_pod_logs",
+              "detail": "supports \u00b7 log \u00b7 source: get_pod_logs(namespace=shop, pod_name=api-server-7f9c)",
               "name": "Logs: required environment variable DB_HOST is not set",
               "status": "healthy"
             },
@@ -44,7 +44,7 @@
               "status": "healthy"
             },
             {
-              "detail": "contradicts \u00b7 event \u00b7 source: get_events",
+              "detail": "contradicts \u00b7 event \u00b7 source: get_events(namespace=shop)",
               "name": "Restarts began 40 minutes before the rollout",
               "status": "warning"
             },
@@ -120,6 +120,8 @@
       ],
       "evidenceDetail": [
         {
+          "call_input": "namespace=shop, pod_name=api-server-7f9c",
+          "call_ref": "c2",
           "confidence": 0.9,
           "kind": "log",
           "observation": "Logs: required environment variable DB_HOST is not set",
@@ -134,6 +136,8 @@
           "stance": "supports"
         },
         {
+          "call_input": "namespace=shop",
+          "call_ref": "c1",
           "confidence": 0.6,
           "kind": "event",
           "observation": "Restarts began 40 minutes before the rollout",

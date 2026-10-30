@@ -39,6 +39,8 @@ SUPPORTED = {
             "source": "get_pod_logs",
             "stance": "supports",
             "confidence": 0.9,
+            "call_ref": "c2",
+            "call_input": "namespace=shop, pod_name=api-server-7f9c",
         },
         {
             "observation": "Rollout at 10:02 removed DB_HOST from the container env",
@@ -53,6 +55,8 @@ SUPPORTED = {
             "source": "get_events",
             "stance": "contradicts",
             "confidence": 0.6,
+            "call_ref": "c1",
+            "call_input": "namespace=shop",
         },
         {
             "observation": "Node worker-2 has 30% memory headroom",

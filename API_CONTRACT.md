@@ -805,15 +805,15 @@ A client that subscribes receives every standing finding at once, then new ones 
   "evidence": ["ConfigMap 'app-config' key 'DB_HOST' missing since rollout at 14:32", "Pod logs show KeyError on startup"],
   "alternativesConsidered": ["Image pull failure ruled out — image exists and pulled successfully"],
   "evidenceDetail": [
-    {"observation": "Pod logs show KeyError on startup", "kind": "log", "source": "get_pod_logs", "stance": "supports", "confidence": 0.9},
-    {"observation": "Restarts began before the rollout", "kind": "event", "source": "get_events", "stance": "contradicts", "confidence": 0.6}
+    {"observation": "Pod logs show KeyError on startup", "kind": "log", "source": "get_pod_logs", "stance": "supports", "confidence": 0.9, "call_ref": "c2", "call_input": "namespace=shop, pod_name=api-7f"},
+    {"observation": "Restarts began before the rollout", "kind": "event", "source": "get_events", "stance": "contradicts", "confidence": 0.6, "call_ref": "c1", "call_input": "namespace=shop"}
   ],
   "planId": "crashloop-resolution-v1",
   "timestamp": 1711540800
 }
 ```
 
-`evidence` is the observations as text; `evidenceDetail` is the structured form the confidence was derived from, with each item's `stance` (`supports`, `contradicts`, `context`) and `source` (the tool or query it came from). `alternativesConsidered` lists hypotheses ruled out. `planId` is present when a plan template produced the report. Both the plan path and the freeform investigation send these fields, and `tests/fixtures/ui_contract/investigation.json` pins the exact payload the UI renders. A `confidence` of 0 means nothing supported the cause, and is shown, not hidden.
+`evidence` is the observations as text; `evidenceDetail` is the structured form the confidence was derived from, with each item's `stance` (`supports`, `contradicts`, `context`) and `source` (the tool it came from). `call_ref` names the exact tool call (`c2`; prefixed with the phase id on plan reports, `diagnose.c2`) and `call_input` its arguments, both taken from the record of calls as they ran, not from the model's account. An item whose cited call failed or never ran has an empty `source` and says what it claimed in `unverified_source`; it counts as unsourced. `alternativesConsidered` lists hypotheses ruled out. `planId` is present when a plan template produced the report. Both the plan path and the freeform investigation send these fields, and `tests/fixtures/ui_contract/investigation.json` pins the exact payload the UI renders. A `confidence` of 0 means nothing supported the cause, and is shown, not hidden.
 
 #### `verification_report` — Next-scan validation after a fix action
 
