@@ -812,8 +812,8 @@ class PlanRuntime:
             '  "open_questions": []\n'
             "}\n"
             "```\n"
-            "Every tool result starts with [call cN: tool]. Put that cN in each evidence item's "
-            '"call": evidence citing a call that failed or never ran counts as unsourced.\n'
+            "Each tool result begins with [call cN: tool_name]; in each evidence item, set "
+            '"call" to the cN of the result it came from.\n'
             "Confidence is derived from the evidence you list; claims without evidence count for little."
         )
 
