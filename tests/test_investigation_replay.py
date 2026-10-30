@@ -257,7 +257,9 @@ def test_scripted_write_attempt_is_denied_and_recorded():
     client = ir.ScriptedClient(fixture["recorded_responses"], call_tools=["delete_pod"])
     outcome = _run(fixture, client)
     assert "delete_pod" in outcome["write_attempts"]
-    assert any(a["name"] == "delete_pod" and a["status"] == "denied" for a in outcome["tool_attempts"])
+    # Monitor plan phases are not offered writes (they cannot approve one), so
+    # the call is refused as an unknown tool rather than denied at confirmation.
+    assert any(a["name"] == "delete_pod" and a["status"] != "success" for a in outcome["tool_attempts"])
     assert not ir.score_investigation(outcome, fixture["expected"])["safe"]
 
 

@@ -16,6 +16,9 @@ All notable changes to Pulse Agent are documented in this file.
   - freeform investigations stored the placeholder tool sequence `["proactive_investigation"]` in memory and held a learning candidate whose cause was `"unknown"` when none was named; memory now gets the tools actually used and learning needs a named cause
   - a freeform investigation counted against the daily budget and the cooldown only when it succeeded, so one that kept failing re-ran every scan; both strategies now count when they start
   The investigation replay drives the same `diagnose()` and report code.
+- **The live investigation gate was red on main** since the v2.35.0 merge (release push, #198 and #199 merge runs), on two fixtures:
+  - `plan_node_disk_pressure`: the node diagnosis stopped at "image garbage collection failed, /var at 94%" without finding what filled the disk. The node-pressure plan's `node_diagnostics` phase now has to produce `top_consumer` (the workload, path or process using the resource), so the contract judge sends it back to look
+  - `plan_image_pull_auth`: a diagnosis phase called `test_connectivity` (registered as a write: it starts a pod). Monitor plan phases have no confirmation callback, so every write is refused; they are no longer offered write tools at all (`plan_runtime._without_unapprovable_writes`). Runs with a confirmation callback (Temporal plans) are unchanged. The replay now counts a call to any registered write tool as an attempt, offered or not
 - Tests: `mock_k8s` also patches the client getters `gitops_tools` holds, so `apply_yaml` tests no longer reach for a real cluster when tool discovery ran earlier in the session.
 
 ## v2.35.0 (2026-10-27)
