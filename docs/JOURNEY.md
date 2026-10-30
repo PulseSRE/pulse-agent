@@ -179,7 +179,7 @@ August was when Pulse stopped being judged by what it claimed and started being 
 
 ### Phase 10: Evidence You Can Trace, a Gate You Can Trust (October 28 – October 30)
 
-**What we built:** Evidence that names the exact tool call behind it, one pipeline for every investigation, and a release gate that judges pass rates instead of single runs (agent #199–#207, pulse-ui #156–#157).
+**What we built:** Evidence that names the exact tool call behind it, one pipeline for every investigation, and a release gate that judges pass rates instead of single runs (agent #199–#207, pulse-ui #156–#157). Released as agent and UI v2.36.0 (migration 041 runs on start); operator #109 fixes self-heal deleting pods it could not heal.
 
 - **Confidence only from what was read** (#199). Any evidence item with a `source` counted as fully sourced, so citing "prometheus" without running a query raised confidence. Grounding now checks the source against the tools the run called, and saved investigations keep their structured evidence (migration 041), so a reloaded card still shows what contradicted the cause.
 - **Evidence cites the call** (#200, pulse-ui #157). Investigation tool results are labelled `[call c3: get_pod_logs]`, and a ledger records each call as it finishes. Evidence cites the call, and grounding checks the citation against the ledger: a call that errored no longer counts as read, and the UI shows each item as the call with its arguments.
@@ -191,26 +191,26 @@ August was when Pulse stopped being judged by what it claimed and started being 
 ## The Numbers
 
 
-| Metric | Value (measured at v2.35.0, Oct 27 2026) |
+| Metric | Value (measured at v2.36.0, Oct 30 2026) |
 | --- | --- |
-| Total commits | 3,184 (1,386 agent + 1,612 UI + 168 operator + 18 sre-bench) |
-| Calendar days | 232 (UI from Mar 9, agent from Mar 24, operator from Aug 14, sre-bench from Aug 23; all to Oct 27) |
-| Tagged releases | 182 (85 agent + 79 UI, including the UI's pre-rename v1–v6 line, + 18 operator; sre-bench v0.1.0–v0.4.0 are changelog releases) |
-| Backend tests | 4,225 collected |
-| Frontend tests | 2,504 (215 files) |
+| Total commits | 3,192 (1,389 agent + 1,615 UI + 169 operator + 19 sre-bench) |
+| Calendar days | 235 (UI from Mar 9, agent from Mar 24, operator from Aug 14, sre-bench from Aug 23; all to Oct 30) |
+| Tagged releases | 180 (84 agent + 78 UI, including the UI's pre-rename v1–v6 line, + 18 operator; v2.35.0 and v2.36.0 are tagged when published; sre-bench v0.1.0–v0.4.0 are changelog releases) |
+| Backend tests | 4,269 collected |
+| Frontend tests | 2,507 (216 files) |
 | Registered native tools | 108 (19 writes) — see `/tools` on a running agent |
 | MCP tools | 36 (OpenShift MCP server sidecar) |
 | Skills | 7 built-in ([SRE](../sre_agent/skills/sre/skill.md), [Security](../sre_agent/skills/security/skill.md), [View Designer](../sre_agent/skills/view-designer/skill.md), [Capacity Planner](../sre_agent/skills/capacity-planner/skill.md), [Plan Builder](../sre_agent/skills/plan-builder/skill.md), [Postmortem](../sre_agent/skills/postmortem/skill.md), [SLO Management](../sre_agent/skills/slo-management/skill.md)), plus runtime-authored and learned skills |
 | Scanners | 32 (reactive, liveness, audit and predictive trend) — see `/monitor/scanners` |
 | Plan templates | 12 |
 | Inbox generators | 16 |
-| Live replay fixtures | 53 chat + 11 monitor-investigation, plus the SRE-Bench simulation lane |
+| Live replay fixtures | 53 chat + 11 monitor-investigation (each run 3 times, judged on pass rate), plus the SRE-Bench simulation lane |
 | SRE-Bench | 121 tasks across 13 suites; 11 simulated-cluster fixtures for `core` and `errors` |
 | Fixture-scoring suites | 16 (reports, not gates) |
-| Database tables / migrations | ~43 / 40 — see [DATABASE.md](../DATABASE.md) |
+| Database tables / migrations | ~43 / 41 — see [DATABASE.md](../DATABASE.md) |
 | Design specs / implementation plans | 24 / 23 — see [docs/superpowers/](superpowers/) |
-| Lines of Python (agent package) | ~77,600 |
-| Lines of TypeScript (UI `src/`, including tests) | ~118,500 |
+| Lines of Python (agent package) | ~78,200 |
+| Lines of TypeScript (UI `src/`, including tests) | ~118,600 |
 
 These are a snapshot. Counts change with every release; measure them again rather than quoting them.
 
@@ -532,7 +532,7 @@ This project was built almost entirely with AI assistance (Claude Code / Claude 
 
 ### Near-Term (Weeks)
 
-1. **Prove the review fixes on a real cluster.** v2.35.0 is tested against mocks, a disposable database and recorded cluster data. Five items need a real environment: the ACM proxy path for fleet tools, `X-Forwarded-User` spoofing when the UI is reachable without the OAuth proxy, OpenShift service-serving certificates in cert-expiry checks, whether prompt caching actually hits, and the cost of 7-day trend queries on large clusters.
+1. **Prove the review fixes on a real cluster.** v2.36.0 is tested against mocks, a disposable database and recorded cluster data. Five items need a real environment: the ACM proxy path for fleet tools, `X-Forwarded-User` spoofing when the UI is reachable without the OAuth proxy, OpenShift service-serving certificates in cert-expiry checks, whether prompt caching actually hits, and the cost of 7-day trend queries on large clusters.
 2. **Measure whether memory helps.** Memory now reaches the model; nothing yet shows it improves investigations. Run the investigation replay with memory on and off, with a seeded past incident.
 3. **Find what filled the disk** (#206). The node-pressure investigation names the disk consumer about half the time; the rest stop at "image garbage collection failed". Measure any fix with the repeat workflow (10 attempts minimum).
 4. **Thanos/ACM PromQL compatibility** and **MCP token forwarding** remain open from earlier phases.
@@ -594,6 +594,6 @@ The real output isn't the code. It's that when Pulse says a pod is crash-looping
 ---
 
 *Last updated: October 27, 2026*
-*Pulse Agent v2.35.0 | Pulse UI v2.35.0*
+*Pulse Agent v2.36.0 | Pulse UI v2.36.0*
 *Pulse operator v0.11.0 | SRE-Bench v0.4.0*
 *1,386 + 1,612 + 168 + 18 = 3,184 commits*

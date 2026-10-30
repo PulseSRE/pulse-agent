@@ -14,7 +14,7 @@
 <body>
 <header class="wrap"><nav class="sites" aria-label="Pulse projects">
 <a class="mark" href="https://github.com/PulseSRE"><svg viewBox="0 0 68 36" aria-hidden="true"><path d="M0 20 H18 L22 24 L28 3 L34 32 L38 20 H50 L54 15 L58 20 H68" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/></svg><span>Pulse</span></a>
-<a class="site" href="https://pulsesre.github.io/pulse-agent/" aria-current="page">Agent</a><a class="site" href="https://pulsesre.github.io/pulse-ui/">UI</a><a class="site" href="https://pulsesre.github.io/pulse-operator/">Operator</a><a class="site" href="https://pulsesre.github.io/sre-bench/">SRE-Bench</a><span class="ver">agent v2.35.0</span>
+<a class="site" href="https://pulsesre.github.io/pulse-agent/" aria-current="page">Agent</a><a class="site" href="https://pulsesre.github.io/pulse-ui/">UI</a><a class="site" href="https://pulsesre.github.io/pulse-operator/">Operator</a><a class="site" href="https://pulsesre.github.io/sre-bench/">SRE-Bench</a><span class="ver">agent v2.36.0</span>
 </nav></header>
 <main>
 <section class="hero wrap" aria-labelledby="title">
@@ -151,6 +151,15 @@
 <div class="wrap">
 <h2 id="new">What's new</h2>
 <div class="release">
+<p class="when"><strong>v2.36.0</strong>30 October 2026<br>Pairs with UI v2.36.0 and operator v0.11.0<br>Migration 041 runs on start</p>
+<ul>
+<li style="--c:var(--ok)"><b>Evidence names the tool call.</b> <span>Every piece of evidence in a diagnosis cites the call it came from, with its arguments. A call that failed or never ran no longer counts as read, so confidence rests only on what was actually seen.</span></li>
+<li style="--c:var(--trace)"><b>One investigation pipeline.</b> <span>Monitor plans, quick investigations, agent handoffs and inbox triage now report, time out, remember and learn the same way. A plan that fails or times out is reported, not silently dropped.</span></li>
+<li style="--c:var(--ask)"><b>Background investigations cannot write.</b> <span>A monitor plan that has no way to approve a change is no longer offered write tools at all.</span></li>
+<li style="--c:var(--ink)"><b>A release gate that means something.</b> <span>Each recorded investigation runs several times and is judged on its pass rate, so red means a real regression, not a coin toss. Failures on main now raise an issue.</span></li>
+</ul>
+</div>
+<div class="release">
 <p class="when"><strong>v2.35.0</strong>27 October 2026<br>Pairs with UI v2.35.0 and operator v0.11.0<br>Migrations 038–040 run on start</p>
 <ul>
 <li style="--c:var(--trace)"><b>Learns only from fixes that held.</b> <span>Approved fixes now teach, but a skill is learned only after its fix outlasts the recurrence window, and a fix that keeps failing for a cause is swapped out or handed to a person.</span></li>
@@ -175,8 +184,8 @@
   <span class="k">namespace:</span> openshiftpulse
 <span class="k">spec:</span>
   <span class="k">vertexAI:</span> { <span class="k">projectId:</span> my-gcp-project, <span class="k">region:</span> us-east5, <span class="k">credentialSecret:</span> gcp-sa-key }
-  <span class="k">agent:</span> { <span class="k">image:</span> <span class="v">quay.io/amobrem/pulse-agent:v2.35.0</span>, <span class="k">trustLevel:</span> 2 }
-  <span class="k">ui:</span>    { <span class="k">image:</span> <span class="v">quay.io/amobrem/openshiftpulse:v2.35.0</span> }</code></pre>
+  <span class="k">agent:</span> { <span class="k">image:</span> <span class="v">quay.io/amobrem/pulse-agent:v2.36.0</span>, <span class="k">trustLevel:</span> 2 }
+  <span class="k">ui:</span>    { <span class="k">image:</span> <span class="v">quay.io/amobrem/openshiftpulse:v2.36.0</span> }</code></pre>
 <ul class="links">
 <li><a href="https://github.com/PulseSRE/pulse-operator#install-via-olm">Install guide</a><span>The canonical steps, in the operator README</span></li>
 <li><a href="https://github.com/PulseSRE/pulse-agent/blob/main/docs/ARCHITECTURE.md">Architecture</a><span>How the agent loop, monitor and skills fit together</span></li>
@@ -189,7 +198,7 @@
 </section>
 </main>
 <footer><div class="wrap">
-<span>Pulse agent v2.35.0. MIT licensed.</span>
+<span>Pulse agent v2.36.0. MIT licensed.</span>
 <span><a href="https://github.com/PulseSRE/pulse-agent">Source</a> &nbsp; <a href="https://github.com/PulseSRE/pulse-agent/releases">Releases</a> &nbsp; <a href="https://github.com/PulseSRE/pulse-agent/blob/main/CHANGELOG.md">Changelog</a></span>
 </div></footer>
 </body>

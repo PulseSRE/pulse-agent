@@ -4,9 +4,20 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## Unreleased
 
+## v2.36.0 (2026-10-30)
+
+Paired with pulse-ui v2.36.0; runs with pulse-operator v0.11.0 (operator #109, the self-heal fix, is independent). **Migration 041** (forward-only): `investigations.evidence_detail`. Pull requests #198–#207. The release gate on main (a5d0783) passed under the new pass-rate rule: monitor investigations 31/33 attempts with no fixture regressed and nothing unsafe (Brier 0.19), chat replay 42/53 (judge average 83, no regression against the baseline), SRE-Bench simulation core 6/6 and errors 5/5. Known weak case: `plan_node_disk_pressure` passes about half the time (#206).
+
+**Behaviour changes**
+- Investigation evidence cites the exact tool call it came from; a call that failed or never ran no longer counts as evidence
+- Every investigation (monitor plans, freeform, agent handoffs, inbox triage) goes through one pipeline: one timeout, failures reported, the same memory and learning rules
+- Monitor plan phases, which cannot approve a write, are no longer offered write tools
+- The node-pressure plan's diagnosis must name the top consumer of the resource under pressure
+
+**Details**
 - The postmortem skill's prompt gains the credential rule every other skill prompt carries.
 - The SLO management skill's burn-rate guidance matches the code: critical at ≥14.4x, warning at ≥6x, targets of 1 or more read as percentages, and an SLO with no data is `no_data`, not critical. It told the model >10x / 2–10x.
-- Docs brought up to v2.35.0 across the repo (journey, API contract, security, database, architecture, README, Pages, release and testing guides).
+- Docs kept current across the repos (#198 after v2.35.0, and this release: journey, API contract, security, architecture, testing, release guide, Pages).
 - **Confidence counts only evidence that was read.** Any evidence item with a `source` was weighed as fully sourced, so a source the investigation never called ("prometheus" with no query run) raised confidence on nothing. Plan phases and freeform investigations now keep a cited source only if it names a tool the run called; otherwise the item counts as unsourced and the claim is kept in `unverified_source`. The investigation replay uses the same rule.
 - **Saved investigations keep their structured evidence** (**migration 041**, `investigations.evidence_detail`). A card reloaded from history lost which evidence contradicted the cause; `GET /inbox/{id}/investigation` now returns `evidence_detail`.
 - **Evidence cites the tool call it came from.** Monitor investigations and plan phases label every tool result (`[call c3: get_pod_logs]`) and evidence names the call it rests on. Grounding checks the citation against a ledger recorded as each call finished (`evidence.CallLedger`, fed by `on_tool_result`), so a call that errored no longer counts as read, and two calls to the same tool are told apart. Grounded items carry `call_ref` and `call_input`. Labelling is opt-in (`run_agent_streaming(label_tool_calls=True)`); chat results are unchanged. The investigation replay reports how much evidence cites a call (not gated).
