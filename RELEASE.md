@@ -32,6 +32,21 @@ Alternatively run `scripts/bump-version.sh X.Y.Z`, review and commit the intende
 
 Verify the image build and actual GitHub release in both repos before deployment. Keep eval artifacts with the release evidence; do not treat a saved baseline as proof the agent passed a live gate.
 
+## Every release covers all three repositories
+
+A release of the agent/UI pair also checks the operator: what shipped in it since its last tag, and whether its docs name the new pair. When pulse-operator `main` has commits since its last tag, it is released in the same pass (it was not, from v0.11.0 to v0.12.0, so the self-heal fix sat merged and unshipped while v2.36.0 went out).
+
+For pulse-operator (its own version line, e.g. v0.12.0):
+
+1. Bump `OperatorVersion` in `internal/controller/compat.go` to the tag without `v`. `release.yml` refuses a tag that does not match.
+2. Cut a `## vX.Y.Z (date)` section in its `CHANGELOG.md` from `Unreleased`, saying which agent/UI pair it pairs with and any behaviour change on upgrade, and add the release to Pages (`docs/index.html`: header version, "What's new", footer, example CR images).
+3. Tag it. `release.yml` builds the operator, bundle and catalog images (the CSV version and `replaces` are set from the tag in CI) and `github-release.yml` publishes the GitHub Release from the changelog section.
+4. When the operator does not change, still update its docs to say which agent/UI versions run on the current operator unchanged, and note any agent migrations that run on start.
+
+Also check sre-bench: its README and Pages cite Pulse's simulation scores by version.
+
+**Tags.** Tag pushes are made from the maintainer's machine, with their GitHub credentials. Keep one script that pushes every tag of a release, agent, UI and operator together, and skips any tag already on GitHub so it can be re-run. After the push, verify in each repository: the image build, the GitHub Release (and that it is marked latest), version-sync for the agent/UI pair, and for the operator the bundle and catalog images.
+
 ## Deploy and recover
 
 Install/configure through the operator and an `OpenShiftPulse` resource. Follow its current README and CRD; update agent/UI image references as a tested pair, then verify pod health, `/version`, interactive responses, read-only cluster access, and approval/rollback behavior on a disposable namespace.

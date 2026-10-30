@@ -17,7 +17,9 @@ Use [RELEASE.md](../../../RELEASE.md) as the maintained procedure. Agent/UI vers
 3. Run `make eval-gate` for actual provider-backed replay; collect its transcript/score/baseline artifacts. Offline fixture-suite scores are informational and cannot establish agent quality.
 4. Review source/security changes and update changelogs and affected guides. Record actual test counts and skipped/blocked checks.
 5. Bump both versions explicitly, review changes, commit and tag the intended repositories. `scripts/bump-version.sh` only edits the agent package/README.
-6. Publish only within user authorization; verify image builds, releases, paired-version checks, and remote CI.
+   **Always include pulse-operator** ("Every release covers all three repositories" in RELEASE.md): if its `main` is ahead of its last tag, release it in the same pass (`OperatorVersion` in `compat.go`, CHANGELOG section, Pages); if not, update its docs to name the agent/UI pair it runs. Check sre-bench's cited scores too.
+   Give the user one tag script that pushes the agent, UI and operator tags together and skips tags that already exist.
+6. Publish only within user authorization; verify image builds, releases (each marked latest), paired-version checks, the operator's bundle and catalog images, and remote CI.
 7. Deployment is a distinct authorized action through pulse-operator. Cluster acceptance is required before declaring deployment healthy.
 
 Do not delete published tags as an application rollback. Restore the previous known-good image pair through the CR and account for forward-only database migrations. Never silently skip a failed prerequisite or label a missing check PASS.
