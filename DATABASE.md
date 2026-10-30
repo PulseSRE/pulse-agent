@@ -116,13 +116,13 @@ Plan phase audit traces use `skill_selection_log.channel_weights` for the stored
 | `user_events` | Raw UI/user event stream | event_type, user_id, payload (JSONB) |
 | `user_interactions` | Aggregated interaction outcomes | interaction_type, outcome, user_id |
 
-Additional tables support operational flags, inbox mutes, episodes and symptoms, cluster memory (`environment_facts`, `workload_baselines`), learning candidates, user skills, and runtime artifact/version storage. The feature grouping above is a navigation aid; `db_schema.py` is the complete DDL.
+Additional tables support operational flags, inbox mutes, episodes and symptoms, cluster memory (`environment_facts`, `workload_baselines`), learning candidates, user skills, runtime artifact/version storage, the fix-outcome ledger (`fix_outcomes`: one verification verdict per applied fix, read by `fix_learning.py`) and persisted noise counts (`monitor_noise`: how often each finding key cleared on its own, so a restart does not reset noise suppression). The feature grouping above is a navigation aid; `db_schema.py` is the complete DDL.
 
 Full DDL: `sre_agent/db_schema.py`
 
 ## Migrations
 
-Migrations are forward-only and recorded in `schema_migrations`. The current registry ends at **036**. The migration registry is authoritative, including changes to existing tables:
+Migrations are forward-only and recorded in `schema_migrations`. The current registry ends at **040**. The migration registry is authoritative, including changes to existing tables:
 
 | Version | Name |
 |---|---|
@@ -162,6 +162,10 @@ Migrations are forward-only and recorded in `schema_migrations`. The current reg
 | 034 | `action_snapshots` |
 | 035 | `user_skills` |
 | 036 | `runtime_artifacts` |
+| 037 | `grid_12` (rescales saved dashboards to the 12-column grid) |
+| 038 | `decaying_tool_counts` (fractional tool-prediction counts) |
+| 039 | `fix_outcomes` |
+| 040 | `monitor_noise` |
 
 Add the next unused integer and migration callable to `ALL_MIGRATIONS`; maintain the fresh-install DDL in `db_schema.py` too. Test fresh creation and upgrade behavior. Do not manually insert a migration row to silence a failing migration: that can leave the application using columns which do not exist.
 

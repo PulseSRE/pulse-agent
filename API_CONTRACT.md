@@ -803,18 +803,16 @@ A client that subscribes receives every standing finding at once, then new ones 
   "confidence": 0.82,
   "evidence": ["ConfigMap 'app-config' key 'DB_HOST' missing since rollout at 14:32", "Pod logs show KeyError on startup"],
   "alternativesConsidered": ["Image pull failure ruled out — image exists and pulled successfully"],
+  "evidenceDetail": [
+    {"observation": "Pod logs show KeyError on startup", "kind": "log", "source": "get_pod_logs", "stance": "supports", "confidence": 0.9},
+    {"observation": "Restarts began before the rollout", "kind": "event", "source": "get_events", "stance": "contradicts", "confidence": 0.6}
+  ],
+  "planId": "crashloop-resolution-v1",
   "timestamp": 1711540800
 }
 ```
 
-Optional fields (per design): `evidence` (list of facts supporting the diagnosis), `alternativesConsidered` (hypotheses checked and ruled out).
-
-> **Known gap:** as of this writing, `investigations.py` computes `evidence`
-> and `alternatives_considered` internally, but `investigation_runner.py`'s
-> outbound payload construction does not copy them onto the broadcast
-> `investigation_report` event -- they are silently dropped before reaching
-> the UI. Either wire them through or remove them from this doc; tracked
-> here so it isn't lost.
+`evidence` is the observations as text; `evidenceDetail` is the structured form the confidence was derived from, with each item's `stance` (`supports`, `contradicts`, `context`) and `source` (the tool or query it came from). `alternativesConsidered` lists hypotheses ruled out. `planId` is present when a plan template produced the report. Both the plan path and the freeform investigation send these fields, and `tests/fixtures/ui_contract/investigation.json` pins the exact payload the UI renders. A `confidence` of 0 means nothing supported the cause, and is shown, not hidden.
 
 #### `verification_report` — Next-scan validation after a fix action
 
