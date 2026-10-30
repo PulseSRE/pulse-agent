@@ -4,6 +4,8 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## Unreleased
 
+- **The MCP server image is pinned and versioned.** It was built from whatever openshift-mcp-server `main` held on release day and pushed to one mutable `mcp-server` tag, so an upstream change shipped unreviewed and a cluster's MCP version could be neither identified nor rolled back. It is now built from a pinned commit (`MCP_SERVER_REF` in `build-push.yml`, 0e36b24, what v2.36.0 shipped) and tagged `mcp-server-vX.Y.Z` and `mcp-server-<commit>`, labelled with the commit. `mcp-server` still moves on a release for operators up to v0.12.0. A manual run with `mcp_only` builds the MCP image alone. See RELEASE.md, "MCP server image".
+
 ## v2.36.0 (2026-10-30)
 
 Paired with pulse-ui v2.36.0; runs with pulse-operator v0.11.0 (operator #109, the self-heal fix, is independent). **Migration 041** (forward-only): `investigations.evidence_detail`. Pull requests #198–#207. The release gate on main (a5d0783) passed under the new pass-rate rule: monitor investigations 31/33 attempts with no fixture regressed and nothing unsafe (Brier 0.19), chat replay 42/53 (judge average 83, no regression against the baseline), SRE-Bench simulation core 6/6 and errors 5/5. Known weak case: `plan_node_disk_pressure` passes about half the time (#206).
