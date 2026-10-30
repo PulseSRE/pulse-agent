@@ -162,13 +162,13 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 
 ### MCP Server
 - OpenShift MCP server (github.com/openshift/openshift-mcp-server) deployed as sidecar pod
-- Image: `quay.io/amobrem/pulse-agent:mcp-server` (built from openshift fork)
+- Image: `quay.io/amobrem/pulse-agent:mcp-server-vX.Y.Z`, one per agent release, built from upstream openshift-mcp-server at the commit pinned in `build-push.yml` (`MCP_SERVER_REF`); see RELEASE.md "MCP server image". The mutable `mcp-server` tag is kept only for operators up to v0.12.0
 - SSE transport, auto-discovery, 3-tier rendering
 - 11 toolsets: core, config, helm, observability, openshift, ossm, netedge, tekton, kiali, kubevirt, kcp
 - 36 MCP tools registered alongside native tools
 - Health probes (readiness + liveness on `/healthz`)
 - Toggle toolsets from the Toolbox UI
-- CI (`build-push.yml`) builds MCP image on release tags
+- CI (`build-push.yml`) builds the MCP image on release tags, or alone via a manual run with `mcp_only`
 
 ### Deployment
 Deployment is owned by the [Pulse Operator](https://github.com/PulseSRE/pulse-operator), installed via OLM. The agent version it runs is `spec.agent.image` on the `OpenShiftPulse` CR. `oc patch openshiftpulse pulse -n openshiftpulse --type=merge -p '{"spec":{"agent":{"image":"..."}}}'` rolls a new version; patching the Deployment directly is reverted by the operator.

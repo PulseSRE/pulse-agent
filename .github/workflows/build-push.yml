@@ -12,15 +12,29 @@ on:
         description: 'Also build MCP server image'
         type: boolean
         default: false
+      mcp_only:
+        description: 'Build only the MCP server image (skip the agent image)'
+        type: boolean
+        default: false
+      mcp_tag:
+        description: 'MCP image tag suffix, e.g. v2.36.0 pushes mcp-server-v2.36.0 (default: the upstream commit)'
+        required: false
 
 env:
   REGISTRY: quay.io
   IMAGE_NAME: amobrem/pulse-agent
   MCP_IMAGE_NAME: amobrem/pulse-agent
+  # The openshift-mcp-server commit every MCP image is built from. It was
+  # unpinned: each release built whatever upstream main held that day, so an
+  # upstream change shipped unreviewed, and the one mutable mcp-server tag
+  # meant nobody could tell which code a cluster ran or roll it back. Move it
+  # deliberately (RELEASE.md, "MCP server"); 0e36b24 is what v2.36.0 shipped.
+  MCP_SERVER_REF: 0e36b241ccf768bdc3eb64df2afcd5257c19061d
 
 jobs:
   build-push:
     runs-on: ubuntu-latest
+    if: ${{ !inputs.mcp_only }}
     # The pre-build test gate runs the full suite, and a large part of that
     # suite needs PostgreSQL — the same service evals.yml declares. Without it
     # every DB-backed test errors with "connection refused" on port 5433 and no
@@ -95,13 +109,39 @@ jobs:
 
   build-mcp:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' || inputs.build_mcp }}
+    if: ${{ github.event_name == 'push' || inputs.build_mcp || inputs.mcp_only }}
     steps:
-      - name: Checkout OpenShift MCP Server
+      - name: Checkout OpenShift MCP Server at the pinned commit
         uses: actions/checkout@v4
         with:
           repository: openshift/openshift-mcp-server
+          ref: ${{ env.MCP_SERVER_REF }}
           path: openshift-mcp-server
+
+      # Every MCP image gets an immutable tag: mcp-server-<agent version> on a
+      # release (the operator runs the one matching spec.agent.image) and
+      # mcp-server-<upstream commit> always. The old mutable mcp-server tag
+      # still moves on a release, for operators up to v0.12.0 that default to
+      # it; a manual build never moves it.
+      - name: Set MCP image tags
+        id: tags
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.mcp_tag }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.MCP_IMAGE_NAME }}
+        run: |
+          {
+            echo "tags<<EOF"
+            echo "$IMAGE:mcp-server-${MCP_SERVER_REF::12}"
+            if [[ "$EVENT_NAME" == "push" ]]; then
+              echo "$IMAGE:mcp-server-$REF_NAME"
+              echo "$IMAGE:mcp-server"
+            elif [[ -n "$INPUT_TAG" ]]; then
+              echo "$IMAGE:mcp-server-$INPUT_TAG"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Log in to Quay.io
         uses: docker/login-action@v3
@@ -116,6 +156,20 @@ jobs:
           context: openshift-mcp-server
           file: openshift-mcp-server/Dockerfile
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.MCP_IMAGE_NAME }}:mcp-server
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/openshift/openshift-mcp-server
+            org.opencontainers.image.revision=${{ env.MCP_SERVER_REF }}
           platforms: linux/amd64
+
+      - name: Record the MCP build
+        env:
+          TAGS: ${{ steps.tags.outputs.tags }}
+        run: |
+          {
+            echo "### MCP server image"
+            echo "Built from openshift/openshift-mcp-server@\`${MCP_SERVER_REF}\`"
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

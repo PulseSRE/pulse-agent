@@ -32,6 +32,12 @@ Alternatively run `scripts/bump-version.sh X.Y.Z`, review and commit the intende
 
 Verify the image build and actual GitHub release in both repos before deployment. Keep eval artifacts with the release evidence; do not treat a saved baseline as proof the agent passed a live gate.
 
+## MCP server image
+
+The MCP server sidecar is built from [openshift/openshift-mcp-server](https://github.com/openshift/openshift-mcp-server) at the commit pinned in `build-push.yml` (`MCP_SERVER_REF`), not from upstream `main`. A release tag pushes `quay.io/amobrem/pulse-agent:mcp-server-vX.Y.Z` (the operator, from v0.13.0, runs the one matching `spec.agent.image`) and `mcp-server-<commit>`, and still moves the old `mcp-server` tag for operators up to v0.12.0. The build's summary records the commit and tags.
+
+Moving the pin is a change like any other: a PR that sets `MCP_SERVER_REF` to the new commit, with what changed upstream since the old one (`git log OLD..NEW` in that repo) in the description. To build an MCP image without a release, run `build-push.yml` manually with `mcp_only` (and `mcp_tag` to name it); a manual build never moves `mcp-server`.
+
 ## Every release covers all three repositories
 
 A release of the agent/UI pair also checks the operator: what shipped in it since its last tag, and whether its docs name the new pair. When pulse-operator `main` has commits since its last tag, it is released in the same pass (it was not, from v0.11.0 to v0.12.0, so the self-heal fix sat merged and unshipped while v2.36.0 went out).
