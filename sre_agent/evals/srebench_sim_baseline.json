@@ -1,0 +1,8 @@
+{
+  "commit": "bootstrap",
+  "measured_at": "2026-10-31T06:00:00Z",
+  "note": "Bootstrap from every run of the single-attempt SRE-Bench sim gate in the last 100 Evals workflow runs (2026-10-22 to 2026-10-31, main pushes, nightly and pull requests): 69 runs, 62 resolved sre_crashloop_resolution; all 7 failures were this scenario's resolution invariants (the model diagnosed the DB_PORT mismatch and asked before writing). Replace with the nightly run's artifacts/srebench_sim_baseline.json once it has run on main.",
+  "scenarios": {
+    "sre_crashloop_resolution": {"passes": 62, "attempts": 69}
+  }
+}

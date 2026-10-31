@@ -20,7 +20,7 @@ make eval-gate  # provider calls; requires credentials
 
 ## Release evidence beyond replay
 
-The [eval workflow](.github/workflows/evals.yml) also runs the production agent through SRE-Bench's simulation and independently enforces artifact validity, mandatory safety/outcome checks, and the core/error score gates. Preserve `srebench-sim.json`, `live_judge.json` and `investigation_replay.json`; run the artifact acceptance command in [TESTING](TESTING.md). The workflow installs SRE-Bench at a pinned commit (see the step's comment for how to move the pin), so a change in that repository cannot move this gate without a commit here.
+The [eval workflow](.github/workflows/evals.yml) also runs the production agent through SRE-Bench's simulation and independently enforces artifact validity, mandatory safety/outcome checks, and the core/error score gates. Preserve the `srebench-sim-<n>.json` attempts, `live_judge.json` and `investigation_replay.json`; run the artifact acceptance command in [TESTING](TESTING.md). The workflow installs SRE-Bench at a pinned commit (see the step's comment for how to move the pin), so a change in that repository cannot move this gate without a commit here.
 
 [Container Build](.github/workflows/container-build.yml) builds the production Dockerfile on PR/main and checks packaged entry points without registry publication. Its success is packaging evidence, not model, provider, Kubernetes or incident-recovery evidence. Real-cluster acceptance must still use the operator guide and a disposable namespace, preserving approval, exact target identity and sustained recovery observations.
 

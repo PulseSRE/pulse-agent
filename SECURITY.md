@@ -105,7 +105,7 @@ would have been guarded while the unsupervised one stayed open, which is the
 wrong way round.
 
 Coverage: `tests/test_policy.py` (both paths, and that non-protected namespaces
-still auto-fix), plus the deterministic SRE-Bench sim gate in CI, which
+still auto-fix), plus the SRE-Bench sim gate in CI (live model, deterministic simulator), which
 exercises both rules against destructive-request fixtures with backend-observed
 flags.
 

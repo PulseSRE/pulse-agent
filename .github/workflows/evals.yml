@@ -22,8 +22,9 @@ jobs:
     # (6h) default, so a hang (e.g. a DB lock wait) silently occupies a
     # runner for hours instead of failing fast. 45m covers unit tests, lint,
     # deterministic eval gates, and the live LLM judge run (daily cron/tags).
-    # 60 since the investigation replay lane joined the live gates.
-    timeout-minutes: 60
+    # 60 since the investigation replay lane joined the live gates; 75 since
+    # the SRE-Bench sim lane runs 3 attempts (5 nightly, ~2.5 min each).
+    timeout-minutes: 75
     services:
       postgres:
         image: postgres:16
@@ -295,13 +296,24 @@ jobs:
           python -m sre_agent.evals.investigation_replay_cli --all --model "$EVAL_MODEL" \
             --concurrency 4 --repeat "$REPEAT" $EXTRA --format json > artifacts/investigation_replay.json
 
-      # Deterministic lane: the live agent against SRE-Bench's simulated cluster
-      # fixtures. No judge in the gate — resolution/efficiency/safety come from
-      # the observing backend (verification_passed only on a post-fix read the
-      # backend saw; policy violations recorded mechanically). This catches what
-      # the sonnet-5 migration exposed: a model swap silently changing the
-      # agent's effective safety posture.
-      - name: SRE-Bench sim gate (deterministic)
+      # Simulated-cluster lane: the live agent against SRE-Bench's simulated
+      # cluster fixtures. No judge in the gate — resolution/efficiency/safety
+      # come from the observing backend (verification_passed only on a post-fix
+      # read the backend saw; policy violations recorded mechanically). This
+      # catches what the sonnet-5 migration exposed: a model swap silently
+      # changing the agent's effective safety posture.
+      #
+      # The simulator and grader are deterministic; the agent is a live model.
+      # Whether it remediates sre_crashloop_resolution or diagnoses and asks
+      # first varies run to run (62 of 69 single runs resolved, 2026-10-22..31),
+      # so one run made this gate red at random. Every scenario is now run
+      # several times. Integrity (`sre-bench verify`), the score gates and the
+      # absolute invariants (completion, policy violation, hallucinated tool,
+      # missing confirmation, post-fix read) must hold on every attempt;
+      # resolution is judged by its pass count against
+      # sre_agent/evals/srebench_sim_baseline.json (one-sided binomial,
+      # p < 0.05: at the bootstrap rate, 2 of 3 on PRs, 3 of 5 nightly).
+      - name: SRE-Bench sim gate (live model, repeated attempts)
         if: >-
           (github.event_name == 'schedule')
           || (github.event_name == 'push' && github.ref == 'refs/heads/main')
@@ -317,12 +329,12 @@ jobs:
           echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
           trap 'rm -f /tmp/gcp-sa-key.json' EXIT
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json
-          # Pinned, deliberately not @main. This step is labelled deterministic
-          # and gates releases, so the grader cannot be whatever sre-bench's
-          # default branch happens to be at that minute: a fixture change there
-          # would move this gate with no commit here. 96e421b5 is v0.4.0 plus
-          # the crashloop-fixture causality fix (PulseSRE/sre-bench#1), which
-          # is what the green runs of this gate have been scored against.
+          # Pinned, deliberately not @main. This step gates releases, so the
+          # grader cannot be whatever sre-bench's default branch happens to be
+          # at that minute: a fixture change there would move this gate with no
+          # commit here. 96e421b5 is v0.4.0 plus the crashloop-fixture
+          # causality fix (PulseSRE/sre-bench#1), which is what the green runs
+          # of this gate have been scored against.
           #
           # To move the pin: put the new sre-bench commit SHA (40 characters —
           # pip cannot fetch a short one) or vX.Y.Z tag here, run this workflow
@@ -331,29 +343,49 @@ jobs:
           # gate, so it is reviewed as a change to the gate.
           pip install "sre-bench[vertex] @ git+https://github.com/PulseSRE/sre-bench.git@96e421b5042a8953757e9591fc9b5d68bee9b555"
           python scripts/check_sim_adapter.py
-          sre-bench run --adapter sre_agent.evals.srebench_adapter:factory \
-            --all --sim --out artifacts/srebench-sim.json
-          # Integrity GATES: a structurally impossible flag (a verified fix with
-          # no post-check read, an unregistered tool name not marked
-          # hallucinated) is an unambiguous bug, never a score judgement call.
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            SIM_REPEAT=5
+            SIM_EXTRA="--write-sim-baseline artifacts/srebench_sim_baseline.json"
+          else
+            SIM_REPEAT=3
+            SIM_EXTRA=""
+          fi
           BENCH_GATE_STATUS=0
-          sre-bench verify artifacts/srebench-sim.json --all || BENCH_GATE_STATUS=1
-          # Mandatory invariants are independent of averaged benchmark scores.
-          python -m sre_agent.evals.acceptance_cli \
-            --sim artifacts/srebench-sim.json --replay artifacts/live_judge.json \
-            --output artifacts/mandatory_acceptance.json || BENCH_GATE_STATUS=1
-          # Both benchmark suites must meet their existing score gates as well.
-          # Retain per-scenario diagnostics in the downloadable artifact while
-          # keeping the concise score summaries below readable in Actions.
-          sre-bench score artifacts/srebench-sim.json --suite core --out artifacts/srebench-core-scores.json || BENCH_GATE_STATUS=1
-          sre-bench score artifacts/srebench-sim.json --suite errors --out artifacts/srebench-error-scores.json || BENCH_GATE_STATUS=1
+          SIM_FILES=""
           {
-            echo "### SRE-Bench sim (deterministic lane)"
-            echo '```'
-            sre-bench score artifacts/srebench-sim.json --suite core --fail-on-gate || BENCH_GATE_STATUS=1
-            sre-bench score artifacts/srebench-sim.json --suite errors --fail-on-gate || BENCH_GATE_STATUS=1
+            echo "### SRE-Bench sim (live model, $SIM_REPEAT attempts)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          for i in $(seq 1 "$SIM_REPEAT"); do
+            SIM="artifacts/srebench-sim-$i.json"
+            SIM_FILES="$SIM_FILES $SIM"
+            # A crashed run leaves no artifact; acceptance then reports it unreadable.
+            sre-bench run --adapter sre_agent.evals.srebench_adapter:factory \
+              --all --sim --out "$SIM" || BENCH_GATE_STATUS=1
+            # Integrity GATES, on every attempt: a structurally impossible flag
+            # (a verified fix with no post-check read, an unregistered tool name
+            # not marked hallucinated) is an unambiguous bug, never a score
+            # judgement call.
+            sre-bench verify "$SIM" --all || BENCH_GATE_STATUS=1
+            # Both benchmark suites must meet their score gates on every attempt.
+            # Per-scenario diagnostics go to the downloadable artifact; the
+            # concise summaries go to the step summary.
+            sre-bench score "$SIM" --suite core --out "artifacts/srebench-core-scores-$i.json" || BENCH_GATE_STATUS=1
+            sre-bench score "$SIM" --suite errors --out "artifacts/srebench-error-scores-$i.json" || BENCH_GATE_STATUS=1
+            {
+              echo "attempt $i/$SIM_REPEAT"
+              sre-bench score "$SIM" --suite core --fail-on-gate || BENCH_GATE_STATUS=1
+              sre-bench score "$SIM" --suite errors --fail-on-gate || BENCH_GATE_STATUS=1
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          # Mandatory invariants are independent of averaged benchmark scores.
+          # The summary names every failing invariant with its pass count.
+          # shellcheck disable=SC2086
+          python -m sre_agent.evals.acceptance_cli \
+            --sim $SIM_FILES --replay artifacts/live_judge.json \
+            --output artifacts/mandatory_acceptance.json \
+            --summary-markdown "$GITHUB_STEP_SUMMARY" $SIM_EXTRA || BENCH_GATE_STATUS=1
           exit "$BENCH_GATE_STATUS"
 
       # Fixture scoring only: these suites grade hand-written scenario JSON and
