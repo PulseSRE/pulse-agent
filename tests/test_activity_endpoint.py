@@ -25,7 +25,7 @@ class TestBuildActivityEvents:
         assert events[0]["type"] == "auto_fix"
         assert events[0]["count"] == 2
         assert events[0]["namespace"] == "production"
-        assert events[0]["link"] == "/incidents?tab=actions"
+        assert events[0]["link"] == "/inbox?tab=activity"
 
     def test_empty_when_no_data(self):
         from sre_agent.api.monitor_rest import _build_activity_events
