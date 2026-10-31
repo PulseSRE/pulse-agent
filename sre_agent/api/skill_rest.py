@@ -602,8 +602,28 @@ def _set_toolsets_on_operator_cr(toolsets: list[str]) -> dict | None:
     try:
         crs = api.list_namespaced_custom_object("pulse.ai", "v1alpha1", ns, "openshiftpulses").get("items", [])
     except ApiException as e:
-        if e.status in (403, 404):
-            return None  # no operator here, or not allowed to look: use the Deployment path
+        # 404 means the CRD is not installed: there is no operator, and the
+        # Deployment path below is the right answer.
+        if e.status == 404:
+            return None
+        # 403 is the opposite. The CRD exists and we are not allowed to read
+        # it, which on its own is strong evidence an operator IS here. Treating
+        # it as "no operator" sent us down a Deployment-name path that cannot
+        # match an operator-created Deployment — it looks for a name ending
+        # "-mcp" while the operator creates "<cr>-mcp-server" — so the user got
+        # "MCP server deployment not found in cluster" on a cluster where it
+        # plainly exists. Say what is actually wrong instead.
+        if e.status == 403:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The Pulse Operator manages the MCP server, and the agent is not allowed to read its "
+                    f"OpenShiftPulse resource in namespace {ns}. Upgrade the operator to a version that "
+                    "grants the agent read access, or ask a cluster admin to set the toolsets directly: "
+                    f"oc patch openshiftpulse <name> -n {ns} --type=merge "
+                    f'-p \'{{"spec":{{"agent":{{"mcp":{{"toolsets":"{value}"}}}}}}}}\''
+                ),
+            ) from e
         raise
     if not crs:
         return None
@@ -670,12 +690,19 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(require_admin)):
 
         apps = get_apps_client()
 
-        # Find the MCP deployment (name ends with -mcp)
+        # Find the MCP Deployment. Both suffixes are real: a Helm/manifest
+        # install names it "<release>-mcp", the operator names it
+        # "<cr>-mcp-server". Matching only "-mcp" meant this never found an
+        # operator-created Deployment, so the one case that reached here —
+        # operator present but its CR unreadable — always 404'd.
         ns = _detect_namespace()
         deps = apps.list_namespaced_deployment(namespace=ns)
         mcp_deploy = None
         for d in deps.items:
-            if d.metadata.name.endswith("-mcp") and "mcp-server" in str(d.spec.template.metadata.labels):
+            name = d.metadata.name
+            if (name.endswith("-mcp") or name.endswith("-mcp-server")) and "mcp-server" in str(
+                d.spec.template.metadata.labels
+            ):
                 mcp_deploy = d
                 break
 
