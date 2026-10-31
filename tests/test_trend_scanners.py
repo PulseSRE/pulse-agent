@@ -235,7 +235,9 @@ def test_error_acceleration_query_offsets_the_selectors_not_the_expression():
     Asserting on the rendered string keeps this cheap and hermetic; the real
     query was also confirmed against a live Thanos (400 before, 200 after).
     """
-    from sre_agent.monitor.trend_scanners import _ERROR_ACCELERATION_QUERY as q
+    from sre_agent.monitor import trend_scanners
+
+    q = trend_scanners._ERROR_ACCELERATION_QUERY
 
     assert "offset 1d" in q, "the day-ago comparison must still be present"
     # Every offset must be preceded by a range selector's closing bracket.

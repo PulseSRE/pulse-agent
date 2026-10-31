@@ -224,9 +224,7 @@ _ERROR_SHARE = _error_share()
 # At least 1% of requests failing, and more than double the share at this time
 # yesterday. The old query, deriv(...) > 0, fired on any upward slope at all —
 # 0.001 errors/s becoming 0.002 was "accelerating".
-_ERROR_ACCELERATION_QUERY = (
-    f"({_ERROR_SHARE} > 0.01) and ({_ERROR_SHARE} > 2 * ({_error_share('1d')}))"
-)
+_ERROR_ACCELERATION_QUERY = f"({_ERROR_SHARE} > 0.01) and ({_ERROR_SHARE} > 2 * ({_error_share('1d')}))"
 
 
 def scan_error_rate_acceleration() -> list[dict]:
