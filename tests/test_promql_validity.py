@@ -11,21 +11,19 @@ pass, the scanner returned nothing, and "no results" is indistinguishable from
 "nothing is wrong". It was invisible for as long as it existed, and surfaced
 only as a vague "Pulse cannot query Prometheus" that pointed at reachability.
 
-`promtool check rules` parses expressions without needing a running
-Prometheus, which makes this cheap enough to run on every push.
+`promql_parser.parse()` (the `promql-parser` package, already in the `test`
+extra for the mock cluster) is a full PromQL parse with no Prometheus to talk
+to and no binary to install, so this runs on every `pytest` invocation, local
+or CI, and cannot be skipped.
 """
 
 from __future__ import annotations
 
 import importlib
-import json
 import pkgutil
 import re
-import shutil
-import subprocess
-import tempfile
-from pathlib import Path
 
+import promql_parser
 import pytest
 
 # Anything that looks like PromQL rather than prose: a known function call or a
@@ -48,10 +46,9 @@ def _collect_scanner_queries() -> dict[str, str]:
 
     found: dict[str, str] = {}
     for mod in pkgutil.iter_modules(monitor_pkg.__path__):
-        try:
-            m = importlib.import_module(f"sre_agent.monitor.{mod.name}")
-        except Exception:  # pragma: no cover - import side effects are not this test's problem
-            continue
+        # No try/except: a module that fails to import would otherwise take its
+        # queries out of the check without anyone noticing.
+        m = importlib.import_module(f"sre_agent.monitor.{mod.name}")
         for attr in dir(m):
             if attr.startswith("__"):
                 continue
@@ -70,33 +67,25 @@ def test_promql_hint_finds_the_known_scanner_queries():
     )
 
 
-@pytest.mark.skipif(shutil.which("promtool") is None, reason="promtool not installed")
 def test_every_scanner_query_parses():
     queries = _collect_scanner_queries()
 
-    # promtool validates recording-rule expressions, which is a full PromQL
-    # parse without needing a Prometheus to talk to.
-    rules = {
-        "groups": [
-            {
-                "name": "pulse-promql-validation",
-                "rules": [{"record": f"pulse:validate:{i}", "expr": q} for i, q in enumerate(queries.values())],
-            }
-        ]
-    }
+    failures = []
+    for name, query in sorted(queries.items()):
+        try:
+            promql_parser.parse(query)
+        except ValueError as exc:
+            failures.append(f"{name}: {exc}\n    {query}")
 
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "rules.json"  # promtool accepts JSON; YAML is a superset
-        path.write_text(json.dumps(rules))
-        proc = subprocess.run(
-            ["promtool", "check", "rules", str(path)],
-            capture_output=True,
-            text=True,
-        )
+    if failures:
+        pytest.fail("PromQL failed to parse:\n" + "\n".join(failures))
 
-    if proc.returncode != 0:
-        names = list(queries)
-        detail = proc.stdout + proc.stderr
-        for i, name in enumerate(names):
-            detail = detail.replace(f"pulse:validate:{i}", name)
-        pytest.fail(f"PromQL failed to parse:\n{detail}")
+
+def test_parser_rejects_an_offset_on_a_finished_expression():
+    """The parser must catch the exact shape that shipped, or the suite proves nothing."""
+    from sre_agent.monitor import trend_scanners
+
+    share = trend_scanners._ERROR_SHARE
+    pre_fix = f"({share} > 0.01) and ({share} > 2 * ({share} offset 1d))"
+    with pytest.raises(ValueError, match="offset"):
+        promql_parser.parse(pre_fix)
