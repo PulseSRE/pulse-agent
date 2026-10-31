@@ -218,3 +218,33 @@ def test_all_scanners_handle_prometheus_failure_status(mock_prometheus_response)
         assert scan_disk_pressure_forecast() == []
         assert scan_hpa_exhaustion_trend() == []
         assert scan_error_rate_acceleration() == []
+
+
+def test_error_acceleration_query_offsets_the_selectors_not_the_expression():
+    """`offset` must sit on the range selectors, never on the finished ratio.
+
+    PromQL only accepts an offset modifier directly after an instant or range
+    vector selector (or a subquery). `(<ratio>) offset 1d` is a parse error, so
+    Prometheus rejects the *entire* query with 400 Bad Request and the scanner
+    returns nothing — silently, and indistinguishably from "no errors found".
+
+    This shipped: the agent reported only "Pulse cannot query Prometheus" and
+    advised checking thanos-querier reachability and the cluster-monitoring-view
+    binding, both of which were already correct. The query was the problem.
+
+    Asserting on the rendered string keeps this cheap and hermetic; the real
+    query was also confirmed against a live Thanos (400 before, 200 after).
+    """
+    from sre_agent.monitor import trend_scanners
+
+    q = trend_scanners._ERROR_ACCELERATION_QUERY
+
+    assert "offset 1d" in q, "the day-ago comparison must still be present"
+    # Every offset must be preceded by a range selector's closing bracket.
+    for idx in (m for m in range(len(q)) if q.startswith("offset", m)):
+        before = q[:idx].rstrip()
+        assert before.endswith("]"), (
+            f"offset at position {idx} follows {before[-40:]!r}, not a range "
+            "selector — Prometheus will reject this query with 400"
+        )
+    assert ") offset" not in q, "offset applied to a parenthesised expression is a parse error"
