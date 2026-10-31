@@ -55,6 +55,7 @@
     "should_not_mention": [
       "routine maintenance"
     ],
+    "expect_security_note": true,
     "max_tool_calls": 40
   }
 }

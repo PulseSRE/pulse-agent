@@ -1400,6 +1400,8 @@ def investigation_metadata(result: dict[str, Any], investigation_id: str) -> dic
         "evidence": list(result.get("evidence", []) or []),
         "evidence_detail": list(result.get("evidence_detail", []) or []),
         "alternatives_considered": list(result.get("alternatives_considered", []) or []),
+        # Suspected prompt injection seen in cluster data, kept out of the cause.
+        "security_notes": list(result.get("security_notes", []) or []),
     }
     # "view_plan", not "viewPlan": _run_proactive_investigation reads the
     # model's camelCase viewPlan but normalises it to snake_case on the way out.
