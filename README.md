@@ -363,7 +363,7 @@ Fixture inventories change with the checked-in JSON/YAML. Scenario reports score
 ```bash
 make evals       # offline harness and fixture reports
 make eval-gate   # live model and judge against recorded tool results
-python -m sre_agent.evals.acceptance_cli --sim artifacts/srebench-sim.json \
+python -m sre_agent.evals.acceptance_cli --sim artifacts/srebench-sim-*.json \
   --replay artifacts/live_judge.json --output artifacts/mandatory_acceptance.json
 ```
 
