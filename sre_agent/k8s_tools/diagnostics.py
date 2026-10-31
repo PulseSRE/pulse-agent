@@ -5,6 +5,7 @@ from __future__ import annotations
 import atexit
 import json
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
@@ -233,6 +234,381 @@ def get_cluster_operators():
     text = "\n".join(lines) or "No ClusterOperators found."
     component = {"kind": "status_list", "title": f"Cluster Operators ({len(items)})", "items": items} if items else None
     return (text, component)
+
+
+# ---------------------------------------------------------------------------
+# Cluster updates (OpenShift ClusterVersion → upgrade_graph)
+# ---------------------------------------------------------------------------
+
+# CVO's Progressing message: "Working towards 4.16.3: 512 of 863 done (59% complete)".
+_CVO_PROGRESS_RE = re.compile(r"(\d+)\s+of\s+(\d+)\s+done(?:\s*\((\d+)%\s*complete\))?")
+_MINOR_RE = re.compile(r"^(\d+)\.(\d+)")
+
+
+def _cond(conditions: list | None, ctype: str) -> dict:
+    for c in conditions or []:
+        if isinstance(c, dict) and c.get("type") == ctype:
+            return c
+    return {}
+
+
+def _minor(version: str) -> tuple[int, int] | None:
+    m = _MINOR_RE.match(version or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _parse_ts(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def parse_cvo_progress(message: str) -> dict | None:
+    """Parse "x of y done (z%)" from the CVO Progressing message; None when absent."""
+    m = _CVO_PROGRESS_RE.search(message or "")
+    if not m:
+        return None
+    done, total = int(m.group(1)), int(m.group(2))
+    percent = int(m.group(3)) if m.group(3) else (round(done * 100 / total) if total else 0)
+    return {"done": done, "total": total, "percent": percent}
+
+
+def build_cluster_updates(cv: dict, operators: list[dict] | None, pools: list[dict] | None) -> dict:
+    """Shape ClusterVersion + ClusterOperators + MachineConfigPools into the upgrade_graph structure.
+
+    Pure function so the shape is testable without a cluster. ``operators`` and
+    ``pools`` are None when they could not be read (reported, not guessed).
+    """
+    spec = cv.get("spec") or {}
+    status = cv.get("status") or {}
+    conditions = status.get("conditions") or []
+    desired_status = status.get("desired") or {}
+    history_raw = status.get("history") or []
+
+    # The version the cluster runs is the newest Completed history entry; while an
+    # update is in flight status.desired is already the target.
+    completed = next((h for h in history_raw if h.get("state") == "Completed"), None)
+    current_version = (completed or desired_status).get("version", "")
+    current = {
+        "version": current_version,
+        "image": (completed or desired_status).get("image", ""),
+        "channel": spec.get("channel", ""),
+        "channels": list(desired_status.get("channels") or []),
+    }
+    desired = {"version": desired_status.get("version", ""), "image": desired_status.get("image", "")}
+    requested = spec.get("desiredUpdate") or None
+
+    upgradeable = _cond(conditions, "Upgradeable")
+    upgradeable_false = upgradeable.get("status") == "False"
+    # While an update is in flight CVO computes availableUpdates/conditionalUpdates
+    # from the release it is reconciling (status.desired), not the one still running.
+    in_flight = _cond(conditions, "Progressing").get("status") == "True"
+    source_version = desired["version"] if in_flight and desired["version"] else current_version
+    current_minor = _minor(source_version)
+
+    def _blocked(version: str) -> bool:
+        # Upgradeable=False blocks minor-version updates; patch updates still proceed.
+        target = _minor(version)
+        return upgradeable_false and bool(current_minor and target and target > current_minor)
+
+    available = []
+    for u in status.get("availableUpdates") or []:
+        version = u.get("version", "")
+        available.append(
+            {
+                "version": version,
+                "image": u.get("image", ""),
+                "url": u.get("url", ""),
+                "channels": list(u.get("channels") or []),
+                "blocked": _blocked(version),
+            }
+        )
+
+    conditional = []
+    for cu in status.get("conditionalUpdates") or []:
+        release = cu.get("release") or {}
+        version = release.get("version", "")
+        rec = _cond(cu.get("conditions"), "Recommended")
+        conditional.append(
+            {
+                "version": version,
+                "image": release.get("image", ""),
+                "url": release.get("url", ""),
+                "channels": list(release.get("channels") or []),
+                "recommended": {
+                    "status": rec.get("status", "Unknown"),
+                    "reason": rec.get("reason", ""),
+                    "message": rec.get("message", ""),
+                },
+                "risks": [
+                    {
+                        "name": r.get("name", ""),
+                        "message": r.get("message", ""),
+                        "url": r.get("url", ""),
+                        "matchingRules": list(r.get("matchingRules") or []),
+                    }
+                    for r in cu.get("risks") or []
+                ],
+                "blocked": _blocked(version),
+            }
+        )
+
+    history = []
+    for h in history_raw:
+        started, finished = _parse_ts(h.get("startedTime")), _parse_ts(h.get("completionTime"))
+        history.append(
+            {
+                "version": h.get("version", ""),
+                "image": h.get("image", ""),
+                "state": h.get("state", ""),
+                "startedTime": h.get("startedTime"),
+                "completionTime": h.get("completionTime"),
+                "verified": bool(h.get("verified", False)),
+                "durationMinutes": round((finished - started).total_seconds() / 60) if started and finished else None,
+            }
+        )
+    last_duration = next(
+        (h["durationMinutes"] for h in history if h["state"] == "Completed" and h["durationMinutes"] is not None),
+        None,
+    )
+
+    progressing = _cond(conditions, "Progressing")
+    failing = _cond(conditions, "Failing")
+    is_progressing = progressing.get("status") == "True"
+    parsed = parse_cvo_progress(progressing.get("message", "")) if is_progressing else None
+    target_version = desired["version"]
+
+    co_progress: dict | None = None
+    if operators is not None:
+        updated = 0
+        degraded = []
+        for co in operators:
+            versions = (co.get("status") or {}).get("versions") or []
+            op_version = next((v.get("version") for v in versions if v.get("name") == "operator"), None)
+            if op_version and op_version == target_version:
+                updated += 1
+            if _cond((co.get("status") or {}).get("conditions"), "Degraded").get("status") == "True":
+                degraded.append((co.get("metadata") or {}).get("name", ""))
+        co_progress = {"updated": updated, "total": len(operators), "degraded": degraded}
+
+    pool_progress: list[dict] | None = None
+    if pools is not None:
+        pool_progress = []
+        for p in pools:
+            pst = p.get("status") or {}
+            pconds = pst.get("conditions")
+            pool_progress.append(
+                {
+                    "name": (p.get("metadata") or {}).get("name", ""),
+                    "updated": int(pst.get("updatedMachineCount") or 0),
+                    "total": int(pst.get("machineCount") or 0),
+                    "degraded": _cond(pconds, "Degraded").get("status") == "True"
+                    or int(pst.get("degradedMachineCount") or 0) > 0,
+                    "updating": _cond(pconds, "Updating").get("status") == "True",
+                    "paused": bool((p.get("spec") or {}).get("paused", False)),
+                }
+            )
+
+    eta = None
+    if is_progressing and parsed and last_duration is not None:
+        eta = max(0, round(last_duration * (100 - parsed["percent"]) / 100))
+
+    progress = {
+        "phase": "failing" if failing.get("status") == "True" else ("progressing" if is_progressing else "idle"),
+        "message": progressing.get("message", "")
+        if is_progressing
+        else (failing.get("message", "") if failing.get("status") == "True" else ""),
+        "done": parsed["done"] if parsed else None,
+        "total": parsed["total"] if parsed else None,
+        "percent": parsed["percent"] if parsed else None,
+        "clusterOperators": co_progress,
+        "pools": pool_progress,
+        "etaMinutes": eta,
+        "etaBasis": "last completed update duration" if eta is not None else "",
+    }
+
+    blockers = []
+    if upgradeable_false:
+        blockers.append(
+            {
+                "type": "upgradeable",
+                "reason": upgradeable.get("reason", ""),
+                "message": upgradeable.get("message", ""),
+                "link": "/admin?tab=updates",
+            }
+        )
+    if failing.get("status") == "True":
+        blockers.append(
+            {
+                "type": "failing",
+                "reason": failing.get("reason", ""),
+                "message": failing.get("message", ""),
+                "link": "/admin?tab=updates",
+            }
+        )
+    for pool in pool_progress or []:
+        if pool["degraded"]:
+            blockers.append(
+                {
+                    "type": "pool",
+                    "reason": "Degraded",
+                    "message": f"MachineConfigPool {pool['name']} is degraded",
+                    "link": f"/r/machineconfiguration.openshift.io~v1~machineconfigpools/_/{pool['name']}",
+                }
+            )
+        elif pool["paused"] and is_progressing and pool["updated"] < pool["total"]:
+            blockers.append(
+                {
+                    "type": "pool",
+                    "reason": "Paused",
+                    "message": f"MachineConfigPool {pool['name']} is paused; its nodes will not update",
+                    "link": f"/r/machineconfiguration.openshift.io~v1~machineconfigpools/_/{pool['name']}",
+                }
+            )
+
+    return {
+        "current": current,
+        "desired": desired,
+        "updatesFrom": source_version,
+        "requested": requested,
+        "availableUpdates": available,
+        "conditionalUpdates": conditional,
+        "history": history,
+        "upgradeable": {
+            "status": upgradeable.get("status", "Unknown") if upgradeable else "Unknown",
+            "reason": upgradeable.get("reason", ""),
+            "message": upgradeable.get("message", ""),
+        },
+        "progress": progress,
+        "blockers": blockers,
+    }
+
+
+def _upgrade_graph_component(data: dict) -> dict:
+    current = data["current"]
+    nodes = []
+    for u in data["availableUpdates"]:
+        nodes.append(
+            {
+                "version": u["version"],
+                "image": u["image"],
+                "state": "blocked" if u["blocked"] else "recommended",
+                "recommended": True,
+                "risks": [],
+                "channels": u["channels"],
+            }
+        )
+    for cu in data["conditionalUpdates"]:
+        if any(n["version"] == cu["version"] for n in nodes):
+            continue
+        recommended = cu["recommended"]["status"] == "True"
+        nodes.append(
+            {
+                "version": cu["version"],
+                "image": cu["image"],
+                "state": "blocked" if cu["blocked"] else ("recommended" if recommended else "conditional"),
+                "recommended": recommended,
+                "risks": cu["risks"],
+                "channels": cu["channels"],
+            }
+        )
+    return {
+        "kind": "upgrade_graph",
+        "title": f"Cluster updates — {current['version'] or 'unknown'}",
+        "current": {"version": current["version"], "image": current["image"], "channel": current["channel"]},
+        "desired": data["desired"],
+        "channels": current["channels"],
+        "nodes": nodes,
+        "edges": [{"from": data["updatesFrom"], "to": n["version"]} for n in nodes],
+        "history": [
+            {k: h[k] for k in ("version", "state", "startedTime", "completionTime", "verified")}
+            for h in data["history"]
+        ],
+        "progress": data["progress"],
+        "blockers": data["blockers"],
+    }
+
+
+@beta_tool
+def get_cluster_updates():
+    """Get OpenShift cluster update options and in-flight upgrade progress from ClusterVersion.
+
+    Returns the current version/channel, recommended updates (availableUpdates),
+    conditional updates with their known risks (name, message, url, matchingRules)
+    and Recommended condition, update history with durations, and — while an
+    update runs — CVO progress ("x of y done"), ClusterOperators at the target
+    version, MachineConfigPool rollout and blockers (Upgradeable=False, degraded
+    or paused pools). Renders an upgrade_graph. Read-only: it never starts an
+    update. Use for "can we upgrade", "what updates are available", "is the
+    upgrade stuck", "how far along is the upgrade".
+    """
+    custom = _kc.get_custom_client()
+    cv = _kc.safe(lambda: custom.get_cluster_custom_object("config.openshift.io", "v1", "clusterversions", "version"))
+    if isinstance(cv, ToolError):
+        if cv.status_code == 404:
+            return "ClusterVersion not found — this is not an OpenShift cluster, so OpenShift updates do not apply."
+        return str(cv)
+
+    cos = _kc.safe(lambda: custom.list_cluster_custom_object("config.openshift.io", "v1", "clusteroperators"))
+    operators = None if isinstance(cos, ToolError) else list(cos.get("items", []))
+    mcps = _kc.safe(
+        lambda: custom.list_cluster_custom_object("machineconfiguration.openshift.io", "v1", "machineconfigpools")
+    )
+    pools = None if isinstance(mcps, ToolError) else list(mcps.get("items", []))
+
+    data = build_cluster_updates(cv, operators, pools)
+    cur = data["current"]
+    lines = [f"Current: {cur['version'] or 'unknown'} (channel {cur['channel'] or 'none'})"]
+    if data["desired"]["version"] and data["desired"]["version"] != cur["version"]:
+        lines.append(f"Updating to: {data['desired']['version']} (update targets below are from that release)")
+    up = data["upgradeable"]
+    if up["status"] == "False":
+        lines.append(f"Upgradeable=False ({up['reason']}): {up['message']} — minor-version updates are blocked")
+    if data["availableUpdates"]:
+        lines.append("Recommended updates:")
+        for u in data["availableUpdates"]:
+            lines.append(f"  {u['version']}{'  [blocked: Upgradeable=False]' if u['blocked'] else ''}")
+    else:
+        lines.append("Recommended updates: none")
+    if data["conditionalUpdates"]:
+        lines.append("Conditional updates (known risks):")
+        for cu in data["conditionalUpdates"]:
+            risks = ", ".join(r["name"] for r in cu["risks"]) or "none listed"
+            lines.append(f"  {cu['version']}  Recommended={cu['recommended']['status']}  risks: {risks}")
+            for r in cu["risks"]:
+                lines.append(f"    - {r['name']}: {r['message']} ({r['url']})")
+    pr = data["progress"]
+    if pr["phase"] != "idle":
+        lines.append(f"Progress ({pr['phase']}): {pr['message']}")
+        if pr["clusterOperators"] is not None:
+            co = pr["clusterOperators"]
+            lines.append(f"  ClusterOperators at target: {co['updated']}/{co['total']}")
+            if co["degraded"]:
+                lines.append(f"  Degraded operators: {', '.join(co['degraded'])}")
+        else:
+            lines.append("  ClusterOperators: could not be read")
+        if pr["pools"] is None:
+            lines.append("  MachineConfigPools: could not be read")
+        for p in pr["pools"] or []:
+            flags = " ".join(f for f, on in (("degraded", p["degraded"]), ("paused", p["paused"])) if on)
+            lines.append(f"  Pool {p['name']}: {p['updated']}/{p['total']} updated {flags}".rstrip())
+        if pr["etaMinutes"] is not None:
+            lines.append(f"  Estimated remaining: ~{pr['etaMinutes']} min (based on the last completed update)")
+    for b in data["blockers"]:
+        lines.append(f"Blocker [{b['type']}]: {b['message']}")
+    if data["history"]:
+        lines.append("History:")
+        for h in data["history"][:5]:
+            dur = f" in {h['durationMinutes']} min" if h["durationMinutes"] is not None else ""
+            lines.append(f"  {h['version']} {h['state']}{dur}")
+    if not cur["version"]:
+        # No Completed history and no desired version: there is no node to draw
+        # the graph from, and the component would fail validation.
+        return "\n".join(lines)
+    return ("\n".join(lines), _upgrade_graph_component(data))
 
 
 @beta_tool

@@ -190,7 +190,7 @@ class TestTransformEdgeCases:
 
         spec = {"kind": "metric_card", "title": "CPU", "value": "72%", "query": "rate(cpu[5m])"}
         result = transform(spec, "chart", options={"time_range": "24h"})
-        assert result["time_range"] == "24h"
+        assert result["timeRange"] == "24h"
 
 
 # ---------------------------------------------------------------------------

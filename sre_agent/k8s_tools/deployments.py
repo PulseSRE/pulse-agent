@@ -362,3 +362,204 @@ def list_replicasets(namespace: str, deployment_name: str = ""):
             f"Age={_kc.age(rs.metadata.creation_timestamp)}"
         )
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Rollout history (Deployment ReplicaSets, StatefulSet/DaemonSet ControllerRevisions)
+# ---------------------------------------------------------------------------
+
+_ROLLOUT_KINDS = {
+    "deployment": ("Deployment", "apps~v1~deployments"),
+    "statefulset": ("StatefulSet", "apps~v1~statefulsets"),
+    "daemonset": ("DaemonSet", "apps~v1~daemonsets"),
+}
+
+
+def _iso(ts) -> str | None:
+    if ts is None:
+        return None
+    if isinstance(ts, str):
+        return ts
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return ts.isoformat().replace("+00:00", "Z")
+
+
+def _owned_by(obj, uid: str | None, kind: str, name: str) -> bool:
+    for ref in obj.metadata.owner_references or []:
+        if ref.kind == kind and (ref.uid == uid if uid else ref.name == name):
+            return True
+    return False
+
+
+def _template_images(template: dict | None) -> list[str]:
+    spec = ((template or {}).get("spec")) or {}
+    return [c.get("image", "") for c in (spec.get("containers") or []) if isinstance(c, dict)]
+
+
+def _cr_template(data) -> dict:
+    """The pod template stored in a ControllerRevision's data (a dict, or a JSON string)."""
+    if isinstance(data, str | bytes):
+        try:
+            data = json.loads(data)
+        except ValueError:
+            return {}
+    if not isinstance(data, dict):
+        return {}
+    return ((data.get("spec") or {}).get("template")) or {}
+
+
+def _conditions(status) -> list[dict]:
+    return [
+        {"type": c.type, "status": c.status, "reason": c.reason or "", "message": c.message or ""}
+        for c in (getattr(status, "conditions", None) or [])
+    ]
+
+
+@beta_tool
+def get_rollout_history(kind: str, namespace: str, name: str):
+    """Get the revision history of a Deployment, StatefulSet or DaemonSet, with images per revision.
+
+    Returns each revision (ReplicaSets for a Deployment, ControllerRevisions for a
+    StatefulSet/DaemonSet) with its container images, change-cause, ready/desired
+    replicas, creation time and which one is current, plus in-flight rollout
+    status. Renders a rollout_history timeline. Read-only; use
+    rollback_deployment to roll a Deployment back.
+
+    Args:
+        kind: Deployment, StatefulSet or DaemonSet.
+        namespace: Kubernetes namespace.
+        name: Workload name.
+    """
+    spec_kind = _ROLLOUT_KINDS.get((kind or "").lower())
+    if not spec_kind:
+        return "Error: kind must be one of Deployment, StatefulSet, DaemonSet."
+    err = _validate_k8s_namespace(namespace) or _validate_k8s_name(name)
+    if err:
+        return err
+    kind_name, gvr = spec_kind
+    apps = _kc.get_apps_client()
+
+    if kind_name == "Deployment":
+        wl = _kc.safe(lambda: apps.read_namespaced_deployment(name, namespace))
+    elif kind_name == "StatefulSet":
+        wl = _kc.safe(lambda: apps.read_namespaced_stateful_set(name, namespace))
+    else:
+        wl = _kc.safe(lambda: apps.read_namespaced_daemon_set(name, namespace))
+    if isinstance(wl, ToolError):
+        return str(wl)
+    uid = wl.metadata.uid
+    st = wl.status
+
+    revisions: list[dict] = []
+    if kind_name == "Deployment":
+        match_labels = (wl.spec.selector.match_labels or {}) if wl.spec and wl.spec.selector else {}
+        selector = ",".join(f"{k}={v}" for k, v in sorted(match_labels.items()))
+        if selector:
+            result = _kc.safe(lambda: apps.list_namespaced_replica_set(namespace, label_selector=selector))
+        else:
+            result = _kc.safe(lambda: apps.list_namespaced_replica_set(namespace))
+        if isinstance(result, ToolError):
+            return str(result)
+        # The selector narrows the list; ownership (uid) decides membership.
+        current_rev = (wl.metadata.annotations or {}).get("deployment.kubernetes.io/revision")
+        for rs in result.items:
+            if not _owned_by(rs, uid, "Deployment", name):
+                continue
+            ann = rs.metadata.annotations or {}
+            rev = ann.get("deployment.kubernetes.io/revision")
+            containers = rs.spec.template.spec.containers if rs.spec and rs.spec.template else []
+            revisions.append(
+                {
+                    "revision": int(rev) if rev and rev.isdigit() else 0,
+                    "name": rs.metadata.name,
+                    "createdAt": _iso(rs.metadata.creation_timestamp),
+                    "images": [c.image for c in containers or []],
+                    "changeCause": ann.get("kubernetes.io/change-cause", ""),
+                    "replicas": {"ready": rs.status.ready_replicas or 0, "desired": rs.spec.replicas or 0},
+                    "current": rev is not None and rev == current_rev,
+                    "source": "replicaset",
+                }
+            )
+        strategy = wl.spec.strategy.type if wl.spec and wl.spec.strategy else "RollingUpdate"
+        in_flight = {
+            "strategy": strategy,
+            "updated": st.updated_replicas or 0,
+            "ready": st.ready_replicas or 0,
+            "available": st.available_replicas or 0,
+            "desired": wl.spec.replicas if wl.spec and wl.spec.replicas is not None else 1,
+            "conditions": _conditions(st),
+        }
+    else:
+        result = _kc.safe(lambda: apps.list_namespaced_controller_revision(namespace))
+        if isinstance(result, ToolError):
+            return str(result)
+        owned = [cr for cr in result.items if _owned_by(cr, uid, kind_name, name)]
+        if kind_name == "StatefulSet":
+            current_name = st.update_revision or ""
+            ready = st.ready_replicas or 0
+            desired = wl.spec.replicas if wl.spec and wl.spec.replicas is not None else 1
+            strategy = wl.spec.update_strategy.type if wl.spec and wl.spec.update_strategy else "RollingUpdate"
+            in_flight = {
+                "strategy": strategy,
+                "updated": st.updated_replicas or 0,
+                "ready": ready,
+                "available": st.available_replicas or 0,
+                "desired": desired,
+                "conditions": _conditions(st),
+            }
+        else:
+            top = max((cr.revision or 0 for cr in owned), default=0)
+            current_name = next((cr.metadata.name for cr in owned if (cr.revision or 0) == top), "")
+            ready = st.number_ready or 0
+            desired = st.desired_number_scheduled or 0
+            strategy = wl.spec.update_strategy.type if wl.spec and wl.spec.update_strategy else "RollingUpdate"
+            in_flight = {
+                "strategy": strategy,
+                "updated": st.updated_number_scheduled or 0,
+                "ready": ready,
+                "available": st.number_available or 0,
+                "desired": desired,
+                "conditions": _conditions(st),
+            }
+        for cr in owned:
+            ann = cr.metadata.annotations or {}
+            is_current = cr.metadata.name == current_name
+            revisions.append(
+                {
+                    "revision": int(cr.revision or 0),
+                    "name": cr.metadata.name,
+                    "createdAt": _iso(cr.metadata.creation_timestamp),
+                    "images": _template_images(_cr_template(cr.data)),
+                    "changeCause": ann.get("kubernetes.io/change-cause", ""),
+                    # Replica counts belong to the workload, not a ControllerRevision.
+                    "replicas": {"ready": ready, "desired": desired} if is_current else None,
+                    "current": is_current,
+                    "source": "controllerrevision",
+                }
+            )
+
+    revisions.sort(key=lambda r: r["revision"])
+    if not revisions:
+        return f"No revisions found for {kind_name} {namespace}/{name}."
+
+    lines = [f"Rollout history for {kind_name} {namespace}/{name} ({len(revisions)} revisions):"]
+    prev_images: list[str] | None = None
+    for r in revisions:
+        changed = "" if prev_images is None or prev_images == r["images"] else "  (image changed)"
+        cause = f"  cause: {r['changeCause']}" if r["changeCause"] else ""
+        mark = "  <- current" if r["current"] else ""
+        lines.append(f"  rev {r['revision']}  {r['name']}  {', '.join(r['images'])}{changed}{cause}{mark}")
+        prev_images = r["images"]
+    f = in_flight
+    lines.append(
+        f"Rollout: {f['updated']}/{f['desired']} updated, {f['ready']} ready, {f['available']} available ({f['strategy']})"
+    )
+    component = {
+        "kind": "rollout_history",
+        "title": f"Rollout history — {name}",
+        "workload": {"kind": kind_name, "namespace": namespace, "name": name, "gvr": gvr},
+        "revisions": revisions,
+        "inFlight": in_flight,
+    }
+    return ("\n".join(lines), component)

@@ -66,6 +66,12 @@ async def rest_get_view(
     view = db.get_view(view_id, owner)
     if view is None:
         return JSONResponse(status_code=404, content={"error": "View not found"})
+    # Views saved before a field was renamed (chart time_range -> timeRange) are
+    # served in the current shape; the stored copy is fixed on its next save.
+    if isinstance(view.get("layout"), list):
+        from ..quality_engine import normalize_layout
+
+        view["layout"] = normalize_layout(view["layout"])
     return view
 
 

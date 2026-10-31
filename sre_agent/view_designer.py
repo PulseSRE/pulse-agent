@@ -23,6 +23,7 @@ _DATA_TOOL_NAMES = {
     "list_jobs",
     "list_cronjobs",
     "list_replicasets",
+    "get_rollout_history",
     "list_hpas",
     "list_resources",
     "describe_resource",
@@ -45,6 +46,7 @@ _DATA_TOOL_NAMES = {
     "discover_metrics",
     # Cluster info
     "get_cluster_version",
+    "get_cluster_updates",
     "get_cluster_operators",
     "list_operator_subscriptions",
     "get_configmap",

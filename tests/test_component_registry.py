@@ -219,6 +219,69 @@ class TestNormalization:
         assert layout[0]["items"][0]["items"][0]["status"] == "unknown"
 
 
+class TestWave8Kinds:
+    def test_upgrade_graph_schema(self):
+        comp = get_component("upgrade_graph")
+        assert comp is not None
+        assert comp.required_fields == ["current", "nodes"]
+        for f in ("desired", "edges", "history", "progress", "blockers"):
+            assert f in comp.optional_fields
+        assert {n["state"] for n in comp.example["nodes"]} == {"recommended", "conditional"}
+        assert "get_cluster_updates" in comp.prompt_hint
+
+    def test_rollout_history_schema(self):
+        comp = get_component("rollout_history")
+        assert comp is not None
+        assert comp.required_fields == ["workload", "revisions"]
+        assert "inFlight" in comp.optional_fields
+        rev = comp.example["revisions"][0]
+        assert set(rev) >= {"revision", "name", "createdAt", "images", "changeCause", "replicas", "current", "source"}
+        assert "get_rollout_history" in comp.prompt_hint
+
+    def test_chart_live_fields(self):
+        comp = get_component("chart")
+        for f in ("timeRange", "refreshInterval", "live", "step", "annotations"):
+            assert f in comp.optional_fields
+        assert "time_range" not in comp.optional_fields
+
+    def test_stat_card_can_be_live(self):
+        comp = get_component("stat_card")
+        assert "query" in comp.optional_fields
+        assert "refreshInterval" in comp.optional_fields
+
+    def test_hints_include_new_kinds(self):
+        hints = get_prompt_hints(["upgrade_graph", "rollout_history"])
+        assert "upgrade_graph --" in hints
+        assert "rollout_history --" in hints
+
+    def test_chart_time_range_renamed(self):
+        spec = normalize_component_spec({"kind": "chart", "query": "up", "time_range": "6h"})
+        assert spec["timeRange"] == "6h"
+        assert "time_range" not in spec
+
+    def test_chart_time_range_does_not_override_camel(self):
+        spec = normalize_component_spec({"kind": "chart", "time_range": "6h", "timeRange": "1h"})
+        assert spec["timeRange"] == "1h"
+        assert "time_range" not in spec
+
+    def test_chart_annotations_cleaned(self):
+        spec = normalize_component_spec(
+            {
+                "kind": "chart",
+                "annotations": [
+                    {"timestamp": 1700000000000, "label": "deploy v2", "kind": "rollout"},
+                    {"timestamp": 1700000060000, "label": "odd", "kind": "bogus"},
+                    {"label": "no timestamp"},
+                    "junk",
+                ],
+            }
+        )
+        assert spec["annotations"] == [
+            {"timestamp": 1700000000000, "label": "deploy v2", "kind": "rollout"},
+            {"timestamp": 1700000060000, "label": "odd", "kind": "config"},
+        ]
+
+
 class TestValidateLayoutKinds:
     def test_valid_kinds(self):
         layout = [{"kind": "metric_card"}, {"kind": "chart"}]
@@ -267,6 +330,8 @@ class TestFrontendContract:
             "resolution_tracker",
             "blast_radius",
             "status_pipeline",
+            "upgrade_graph",
+            "rollout_history",
         }
     )
 
