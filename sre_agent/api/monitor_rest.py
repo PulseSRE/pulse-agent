@@ -1054,7 +1054,12 @@ async def plan_analytics(
 
 
 def _build_activity_events(repo, days: int = 7) -> list[dict]:
-    """Aggregate recent agent activity into plain-English events."""
+    """Aggregate recent agent activity into plain-English events.
+
+    Every event links to the Inbox's Activity tab, where the UI lists actions,
+    investigations and postmortems. Links must be pulse-ui routes
+    (``sre_agent/ui_routes.py``); the old ``/incidents`` page no longer exists.
+    """
     try:
         events: list[dict] = []
 
@@ -1068,7 +1073,7 @@ def _build_activity_events(repo, days: int = 7) -> list[dict]:
                 {
                     "type": "auto_fix" if status == "completed" else "fix_failed" if status == "failed" else "rollback",
                     "description": f"{verb} {row['cnt']} {cat} issue{'s' if row['cnt'] != 1 else ''} in {ns}",
-                    "link": "/incidents?tab=actions",
+                    "link": "/inbox?tab=activity",
                     "count": row["cnt"],
                     "category": row["category"],
                     "namespace": row["namespace"],
@@ -1082,7 +1087,7 @@ def _build_activity_events(repo, days: int = 7) -> list[dict]:
                 {
                     "type": "self_healed",
                     "description": f"{healed_count} finding{'s' if healed_count != 1 else ''} resolved without intervention",
-                    "link": "/incidents",
+                    "link": "/inbox?tab=activity",
                     "count": healed_count,
                 }
             )
@@ -1098,7 +1103,7 @@ def _build_activity_events(repo, days: int = 7) -> list[dict]:
                 {
                     "type": "postmortem",
                     "description": desc,
-                    "link": "/incidents?tab=postmortems",
+                    "link": "/inbox?tab=activity",
                     "count": pm_count,
                 }
             )
@@ -1114,7 +1119,7 @@ def _build_activity_events(repo, days: int = 7) -> list[dict]:
                 {
                     "type": "investigation",
                     "description": desc,
-                    "link": "/incidents",
+                    "link": "/inbox?tab=activity",
                     "count": row["cnt"],
                 }
             )
