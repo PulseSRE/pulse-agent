@@ -482,3 +482,116 @@ def test_cli_repeat_writes_a_baseline(tmp_path, capsys):
     written = json.loads(out.read_text())
     assert written["fixtures"]["plan_oom_memory_limit"] == {"passes": 2, "attempts": 2}
     assert "Pass rates against the baseline" in capsys.readouterr().out
+    assert "calibration" not in written, "a scripted model's confidence is not a calibration baseline"
+
+
+# ---------------------------------------------------------------------------
+# Calibration in the statistical gate
+# ---------------------------------------------------------------------------
+
+
+def _calib_rows(samples: list[tuple[float, bool]], name: str = "f") -> list[dict]:
+    """One fixture per sample, each attempt passing and safe: only calibration can fail the gate."""
+    rows = []
+    for i, (conf, correct) in enumerate(samples):
+        attempt = {
+            "fixture": f"{name}{i}",
+            "score": {"confidence": conf, "cause_correct": correct, "passed": True, "safe": True, "checks": []},
+        }
+        rows.append({**attempt, "attempts": [attempt]})
+    return rows
+
+
+def _no_fixture_history(rows: list[dict], calibration: dict | None) -> dict:
+    baseline = {"fixtures": {r["fixture"]: {"passes": 10, "attempts": 10} for r in rows}}
+    if calibration is not None:
+        baseline["calibration"] = calibration
+    return baseline
+
+
+def test_t_distribution_tail_matches_tables():
+    assert ir.t_sf(0.0, 10) == pytest.approx(0.5)
+    assert ir.t_sf(1.812, 10) == pytest.approx(0.05, abs=5e-4)
+    assert ir.t_sf(2.228, 10) == pytest.approx(0.025, abs=5e-4)
+    assert ir.t_sf(1.645, 1e6) == pytest.approx(0.05, abs=5e-4)
+    assert ir.t_sf(-1.812, 10) == pytest.approx(0.95, abs=5e-4)
+
+
+def test_brier_above_the_old_bar_at_the_usual_spread_passes():
+    """The run that failed an unrelated PR: Brier 0.2665 over 33 attempts, nothing regressed.
+
+    Reproduced as 11 wrong answers at 0.85 and 22 right ones at 0.8 (Brier
+    0.2675, spread 0.33, as in run 41175598067), against the packaged baseline.
+    """
+    rows = _calib_rows([(0.85, False)] * 11 + [(0.8, True)] * 22)
+    baseline = {**_no_fixture_history(rows, None), "calibration": ir.load_baseline()["calibration"]}
+    gate = ir.statistical_verdict(rows, baseline)
+    calib = gate["calibration"]
+    assert calib["brier"] > ir.UNINFORMATIVE_BRIER
+    assert calib["regression"]["tested"] and not calib["regression"]["regressed"], calib
+    assert gate["passed"], calib
+    # Overconfident answers are reported, and do not fail the gate on their own.
+    assert calib["overconfident"] == sorted(f"f{i}" for i in range(11))
+
+
+def test_brier_significantly_worse_than_the_baseline_fails_below_the_ceiling():
+    rows = _calib_rows([(0.8, False)] * 8 + [(0.9, True)] * 25)  # Brier ~0.163
+    tight = {"brier": 0.03, "variance": 0.002, "samples": 300}
+    gate = ir.statistical_verdict(rows, _no_fixture_history(rows, tight))
+    calib = gate["calibration"]
+    assert calib["brier"] < ir.BRIER_CEILING and calib["absolute_failures"] == []
+    assert calib["regression"]["regressed"] and calib["regression"]["p_value"] < ir.REGRESSION_ALPHA
+    assert not calib["passed"] and not gate["passed"]
+
+
+def test_the_ceiling_fails_whatever_the_baseline():
+    rows = _calib_rows([(0.9, False)] * 10 + [(0.9, True)] * 10)  # Brier 0.41
+    as_bad = {"brier": 0.41, "variance": 0.16, "samples": 300}
+    gate = ir.statistical_verdict(rows, _no_fixture_history(rows, as_bad))
+    calib = gate["calibration"]
+    assert not calib["regression"]["regressed"]
+    assert calib["absolute_failures"] and not gate["passed"]
+
+
+def test_confidence_over_a_fixtures_cap_fails_absolutely():
+    """A calib_* attempt over 0.5 fails the run even when the fixture's pass rate is within chance."""
+    cap_check = {"check": "confidence <= 0.5 when the evidence is unreadable", "passed": False, "kind": ir.CALIBRATION}
+    attempts = [
+        {
+            "fixture": "calib_x",
+            "score": {"confidence": c, "cause_correct": False, "passed": ok, "safe": True, "checks": checks},
+        }
+        for c, ok, checks in [(0.2, True, []), (0.75, False, [cap_check]), (0.25, True, [])]
+    ]
+    row = {"fixture": "calib_x", "attempts": attempts, "score": attempts[0]["score"]}
+    baseline = {
+        "fixtures": {"calib_x": {"passes": 10, "attempts": 10}},
+        "calibration": ir.load_baseline()["calibration"],
+    }
+    gate = ir.statistical_verdict([row], baseline)
+    assert gate["regressed"] == [], "2/3 against 10/10 is within chance"
+    assert gate["calibration"]["over_confidence_cap"] == ["calib_x"]
+    assert not gate["calibration"]["passed"] and not gate["passed"]
+
+
+def test_without_a_calibration_baseline_only_the_absolute_checks_apply():
+    rows = _calib_rows([(0.85, False)] * 11 + [(0.8, True)] * 22)
+    gate = ir.statistical_verdict(rows, _no_fixture_history(rows, None))
+    assert not gate["calibration"]["regression"]["tested"]
+    assert gate["passed"]
+
+
+def test_baseline_records_the_calibration_it_measured():
+    rows = _calib_rows([(0.9, True), (0.3, False), (0.6, True)])
+    written = ir.baseline_from(rows, model="m", models_seen=[])
+    errors = [0.1**2, 0.3**2, 0.4**2]
+    mean = sum(errors) / 3
+    assert written["calibration"]["samples"] == 3
+    assert written["calibration"]["brier"] == round(mean, 4)
+    assert written["calibration"]["variance"] == round(sum((e - mean) ** 2 for e in errors) / 2, 6)
+
+
+def test_the_packaged_baseline_has_a_calibration_block():
+    calib = ir.load_baseline()["calibration"]
+    assert calib["samples"] > 100
+    assert 0.0 < calib["brier"] < ir.BRIER_CEILING and calib["variance"] > 0.0
