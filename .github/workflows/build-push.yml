@@ -64,6 +64,18 @@ jobs:
         with:
           python-version: "3.11"
 
+      # promtool parses the scanners' PromQL (tests/test_promql_validity.py).
+      # Without it installed that test skips, which is as good as not having
+      # it: a query Prometheus rejects with 400 makes its scanner return
+      # nothing, and "no results" reads exactly like "nothing is wrong".
+      - name: Install promtool
+        run: |
+          PROM_VERSION=3.1.0
+          curl -sSL "https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/prometheus-${PROM_VERSION}.linux-amd64.tar.gz" \
+            | tar xz -C /tmp
+          sudo install -m 0755 "/tmp/prometheus-${PROM_VERSION}.linux-amd64/promtool" /usr/local/bin/promtool
+          promtool --version
+
       - name: Run tests before build
         run: |
           python -m pip install --upgrade pip
