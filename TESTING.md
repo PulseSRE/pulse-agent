@@ -653,11 +653,32 @@ python -m sre_agent.evals.cli --audit-prompt --mode sre --format json --output a
 ### Workflow: `.github/workflows/evals.yml`
 
 **Triggers:**
-- Pull requests to `main`
+- Pull requests to `main` (opened, synchronize, reopened, labeled)
+- The merge queue (`merge_group`)
 - Push to `main`
 - Push of version tags (`v*`)
 - Daily at 06:00 UTC (cron)
 - Manual dispatch (with option to run live LLM judge)
+
+**Lanes.** One job, `evals` (the required check), runs one of two lanes, chosen
+by the `Select eval lane` step and printed at the top of the step summary:
+
+| Lane | Runs on | What runs |
+|------|---------|-----------|
+| fast | pull requests | lint, format, types, discipline, unit tests, version/docs checks, prompt reports, fixture reports, dry-run chat and investigation replays |
+| full | merge queue, push to `main`, tags, nightly, manual dispatch with `run_live_judge`, and pull requests labelled `run-live-evals` | fast, plus live judged replay, live investigation replay and the SRE-Bench sim gate |
+
+`main` is protected by a merge queue, so every change passes the full lane on
+the exact commit that lands before it reaches `main`. Pull requests no longer
+wait ~26 minutes for the live gates; add the `run-live-evals` label to run them
+on a PR (the label stays, so later pushes run the full lane too; remove it to
+go back). The live lanes need the Vertex secrets, which GitHub provides to
+`merge_group`, `push`, `schedule` and same-repository pull requests, but not to
+pull requests from forks or Dependabot. A new push to a pull request cancels
+its running evals; merge-queue, main, tag and nightly runs are never cancelled.
+
+`Container Build` (`build`) and `Secret Scan` (`Detect secrets`) also run on
+`merge_group`, so all three required checks report in the queue.
 
 **Services:** PostgreSQL 16 on port 5433 (`pulse:pulse@localhost:5433/pulse_test`)
 
@@ -665,7 +686,7 @@ python -m sre_agent.evals.cli --audit-prompt --mode sre --format json --output a
 
 Always-run checks include Ruff lint/format, Mypy, discipline rules, pytest, package-version/README consistency, and router-derived API-documentation coverage. Helm lint and Chart.yaml sync were removed with the charts.
 
-Offline fixture reports and prompt baseline comparisons are non-gating reports. Replay dry-run checks harness plumbing. **Live judged replay is gating** when scheduled, pushed to main, tagged, requested manually, or triggered by prompt changes; it fails if the configured Vertex credentials are missing. The command uses `claude-sonnet-5`, concurrency 4, `--judge-min 60`, `--judge-samples 3`, and the checked-in replay baseline. The SRE-Bench simulation step supplies a separate behavioral gate under its workflow conditions. Inspect [.github/workflows/evals.yml](.github/workflows/evals.yml) for exact triggers and generated artifacts.
+Offline fixture reports and prompt baseline comparisons are non-gating reports. Replay dry-run checks harness plumbing. **Live judged replay is gating** in the full lane (merge queue, push to main, tags, nightly, manual `run_live_judge`, or a pull request labelled `run-live-evals`); it fails if the configured Vertex credentials are missing. The command uses `claude-sonnet-5`, concurrency 4, `--judge-min 60`, `--judge-samples 3`, and the checked-in replay baseline. The SRE-Bench simulation step supplies a separate behavioral gate under its workflow conditions. Inspect [.github/workflows/evals.yml](.github/workflows/evals.yml) for exact triggers and generated artifacts.
 
 ### Artifacts
 

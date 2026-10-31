@@ -37,6 +37,6 @@ python scripts/check_discipline.py
 
 ## CI and review
 
-[evals.yml](.github/workflows/evals.yml) runs on main PRs/pushes, tags, a daily schedule, and manual dispatch. It includes lint, formatting, types, discipline, tests, route documentation coverage, and offline replay. Provider-backed replay and SRE-Bench simulation run under workflow conditions and require credentials. The image build, release publication, version comparison, and secret scan have separate workflows.
+[evals.yml](.github/workflows/evals.yml) runs on main PRs, the merge queue, pushes to main, tags, a daily schedule, and manual dispatch. Pull requests run the fast lane: lint, formatting, types, discipline, tests, route documentation coverage, and offline (dry-run) replay. The merge queue, main, tags and the nightly run the full lane, which adds provider-backed replay and the SRE-Bench simulation and requires credentials; label a PR `run-live-evals` to run the full lane on it. `main` merges only through the merge queue, so the full lane always runs before a change lands (see [TESTING](TESTING.md#ci-pipeline)). The image build, release publication, version comparison, and secret scan have separate workflows.
 
 Describe the problem, final behavior, checks performed, and remaining deployment/provider validation. See [RELEASE](RELEASE.md) before tagging or publishing.

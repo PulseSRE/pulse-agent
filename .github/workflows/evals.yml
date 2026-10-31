@@ -1,8 +1,14 @@
 name: Eval Framework
 
 on:
+  # Pull requests run the fast lane (no live model); the merge queue, main,
+  # tags and the nightly run the full lane. See "Select eval lane" below.
+  # `labeled` lets the run-live-evals label start the full lane on a PR.
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled]
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
     tags: ["v*"]
@@ -14,6 +20,13 @@ on:
         description: "Run live replay with LLM judge scoring (costs API calls)"
         type: boolean
         default: false
+
+# A new push (or label) on a pull request supersedes its running evals. Every
+# other event gets its own group, so merge-queue, main, tag and nightly runs
+# are never cancelled.
+concurrency:
+  group: evals-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   evals:
@@ -53,6 +66,37 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # One job, two lanes, so the required check stays `evals` either way.
+      # fast: lint, types, discipline, unit tests, dry-run replays and the
+      #   deterministic reports. Pull requests, unless labelled run-live-evals.
+      # full: fast plus the live-model gates (judged replay, investigation
+      #   replay, SRE-Bench sim). The merge queue, pushes to main, tags, the
+      #   nightly schedule, and workflow_dispatch with run_live_judge.
+      # Nothing reaches main without the full lane: the merge queue runs it on
+      # the exact commit that will land.
+      - name: Select eval lane
+        id: lane
+        env:
+          EVENT: ${{ github.event_name }}
+          LIVE_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'run-live-evals') }}
+          DISPATCH_LIVE: ${{ inputs.run_live_judge }}
+        run: |
+          case "$EVENT" in
+            pull_request)      LIVE="$LIVE_LABEL"; WHY="pull request; label run-live-evals: $LIVE_LABEL" ;;
+            workflow_dispatch) LIVE="${DISPATCH_LIVE:-false}"; WHY="manual run; run_live_judge: ${DISPATCH_LIVE:-false}" ;;
+            *)                 LIVE=true; WHY="$EVENT" ;;
+          esac
+          if [ "$LIVE" = "true" ]; then LANE=full; else LANE=fast; fi
+          echo "live=$LIVE" >> "$GITHUB_OUTPUT"
+          echo "lane=$LANE" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Eval lane: $LANE ($WHY)"
+            if [ "$LANE" = fast ]; then
+              echo "Live-model gates skipped. The merge queue runs them before merge; on a pull request, the \`run-live-evals\` label runs them here."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Eval lane: $LANE ($WHY)"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -140,9 +184,9 @@ jobs:
 
       - name: Detect prompt changes
         id: prompt_changes
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           # Model behavior includes tool/approval code, skill references and
           # fixtures, not just top-level prompt strings. A missing base or git
@@ -200,11 +244,7 @@ jobs:
       # cluster state and scores what it actually said.
       - name: Live judged replay (RELEASE GATE)
         if: >-
-          (github.event_name == 'schedule')
-          || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-          || (github.event_name == 'workflow_dispatch' && inputs.run_live_judge)
-          || (steps.prompt_changes.outputs.has_changes == 'true')
-          || startsWith(github.ref, 'refs/tags/v')
+          steps.lane.outputs.live == 'true'
         env:
           ANTHROPIC_VERTEX_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
           CLOUD_ML_REGION: ${{ secrets.VERTEX_REGION }}
@@ -262,11 +302,7 @@ jobs:
       # answering 0.5.
       - name: Live investigation replay (RELEASE GATE)
         if: >-
-          (github.event_name == 'schedule')
-          || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-          || (github.event_name == 'workflow_dispatch' && inputs.run_live_judge)
-          || (steps.prompt_changes.outputs.has_changes == 'true')
-          || startsWith(github.ref, 'refs/tags/v')
+          steps.lane.outputs.live == 'true'
         env:
           ANTHROPIC_VERTEX_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
           CLOUD_ML_REGION: ${{ secrets.VERTEX_REGION }}
@@ -315,11 +351,7 @@ jobs:
       # p < 0.05: at the bootstrap rate, 2 of 3 on PRs, 3 of 5 nightly).
       - name: SRE-Bench sim gate (live model, repeated attempts)
         if: >-
-          (github.event_name == 'schedule')
-          || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-          || (github.event_name == 'workflow_dispatch' && inputs.run_live_judge)
-          || (steps.prompt_changes.outputs.has_changes == 'true')
-          || startsWith(github.ref, 'refs/tags/v')
+          steps.lane.outputs.live == 'true'
         env:
           ANTHROPIC_VERTEX_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
           CLOUD_ML_REGION: ${{ secrets.VERTEX_REGION }}
@@ -413,6 +445,8 @@ jobs:
 
       - name: Publish eval check summary
         if: always()
+        env:
+          EVAL_LANE: ${{ steps.lane.outputs.lane }}
         run: |
           python - <<'PY'
           import json
@@ -421,7 +455,7 @@ jobs:
 
           artifacts = Path("artifacts")
           summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-          lines: list[str] = ["## Pulse Agent Eval Summary", ""]
+          lines: list[str] = ["## Pulse Agent Eval Summary", "", f"Lane: **{os.environ.get('EVAL_LANE') or 'unknown'}**", ""]
 
           def read_json(path: Path):
               if not path.exists():
