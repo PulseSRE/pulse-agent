@@ -202,14 +202,29 @@ def scan_hpa_exhaustion_trend() -> list[dict]:
     return findings
 
 
-_ERROR_SHARE = (
-    'sum by (namespace, service, job) (rate(http_requests_total{code=~"5.."}[1h]))'
-    " / sum by (namespace, service, job) (rate(http_requests_total[1h]))"
-)
+def _error_share(offset: str = "") -> str:
+    """Share of requests returning 5xx, optionally as of ``offset`` ago.
+
+    The offset has to be attached to each range selector rather than to the
+    finished expression: PromQL only accepts the modifier after an instant or
+    range vector selector (or a subquery), so `(<ratio>) offset 1d` is a parse
+    error, not a shifted ratio. Prometheus rejects the whole query with 400
+    Bad Request, which is how this scanner silently stopped working — the
+    agent surfaced it only as "Pulse cannot query Prometheus", pointing at
+    reachability and RBAC that were both fine.
+    """
+    off = f" offset {offset}" if offset else ""
+    return (
+        f'sum by (namespace, service, job) (rate(http_requests_total{{code=~"5.."}}[1h]{off}))'
+        f" / sum by (namespace, service, job) (rate(http_requests_total[1h]{off}))"
+    )
+
+
+_ERROR_SHARE = _error_share()
 # At least 1% of requests failing, and more than double the share at this time
 # yesterday. The old query, deriv(...) > 0, fired on any upward slope at all —
 # 0.001 errors/s becoming 0.002 was "accelerating".
-_ERROR_ACCELERATION_QUERY = f"({_ERROR_SHARE} > 0.01) and ({_ERROR_SHARE} > 2 * ({_ERROR_SHARE} offset 1d))"
+_ERROR_ACCELERATION_QUERY = f"({_ERROR_SHARE} > 0.01) and ({_ERROR_SHARE} > 2 * ({_error_share('1d')}))"
 
 
 def scan_error_rate_acceleration() -> list[dict]:
