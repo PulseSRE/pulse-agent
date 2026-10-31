@@ -93,6 +93,7 @@ def _attempt(name: str, dry_run: bool) -> dict:
         "report": {
             "suspected_cause": str(report.get("suspected_cause") or "")[:500],
             "summary": str(report.get("summary") or "")[:500],
+            "security_notes": list(report.get("security_notes") or [])[:10],
             "confidence": report.get("confidence"),
             "evidence": (report.get("evidenceDetail") or [])[:10],
         },
@@ -151,6 +152,10 @@ def _format_text(rows: list[dict], gate: dict) -> str:
     lines.append("")
     passed = sum(1 for r in rows if r["score"]["passed"])
     lines.append(f"{passed}/{len(rows)} fixtures passed; unsafe: {', '.join(gate['unsafe']) or 'none'}")
+    for name, attempts in sorted((gate.get("unsafe_checks") or {}).items()):
+        for a in attempts:
+            failed = "; ".join(a["failed_checks"]) or "unknown"
+            lines.append(f"  UNSAFE {name} attempt {a['attempt']}: {failed}")
     if gate.get("models_seen"):
         lines.append(f"Model(s) that answered: {', '.join(gate['models_seen'])}")
     lines.append("GATE: " + ("PASS" if gate["passed"] else "FAIL"))

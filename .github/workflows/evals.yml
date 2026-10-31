@@ -445,6 +445,12 @@ jobs:
                   f"overconfident: {', '.join(calib.get('overconfident') or []) or 'none'}; "
                   f"evidence citing a call: {(gate.get('citations') or {}).get('cited')}/{(gate.get('citations') or {}).get('total')}) — blocks the build"
               )
+              for fixture_name, unsafe_attempts in sorted((gate.get("unsafe_checks") or {}).items()):
+                  for a in unsafe_attempts:
+                      lines.append(
+                          f"  - unsafe: {fixture_name} attempt {a.get('attempt')}: "
+                          f"{'; '.join(a.get('failed_checks') or []) or 'unknown'}"
+                      )
           else:
               lines.append("- **investigation replay: did not run**")
 

@@ -20,7 +20,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from .evidence import CallLedger
+from .evidence import SECURITY_NOTES_INSTRUCTION, CallLedger, merge_security_notes, parse_security_notes
 from .skill_plan import (
     PlanResult,
     SkillOutput,
@@ -527,6 +527,11 @@ class PlanRuntime:
                 findings = data.get("findings", {})
                 if not isinstance(findings, dict):
                     findings = {}
+                # A note the model filed under findings still belongs in its own field.
+                security_notes = merge_security_notes(
+                    parse_security_notes(data.get("security_notes")),
+                    parse_security_notes(findings.pop("security_notes", None)),
+                )
                 alternatives = data.get("alternatives_considered")
                 if isinstance(alternatives, list) and alternatives:
                     findings.setdefault("alternatives_considered", [str(a) for a in alternatives[:10]])
@@ -543,6 +548,7 @@ class PlanRuntime:
                     confidence=derive_confidence(evidence, asserted),
                     evidence=[e.model_dump() for e in evidence],
                     tool_calls=tool_calls,
+                    security_notes=security_notes,
                 )
             except (json.JSONDecodeError, ValueError) as e:
                 logger.debug("Could not parse structured output for phase '%s': %s", phase.id, e)
@@ -590,6 +596,14 @@ class PlanRuntime:
                 lines.append(f"Risk flags: {', '.join(output.risk_flags[:3])}")
             if output.open_questions:
                 lines.append(f"Open questions: {', '.join(output.open_questions[:3])}")
+            if output.security_notes:
+                # Already recorded; repeated so a later phase does not move the
+                # flag into its diagnosis. Model-written text about cluster data,
+                # so it is scrubbed like cluster data.
+                from .monitor.confidence import _sanitize_for_prompt
+
+                notes = "; ".join(_sanitize_for_prompt(n) for n in output.security_notes[:3])
+                lines.append(f"Security notes (already recorded; keep out of the diagnosis): {notes}")
             lines.append("")
 
         return "\n".join(lines)
@@ -824,6 +838,7 @@ class PlanRuntime:
             logger.debug("Could not inject skill examples for phase '%s'", phase.id, exc_info=True)
 
         parts.append("\nInvestigate and produce structured findings.")
+        parts.append(f"\n## Untrusted data\n{SECURITY_NOTES_INSTRUCTION}")
         produces = ", ".join(f'"{p}": ...' for p in (phase.produces or []))
         parts.append(
             "\n## Output format\n"
@@ -836,7 +851,8 @@ class PlanRuntime:
             '"call": "c3", "source": "the tool it came from", "stance": "supports|contradicts|context"}],\n'
             '  "alternatives_considered": ["causes you ruled out, and why"],\n'
             '  "confidence": 0.0,\n'
-            '  "open_questions": []\n'
+            '  "open_questions": [],\n'
+            '  "security_notes": []\n'
             "}\n"
             "```\n"
             "Each tool result begins with [call cN: tool_name]; in each evidence item, set "
