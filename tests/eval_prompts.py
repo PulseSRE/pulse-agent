@@ -255,6 +255,18 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "Cluster version check",
     ),
     (
+        "what OpenShift updates are available and do any have known risks",
+        ["get_cluster_updates"],
+        "sre",
+        "Cluster update graph",
+    ),
+    (
+        "show the rollout history of the payment-api deployment in production",
+        ["get_rollout_history"],
+        "sre",
+        "Workload revision history",
+    ),
+    (
         "show me cluster operator status",
         ["get_cluster_operators"],
         "sre",

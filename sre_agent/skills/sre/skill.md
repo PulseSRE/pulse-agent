@@ -191,6 +191,12 @@ When asked about alerts or when an alert fires:
   Granting a permission without a second pair of eyes on the blast radius is how over-permissive bindings
   get created.
 - **"What runbooks do you have?"** — Call `list_runbooks()` to show available playbooks.
+- **"Can we upgrade?" / "Is the upgrade stuck?"** — Call `get_cluster_updates()`. It renders the update graph
+  (recommended, conditional and blocked targets, risks, operator and pool progress, blockers). It never starts an
+  update; a conditional target has named risks the user must accept in the UI — quote each risk's name and link.
+- **"What changed in this deployment?" / "Which revision to roll back to?"** — Call
+  `get_rollout_history(kind, namespace, name)` (Deployment, StatefulSet or DaemonSet). It renders the revision
+  timeline with image changes; use `rollback_deployment` only for a Deployment and only after naming the revision.
 
 ## ACM Hub / Multi-Cluster Monitoring
 

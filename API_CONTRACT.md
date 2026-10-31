@@ -177,7 +177,7 @@ Inbox item `metadata` optional keys added for queue explainability: `priority_fa
 | `POST` | `/admin/mcp` | admin | Register a new MCP server connection |
 | `DELETE` | `/admin/mcp/{name}` | admin | Remove an MCP server connection |
 | `POST` | `/admin/mcp/test` | admin | Test an MCP server connection |
-| `GET` | `/components` | token | Component registry -- list all 25 component kinds with schemas |
+| `GET` | `/components` | token | Component registry -- list all 27 component kinds with schemas |
 
 #### Debug (`debug_rest.py`)
 
@@ -1202,7 +1202,7 @@ Structured UI components returned by agent tools via the `component` event. The 
 | `badge_list` | Colored badges | `badges[]{text, variant}` |
 | `status_list` | Health status items | `items[]{name, status, detail?}` |
 | `key_value` | Key-value pairs | `pairs[]{key, value}` |
-| `chart` | Time-series chart | `series[]{label, data[][], color?}` |
+| `chart` | Time-series chart | `series[]{label, data[][], color?}`, `query?`, `timeRange?` (was `time_range`; the old name is still accepted), `refreshInterval?` (s), `live?` (sliding window), `step?` (s), `annotations?[]{timestamp, label, kind: rollout\|alert\|config}` |
 | `tabs` | Tabbed content | `tabs[]{label, content: ComponentSpec}` |
 | `grid` | Grid layout | `columns`, `items: ComponentSpec[]` |
 | `section` | Titled section | `title`, `content: ComponentSpec` |
@@ -1213,7 +1213,9 @@ Structured UI components returned by agent tools via the `component` event. The 
 | `node_map` | Node topology | `nodes[]{name, status, cpuPct?, memPct?}` |
 | `bar_list` | Horizontal ranked bars | `items[]{label, value, badge?, href?}` |
 | `progress_list` | Utilization bars | `items[]{label, value, max, unit?}`, `thresholds?` |
-| `stat_card` | Single big KPI | `title`, `value`, `unit?`, `trend?`, `trendValue?`, `status?` |
+| `stat_card` | Single big KPI | `title`, `value` (or `query`), `unit?`, `trend?`, `trendValue?`, `status?`, `query?` (PromQL instant query, keeps the value live), `refreshInterval?` (s) |
+| `upgrade_graph` | OpenShift update graph (from `get_cluster_updates`) | `current{version, image, channel}`, `desired?`, `channels?[]`, `nodes[]{version, image, state: recommended\|conditional\|blocked, recommended, risks[]{name, message, url, matchingRules}, channels}`, `edges?[]{from, to}`, `history?[]{version, state, startedTime, completionTime, verified}`, `progress?{phase, message, done, total, percent, clusterOperators{updated, total, degraded[]}, pools[]{name, updated, total, degraded, updating, paused}, etaMinutes, etaBasis}`, `blockers?[]{type, reason, message, link}` |
+| `rollout_history` | Workload revision timeline (from `get_rollout_history`) | `workload{kind, namespace, name, gvr}`, `revisions[]{revision, name, createdAt, images[], changeCause, replicas{ready, desired}\|null, current, source: replicaset\|controllerrevision}`, `inFlight?{strategy, updated, ready, available, desired, conditions[]}`, `correlations?[]` |
 
 ### Badge Variants
 
