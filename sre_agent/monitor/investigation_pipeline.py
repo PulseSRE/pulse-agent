@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from ..async_db import ASYNC_DB_ERRORS as _ASYNC_DB_ERRORS
 from ..config import get_settings
+from ..evidence import merge_security_notes, parse_security_notes
 from .findings import _ts
 from .investigations import _run_proactive_investigation, _run_security_followup
 
@@ -61,6 +62,10 @@ class InvestigationOutcome:
     asserted_confidence: float | None = None
     evidence_detail: list[dict] = field(default_factory=list)
     alternatives: list[str] = field(default_factory=list)
+    # Suspected prompt injection or other manipulation seen in cluster data.
+    # Its own field so the cause and summary stay about the fault: a model that
+    # flagged an injection used to have nowhere to say so but the cause.
+    security_notes: list[str] = field(default_factory=list)
     view_plan: list[dict] = field(default_factory=list)
     # Tool names, and the ledger of calls evidence cites (evidence.CallLedger).
     tools_called: list[str] = field(default_factory=list)
@@ -100,6 +105,9 @@ class InvestigationOutcome:
             "alternatives_considered": self.alternatives,
             "alternativesConsidered": self.alternatives,
         }
+        if self.security_notes:
+            report["security_notes"] = self.security_notes
+            report["securityNotes"] = self.security_notes
         if self.view_plan:
             report["viewPlan"] = self.view_plan
         if self.plan_id:
@@ -119,6 +127,7 @@ class InvestigationOutcome:
             "evidence": self.evidence,
             "evidence_detail": self.evidence_detail,
             "alternatives_considered": self.alternatives,
+            "security_notes": self.security_notes,
             "view_plan": self.view_plan,
         }
 
@@ -150,6 +159,7 @@ def outcome_from_freeform(result: dict) -> InvestigationOutcome:
         asserted_confidence=float(asserted) if asserted is not None else None,
         evidence_detail=list(result.get("evidence_detail") or []),
         alternatives=[str(a) for a in (result.get("alternatives_considered") or [])][:10],
+        security_notes=parse_security_notes(result.get("security_notes")),
         view_plan=list(result.get("view_plan") or []),
         tools_called=list(result.get("tools_called") or []),
         tool_calls=list(result.get("tool_calls") or []),
@@ -198,6 +208,8 @@ def outcome_from_plan(template, result) -> InvestigationOutcome:
         confidence=float(lead.confidence or 0.0),
         evidence_detail=[e for out in outputs.values() for e in (out.evidence or [])][:10],
         alternatives=[str(a) for a in (findings.get("alternatives_considered") or [])][:10],
+        # Any phase may have seen it; the flag belongs to the whole investigation.
+        security_notes=merge_security_notes(*(getattr(out, "security_notes", None) for out in outputs.values())),
         tools_called=[t for out in outputs.values() for t in out.actions_taken],
         tool_calls=[c for out in outputs.values() for c in (getattr(out, "tool_calls", None) or [])],
         plan_id=plan_id,
@@ -459,6 +471,7 @@ def _publish(finding: dict, outcome: InvestigationOutcome) -> None:
                     "suspected_cause": outcome.suspected_cause,
                     "recommended_fix": outcome.recommended_fix,
                     "confidence": outcome.confidence,
+                    "security_notes": outcome.security_notes,
                 },
                 namespace=(resources[0] or {}).get("namespace", ""),
                 resources=finding.get("resources", []),

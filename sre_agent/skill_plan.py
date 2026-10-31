@@ -67,6 +67,10 @@ class SkillOutput:
     # The tool calls the phase made (evidence.CallLedger.as_list()); evidence
     # cites them by ref, prefixed with the phase id ("diagnose.c3").
     tool_calls: list[dict] = field(default_factory=list)
+    # Suspected prompt injection or other manipulation the phase saw in cluster
+    # data (evidence.parse_security_notes). Kept apart from findings so the
+    # diagnosis stays about the fault.
+    security_notes: list[str] = field(default_factory=list)
 
 
 @dataclass
