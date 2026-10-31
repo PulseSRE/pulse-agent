@@ -310,3 +310,91 @@ def test_mcp_toolsets_explain_when_the_agent_may_not_change_the_operator():
         with pytest.raises(HTTPException) as err:
             skill_rest._set_toolsets_on_operator_cr(["core"])
     assert err.value.status_code == 409 and "oc patch openshiftpulse pulse" in err.value.detail
+
+
+def _toolsets_on_cr_with_list_error(status: int):
+    from kubernetes.client.rest import ApiException
+
+    from sre_agent.api import skill_rest
+
+    api = MagicMock()
+    api.list_namespaced_custom_object.side_effect = ApiException(status=status)
+    with (
+        patch("kubernetes.client.CustomObjectsApi", return_value=api),
+        patch("sre_agent.k8s_client._load_k8s"),
+        patch.object(skill_rest, "_detect_namespace", return_value="openshiftpulse"),
+    ):
+        return skill_rest._set_toolsets_on_operator_cr(["core", "helm"]), api
+
+
+def test_mcp_toolsets_unreadable_operator_resource_is_a_409_not_no_operator():
+    """403 on the list means the CRD exists: an operator is here, so do not fall back to the Deployment."""
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as err:
+        _toolsets_on_cr_with_list_error(403)
+    assert err.value.status_code == 409
+    assert "managed by the Pulse Operator" in err.value.detail
+    assert "spec.agent.mcp.toolsets" in err.value.detail
+    assert "oc patch openshiftpulse" in err.value.detail and "-n openshiftpulse" in err.value.detail
+    assert '"toolsets":"core,helm"' in err.value.detail
+
+
+def test_mcp_toolsets_missing_operator_crd_falls_through_to_the_deployment():
+    out, api = _toolsets_on_cr_with_list_error(404)
+    assert out is None
+    api.patch_namespaced_custom_object.assert_not_called()
+
+
+def _deployment(name: str, *, owner_kind: str | None = None, owner_name: str = "pulse"):
+    refs = [SimpleNamespace(kind=owner_kind, name=owner_name)] if owner_kind else None
+    return SimpleNamespace(
+        metadata=SimpleNamespace(name=name, owner_references=refs),
+        spec=SimpleNamespace(
+            template=SimpleNamespace(
+                metadata=SimpleNamespace(labels={"app": name}),
+                spec=SimpleNamespace(containers=[SimpleNamespace(args=[])]),
+            )
+        ),
+    )
+
+
+def test_mcp_toolsets_never_patch_an_operator_owned_deployment():
+    """The operator's MCP image takes --config; the Deployment path's --port args would crash-loop it."""
+    from fastapi import HTTPException
+
+    from sre_agent.api import skill_rest
+
+    apps = MagicMock()
+    apps.list_namespaced_deployment.return_value = SimpleNamespace(
+        items=[_deployment("pulse-mcp-server", owner_kind="OpenShiftPulse", owner_name="pulse")]
+    )
+    with (
+        patch.object(skill_rest, "_set_toolsets_on_operator_cr", return_value=None),
+        patch.object(skill_rest, "_detect_namespace", return_value="openshiftpulse"),
+        patch("sre_agent.k8s_client.get_apps_client", return_value=apps),
+        pytest.raises(HTTPException) as err,
+    ):
+        asyncio.run(skill_rest.update_mcp_toolsets({"toolsets": ["core"]}, _auth=None))
+    assert err.value.status_code == 409
+    assert "oc patch openshiftpulse pulse -n openshiftpulse" in err.value.detail
+    apps.patch_namespaced_deployment.assert_not_called()
+
+
+def test_mcp_toolsets_do_not_match_an_unowned_mcp_server_suffix():
+    """Only "<release>-mcp" is a Deployment this path may patch; "-mcp-server" is not matched by name."""
+    from fastapi import HTTPException
+
+    from sre_agent.api import skill_rest
+
+    apps = MagicMock()
+    apps.list_namespaced_deployment.return_value = SimpleNamespace(items=[_deployment("pulse-mcp-server")])
+    with (
+        patch.object(skill_rest, "_set_toolsets_on_operator_cr", return_value=None),
+        patch.object(skill_rest, "_detect_namespace", return_value="openshiftpulse"),
+        patch("sre_agent.k8s_client.get_apps_client", return_value=apps),
+        pytest.raises(HTTPException) as err,
+    ):
+        asyncio.run(skill_rest.update_mcp_toolsets({"toolsets": ["core"]}, _auth=None))
+    assert err.value.status_code == 404
+    apps.patch_namespaced_deployment.assert_not_called()

@@ -4,6 +4,7 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## Unreleased
 
+- **The MCP toolset toggle no longer reports "MCP server deployment not found" on operator installs.** A 403 listing OpenShiftPulse resources was treated like a missing CRD, so the request fell back to patching a Deployment named `*-mcp`, which the operator's `<cr>-mcp-server` never matches. `POST /admin/mcp/toolsets` now returns 409 when the operator manages the MCP server and the agent cannot change its CR (403 on list or patch, or an MCP Deployment owned by an OpenShiftPulse), with the `oc patch openshiftpulse ... spec.agent.mcp.toolsets` command for an admin. It never patches an operator-owned Deployment: the operator's MCP image takes a `--config` file and would crash-loop on the `--port`/`--toolsets` args. A 404 (no CRD) still uses the Deployment path for non-operator installs (#214).
 - **The MCP server image is pinned and versioned.** It was built from whatever openshift-mcp-server `main` held on release day and pushed to one mutable `mcp-server` tag, so an upstream change shipped unreviewed and a cluster's MCP version could be neither identified nor rolled back. It is now built from a pinned commit (`MCP_SERVER_REF` in `build-push.yml`, 0e36b24, what v2.36.0 shipped) and tagged `mcp-server-vX.Y.Z` and `mcp-server-<commit>`, labelled with the commit. `mcp-server` still moves on a release for operators up to v0.12.0. A manual run with `mcp_only` builds the MCP image alone. See RELEASE.md, "MCP server image".
 
 ## v2.36.0 (2026-10-30)
