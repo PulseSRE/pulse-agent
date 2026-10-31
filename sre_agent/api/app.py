@@ -64,6 +64,68 @@ class CorrelationMiddleware(BaseHTTPMiddleware):
             structlog.contextvars.unbind_contextvars("request_id")
 
 
+async def _connect_mcp_with_retry(skills: dict, *, initial_backoff: float = 30, max_backoff: float = 300) -> None:
+    """Connect each skill's MCP server, retrying the ones that fail until they connect.
+
+    connect_mcp_server's own retries span ~26s, which covers a sidecar that is
+    merely slow. It does not cover an MCP server that is still crash-looping,
+    or one rescheduled by a node drain, and startup used to be the only attempt
+    ever made: the failure was cached and the agent reported "Connection
+    refused" against a server that had been healthy for an hour. Recovering
+    needed a pod restart, which is not something an operator-managed stack
+    should ask for. Keep retrying the ones that failed, backing off so a
+    genuinely absent server costs one log line every few minutes rather than a
+    hot loop.
+
+    This covers a connection that fails from the start. A connection that
+    succeeded and later drops is not retried here.
+    """
+    import asyncio
+
+    from ..mcp_client import connect_skill_mcp
+    from ..skill_loader import revalidate_skills
+
+    pending = [s for s in skills.values() if (s.path / "mcp.yaml").exists()]
+    backoff = initial_backoff
+    while pending and not _mcp_shutdown.is_set():
+        still_failing = []
+        for skill in pending:
+            if _mcp_shutdown.is_set():
+                break
+            try:
+                conn = await asyncio.to_thread(connect_skill_mcp, skill.name, skill.path, builtin=skill.builtin)
+                if _mcp_shutdown.is_set():
+                    break
+                if conn and conn.connected:
+                    logger.info("MCP connected for skill '%s': %d tools", skill.name, len(conn.tools))
+                elif conn:
+                    logger.warning("MCP failed for skill '%s': %s", skill.name, conn.error)
+                    still_failing.append(skill)
+            except Exception as e:
+                logger.warning("MCP init failed for skill '%s': %s", skill.name, e)
+                still_failing.append(skill)
+
+        revalidate_skills()
+
+        pending = still_failing
+        if not pending or _mcp_shutdown.is_set():
+            break
+        logger.info(
+            "MCP retry for %d skill(s) in %ds: %s",
+            len(pending),
+            backoff,
+            ", ".join(s.name for s in pending),
+        )
+        # Wait on the shutdown event rather than sleeping, so shutdown is not
+        # delayed by up to `backoff` seconds. _mcp_shutdown is a
+        # threading.Event (it is set from non-async teardown), so its blocking
+        # wait goes to a worker thread; it returns True when set and False on
+        # timeout.
+        if await asyncio.to_thread(_mcp_shutdown.wait, backoff):
+            break
+        backoff = min(backoff * 2, max_backoff)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Verify k8s connectivity and auth config on startup."""
@@ -138,62 +200,7 @@ async def lifespan(app: FastAPI):
             temporal_task = asyncio.create_task(run_worker(temporal_shutdown))
 
         # Connect MCP servers in background (non-blocking — sidecar may take 15-30s)
-        async def _connect_mcp_background():
-            from ..mcp_client import connect_skill_mcp
-
-            pending = [s for s in skills.values() if (s.path / "mcp.yaml").exists()]
-
-            # connect_mcp_server's own retries span ~26s, which covers a sidecar
-            # that is merely slow. It does not cover an MCP server that is still
-            # crash-looping, or one rescheduled by a node drain, and this used to
-            # be the only attempt ever made: the failure was cached and the agent
-            # reported "Connection refused" against a server that had been
-            # healthy for an hour. Recovering needed a pod restart, which is not
-            # something an operator-managed stack should ask for. Keep retrying
-            # the ones that failed, backing off so a genuinely absent server
-            # costs one log line every few minutes rather than a hot loop.
-            backoff = 30
-            while pending and not _mcp_shutdown.is_set():
-                still_failing = []
-                for skill in pending:
-                    if _mcp_shutdown.is_set():
-                        break
-                    try:
-                        conn = await asyncio.to_thread(connect_skill_mcp, skill.name, skill.path, builtin=skill.builtin)
-                        if _mcp_shutdown.is_set():
-                            break
-                        if conn and conn.connected:
-                            logger.info("MCP connected for skill '%s': %d tools", skill.name, len(conn.tools))
-                        elif conn:
-                            logger.warning("MCP failed for skill '%s': %s", skill.name, conn.error)
-                            still_failing.append(skill)
-                    except Exception as e:
-                        logger.warning("MCP init failed for skill '%s': %s", skill.name, e)
-                        still_failing.append(skill)
-
-                from ..skill_loader import revalidate_skills
-
-                revalidate_skills()
-
-                pending = still_failing
-                if not pending or _mcp_shutdown.is_set():
-                    break
-                logger.info(
-                    "MCP retry for %d skill(s) in %ds: %s",
-                    len(pending),
-                    backoff,
-                    ", ".join(s.name for s in pending),
-                )
-                # Wait on the shutdown event rather than sleeping, so shutdown
-                # is not delayed by up to `backoff` seconds. _mcp_shutdown is a
-                # threading.Event (it is set from non-async teardown), so its
-                # blocking wait goes to a worker thread; it returns True when
-                # set and False on timeout.
-                if await asyncio.to_thread(_mcp_shutdown.wait, backoff):
-                    break
-                backoff = min(backoff * 2, 300)
-
-        mcp_task = asyncio.create_task(_connect_mcp_background())
+        mcp_task = asyncio.create_task(_connect_mcp_with_retry(skills))
     except Exception as e:
         logger.warning("Skill loading failed: %s", e)
 
