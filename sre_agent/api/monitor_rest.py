@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from .auth import require_admin, verify_token
+from .auth import get_owner, require_admin, verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -357,12 +357,12 @@ async def register_slo(request: Request, _auth=Depends(verify_token)):
 
 
 @router.delete("/slo/{service}/{slo_type}")
-async def unregister_slo(service: str, slo_type: str, _auth=Depends(verify_token)):
-    """Remove an SLO definition."""
+async def unregister_slo(service: str, slo_type: str, _auth=Depends(verify_token), owner: str = Depends(get_owner)):
+    """Remove an SLO definition. A deleted default stays deleted across restarts."""
     from ..slo_registry import get_slo_registry
 
     registry = get_slo_registry()
-    registry.unregister(service, slo_type)
+    registry.unregister(service, slo_type, deleted_by=owner)
     return {"status": "removed", "service": service, "type": slo_type}
 
 

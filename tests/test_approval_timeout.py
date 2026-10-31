@@ -104,6 +104,7 @@ def _autofix_patches(monitor, saved):
     repo = MagicMock()
     repo.check_pending_proposal.return_value = None
     repo.check_existing_human_review.return_value = None
+    repo.find_recent_rejection.return_value = None
     core = MagicMock()
     core.read_namespaced_pod.return_value = MagicMock(
         metadata=MagicMock(owner_references=[MagicMock(kind="ReplicaSet", name="api")])
@@ -154,6 +155,29 @@ class TestApprovalWaitDoesNotBlockTheScan:
                     await task
 
     @pytest.mark.asyncio
+    async def test_a_rejected_fix_is_not_proposed_again_next_scan(self):
+        """A person said no; asking again every scan re-notifies and invites a second "no"."""
+        import contextlib
+
+        monitor, subscriber, saved = _ask_first_monitor()
+        patches = _autofix_patches(monitor, saved)
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            repo = stack.enter_context(patch("sre_agent.monitor.cluster_monitor.get_monitor_repo")).return_value
+            repo.check_pending_proposal.return_value = None
+            repo.check_existing_human_review.return_value = None
+            repo.count_recent_fix_attempts.return_value = 0
+            repo.find_recent_rejection.return_value = "a-rejected"
+            await asyncio.wait_for(monitor.auto_fix([dict(FINDING)]), timeout=5)
+
+            monitor._broadcast_raw.assert_not_awaited()
+            assert not subscriber._pending_action_approvals
+            assert saved == []
+            corr_key, strategy, _since = repo.find_recent_rejection.call_args[0]
+            assert corr_key.startswith("crashloop:prod:") and strategy == "restart_pod"
+
+    @pytest.mark.asyncio
     async def test_pending_proposal_is_not_reproposed_next_scan(self):
         """With the wait off-loop, the next scan sees the same finding still
         firing; without the in-flight guard it would broadcast a duplicate."""
@@ -199,7 +223,9 @@ class TestApprovalWaitDoesNotBlockTheScan:
             assert saved[0]["error"] == "Rejected by user"
             assert monitor._proposals_awaiting_approval == set(), "slot must free for a future re-proposal"
             # Fix learning hears the "no", filed under the plan's cause and strategy.
-            learned.assert_called_once_with(saved[0]["id"], "crashloop", "restart_pod")
+            from sre_agent.inbox import _finding_corr_key
+
+            learned.assert_called_once_with(saved[0]["id"], "crashloop", "restart_pod", _finding_corr_key(FINDING))
             # Stored with the proposal, so a REST rejection later can do the same.
             assert saved[0]["input"]["fixStrategy"] == "restart_pod"
             assert saved[0]["input"]["causeCategory"] == "crashloop"

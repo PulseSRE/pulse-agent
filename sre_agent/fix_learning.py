@@ -75,11 +75,11 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def record_verdict(action_id: str, cause: str, strategy: str, status: str) -> None:
-    """Record what verification concluded about one applied fix."""
+def record_verdict(action_id: str, cause: str, strategy: str, status: str) -> bool:
+    """Record what verification concluded about one applied fix. True if it was written."""
     verdict = _VERDICT_FOR_STATUS.get(status)
     if not verdict or not action_id or not cause or not strategy or strategy == HUMAN_REVIEW:
-        return
+        return False
     try:
         db = _db()
         db.execute(
@@ -89,8 +89,10 @@ def record_verdict(action_id: str, cause: str, strategy: str, status: str) -> No
             (action_id, cause, strategy, verdict, _now_ms()),
         )
         db.commit()
+        return True
     except Exception:
         logger.debug("Failed to record fix verdict for %s", action_id, exc_info=True)
+        return False
 
 
 def mark_recurred(action_id: str) -> None:
@@ -106,16 +108,39 @@ def mark_recurred(action_id: str) -> None:
         logger.debug("Failed to mark fix %s recurred", action_id, exc_info=True)
 
 
-def record_rejection(action_id: str, cause: str, strategy: str) -> bool:
-    """Record that a person declined a proposed fix. False if it could not count.
+def record_rejection(action_id: str, cause: str, strategy: str, correlation_key: str = "") -> bool:
+    """Record that a person declined a proposed fix. True only if a verdict was written.
 
     A proposal made before the cause was stored with it has no cause to file
     the rejection under; guessing one would teach the wrong lesson.
+
+    At most one rejection counts per condition (``correlation_key``) per
+    strategy and cause within the window. A person saying no to the same fix
+    for the same workload again is one opinion about that workload, not
+    evidence about the strategy everywhere: without this, re-rejecting one
+    noisy workload two or three times would switch or escalate the cause for
+    the whole cluster.
     """
     if not action_id or not cause or not strategy or strategy == HUMAN_REVIEW:
         return False
-    record_verdict(action_id, cause, strategy, "rejected")
-    return True
+    if correlation_key and _already_rejected_here(action_id, cause, strategy, correlation_key):
+        logger.info("Rejection of %s not counted again for %s (%s/%s)", action_id, correlation_key, cause, strategy)
+        return False
+    return record_verdict(action_id, cause, strategy, "rejected")
+
+
+def _already_rejected_here(action_id: str, cause: str, strategy: str, correlation_key: str) -> bool:
+    try:
+        row = _db().fetchone(
+            "SELECT 1 AS hit FROM fix_outcomes fo JOIN actions a ON a.id = fo.action_id "
+            "WHERE a.correlation_key = ? AND fo.verdict = ? AND fo.cause = ? AND fo.strategy = ? "
+            "AND fo.recorded_at >= ? AND fo.action_id <> ? LIMIT 1",
+            (correlation_key, REJECTED, cause, strategy, _now_ms() - WINDOW_DAYS * 86_400_000, action_id),
+        )
+    except Exception:
+        logger.debug("Could not check earlier rejections for %s", correlation_key, exc_info=True)
+        return False
+    return row is not None
 
 
 def _counts(cause: str) -> dict[str, tuple[int, int, int]]:

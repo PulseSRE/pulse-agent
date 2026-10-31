@@ -61,19 +61,26 @@ def _client(user: str | None = "alice") -> TestClient:
     return TestClient(app)
 
 
-def _propose(action_id: str = "rj-1", *, cause: str | None = "crash_exit", status: str = "proposed") -> None:
+def _propose(
+    action_id: str = "rj-1",
+    *,
+    cause: str | None = "crash_exit",
+    status: str = "proposed",
+    corr: str = "crashloop:shop:api",
+    finding_id: str = FINDING_ID,
+) -> None:
     inp: dict = {"category": "crashloop", "resources": RESOURCES, "fixStrategy": "restart_controller"}
     if cause:
         inp["causeCategory"] = cause
     save_action(
         {
             "id": action_id,
-            "findingId": FINDING_ID,
+            "findingId": finding_id,
             "tool": "",
             "input": inp,
             "status": status,
             "reasoning": "Auto-fix for crashloop",
-            "correlationKey": "crashloop:shop:api",
+            "correlationKey": corr,
         },
         category="crashloop",
         resources=RESOURCES,
@@ -90,7 +97,6 @@ def _inbox_item() -> str:
             "created_by": "system:monitor",
             "namespace": "shop",
             "resources": RESOURCES,
-            "metadata": {"has_pending_approval": True},
         }
     )
 
@@ -134,7 +140,6 @@ def test_reject_notes_the_inbox_item_and_leaves_it_open(broadcasts):
     item = get_inbox_item(item_id)
     assert item["status"] not in ("resolved", "archived"), "declining a fix does not fix the problem"
     md = item["metadata"] if isinstance(item["metadata"], dict) else json.loads(item["metadata"])
-    assert "has_pending_approval" not in md
     assert md["fix_rejected"]["action_id"] == "rj-1"
     assert md["fix_rejected"]["by"] == "alice"
     assert md["fix_rejected"]["reason"] == "owner is rolling back instead"
@@ -208,7 +213,7 @@ def test_reject_needs_an_authenticated_admin():
 
 def test_repeated_rejections_escalate_the_strategy_to_a_person(broadcasts):
     for i in range(3):
-        _propose(f"rj-{i}")
+        _propose(f"rj-{i}", corr=f"crashloop:shop:Deployment/api-{i}")
         assert _client().post(f"/fix-history/rj-{i}/reject", json={"reason": "no"}).status_code == 200
 
     plan = steer(
@@ -265,3 +270,94 @@ def test_episode_symptoms_carry_their_inbox_item_id():
     ):
         result = asyncio.run(episode_rest.rest_get_episode("ep-1"))
     assert [s["item_id"] for s in result["symptoms"]] == ["inb-api", None]
+
+
+def test_rejecting_one_workload_again_and_again_counts_once(broadcasts):
+    """Re-rejecting one noisy workload is one opinion, not cluster-wide evidence."""
+    for i in range(4):
+        _propose(f"rj-{i}")
+        resp = _client().post(f"/fix-history/rj-{i}/reject", json={"reason": "no"})
+        assert resp.status_code == 200
+        assert resp.json()["learned"] is (i == 0)
+    assert rejections("crash_exit") == {"restart_controller": 1}
+    plan = steer(
+        FixPlan(strategy="restart_controller", cause_category="crash_exit", confidence=0.6, description="d", params={})
+    )
+    assert plan.strategy == "restart_controller", "one workload's rejections must not escalate the cause"
+
+
+def test_a_rejection_is_found_for_its_condition_and_strategy_only(broadcasts):
+    import time
+
+    from sre_agent.repositories import get_monitor_repo
+
+    _propose()
+    _client().post("/fix-history/rj-1/reject", json={"reason": "no"})
+    repo = get_monitor_repo()
+    since = int(time.time() * 1000) - 3600_000
+    assert repo.find_recent_rejection("crashloop:shop:api", "restart_controller", since) == "rj-1"
+    assert repo.find_recent_rejection("crashloop:shop:api", "patch_resources", since) is None
+    assert repo.find_recent_rejection("crashloop:shop:other", "restart_controller", since) is None
+    assert repo.find_recent_rejection("crashloop:shop:api", "restart_controller", since + 2 * 3600_000) is None
+
+
+def test_rejected_proposals_are_not_in_the_fix_rate(broadcasts):
+    """Nothing ran, so a rejection is not a fix that failed."""
+    from sre_agent.repositories import get_monitor_repo
+
+    repo = get_monitor_repo()
+    before = repo.fetch_fix_rate(1)
+    _propose()
+    _client().post("/fix-history/rj-1/reject", json={"reason": "no"})
+    _propose("rj-ran", status="failed")
+    after = repo.fetch_fix_rate(1)
+    assert after["total"] - before["total"] == 1, "only the fix that ran and failed counts"
+
+
+def test_the_inbox_item_is_found_by_condition_when_the_finding_id_changed(broadcasts):
+    """Finding ids are minted per sighting; after a restart the proposal's id names nothing."""
+    item_id = create_inbox_item(
+        {
+            "item_type": "task",
+            "title": "Pod api crashlooping",
+            "severity": "warning",
+            "finding_id": "f-new-sighting",
+            "created_by": "system:monitor",
+            "correlation_key": "crashloop:shop:api",
+            "namespace": "shop",
+            "resources": RESOURCES,
+        }
+    )
+    try:
+        _propose(finding_id="f-old-sighting")
+        resp = _client().post("/fix-history/rj-1/reject", json={"reason": "no"})
+        assert resp.json()["inboxItemId"] == item_id
+        md = get_inbox_item(item_id)["metadata"]
+        md = md if isinstance(md, dict) else json.loads(md)
+        assert md["fix_rejected"]["action_id"] == "rj-1"
+    finally:
+        get_database().execute("DELETE FROM inbox_items WHERE id = ?", (item_id,))
+        get_database().commit()
+
+
+def test_a_superseded_proposal_is_withdrawn_not_left_to_be_rejected(broadcasts):
+    """Approve refuses when the plan changed; rejecting it would judge a fix nobody judged."""
+    from unittest.mock import MagicMock
+
+    from sre_agent.monitor.approvals import ApprovalError, approve_fix
+
+    _propose()  # proposed with restart_controller
+    new_plan = MagicMock(strategy="patch_resources", cause_category="crash_exit", description="d", params={})
+    with (
+        patch("sre_agent.monitor.approvals._current_finding", return_value={"id": FINDING_ID, "category": "crashloop"}),
+        patch("sre_agent.monitor.autofix.remediation_blocked_reason", return_value=""),
+        patch("sre_agent.monitor.fix_planner.get_investigation_for_finding", return_value=None),
+        patch("sre_agent.monitor.fix_planner.default_fix_plan", return_value=new_plan),
+    ):
+        with pytest.raises(ApprovalError) as e:
+            approve_fix("rj-1", "alice")
+    assert e.value.status_code == 409
+    assert "withdrawn" in e.value.reason
+    assert get_action_detail("rj-1")["status"] == "expired"
+    assert track_record("crash_exit") == {}
+    assert _client().post("/fix-history/rj-1/reject", json={"reason": "no"}).status_code == 409

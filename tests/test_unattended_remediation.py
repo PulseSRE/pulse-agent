@@ -175,6 +175,7 @@ async def test_it_does_not_ask_the_same_question_every_scan(monitor):
     saved = []
     repo = MagicMock()
     repo.check_pending_proposal.return_value = {"id": "a-already-asked"}
+    repo.find_recent_rejection.return_value = None
     with (
         patch("sre_agent.monitor.cluster_monitor.is_autofix_paused", return_value=False),
         patch("sre_agent.monitor.cluster_monitor.get_settings") as settings,
@@ -203,6 +204,7 @@ async def test_the_first_proposal_is_still_recorded(monitor):
     saved = []
     repo = MagicMock()
     repo.check_pending_proposal.return_value = None
+    repo.find_recent_rejection.return_value = None
     with (
         patch("sre_agent.monitor.cluster_monitor.is_autofix_paused", return_value=False),
         patch("sre_agent.monitor.cluster_monitor.get_settings") as settings,

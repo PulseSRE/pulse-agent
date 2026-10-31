@@ -244,8 +244,9 @@ class TestDeletedDefaultsStayDeleted:
         from fastapi.testclient import TestClient
 
         import sre_agent.slo_registry as mod
-        from sre_agent.api.auth import verify_token
+        from sre_agent.api.auth import get_owner, verify_token
         from sre_agent.api.monitor_rest import router
+        from sre_agent.db import get_database
 
         self._clean()
         try:
@@ -253,9 +254,14 @@ class TestDeletedDefaultsStayDeleted:
             app = FastAPI()
             app.include_router(router)
             app.dependency_overrides[verify_token] = lambda: None
+            app.dependency_overrides[get_owner] = lambda: "alice"
             resp = TestClient(app).delete(f"/slo/{self.KEY[0]}/{self.KEY[1]}")
             assert resp.status_code == 200
             assert self._restart().get(*self.KEY) is None
+            row = get_database().fetchone(
+                "SELECT updated_by FROM operational_flags WHERE key = %s", (f"slo_deleted:{self.KEY[0]}:{self.KEY[1]}",)
+            )
+            assert row["updated_by"] == "alice", "the tombstone records who deleted it"
         finally:
             self._clean()
             mod._registry = None
