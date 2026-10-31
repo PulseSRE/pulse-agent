@@ -139,12 +139,25 @@ def _format_text(rows: list[dict], gate: dict) -> str:
     if calib:
         lines.append("")
         lines.append(
-            f"Calibration: brier={calib['brier']} (max {calib['max_brier']}) over {calib['samples']} attempts; "
-            f"mean confidence right={calib['mean_confidence_when_right']} wrong={calib['mean_confidence_when_wrong']}"
+            f"Calibration: brier={calib['brier']} (ceiling {calib.get('ceiling')}) over {calib['samples']} attempts; "
+            f"mean confidence right={calib.get('mean_confidence_when_right')} "
+            f"wrong={calib.get('mean_confidence_when_wrong')}"
         )
+        for failure in calib.get("absolute_failures") or []:
+            lines.append(f"  FAIL {failure}")
+        reg = calib.get("regression")
+        if reg and reg.get("tested"):
+            mark = "REGRESSED" if reg["regressed"] else "ok"
+            lines.append(
+                f"  {mark} vs baseline brier={reg['baseline_brier']} over {reg['baseline_samples']} attempts "
+                f"(one-sided Welch t={reg['t']}, p={reg['p_value']})"
+            )
+        elif reg:
+            lines.append(f"  not compared: {reg['reason']}")
         if calib["overconfident"]:
             lines.append(
-                f"Overconfident wrong (>= {calib['overconfident_threshold']}): {', '.join(calib['overconfident'])}"
+                f"  WARNING overconfident wrong (>= {calib['overconfident_threshold']}, not gating): "
+                f"{', '.join(calib['overconfident'])}"
             )
     cites = gate.get("citations") or {}
     if cites.get("total"):
@@ -210,7 +223,11 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.write_baseline).write_text(
                 json.dumps(
                     ir.baseline_from(
-                        rows, model=args.model, models_seen=models, commit=os.environ.get("GITHUB_SHA", "")
+                        rows,
+                        model=args.model,
+                        models_seen=models,
+                        commit=os.environ.get("GITHUB_SHA", ""),
+                        dry_run=args.dry_run,
                     ),
                     indent=2,
                 )
