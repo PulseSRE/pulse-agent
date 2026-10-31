@@ -303,7 +303,11 @@ def build_cluster_updates(cv: dict, operators: list[dict] | None, pools: list[di
 
     upgradeable = _cond(conditions, "Upgradeable")
     upgradeable_false = upgradeable.get("status") == "False"
-    current_minor = _minor(current_version)
+    # While an update is in flight CVO computes availableUpdates/conditionalUpdates
+    # from the release it is reconciling (status.desired), not the one still running.
+    in_flight = _cond(conditions, "Progressing").get("status") == "True"
+    source_version = desired["version"] if in_flight and desired["version"] else current_version
+    current_minor = _minor(source_version)
 
     def _blocked(version: str) -> bool:
         # Upgradeable=False blocks minor-version updates; patch updates still proceed.
@@ -414,7 +418,9 @@ def build_cluster_updates(cv: dict, operators: list[dict] | None, pools: list[di
 
     progress = {
         "phase": "failing" if failing.get("status") == "True" else ("progressing" if is_progressing else "idle"),
-        "message": progressing.get("message", "") if is_progressing else "",
+        "message": progressing.get("message", "")
+        if is_progressing
+        else (failing.get("message", "") if failing.get("status") == "True" else ""),
         "done": parsed["done"] if parsed else None,
         "total": parsed["total"] if parsed else None,
         "percent": parsed["percent"] if parsed else None,
@@ -466,6 +472,7 @@ def build_cluster_updates(cv: dict, operators: list[dict] | None, pools: list[di
     return {
         "current": current,
         "desired": desired,
+        "updatesFrom": source_version,
         "requested": requested,
         "availableUpdates": available,
         "conditionalUpdates": conditional,
@@ -515,7 +522,7 @@ def _upgrade_graph_component(data: dict) -> dict:
         "desired": data["desired"],
         "channels": current["channels"],
         "nodes": nodes,
-        "edges": [{"from": current["version"], "to": n["version"]} for n in nodes],
+        "edges": [{"from": data["updatesFrom"], "to": n["version"]} for n in nodes],
         "history": [
             {k: h[k] for k in ("version", "state", "startedTime", "completionTime", "verified")}
             for h in data["history"]
@@ -556,7 +563,7 @@ def get_cluster_updates():
     cur = data["current"]
     lines = [f"Current: {cur['version'] or 'unknown'} (channel {cur['channel'] or 'none'})"]
     if data["desired"]["version"] and data["desired"]["version"] != cur["version"]:
-        lines.append(f"Updating to: {data['desired']['version']}")
+        lines.append(f"Updating to: {data['desired']['version']} (update targets below are from that release)")
     up = data["upgradeable"]
     if up["status"] == "False":
         lines.append(f"Upgradeable=False ({up['reason']}): {up['message']} — minor-version updates are blocked")
@@ -597,6 +604,10 @@ def get_cluster_updates():
         for h in data["history"][:5]:
             dur = f" in {h['durationMinutes']} min" if h["durationMinutes"] is not None else ""
             lines.append(f"  {h['version']} {h['state']}{dur}")
+    if not cur["version"]:
+        # No Completed history and no desired version: there is no node to draw
+        # the graph from, and the component would fail validation.
+        return "\n".join(lines)
     return ("\n".join(lines), _upgrade_graph_component(data))
 
 

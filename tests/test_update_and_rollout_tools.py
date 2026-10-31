@@ -245,6 +245,40 @@ class TestGetClusterUpdates:
         assert "ClusterOperators at target: 2/3" in text
         assert "Pool worker: 2/5 updated paused" in text
 
+    def test_in_flight_targets_come_from_the_release_being_reconciled(self, mock_k8s):
+        # During 4.16.3 -> 4.17.2, CVO lists updates *from 4.17.2*; Upgradeable=False
+        # then blocks 4.18 targets, not the 4.17 patch that is already in reach.
+        cv = _cv(progressing=True, upgradeable=False)
+        cv["status"]["desired"] = {"version": "4.17.2", "image": "quay.io/ocp-release@sha256:ddd"}
+        cv["status"]["availableUpdates"] = [
+            {"version": "4.17.5", "image": "quay.io/ocp-release@sha256:e1"},
+            {"version": "4.18.1", "image": "quay.io/ocp-release@sha256:e2"},
+        ]
+        cv["status"]["conditionalUpdates"] = []
+        _wire(mock_k8s, cv)
+        text, comp = get_cluster_updates.call({})
+        assert comp["current"]["version"] == "4.16.3"
+        assert comp["edges"] == [{"from": "4.17.2", "to": "4.17.5"}, {"from": "4.17.2", "to": "4.18.1"}]
+        states = {n["version"]: n["state"] for n in comp["nodes"]}
+        assert states == {"4.17.5": "recommended", "4.18.1": "blocked"}
+        assert "update targets below are from that release" in text
+
+    def test_failing_without_progressing_reports_the_failure(self):
+        cv = _cv()
+        cv["status"]["conditions"] = [
+            {"type": "Failing", "status": "True", "reason": "ClusterOperatorDegraded", "message": "etcd is degraded"},
+            {"type": "Progressing", "status": "False", "message": "Error while reconciling 4.16.3"},
+        ]
+        data = build_cluster_updates(cv, [], [])
+        assert data["progress"]["phase"] == "failing"
+        assert data["progress"]["message"] == "etcd is degraded"
+
+    def test_no_version_returns_text_only(self, mock_k8s):
+        _wire(mock_k8s, {"spec": {"channel": "stable-4.16"}, "status": {"conditions": []}})
+        result = get_cluster_updates.call({})
+        assert isinstance(result, str)
+        assert "Current: unknown" in result
+
     def test_upgradeable_false_blocks_minor_targets_only(self, mock_k8s):
         _wire(mock_k8s, _cv(upgradeable=False))
         text, comp = get_cluster_updates.call({})
@@ -326,7 +360,11 @@ class TestGetRolloutHistory:
         apps = mock_k8s["apps"]
         apps.read_namespaced_deployment.return_value = SimpleNamespace(
             metadata=_meta("api", uid="dep-uid", annotations={"deployment.kubernetes.io/revision": "3"}),
-            spec=SimpleNamespace(replicas=3, strategy=SimpleNamespace(type="RollingUpdate")),
+            spec=SimpleNamespace(
+                replicas=3,
+                strategy=SimpleNamespace(type="RollingUpdate"),
+                selector=SimpleNamespace(match_labels={"app": "api", "tier": "web"}),
+            ),
             status=SimpleNamespace(
                 updated_replicas=2,
                 ready_replicas=3,
@@ -369,6 +407,7 @@ class TestGetRolloutHistory:
         assert "(image changed)" in text
         assert "<- current" in text
         assert _errors(comp) == []
+        apps.list_namespaced_replica_set.assert_called_once_with("prod", label_selector="app=api,tier=web")
 
     def test_statefulset_uses_controller_revisions(self, mock_k8s):
         apps = mock_k8s["apps"]

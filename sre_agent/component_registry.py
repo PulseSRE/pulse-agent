@@ -404,7 +404,7 @@ register_component(
             "upgrade_graph — Cluster update graph. Produced by get_cluster_updates(); do not hand-build it. "
             "nodes[].state: recommended|conditional|blocked; conditional nodes carry risks[{name,message,url,matchingRules}]. "
             "progress: {phase, percent, clusterOperators:{updated,total,degraded[]}, pools[{name,updated,total,degraded}], etaMinutes}. "
-            "blockers[{type: upgradeable|failing|pool|pdb|drain, message, link}]. The UI asks for explicit risk acceptance before a conditional update."
+            "blockers[{type: upgradeable|failing|pool, reason, message, link}]. The UI asks for explicit risk acceptance before a conditional update."
         ),
     )
 )

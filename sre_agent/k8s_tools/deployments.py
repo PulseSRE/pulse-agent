@@ -453,9 +453,15 @@ def get_rollout_history(kind: str, namespace: str, name: str):
 
     revisions: list[dict] = []
     if kind_name == "Deployment":
-        result = _kc.safe(lambda: apps.list_namespaced_replica_set(namespace))
+        match_labels = (wl.spec.selector.match_labels or {}) if wl.spec and wl.spec.selector else {}
+        selector = ",".join(f"{k}={v}" for k, v in sorted(match_labels.items()))
+        if selector:
+            result = _kc.safe(lambda: apps.list_namespaced_replica_set(namespace, label_selector=selector))
+        else:
+            result = _kc.safe(lambda: apps.list_namespaced_replica_set(namespace))
         if isinstance(result, ToolError):
             return str(result)
+        # The selector narrows the list; ownership (uid) decides membership.
         current_rev = (wl.metadata.annotations or {}).get("deployment.kubernetes.io/revision")
         for rs in result.items:
             if not _owned_by(rs, uid, "Deployment", name):
