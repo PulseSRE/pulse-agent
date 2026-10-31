@@ -53,10 +53,16 @@ WINDOW_DAYS = 30
 HELD = "held"
 FAILED = "failed"
 RECURRED = "recurred"
+# A person declined the proposal. The fix never ran, so this says nothing about
+# whether it would have held — but it is the operator saying "not this fix for
+# this cause", and a strategy people keep declining should stop being proposed
+# as an automated fix the same way one that keeps failing does. It counts as
+# "did not hold" in the record and is named as a rejection in the explanation.
+REJECTED = "rejected"
 
 # Verification statuses that are a verdict on the fix. "unverifiable" and
 # "improved" say nothing definite about whether the fix held.
-_VERDICT_FOR_STATUS = {"verified": HELD, "still_failing": FAILED}
+_VERDICT_FOR_STATUS = {"verified": HELD, "still_failing": FAILED, "rejected": REJECTED}
 
 
 def _db():
@@ -69,11 +75,11 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def record_verdict(action_id: str, cause: str, strategy: str, status: str) -> None:
-    """Record what verification concluded about one applied fix."""
+def record_verdict(action_id: str, cause: str, strategy: str, status: str) -> bool:
+    """Record what verification concluded about one applied fix. True if it was written."""
     verdict = _VERDICT_FOR_STATUS.get(status)
     if not verdict or not action_id or not cause or not strategy or strategy == HUMAN_REVIEW:
-        return
+        return False
     try:
         db = _db()
         db.execute(
@@ -83,8 +89,10 @@ def record_verdict(action_id: str, cause: str, strategy: str, status: str) -> No
             (action_id, cause, strategy, verdict, _now_ms()),
         )
         db.commit()
+        return True
     except Exception:
         logger.debug("Failed to record fix verdict for %s", action_id, exc_info=True)
+        return False
 
 
 def mark_recurred(action_id: str) -> None:
@@ -100,20 +108,66 @@ def mark_recurred(action_id: str) -> None:
         logger.debug("Failed to mark fix %s recurred", action_id, exc_info=True)
 
 
-def track_record(cause: str) -> dict[str, tuple[int, int]]:
-    """``{strategy: (held, did_not_hold)}`` for one cause."""
+def record_rejection(action_id: str, cause: str, strategy: str, correlation_key: str = "") -> bool:
+    """Record that a person declined a proposed fix. True only if a verdict was written.
+
+    A proposal made before the cause was stored with it has no cause to file
+    the rejection under; guessing one would teach the wrong lesson.
+
+    At most one rejection counts per condition (``correlation_key``) per
+    strategy and cause within the window. A person saying no to the same fix
+    for the same workload again is one opinion about that workload, not
+    evidence about the strategy everywhere: without this, re-rejecting one
+    noisy workload two or three times would switch or escalate the cause for
+    the whole cluster.
+    """
+    if not action_id or not cause or not strategy or strategy == HUMAN_REVIEW:
+        return False
+    if correlation_key and _already_rejected_here(action_id, cause, strategy, correlation_key):
+        logger.info("Rejection of %s not counted again for %s (%s/%s)", action_id, correlation_key, cause, strategy)
+        return False
+    return record_verdict(action_id, cause, strategy, "rejected")
+
+
+def _already_rejected_here(action_id: str, cause: str, strategy: str, correlation_key: str) -> bool:
+    try:
+        row = _db().fetchone(
+            "SELECT 1 AS hit FROM fix_outcomes fo JOIN actions a ON a.id = fo.action_id "
+            "WHERE a.correlation_key = ? AND fo.verdict = ? AND fo.cause = ? AND fo.strategy = ? "
+            "AND fo.recorded_at >= ? AND fo.action_id <> ? LIMIT 1",
+            (correlation_key, REJECTED, cause, strategy, _now_ms() - WINDOW_DAYS * 86_400_000, action_id),
+        )
+    except Exception:
+        logger.debug("Could not check earlier rejections for %s", correlation_key, exc_info=True)
+        return False
+    return row is not None
+
+
+def _counts(cause: str) -> dict[str, tuple[int, int, int]]:
+    """``{strategy: (held, did_not_hold, of_which_rejected)}`` for one cause."""
     try:
         rows = _db().fetchall(
             "SELECT strategy, "
             "SUM(CASE WHEN verdict = 'held' THEN 1 ELSE 0 END) AS held, "
-            "SUM(CASE WHEN verdict <> 'held' THEN 1 ELSE 0 END) AS lost "
+            "SUM(CASE WHEN verdict <> 'held' THEN 1 ELSE 0 END) AS lost, "
+            "SUM(CASE WHEN verdict = 'rejected' THEN 1 ELSE 0 END) AS rejected "
             "FROM fix_outcomes WHERE cause = ? AND recorded_at >= ? GROUP BY strategy",
             (cause, _now_ms() - WINDOW_DAYS * 86_400_000),
         )
     except Exception:
         logger.debug("Failed to read fix track record for %s", cause, exc_info=True)
         return {}
-    return {r["strategy"]: (int(r["held"] or 0), int(r["lost"] or 0)) for r in rows or []}
+    return {r["strategy"]: (int(r["held"] or 0), int(r["lost"] or 0), int(r["rejected"] or 0)) for r in rows or []}
+
+
+def track_record(cause: str) -> dict[str, tuple[int, int]]:
+    """``{strategy: (held, did_not_hold)}`` for one cause (rejections count as not held)."""
+    return {strategy: (held, lost) for strategy, (held, lost, _) in _counts(cause).items()}
+
+
+def rejections(cause: str) -> dict[str, int]:
+    """``{strategy: times a person declined it}`` for one cause, within the window."""
+    return {strategy: rejected for strategy, (_, _, rejected) in _counts(cause).items() if rejected}
 
 
 def _expected(record: dict[str, tuple[int, int]], strategy: str, default: str) -> tuple[float, int]:
@@ -122,9 +176,13 @@ def _expected(record: dict[str, tuple[int, int]], strategy: str, default: str) -
     return (held + a) / (held + lost + a + b), held + lost
 
 
-def _describe(strategy: str, record: dict[str, tuple[int, int]]) -> str:
+def _describe(strategy: str, record: dict[str, tuple[int, int]], rejected: dict[str, int] | None = None) -> str:
     held, lost = record.get(strategy, (0, 0))
-    return f"{strategy} held {held} of {held + lost}"
+    text = f"{strategy} held {held} of {held + lost}"
+    declined = (rejected or {}).get(strategy, 0)
+    if declined:
+        text += f" ({declined} declined by a person)"
+    return text
 
 
 def steer(plan):
@@ -132,9 +190,11 @@ def steer(plan):
     if plan is None or plan.strategy == HUMAN_REVIEW:
         return plan
     cause = plan.cause_category
-    record = track_record(cause)
-    if not record:
+    counts = _counts(cause)
+    if not counts:
         return plan
+    record = {strategy: (held, lost) for strategy, (held, lost, _) in counts.items()}
+    rejected = {strategy: r for strategy, (_, _, r) in counts.items() if r}
 
     default = plan.strategy
     candidates = [default] + [s for s in ALTERNATIVES.get(cause, []) if s != default]
@@ -144,19 +204,19 @@ def steer(plan):
 
     reasons: list[str] = []
     if best != default and best_score >= default_score + SWITCH_MARGIN:
-        reasons.append(f"switched from {default}: {_describe(default, record)} for {cause}")
+        reasons.append(f"switched from {default}: {_describe(default, record, rejected)} for {cause}")
         plan.strategy = best
         if record.get(best):
-            reasons.append(_describe(best, record))
+            reasons.append(_describe(best, record, rejected))
         else:
             reasons.append(f"{best} not tried yet for {cause}")
 
     chosen_score, chosen_n = _expected(record, plan.strategy, default)
     if chosen_n >= MIN_EVIDENCE and chosen_score < ESCALATE_BELOW:
-        reasons.append(f"escalated to a person: {_describe(plan.strategy, record)} for {cause}")
+        reasons.append(f"escalated to a person: {_describe(plan.strategy, record, rejected)} for {cause}")
         plan.strategy = HUMAN_REVIEW
     elif not reasons and chosen_n:
-        reasons.append(f"track record: {_describe(plan.strategy, record)} for {cause}")
+        reasons.append(f"track record: {_describe(plan.strategy, record, rejected)} for {cause}")
 
     if reasons:
         note = "; ".join(reasons)

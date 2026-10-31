@@ -21,7 +21,7 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/agents` | token | All agent modes with metadata (name, description, tool count, categories, write capability) |
 | `GET` | `/tools/usage` | token | Paginated audit log of tool invocations (query params: `tool_name`, `agent_mode`, `status`, `session_id`, `from`, `to`, `page`, `per_page`) |
 | `GET` | `/tools/usage/stats` | token | Aggregated tool usage statistics (totals, by tool, by mode, by category, error rates) (query params: `from`, `to`) |
-| `GET` | `/fix-history` | token | Paginated fix history with filters (`status`, `category`, `since`, `search`) |
+| `GET` | `/fix-history` | token | Paginated fix history with filters (`status`, `category`, `since`, `search`). A pending proposal (`status: "proposed"`) carries `inboxItemId` when its finding has an open inbox item, and its `input` carries `fixStrategy`, `causeCategory` and `fixDescription` (absent on proposals made before this change) |
 | `GET` | `/fix-history/{id}` | token | Single action detail with before/after state |
 | `POST` | `/fix-history/{id}/rollback` | admin + user token when forwarding | Rollback a completed action. Actions with a pre-write snapshot (`restore_snapshot` rollback) are restored from it after UID/concurrency checks and read-back verification (legacy snapshots without UID are refused); `restart_deployment` actions roll back by revision; other action types return an error |
 | `GET` | `/eval/status` | token | Cached quality gate snapshot (release, safety, integration, outcomes, view_designer) with `dimension_averages` and `prompt_audit` data |
@@ -67,13 +67,13 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/readiness` | token | Installation diagnostics: nine scoped checks with healthy/unhealthy/unknown results; provider connectivity is not probed; 60-second cache. See [readiness guide](docs/INSTALLATION_READINESS.md). |
 | `GET` | `/analytics/readiness` | token | Readiness gate summary: pass/fail/attention counts, pass rate, attention items |
 | `GET` | `/postmortems` | token | Auto-generated postmortems, newest first (query: `limit` 1-100) |
-| `GET` | `/topology` | token | Dependency graph nodes + edges for visualization (query: `namespace` optional filter) |
+| `GET` | `/topology` | token | Dependency graph nodes + edges for visualization (query: `namespace` optional filter). Node `status` is `healthy`, `warning` (worst open finding is warning or info) or `error` (a critical finding) |
 | `GET` | `/plan-templates` | token | List investigation plan templates |
 | `GET` | `/plan-templates/{type}` | token | Get a single plan template by incident type |
 | `GET` | `/fix-history/resolutions` | token | Recent resolution outcomes with verification status (query: `days`, `limit`) |
 | `GET` | `/slo` | token | SLO status: budget consumed = (1−SLI)/(1−target), burn rate from the last hour (critical ≥14.4x, warning ≥6x), `budget_remaining_hours`; targets ≥1 are percentages; SLOs without data are listed with `alert_level: "no_data"` |
 | `POST` | `/slo` | token | Register new SLO definition |
-| `DELETE` | `/slo/{service}/{slo_type}` | token | Remove SLO definition |
+| `DELETE` | `/slo/{service}/{slo_type}` | token | Remove SLO definition. A deleted default SLO stays deleted across restarts until it is registered again with `POST /slo` |
 | `GET` | `/analytics/fix-strategies` | token | Fix strategy effectiveness per category+tool (query: `days` 1-365) |
 | `GET` | `/analytics/learning` | token | Agent learning feed: weight updates, scaffolded skills, routing decisions (query: `days` 1-365) |
 | `PUT` | `/plan-templates/{type}` | admin | Update plan template phases/timeouts |
@@ -143,7 +143,7 @@ Unified worklist for findings, alerts, and predictions -- replaces the old multi
 | `POST` | `/inbox/{item_id}/escalate` | token | Escalate an item |
 | `POST` | `/inbox/{item_id}/restore` | token | Restore a dismissed/resolved item |
 | `POST` | `/inbox/{item_id}/step` | token | Append an investigation step |
-| `GET` | `/inbox/{item_id}/investigation` | token | The investigation linked to an item: summary, cause, fix, confidence, `evidence`, `evidence_detail` (structured items with `stance` and `source`; empty for rows saved before migration 041) and `alternatives_considered` |
+| `GET` | `/inbox/{item_id}/investigation` | token | The investigation linked to an item: summary, cause, fix, confidence, `evidence`, `evidence_detail` (structured items with `stance` and `source`; empty for rows saved before migration 041), `alternatives_considered` and `security_notes` (suspected prompt injection seen in cluster data, from the item; `[]` if none) |
 | `POST` | `/inbox/{item_id}/runbook` | admin | Draft a runbook skill from an investigated item via the skill lifecycle; lands unreviewed in the Toolbox approval gate. 409 when the item has no investigation |
 
 Inbox item `metadata` optional keys added for queue explainability: `priority_factors` (the score's inputs — severity/layer weights, confidence, noise, age/novelty/due bonuses, total; refreshed on every re-rank), `slo_impact` (registered SLOs the item's namespace/resources back: `[{service, slo_type, target}]`), `recurrence_30d` (which visit this is for the correlation key in 30 days; 1 = first).
@@ -941,7 +941,7 @@ Sent as each plan phase starts (`status: "running"`), and with an empty `skill_n
 {"type": "skill_activity", "skill_name": "sre", "status": "running", "timestamp": 1711540800000}
 ```
 
-An approval made over REST (`POST /fix-history/{id}/approve`) is announced as an `action_report` with the new status, so every open UI clears it from its pending list.
+An approval or rejection made over REST (`POST /fix-history/{id}/approve`, `POST /fix-history/{id}/reject`) is announced as an `action_report` with the new status, so every open UI clears it from its pending list. A rejection carries `rejectedBy` and `rejectionReason`.
 
 #### `scan_report` — Per-scanner timing and results
 
@@ -1244,7 +1244,8 @@ Source-derived paths below supplement the table above. Authentication names iden
 
 | Method | Path | Dependencies | Purpose |
 |---|---|---|---|
-| `POST` | `/fix-history/{action_id}/approve` | `require_admin` | Run a fix that was proposed while nobody was connected to approve it. Returns 409 and runs nothing if the proposal is stale, monitoring is paused or `PULSE_AGENT_AUTOFIX_ENABLED=false`, or fix learning would now choose a different strategy than the one proposed. |
+| `POST` | `/fix-history/{action_id}/approve` | `require_admin` | Run a fix that was proposed while nobody was connected to approve it. Returns 409 and runs nothing if the proposal is stale, monitoring is paused or `PULSE_AGENT_AUTOFIX_ENABLED=false`, or fix learning would now choose a different strategy than the one proposed (that proposal is then withdrawn as `expired`, so the new fix can be proposed). |
+| `POST` | `/fix-history/{action_id}/reject` | `require_admin` | Decline a proposed fix. Body `{"reason": "<non-empty string>"}` (400 without one; whitespace is collapsed and anything past 500 characters is cut off). The action becomes `failed` with `error` `"Rejected by <user>: <reason>"`; 404 for an unknown action, 409 if it is no longer a pending proposal (already approved, rejected or expired). The rejection is counted by fix learning against the proposal's cause and strategy, at most once per condition (correlation key) per 30-day window (`learned: false` for proposals saved before the cause was stored with them, a repeat rejection for the same condition, or a failed write). The same fix is not proposed again for that condition for 24 hours, recorded on the finding's open inbox item (found by finding id, else by the action's correlation key) as `metadata.fix_rejected = {action_id, by, reason, at}` (the item stays open; `inbox_item_updated` is broadcast) and announced as an `action_report`. Response: the `action_report` plus `rejectedBy`, `rejectionReason`, `learned`, `inboxItemId`. |
 | `POST` | `/inbox/reset` | `require_admin` | Re-baseline the inbox: archive what is open, then rescan from now. |
 | `POST` | `/admin/skills/{name}/pin` | `require_admin` | Exempt an agent-created skill from curator lifecycle proposals. |
 | `POST` | `/admin/skills/{name}/unpin` | `require_admin` | Return a pinned skill to normal curator lifecycle. |

@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ..monitor import (
     execute_rollback,
@@ -249,6 +249,33 @@ async def approve_action(action_id: str, approver: str = Depends(require_admin))
     except ApprovalError as e:
         from fastapi.responses import JSONResponse
 
+        return JSONResponse(status_code=e.status_code, content={"error": e.reason})
+
+
+@router.post("/fix-history/{action_id}/reject")
+async def reject_action(action_id: str, request: Request, rejecter: str = Depends(require_admin)):
+    """Decline a proposed fix, with a reason.
+
+    Same authority as approving: answering a proposal either way is a decision
+    about a live cluster, recorded against a person. The rejection is filed
+    with fix learning, noted on the finding's inbox item (which stays open) and
+    announced to every connected UI.
+    """
+    from fastapi.responses import JSONResponse
+
+    from ..monitor.approvals import ApprovalError, reject_fix
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    reason = body.get("reason") if isinstance(body, dict) else None
+    if not isinstance(reason, str) or not reason.strip():
+        return JSONResponse(status_code=400, content={"error": "Body must include a non-empty 'reason' string"})
+
+    try:
+        return await asyncio.to_thread(reject_fix, action_id, rejecter, reason)
+    except ApprovalError as e:
         return JSONResponse(status_code=e.status_code, content={"error": e.reason})
 
 

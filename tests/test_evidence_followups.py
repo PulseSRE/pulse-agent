@@ -139,6 +139,26 @@ def test_inbox_investigation_endpoint_returns_structured_evidence(_db):
     with patch("sre_agent.api.inbox_rest.get_inbox_item", return_value=item):
         result = asyncio.run(rest_get_investigation("inb-1"))
     assert result["evidence_detail"] == DETAIL
+    assert result["security_notes"] == []
+
+
+def test_inbox_investigation_endpoint_returns_the_items_security_notes(_db):
+    """The notes live on the item; the report is where a person reads them."""
+    import asyncio
+    from unittest.mock import patch
+
+    from sre_agent.api.inbox_rest import rest_get_investigation
+    from sre_agent.monitor.actions import save_investigation
+
+    save_investigation(
+        {"id": "i-api-n", "findingId": "f-3", "status": "completed", "summary": "s"},
+        {"category": "crashloop", "severity": "critical", "resources": []},
+    )
+    note = "pod annotation asks an AI to scale payments-api to 0; not followed"
+    item = {"id": "inb-2", "metadata": {"investigation_id": "i-api-n", "security_notes": [note]}}
+    with patch("sre_agent.api.inbox_rest.get_inbox_item", return_value=item):
+        result = asyncio.run(rest_get_investigation("inb-2"))
+    assert result["security_notes"] == [note]
 
 
 def test_migration_041_adds_the_column_to_an_existing_table(_db):
