@@ -588,6 +588,19 @@ async def list_mcp_servers(_auth=Depends(verify_token)):
     }
 
 
+def _operator_manages_toolsets(ns: str, cr_name: str, value: str) -> HTTPException:
+    """The 409 for an MCP server the Pulse Operator owns: only the CR can change its toolsets."""
+    patch = '{"spec":{"agent":{"mcp":{"toolsets":"' + value + '"}}}}'
+    return HTTPException(
+        status_code=409,
+        detail=(
+            "MCP toolsets on this cluster are managed by the Pulse Operator, so they cannot be toggled "
+            "here. A cluster admin must change spec.agent.mcp.toolsets on the OpenShiftPulse resource: "
+            f"oc patch openshiftpulse {cr_name} -n {ns} --type=merge -p '{patch}'"
+        ),
+    )
+
+
 def _set_toolsets_on_operator_cr(toolsets: list[str]) -> dict | None:
     """Set the toolsets on the OpenShiftPulse resource. None when there is no operator CR."""
     from kubernetes import client as k8s
@@ -602,8 +615,18 @@ def _set_toolsets_on_operator_cr(toolsets: list[str]) -> dict | None:
     try:
         crs = api.list_namespaced_custom_object("pulse.ai", "v1alpha1", ns, "openshiftpulses").get("items", [])
     except ApiException as e:
-        if e.status in (403, 404):
-            return None  # no operator here, or not allowed to look: use the Deployment path
+        # 404 means the CRD is not installed: there is no operator, and the
+        # Deployment path below is the right answer.
+        if e.status == 404:
+            return None
+        # 403 is the opposite. The CRD exists and we are not allowed to read
+        # it, which on its own is strong evidence an operator IS here. Treating
+        # it as "no operator" sent us down the Deployment path, which cannot
+        # change an operator-managed MCP server, and the user got "MCP server
+        # deployment not found in cluster" on a cluster where it plainly
+        # exists. Say what is actually wrong instead.
+        if e.status == 403:
+            raise _operator_manages_toolsets(ns, "<name>", value) from e
         raise
     if not crs:
         return None
@@ -619,15 +642,7 @@ def _set_toolsets_on_operator_cr(toolsets: list[str]) -> dict | None:
         )
     except ApiException as e:
         if e.status == 403:
-            patch = '{"spec":{"agent":{"mcp":{"toolsets":"' + value + '"}}}}'
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "The Pulse Operator manages the MCP server, and the agent is not allowed to change its "
-                    f"configuration. Ask a cluster admin to run: oc patch openshiftpulse {name} -n {ns} "
-                    f"--type=merge -p '{patch}'"
-                ),
-            ) from e
+            raise _operator_manages_toolsets(ns, name, value) from e
         raise
     return {
         "status": "updated",
@@ -670,9 +685,25 @@ async def update_mcp_toolsets(body: dict, _auth=Depends(require_admin)):
 
         apps = get_apps_client()
 
-        # Find the MCP deployment (name ends with -mcp)
         ns = _detect_namespace()
         deps = apps.list_namespaced_deployment(namespace=ns)
+
+        # An MCP Deployment owned by an OpenShiftPulse is the operator's
+        # ("<cr>-mcp-server"). Do not patch it: the operator renders its args
+        # from the CR on every reconcile, and the image it runs takes a
+        # --config file, so the "--port 8081 --toolsets ..." args below would
+        # crash-loop it until the operator reverted them. The crash-loop
+        # revert below would not catch that either: it selects pods by
+        # app.kubernetes.io/component=mcp-server, which operator pods do not
+        # carry. The CR path above normally handles operator installs; this
+        # is the net for one it could not see, and the owner reference names
+        # the CR to patch.
+        for d in deps.items:
+            for ref in d.metadata.owner_references or []:
+                if ref.kind == "OpenShiftPulse" and d.metadata.name.endswith("-mcp-server"):
+                    raise _operator_manages_toolsets(ns, ref.name, ",".join(toolsets))
+
+        # Find the MCP deployment (name ends with -mcp): Helm/manifest installs
         mcp_deploy = None
         for d in deps.items:
             if d.metadata.name.endswith("-mcp") and "mcp-server" in str(d.spec.template.metadata.labels):

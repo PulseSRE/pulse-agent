@@ -173,7 +173,7 @@ Inbox item `metadata` optional keys added for queue explainability: `priority_fa
 | `GET` | `/prompt/versions/{skill}` | token | Prompt version history for a skill |
 | `GET` | `/prompt/log` | token | Prompt audit log (hash, sections, tokens) |
 | `GET` | `/admin/mcp` | token | List MCP server connections and status |
-| `POST` | `/admin/mcp/toolsets` | admin | Toggle MCP toolsets on/off |
+| `POST` | `/admin/mcp/toolsets` | admin | Toggle MCP toolsets on/off. Under the Pulse Operator it patches `spec.agent.mcp.toolsets` on the OpenShiftPulse CR; returns **409** when the operator manages the MCP server and the agent cannot change the CR (detail carries the `oc patch openshiftpulse` command for an admin) |
 | `POST` | `/admin/mcp` | admin | Register a new MCP server connection |
 | `DELETE` | `/admin/mcp/{name}` | admin | Remove an MCP server connection |
 | `POST` | `/admin/mcp/test` | admin | Test an MCP server connection |
