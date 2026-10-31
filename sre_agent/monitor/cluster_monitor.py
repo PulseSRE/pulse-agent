@@ -679,6 +679,11 @@ class ClusterMonitor:
                 # Persisted with the proposal, so an approval later can refuse
                 # to run a different fix than the one the person was shown.
                 action_report["input"]["fixStrategy"] = targeted_plan.strategy
+                # And the cause it was chosen for, so a rejection later can be
+                # filed against the right (cause, strategy) in fix learning.
+                action_report["input"]["causeCategory"] = targeted_plan.cause_category
+                # And what the fix does, in words, for the person deciding later.
+                action_report["input"]["fixDescription"] = targeted_plan.description
 
             # If an open episode already explains this finding, say so on the
             # proposal. Measured on the reference cluster: all four fixes
@@ -856,6 +861,17 @@ class ClusterMonitor:
                     # Same split as the status: "expired" says no operator
                     # answered, "rejected" says one did and declined.
                     AUTOFIX_TOTAL.labels(outcome="expired" if timed_out else "rejected").inc()
+                if not timed_out and targeted_plan is not None:
+                    # A person said no to this fix for this cause. Fix learning
+                    # counts that, so a strategy people keep declining stops
+                    # being proposed (the REST reject records the same thing).
+                    from ..fix_learning import record_rejection
+
+                    record_rejection(
+                        action_report["id"],
+                        str(getattr(targeted_plan, "cause_category", "") or ""),
+                        str(getattr(targeted_plan, "strategy", "") or ""),
+                    )
                 await self._broadcast_raw(action_report)
                 save_action(action_report, category=category, resources=resources, finding=finding)
                 return

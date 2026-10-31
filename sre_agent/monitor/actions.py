@@ -39,6 +39,29 @@ def save_action(
         logger.error("Failed to save action: %s", e)
 
 
+def _link_proposals_to_inbox(actions: list[dict]) -> None:
+    """Give each pending proposal the id of its finding's open inbox item.
+
+    A proposal names a finding, but the inbox is keyed by item; without this
+    the UI could show "a fix is waiting" but not open the item it is for, nor
+    show the Approve button on that item. Proposals only — they are few, and
+    nothing else is answered from the inbox.
+    """
+    proposed = [a for a in actions if a.get("status") == "proposed" and a.get("findingId")]
+    if not proposed:
+        return
+    try:
+        from ..repositories.inbox_repo import get_inbox_repo
+
+        repo = get_inbox_repo()
+        for action in proposed:
+            row = repo.find_active_by_finding_id(action["findingId"])
+            if row is not None:
+                action["inboxItemId"] = row["id"]
+    except Exception:
+        logger.debug("Could not link proposals to inbox items", exc_info=True)
+
+
 def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = None) -> dict:
     """Retrieve paginated fix history from the database."""
     page = max(page, 1)
@@ -91,6 +114,7 @@ def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = N
                 }
             )
 
+        _link_proposals_to_inbox(actions)
         return {"actions": actions, "total": total, "page": page, "pageSize": page_size}
     except Exception as e:
         logger.error("Failed to get fix history: %s", e)

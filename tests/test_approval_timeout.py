@@ -186,6 +186,7 @@ class TestApprovalWaitDoesNotBlockTheScan:
         with contextlib.ExitStack() as stack:
             for p in patches:
                 stack.enter_context(p)
+            learned = stack.enter_context(patch("sre_agent.fix_learning.record_rejection"))
             await asyncio.wait_for(monitor.auto_fix([dict(FINDING)]), timeout=5)
 
             # The operator declines.
@@ -197,6 +198,12 @@ class TestApprovalWaitDoesNotBlockTheScan:
             assert [r["status"] for r in saved] == ["failed"]
             assert saved[0]["error"] == "Rejected by user"
             assert monitor._proposals_awaiting_approval == set(), "slot must free for a future re-proposal"
+            # Fix learning hears the "no", filed under the plan's cause and strategy.
+            learned.assert_called_once_with(saved[0]["id"], "crashloop", "restart_pod")
+            # Stored with the proposal, so a REST rejection later can do the same.
+            assert saved[0]["input"]["fixStrategy"] == "restart_pod"
+            assert saved[0]["input"]["causeCategory"] == "crashloop"
+            assert saved[0]["input"]["fixDescription"] == _PLAN.description
 
     @pytest.mark.asyncio
     async def test_timeout_records_expired_via_the_real_path(self):
@@ -209,6 +216,7 @@ class TestApprovalWaitDoesNotBlockTheScan:
         with (
             patch("sre_agent.monitor.cluster_monitor.get_settings", return_value=settings),
             patch("sre_agent.monitor.cluster_monitor.save_action", side_effect=lambda r, **kw: saved.append(dict(r))),
+            patch("sre_agent.fix_learning.record_rejection") as learned,
         ):
             await monitor._await_approval_then_execute(
                 approval_future=never,
@@ -225,6 +233,7 @@ class TestApprovalWaitDoesNotBlockTheScan:
         assert [r["status"] for r in saved] == ["expired"]
         assert "never attempted" in saved[0]["error"]
         assert monitor._proposals_awaiting_approval == set()
+        learned.assert_not_called()  # nobody answering is not a rejection
 
 
 class TestApprovalIsReCheckedWhenItArrives:

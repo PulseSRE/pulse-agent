@@ -47,11 +47,30 @@ async def rest_get_episode(episode_id: str):
         raise HTTPException(status_code=404, detail=f"Episode {episode_id} not found")
     return {
         "episode": dict(episode),
-        "symptoms": [dict(s) for s in repo.symptoms(episode_id)],
+        "symptoms": _with_inbox_items([dict(s) for s in repo.symptoms(episode_id)]),
         "changes": changes_around(episode_id),
         "recurrence": recurrence_summary(episode_id),
         "investigation": investigation_for(episode_id),
     }
+
+
+def _with_inbox_items(symptoms: list[dict]) -> list[dict]:
+    """Give each symptom the id of its open inbox item (``item_id``, or None).
+
+    Symptoms are folded out of the inbox list, so the episode card is the only
+    place they show; without the id a symptom was a line of text with no way
+    to open the item behind it.
+    """
+    try:
+        from ..repositories.inbox_repo import get_inbox_repo
+
+        repo = get_inbox_repo()
+        for s in symptoms:
+            row = repo.find_active_by_correlation_task(s.get("correlation_key") or "")
+            s["item_id"] = row["id"] if row is not None else None
+    except Exception:
+        logger.debug("Could not link episode symptoms to inbox items", exc_info=True)
+    return symptoms
 
 
 @router.post("/episodes/{episode_id}/detach")

@@ -135,6 +135,23 @@ class MonitorRepository(BaseRepository):
         self.db.commit()
         return claimed
 
+    def reject_proposal(self, action_id: str, rejecter: str, message: str, timestamp: int) -> bool:
+        """Answer a pending proposal with "no". False if it was not still pending.
+
+        Same race guard as claim_proposed_action: an approve and a reject
+        arriving together leave exactly one of them in charge of the row.
+        ``approved_by``/``approved_at`` record who answered, whichever way.
+        """
+        self.ensure_tables()
+        cur = self.db.execute(
+            "UPDATE actions SET status = 'failed', error = ?, approved_by = ?, approved_at = ? "
+            "WHERE id = ? AND status = 'proposed'",
+            (message, rejecter, timestamp, action_id),
+        )
+        rejected = getattr(cur, "rowcount", 0) == 1
+        self.db.commit()
+        return rejected
+
     def get_action_by_id(self, action_id: str) -> dict | None:
         """Get a single raw action row by ID."""
         self.ensure_tables()

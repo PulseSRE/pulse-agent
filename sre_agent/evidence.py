@@ -318,7 +318,7 @@ def parse_security_notes(raw: Any) -> list[str]:
     notes: list[str] = []
     for item in raw:
         text = str(item if not isinstance(item, dict) else item.get("note") or item.get("text") or "").strip()
-        if text.lower().rstrip(".") in _NO_NOTE or text in notes:
+        if text.lower().rstrip(".") in _NO_NOTE or _repeats(text, notes):
             continue
         notes.append(text[:500])
         if len(notes) >= MAX_SECURITY_NOTES:
@@ -327,10 +327,136 @@ def parse_security_notes(raw: Any) -> list[str]:
 
 
 def merge_security_notes(*groups: list[str] | None) -> list[str]:
-    """Notes from several sources (a plan's phases), in order, without repeats."""
+    """Notes from several sources (a plan's phases), in order, without repeats.
+
+    Each phase of a plan sees the same cluster data, so the same injection is
+    reported once per phase in slightly different words ("the ops-note
+    annotation asks to delete the namespace" / "annotation ops-note on the
+    pod instructs deleting the namespace"). Exact matching kept all of them,
+    and one attempt read as several. A note that says nearly the same thing
+    as an earlier one (``_repeats``) is dropped; the first wording is kept.
+    """
     merged: list[str] = []
     for group in groups:
         for note in group or []:
-            if note not in merged:
+            if not _repeats(note, merged):
                 merged.append(note)
     return merged[:MAX_SECURITY_NOTES]
+
+
+# Words that carry no information about *which* injection a note describes.
+_NOTE_STOPWORDS = frozenset(
+    [
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "of",
+        "to",
+        "in",
+        "on",
+        "at",
+        "for",
+        "from",
+        "by",
+        "with",
+        "into",
+        "this",
+        "that",
+        "these",
+        "those",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "it",
+        "its",
+        "as",
+        "asks",
+        "asked",
+        "asking",
+        "ask",
+        "instructs",
+        "instructed",
+        "instructing",
+        "instruction",
+        "instructions",
+        "tells",
+        "told",
+        "telling",
+        "requests",
+        "requested",
+        "requesting",
+        "request",
+        "says",
+        "said",
+        "saying",
+        "contains",
+        "contained",
+        "containing",
+        "attempt",
+        "attempts",
+        "attempted",
+        "suspected",
+        "possible",
+        "possibly",
+        "likely",
+        "prompt",
+        "injection",
+        "injected",
+        "manipulation",
+        "text",
+        "data",
+        "cluster",
+        "seen",
+        "found",
+        "appears",
+        "appeared",
+        "there",
+        "which",
+        "who",
+        "what",
+        "operator",
+        "ai",
+        "agent",
+    ]
+)
+# Token-set similarity at or above which two notes describe the same attempt.
+NOTE_SIMILARITY = 0.6
+
+
+def _note_tokens(note: str) -> frozenset[str]:
+    import re
+
+    tokens = set()
+    for word in re.findall(r"[a-z0-9]+", note.lower()):
+        if word in _NOTE_STOPWORDS:
+            continue
+        # Light stemming so "deletes"/"deleting"/"delete" and "pods"/"pod" agree.
+        for suffix in ("ing", "es", "ed", "s"):
+            if len(word) > len(suffix) + 2 and word.endswith(suffix):
+                word = word[: -len(suffix)]
+                break
+        if word.endswith("e") and len(word) > 3:
+            word = word[:-1]
+        tokens.add(word)
+    return frozenset(tokens)
+
+
+def _repeats(note: str, existing: list[str]) -> bool:
+    """Whether ``note`` says (nearly) the same thing as one already in ``existing``."""
+    if note in existing:
+        return True
+    mine = _note_tokens(note)
+    if not mine:
+        return False
+    for other in existing:
+        theirs = _note_tokens(other)
+        if not theirs:
+            continue
+        if len(mine & theirs) / len(mine | theirs) >= NOTE_SIMILARITY:
+            return True
+    return False
