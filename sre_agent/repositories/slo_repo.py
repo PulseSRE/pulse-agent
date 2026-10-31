@@ -46,6 +46,35 @@ class SLORepository(BaseRepository):
         )
         self.db.commit()
 
+    # Deleting a *default* SLO removed it until the next restart, when the code
+    # registered it again. A deletion is operator state like a registration,
+    # so it is remembered: one ``operational_flags`` row per deleted
+    # service:type (an existing key/value table, so no migration).
+    TOMBSTONE_PREFIX = "slo_deleted:"
+
+    def add_tombstone(self, service_name: str, slo_type: str, deleted_by: str = "") -> None:
+        self.db.execute(
+            "INSERT INTO operational_flags (key, value, updated_at, updated_by) VALUES (%s, TRUE, NOW(), %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = TRUE, updated_at = NOW(), updated_by = EXCLUDED.updated_by",
+            (f"{self.TOMBSTONE_PREFIX}{service_name}:{slo_type}", deleted_by or None),
+        )
+        self.db.commit()
+
+    def clear_tombstone(self, service_name: str, slo_type: str) -> None:
+        self.db.execute(
+            "DELETE FROM operational_flags WHERE key = %s",
+            (f"{self.TOMBSTONE_PREFIX}{service_name}:{slo_type}",),
+        )
+        self.db.commit()
+
+    def fetch_tombstones(self) -> set[str]:
+        """``service:type`` keys an operator deleted."""
+        rows = self.db.fetchall(
+            "SELECT key FROM operational_flags WHERE key LIKE %s AND value = TRUE",
+            (f"{self.TOMBSTONE_PREFIX}%",),
+        )
+        return {r["key"][len(self.TOMBSTONE_PREFIX) :] for r in rows or []}
+
     def fetch_all(self) -> list[dict]:
         rows = self.db.fetchall(
             "SELECT service_name, slo_type, target, window_days, description FROM slo_definitions ORDER BY service_name, slo_type"

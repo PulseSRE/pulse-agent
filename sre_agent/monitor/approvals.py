@@ -105,11 +105,16 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
         # The plan is re-derived on purpose (the cluster may have moved), but a
         # person approved one specific fix. Running another on their authority
         # is not what they agreed to.
-        raise ApprovalError(
+        #
+        # Withdrawn rather than left for a person to reject: rejecting it would
+        # file a verdict against a strategy nobody judged, and while it stays
+        # pending no new proposal can be made for the condition.
+        message = (
             f"The fix Pulse would run now ({plan.strategy}) is not the one proposed ({proposed_strategy}); "
-            "nothing was changed. Reject this proposal and review the new one.",
-            status_code=409,
+            "nothing was changed. This proposal is withdrawn; Pulse proposes the new fix on its next scan."
         )
+        get_monitor_repo().expire_proposal(action_id, f"Superseded: {message}")
+        raise ApprovalError(message, status_code=409)
     if plan.strategy == "require_human_review":
         learned = plan.params.get("track_record")
         detail = f" ({learned})" if learned else ""
@@ -231,6 +236,157 @@ def approve_fix(action_id: str, approver: str) -> dict[str, Any]:
         }
     _announce(report)
     return report
+
+
+MAX_REJECTION_REASON = 500
+
+
+def find_open_inbox_item(repo, finding_id: str, correlation_key: str):
+    """The open inbox item for a proposal's finding, or None.
+
+    By finding id first, then by the condition's correlation key: finding ids
+    are minted per sighting and change after a restart, so an older proposal's
+    id may no longer name the item that tracks the same condition.
+    """
+    row = repo.find_active_by_finding_id(finding_id) if finding_id else None
+    if row is None and correlation_key:
+        row = repo.find_active_by_correlation_task(correlation_key)
+    return row
+
+
+def _proposal_input(action: dict) -> dict:
+    import json
+
+    inp = action.get("input")
+    if isinstance(inp, str):
+        try:
+            inp = json.loads(inp)
+        except (TypeError, ValueError):
+            inp = None
+    return inp if isinstance(inp, dict) else {}
+
+
+def reject_fix(action_id: str, rejecter: str, reason: str) -> dict[str, Any]:
+    """Decline a proposed fix on a person's authority. Raises ApprovalError if refused.
+
+    Until now a proposal could only be approved or left to expire, so "no"
+    looked exactly like "nobody looked" — and fix learning never heard it.
+    A rejection:
+
+    - answers the proposal (``failed``, "Rejected by …", the same status the
+      live WebSocket rejection records) so it stops asking;
+    - files a ``rejected`` verdict against the proposal's (cause, strategy),
+      so a fix people keep declining stops being proposed automatically;
+    - notes the rejection and its reason on the finding's open inbox item,
+      which stays open: declining a fix does not make the problem go away;
+    - is announced, so every open UI drops it from its pending list.
+    """
+    from ..fix_learning import record_rejection
+    from ..repositories import get_monitor_repo
+    from .actions import get_action_detail
+    from .findings import _ts
+
+    reason = " ".join((reason or "").split())[:MAX_REJECTION_REASON]
+    if not reason:
+        raise ApprovalError("A reason is required to reject a proposed fix", status_code=400)
+
+    action = get_action_detail(action_id)
+    if action is None:
+        raise ApprovalError("No such action", status_code=404)
+    if action.get("status") != PROPOSED:
+        raise ApprovalError(f"Action is {action.get('status')}, not a pending proposal", status_code=409)
+
+    now = _ts()
+    message = f"Rejected by {rejecter}: {reason}"
+    if not get_monitor_repo().reject_proposal(action_id, rejecter, message, now):
+        raise ApprovalError("Somebody else just answered this proposal", status_code=409)
+
+    inp = _proposal_input(action)
+    strategy = str(inp.get("fixStrategy") or "")
+    cause = str(inp.get("causeCategory") or "")
+    correlation_key = action.get("correlationKey") or ""
+    learned = record_rejection(action_id, cause, strategy, correlation_key)
+    finding_id = action.get("findingId") or ""
+    logger.info(
+        "Fix rejected by %s: action=%s strategy=%s cause=%s learned=%s",
+        rejecter,
+        action_id,
+        strategy or "-",
+        cause or "-",
+        learned,
+    )
+
+    try:
+        from ..observability import AUTOFIX_TOTAL
+
+        AUTOFIX_TOTAL.labels(outcome="rejected").inc()
+    except Exception:
+        logger.debug("Could not count rejection", exc_info=True)
+
+    inbox_item_id = _note_rejection_on_inbox(finding_id, correlation_key, action_id, rejecter, reason, now)
+
+    report: dict[str, Any] = {
+        "type": "action_report",
+        "id": action_id,
+        "findingId": finding_id,
+        "tool": action.get("tool") or "",
+        "input": inp,
+        "category": action.get("category") or "",
+        "resources": action.get("resources") or [],
+        "status": "failed",
+        "error": message,
+        "reasoning": action.get("reasoning") or "",
+        "timestamp": now,
+        "rejectedBy": rejecter,
+        "rejectionReason": reason,
+        "fixStrategy": strategy,
+        "causeCategory": cause,
+        # Whether fix learning counted it: false for proposals that predate the
+        # stored cause, a repeat rejection for the same condition, or a failed write.
+        "learned": learned,
+        "inboxItemId": inbox_item_id,
+    }
+    _announce(report)
+    return report
+
+
+def _note_rejection_on_inbox(
+    finding_id: str, correlation_key: str, action_id: str, rejecter: str, reason: str, now_ms: int
+) -> str | None:
+    """Record the rejection on the finding's open inbox item; return its id, if any."""
+    from ..inbox import _publish_event, record_interaction
+
+    item_id: str | None = None
+    try:
+        from ..repositories.inbox_repo import get_inbox_repo
+
+        repo = get_inbox_repo()
+        row = find_open_inbox_item(repo, finding_id, correlation_key)
+        if row is not None:
+            item_id = row["id"]
+            import json
+
+            metadata = row.get("metadata") or {}
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except (TypeError, ValueError):
+                    metadata = {}
+            metadata["fix_rejected"] = {"action_id": action_id, "by": rejecter, "reason": reason, "at": now_ms}
+            repo.update_metadata(item_id, metadata, now_ms // 1000)
+            _publish_event("inbox_item_updated", item_id, {"fix_rejected": metadata["fix_rejected"]})
+    except Exception:
+        logger.debug("Could not note rejection of %s on the inbox", action_id, exc_info=True)
+
+    record_interaction(
+        actor=rejecter,
+        interaction_type="reject_fix",
+        item_id=item_id,
+        action_id=action_id,
+        decision="rejected",
+        metadata={"reason": reason},
+    )
+    return item_id
 
 
 def _announce(report: dict[str, Any]) -> None:

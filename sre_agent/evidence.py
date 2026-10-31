@@ -318,6 +318,8 @@ def parse_security_notes(raw: Any) -> list[str]:
     notes: list[str] = []
     for item in raw:
         text = str(item if not isinstance(item, dict) else item.get("note") or item.get("text") or "").strip()
+        # Exact repeats only: two differently worded notes in one answer are
+        # the model's own count of attempts and are kept.
         if text.lower().rstrip(".") in _NO_NOTE or text in notes:
             continue
         notes.append(text[:500])
@@ -327,10 +329,105 @@ def parse_security_notes(raw: Any) -> list[str]:
 
 
 def merge_security_notes(*groups: list[str] | None) -> list[str]:
-    """Notes from several sources (a plan's phases), in order, without repeats."""
+    """Notes from several sources (a plan's phases), in order, without repeats.
+
+    Each phase of a plan sees the same cluster data, so the same injection is
+    reported once per phase in slightly different words ("the ops-note
+    annotation asks to delete the namespace" / "annotation ops-note on the
+    pod instructs deleting the namespace"). Exact matching kept all of them,
+    and one attempt read as several. A note that says nearly the same thing
+    as an earlier one (``_repeats``) is dropped; the first wording is kept.
+    """
     merged: list[str] = []
     for group in groups:
         for note in group or []:
-            if note not in merged:
+            if not _repeats(note, merged):
                 merged.append(note)
     return merged[:MAX_SECURITY_NOTES]
+
+
+def _words(text: str) -> frozenset[str]:
+    return frozenset(text.split())
+
+
+# Words that carry no information about *which* injection a note describes.
+_NOTE_STOPWORDS = _words(
+    "a an the and or of to in on at for from by with into this that these those is are was were be been "
+    "it its as ask asks asked asking instruct instructs instructed instructing instruction instructions "
+    "tell tells told telling request requests requested requesting say says said saying contain contains "
+    "contained containing attempt attempts attempted suspected possible possibly likely prompt injection "
+    "injected manipulation text data cluster seen found appears appeared there which who what operator ai "
+    "agent not followed ignored routine maintenance cleanup approved"
+)
+# Kinds of thing an injection sits in or names. The word next to one is a name
+# ("namespace shop", "the payments namespace", "pod web").
+_NOTE_KINDS = _words(
+    "pod pods namespace namespaces deployment deployments secret secrets configmap configmaps pvc pvcs "
+    "persistentvolumeclaim node nodes service services statefulset daemonset replicaset job cronjob route "
+    "annotation annotations label labels event events log logs container containers alert alerts"
+)
+# What an injection asks for, stemmed. Two notes asking for different things
+# are different attempts however alike their wording.
+_NOTE_VERBS = _words(
+    "delet remov scal restart print reveal dump exec run patch edit appl creat drain cordon disabl "
+    "rollback send post expos curl wget read cat copy grant escalat"
+)
+# Token-set similarity at or above which two notes with the same names and
+# actions describe the same attempt.
+NOTE_SIMILARITY = 0.5
+
+
+def _stem(word: str) -> str:
+    for suffix in ("ation", "ion", "ing", "es", "ed", "s"):
+        if len(word) > len(suffix) + 2 and word.endswith(suffix):
+            word = word[: -len(suffix)]
+            break
+    if word.endswith("e") and len(word) > 3:
+        word = word[:-1]
+    return word
+
+
+def _note_parts(note: str) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+    """(content tokens, names, actions) of a note.
+
+    Names are identifier-like tokens (containing a digit, hyphen, dot,
+    underscore or slash: ``web-1``, ``data-0``, ``api.v1``) plus the word
+    beside a kind word (``namespace shop``).
+    """
+    import re
+
+    raw = re.findall(r"[a-z0-9][a-z0-9._/-]*[a-z0-9]|[a-z0-9]", note.lower())
+    names: set[str] = {t for t in raw if re.search(r"[0-9._/-]", t)}
+    words = [t for t in raw if not re.search(r"[0-9._/-]", t)]
+    for i, w in enumerate(words):
+        if w not in _NOTE_KINDS:
+            continue
+        for j in (i - 1, i + 1):
+            if 0 <= j < len(words):
+                n = words[j]
+                if n not in _NOTE_STOPWORDS and n not in _NOTE_KINDS and _stem(n) not in _NOTE_VERBS:
+                    names.add(n)
+    content = {_stem(w) for w in words if w not in _NOTE_STOPWORDS}
+    actions = {c for c in content if c in _NOTE_VERBS}
+    return frozenset(content | names), frozenset(names), frozenset(actions)
+
+
+def _repeats(note: str, existing: list[str]) -> bool:
+    """Whether ``note`` reports the same attempt as one already in ``existing``.
+
+    The same only if it names the same things and asks for the same actions,
+    and the wording overlaps: ``web-1`` vs ``web-2``, ``shop`` vs ``bank``,
+    "scale" vs "delete" are different attempts however alike the sentences.
+    """
+    if note in existing:
+        return True
+    content, names, actions = _note_parts(note)
+    if not content:
+        return False
+    for other in existing:
+        o_content, o_names, o_actions = _note_parts(other)
+        if names != o_names or actions != o_actions or not o_content:
+            continue
+        if len(content & o_content) / len(content | o_content) >= NOTE_SIMILARITY:
+            return True
+    return False

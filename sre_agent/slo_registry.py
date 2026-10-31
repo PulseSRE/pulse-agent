@@ -74,17 +74,24 @@ class SLORegistry:
             try:
                 from .repositories import get_slo_repo
 
-                get_slo_repo().save(slo.service_name, slo.slo_type, slo.target, slo.window_days, slo.description)
+                repo = get_slo_repo()
+                repo.save(slo.service_name, slo.slo_type, slo.target, slo.window_days, slo.description)
+                # Registering again is how a deleted default comes back.
+                repo.clear_tombstone(slo.service_name, slo.slo_type)
             except Exception:
                 logger.debug("SLO persistence unavailable; registered in memory only", exc_info=True)
 
-    def unregister(self, service_name: str, slo_type: str, persist: bool = True) -> bool:
+    def unregister(self, service_name: str, slo_type: str, persist: bool = True, deleted_by: str = "") -> bool:
         key = f"{service_name}:{slo_type}"
         if persist:
             try:
                 from .repositories import get_slo_repo
 
-                get_slo_repo().delete(service_name, slo_type)
+                repo = get_slo_repo()
+                repo.delete(service_name, slo_type)
+                # Remembered so a default SLO is not registered again on the
+                # next restart; see _register_defaults.
+                repo.add_tombstone(service_name, slo_type, deleted_by)
             except Exception:
                 logger.debug("SLO persistence unavailable; unregistered in memory only", exc_info=True)
         if key in self._slos:
@@ -274,7 +281,7 @@ def get_slo_registry() -> SLORegistry:
     global _registry
     if _registry is None:
         _registry = SLORegistry()
-        _register_defaults(_registry)
+        _register_defaults(_registry, skip=_load_tombstones())
         _load_persisted(_registry)
     return _registry
 
@@ -298,8 +305,19 @@ def _load_persisted(registry: SLORegistry) -> None:
         logger.info("Loaded %d persisted SLOs", len(rows))
 
 
-def _register_defaults(registry: SLORegistry) -> None:
-    """Register default SLOs for known Pulse Agent services."""
+def _load_tombstones() -> set[str]:
+    """``service:type`` keys an operator deleted; empty when there is no database."""
+    try:
+        from .repositories import get_slo_repo
+
+        return get_slo_repo().fetch_tombstones()
+    except Exception:
+        logger.debug("SLO tombstones unavailable; registering every default", exc_info=True)
+        return set()
+
+
+def _register_defaults(registry: SLORegistry, skip: set[str] | None = None) -> None:
+    """Register default SLOs for known Pulse Agent services, except ones an operator deleted."""
     defaults = [
         SLODefinition(
             service_name="pulse-openshift-sre-agent",
@@ -330,11 +348,16 @@ def _register_defaults(registry: SLORegistry) -> None:
             description="OpenShift MCP server must be available 99.9% over rolling 30 days",
         ),
     ]
+    registered = 0
     for slo in defaults:
+        if skip and f"{slo.service_name}:{slo.slo_type}" in skip:
+            logger.info("Default SLO %s %s stays deleted", slo.service_name, slo.slo_type)
+            continue
         # persist=False: defaults are code, not operator state — writing them
         # to the DB would resurrect any default an operator later deletes.
         registry.register(slo, persist=False)
-    logger.info("Registered %d default SLOs", len(defaults))
+        registered += 1
+    logger.info("Registered %d default SLOs", registered)
 
 
 def list_slo_definitions() -> list[dict]:
