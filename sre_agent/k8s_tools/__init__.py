@@ -43,6 +43,7 @@ __all__ = [
     "drain_node",
     "exec_command",
     "get_cluster_operators",
+    "get_cluster_updates",
     "get_cluster_version",
     "get_configmap",
     "get_endpoint_slices",
@@ -59,6 +60,7 @@ __all__ = [
     "get_resource_quotas",
     "get_resource_recommendations",
     "get_resource_relationships",
+    "get_rollout_history",
     "get_services",
     "get_tls_certificates",
     "list_cronjobs",
@@ -104,6 +106,7 @@ from .audit import record_audit_entry
 # --- Deployment tools ---
 from .deployments import (
     describe_deployment,
+    get_rollout_history,
     list_deployments,
     list_replicasets,
     restart_deployment,
@@ -115,6 +118,7 @@ from .deployments import (
 from .diagnostics import (
     describe_service,
     get_cluster_operators,
+    get_cluster_updates,
     get_cluster_version,
     get_configmap,
     get_endpoint_slices,
@@ -239,6 +243,7 @@ ALL_TOOLS: list[Any] = [
     get_events,  # field_selector filtering by kind/name/type
     get_cluster_version,
     get_cluster_operators,  # OpenShift condition->status mapping
+    get_cluster_updates,  # ClusterVersion updates/risks/progress -> upgrade_graph
     get_configmap,
     get_node_metrics,  # metrics API + unit parsing
     get_pod_metrics,  # metrics API + sort by cpu/memory
@@ -262,6 +267,7 @@ ALL_TOOLS: list[Any] = [
     search_logs,  # search across pods by label
     get_resource_recommendations,  # right-sizing analysis
     diagnose_stuck_deletion,  # why a deletion never completed
+    get_rollout_history,  # ReplicaSet/ControllerRevision history -> rollout_history
     # Write operations
     scale_deployment,
     restart_deployment,

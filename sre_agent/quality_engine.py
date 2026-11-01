@@ -132,6 +132,18 @@ def normalize_component_spec(spec: dict) -> dict:
                     item["status"] = "healthy"
 
     elif kind == "chart":
+        # The field is camelCase like every other chart field; accept the old
+        # snake_case name so saved views and older tool output keep their range.
+        if "time_range" in spec:
+            legacy = spec.pop("time_range")
+            spec.setdefault("timeRange", legacy)
+        annotations = spec.get("annotations")
+        if isinstance(annotations, list):
+            spec["annotations"] = [
+                {**a, "kind": a.get("kind") if a.get("kind") in ("rollout", "alert", "config") else "config"}
+                for a in annotations
+                if isinstance(a, dict) and a.get("timestamp") is not None
+            ]
         series = spec.get("series")
         if isinstance(series, list):
             for s in series:
@@ -582,8 +594,34 @@ def _validate_component(comp: dict, result: QualityResult) -> None:
                     result.errors.append(f"progress_list item '{item.get('label', '?')}' must have 'max' > 0.")
 
     elif kind == "stat_card":
-        if not comp.get("value"):
-            result.errors.append(f"Stat card '{title or 'untitled'}' must have 'value'.")
+        if not comp.get("value") and not comp.get("query"):
+            result.errors.append(f"Stat card '{title or 'untitled'}' must have 'value' or 'query'.")
+
+    elif kind == "upgrade_graph":
+        current = comp.get("current")
+        if not isinstance(current, dict) or not current.get("version"):
+            result.errors.append("upgrade_graph must have 'current' with a 'version'.")
+        nodes = comp.get("nodes")
+        if not isinstance(nodes, list):
+            result.errors.append("upgrade_graph must have 'nodes' (list; empty when the cluster is up to date).")
+        else:
+            for node in nodes:
+                if not isinstance(node, dict) or not node.get("version"):
+                    result.errors.append("upgrade_graph node must have 'version'.")
+                elif node.get("state", "recommended") not in ("recommended", "conditional", "blocked"):
+                    result.errors.append(
+                        f"upgrade_graph node state must be recommended|conditional|blocked, got '{node.get('state')}'."
+                    )
+
+    elif kind == "rollout_history":
+        workload = comp.get("workload")
+        if not isinstance(workload, dict) or not all(workload.get(k) for k in ("kind", "namespace", "name")):
+            result.errors.append("rollout_history must have 'workload' with kind, namespace and name.")
+        revisions = comp.get("revisions")
+        if not isinstance(revisions, list) or not revisions:
+            result.errors.append("rollout_history must have at least one revision.")
+        elif any(not isinstance(r, dict) or not isinstance(r.get("revision"), int) for r in revisions):
+            result.errors.append("rollout_history revisions must each have an integer 'revision'.")
 
     elif kind == "timeline":
         lanes = comp.get("lanes")

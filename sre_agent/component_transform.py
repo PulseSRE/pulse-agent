@@ -228,7 +228,11 @@ def _chart_to_metric_card(spec: dict, options: dict) -> dict:
 @_register("metric_card", "chart")
 def _metric_card_to_chart(spec: dict, options: dict) -> dict:
     """Use query to render as time-series chart."""
-    return {"chartType": "line", "query": spec.get("query", ""), "time_range": options.get("time_range", "1h")}
+    return {
+        "chartType": "line",
+        "query": spec.get("query", ""),
+        "timeRange": options.get("timeRange", options.get("time_range", "1h")),
+    }
 
 
 @_register("status_list", "data_table")
