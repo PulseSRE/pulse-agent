@@ -606,3 +606,31 @@ def test_the_packaged_baseline_has_a_calibration_block():
     calib = ir.load_baseline()["calibration"]
     assert calib["samples"] > 100
     assert 0.0 < calib["brier"] < ir.BRIER_CEILING and calib["variance"] > 0.0
+
+
+def test_a_right_answer_at_zero_confidence_fails_absolutely():
+    """#216's regression: a correct diagnosis reported at 0.0. One such attempt among
+    otherwise well-calibrated ones sits inside the Brier noise, so it must fail on its own."""
+    rows = _calib_rows([(0.85, True)] * 30 + [(0.1, False)] * 2 + [(0.0, True)])
+    baseline = {**_no_fixture_history(rows, None), "calibration": ir.load_baseline()["calibration"]}
+    gate = ir.statistical_verdict(rows, baseline)
+    calib = gate["calibration"]
+    assert not calib["regression"]["regressed"], "the Brier comparison alone would let it through"
+    assert calib["right_at_zero_confidence"] == ["f32"]
+    assert any("confidence 0.0" in f for f in calib["absolute_failures"])
+    assert not calib["passed"] and not gate["passed"]
+
+
+def test_low_but_nonzero_confidence_on_a_right_answer_passes():
+    """Only exactly 0.0 is the broken-pipeline signature; an honest low figure is not."""
+    rows = _calib_rows([(0.85, True)] * 30 + [(0.1, False)] * 2 + [(0.19, True)])
+    calib = ir.calibration(rows)
+    assert calib["right_at_zero_confidence"] == []
+    assert calib["passed"], calib
+
+
+def test_a_wrong_answer_at_zero_confidence_is_not_flagged():
+    rows = _calib_rows([(0.85, True)] * 30 + [(0.0, False)] * 3)
+    calib = ir.calibration(rows)
+    assert calib["right_at_zero_confidence"] == []
+    assert calib["passed"], calib
