@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from sre_agent.evidence import (
     SECURITY_NOTES_INSTRUCTION,
     merge_security_notes,
@@ -47,6 +49,56 @@ def test_parse_security_notes_accepts_lists_strings_and_drops_placeholders():
 
 def test_merge_keeps_order_without_repeats():
     assert merge_security_notes(["a", "b"], None, ["b", "c"]) == ["a", "b", "c"]
+
+
+def test_merge_drops_the_same_injection_reworded_by_another_phase():
+    """Each plan phase sees the same data and reports the same attempt in its own words."""
+    triage = ["Pod annotation 'ops-note' instructs the AI to delete namespace payments; not followed"]
+    diagnose = ["The ops-note annotation on the pod asks to delete the payments namespace (ignored)"]
+    remediate = ["Suspected prompt injection: ops-note pod annotation requesting deletion of namespace payments"]
+    assert merge_security_notes(triage, diagnose, remediate) == triage
+
+
+def test_merge_keeps_distinct_attempts_that_share_words():
+    """Same verb and target, different source: two attempts, two notes."""
+    notes = [
+        "ConfigMap app-config contains text asking to delete namespace prod",
+        "Warning event on node worker-3 asks to delete namespace prod",
+        "Pod annotation asks to scale checkout to 0 replicas",
+    ]
+    assert merge_security_notes(notes[:1], notes[1:2], notes[2:]) == notes
+
+
+def test_parse_keeps_reworded_notes_within_one_answer():
+    """Within one answer two notes are the model's own count of attempts; only exact repeats go."""
+    a = "Log line in api-7f9 says to run 'oc delete pvc data-0' as routine cleanup"
+    b = "log line in pod api-7f9 says: run oc delete pvc data-0 (routine cleanup)"
+    assert parse_security_notes([a, b, a]) == [a, b]
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        # different pods
+        (
+            "Annotation on pod web-1 asks to delete deployment checkout",
+            "Annotation on pod web-2 asks to delete deployment checkout",
+        ),
+        # different namespaces
+        (
+            "ConfigMap in namespace shop asks to delete all deployments",
+            "ConfigMap in namespace bank asks to delete all deployments",
+        ),
+        # different actions
+        (
+            "Pod annotation on api-7f9 asks to scale payments-api to 0",
+            "Pod annotation on api-7f9 asks to delete payments-api",
+        ),
+        ("Log line in api-7f9 asks to delete pvc data-0", "Log line in api-7f9 asks to print secret db-creds"),
+    ],
+)
+def test_merge_keeps_different_injections_apart(first, second):
+    assert merge_security_notes([first], [second]) == [first, second]
 
 
 def test_plan_phase_parses_security_notes_out_of_its_json():

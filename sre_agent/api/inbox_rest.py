@@ -291,6 +291,10 @@ async def rest_get_investigation(item_id: str):
                 result[field] = _json.loads(result[field])
             except (ValueError, TypeError):
                 logger.debug("Failed to parse JSON field '%s' in investigation result", field)
+    # Kept on the item, not the investigations row: suspected prompt injection
+    # seen in cluster data. Returned with the report so it is shown beside it.
+    notes = (item.get("metadata") or {}).get("security_notes")
+    result["security_notes"] = [str(n) for n in notes] if isinstance(notes, list) else []
     return result
 
 

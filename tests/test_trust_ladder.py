@@ -52,6 +52,7 @@ async def _run_at(level: int) -> dict:
     handler = MagicMock(return_value={"success": True, "message": "ok"})
     repo = MagicMock()
     repo.check_pending_proposal.return_value = None
+    repo.find_recent_rejection.return_value = None
     repo.check_existing_human_review.return_value = None
 
     with (

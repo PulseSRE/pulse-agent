@@ -135,6 +135,23 @@ class MonitorRepository(BaseRepository):
         self.db.commit()
         return claimed
 
+    def reject_proposal(self, action_id: str, rejecter: str, message: str, timestamp: int) -> bool:
+        """Answer a pending proposal with "no". False if it was not still pending.
+
+        Same race guard as claim_proposed_action: an approve and a reject
+        arriving together leave exactly one of them in charge of the row.
+        ``approved_by``/``approved_at`` record who answered, whichever way.
+        """
+        self.ensure_tables()
+        cur = self.db.execute(
+            "UPDATE actions SET status = 'failed', error = ?, approved_by = ?, approved_at = ? "
+            "WHERE id = ? AND status = 'proposed'",
+            (message, rejecter, timestamp, action_id),
+        )
+        rejected = getattr(cur, "rowcount", 0) == 1
+        self.db.commit()
+        return rejected
+
     def get_action_by_id(self, action_id: str) -> dict | None:
         """Get a single raw action row by ID."""
         self.ensure_tables()
@@ -248,6 +265,33 @@ class MonitorRepository(BaseRepository):
             "SELECT id FROM actions WHERE correlation_key = ? AND status IN ('proposed', 'approved') LIMIT 1",
             (correlation_key,),
         )
+
+    REJECTED_PREFIX = "Rejected by"
+
+    def find_recent_rejection(self, correlation_key: str, strategy: str, since_ms: int) -> str | None:
+        """Id of a rejection of ``strategy`` for this condition since ``since_ms``, or None.
+
+        A rejection is a ``failed`` action whose error starts "Rejected by"
+        (REST and WebSocket rejections both record that). The strategy lives in
+        the proposal's ``input``; an empty ``strategy`` matches proposals that
+        had none.
+        """
+        if not correlation_key:
+            return None
+        self.ensure_tables()
+        rows = self.db.fetchall(
+            "SELECT id, input FROM actions WHERE correlation_key = ? AND status = 'failed' "
+            "AND error LIKE ? AND COALESCE(approved_at, timestamp) >= ?",
+            (correlation_key, f"{self.REJECTED_PREFIX}%", since_ms),
+        )
+        for row in rows or []:
+            try:
+                inp = json.loads(row["input"]) if row["input"] else {}
+            except (TypeError, ValueError):
+                inp = {}
+            if str((inp or {}).get("fixStrategy") or "") == (strategy or ""):
+                return row["id"]
+        return None
 
     def check_existing_human_review(self, correlation_key: str) -> dict | None:
         """Whether this condition already has a human-review action pending.
@@ -601,8 +645,10 @@ class MonitorRepository(BaseRepository):
             "SELECT COUNT(*) FILTER (WHERE status = 'completed' AND verification_status = 'verified') AS good, "
             "COUNT(*) AS total FROM actions "
             "WHERE status IN ('completed', 'failed', 'rolled_back') "
+            # A rejected proposal never ran: it is not a fix that failed.
+            "AND NOT (status = 'failed' AND COALESCE(error, '') LIKE ?) "
             "AND timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * ?)::BIGINT * 1000",
-            (days,),
+            (f"{self.REJECTED_PREFIX}%", days),
         )
 
     def fetch_false_positive_rate(self, days: int) -> dict | None:

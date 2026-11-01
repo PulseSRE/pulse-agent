@@ -195,3 +195,84 @@ class TestApiserverLatencyQuery:
         slo = SLODefinition(service_name="api", slo_type="availability", target=0.999)
         assert "[1h]" in reg._build_prom_query(slo, "1h")
         assert "[30d]" in reg._build_prom_query(slo)
+
+
+class TestDeletedDefaultsStayDeleted:
+    """Deleting a default SLO used to last only until the next restart."""
+
+    KEY = ("openshiftpulse", "availability")
+
+    def _restart(self):
+        import sre_agent.slo_registry as mod
+
+        mod._registry = None
+        return mod.get_slo_registry()
+
+    def _clean(self):
+        from sre_agent.db import get_database
+
+        db = get_database()
+        db.execute("DELETE FROM operational_flags WHERE key LIKE %s", ("slo_deleted:%",))
+        db.execute("DELETE FROM slo_definitions")
+        db.commit()
+
+    def test_a_deleted_default_is_not_registered_again_after_restart(self):
+        import sre_agent.slo_registry as mod
+
+        self._clean()
+        try:
+            reg = self._restart()
+            assert reg.get(*self.KEY) is not None
+            assert reg.unregister(*self.KEY, deleted_by="alice") is True
+
+            reg = self._restart()
+            assert reg.get(*self.KEY) is None, "the operator deleted it; a restart must not bring it back"
+            # The other defaults are unaffected.
+            assert reg.get("pulse-openshift-sre-agent", "availability") is not None
+
+            # Registering it again is how it comes back, and that survives a restart too.
+            reg.register(SLODefinition(service_name=self.KEY[0], slo_type=self.KEY[1], target=0.995))
+            reg = self._restart()
+            slo = reg.get(*self.KEY)
+            assert slo is not None and slo.target == 0.995
+        finally:
+            self._clean()
+            mod._registry = None
+
+    def test_delete_endpoint_tombstones_the_default(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        import sre_agent.slo_registry as mod
+        from sre_agent.api.auth import get_owner, verify_token
+        from sre_agent.api.monitor_rest import router
+        from sre_agent.db import get_database
+
+        self._clean()
+        try:
+            self._restart()
+            app = FastAPI()
+            app.include_router(router)
+            app.dependency_overrides[verify_token] = lambda: None
+            app.dependency_overrides[get_owner] = lambda: "alice"
+            resp = TestClient(app).delete(f"/slo/{self.KEY[0]}/{self.KEY[1]}")
+            assert resp.status_code == 200
+            assert self._restart().get(*self.KEY) is None
+            row = get_database().fetchone(
+                "SELECT updated_by FROM operational_flags WHERE key = %s", (f"slo_deleted:{self.KEY[0]}:{self.KEY[1]}",)
+            )
+            assert row["updated_by"] == "alice", "the tombstone records who deleted it"
+        finally:
+            self._clean()
+            mod._registry = None
+
+    def test_no_database_registers_every_default(self):
+        from unittest.mock import patch
+
+        from sre_agent.slo_registry import _load_tombstones, _register_defaults
+
+        with patch("sre_agent.repositories.get_slo_repo", side_effect=RuntimeError("no db")):
+            assert _load_tombstones() == set()
+        reg = SLORegistry()
+        _register_defaults(reg, skip=set())
+        assert reg.get(*self.KEY) is not None

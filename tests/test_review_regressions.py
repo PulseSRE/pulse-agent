@@ -164,3 +164,51 @@ def test_topology_id_round_trips_to_blast_radius(monkeypatch, kind, namespace, r
     assert result["source"] == source
     assert result["resources"][0]["id"] == child
     assert result["resources"][0]["relationship"] == relationship
+
+
+def test_topology_node_status_follows_finding_severity(monkeypatch):
+    """Warning is amber and critical is red; a node takes its worst open finding."""
+    from unittest.mock import AsyncMock
+
+    graph = DependencyGraph()
+    graph.add_node("Deployment", "prod", "warn-only")
+    graph.add_node("Deployment", "prod", "crit-only")
+    graph.add_node("Deployment", "prod", "both")
+    graph.add_node("Deployment", "prod", "info-only")
+    graph.add_node("Deployment", "prod", "quiet")
+    monkeypatch.setattr("sre_agent.dependency_graph.get_dependency_graph", lambda: graph)
+
+    repo = MagicMock()
+    repo.async_fetch_active_findings = AsyncMock(
+        return_value=[
+            {"severity": "warning", "resources": "Deployment:prod:warn-only"},
+            {"severity": "critical", "resources": "Deployment:prod:crit-only"},
+            {"severity": "critical", "resources": "Deployment:prod:both"},
+            {"severity": "warning", "resources": "Deployment:prod:both"},
+            {"severity": "info", "resources": "Deployment:prod:info-only"},
+        ]
+    )
+    repo.fetch_deployment_risk_findings.return_value = []
+    repo.fetch_recent_deployments.return_value = []
+    monkeypatch.setattr("sre_agent.repositories.get_monitor_repo", lambda: repo)
+
+    result = asyncio.run(
+        topology_rest.get_topology(
+            namespace=None,
+            kinds="",
+            relationships="",
+            layout_hint="",
+            include_metrics=False,
+            group_by="",
+            user_token=None,
+            _auth=None,
+        )
+    )
+    status = {n["name"]: n["status"] for n in result["nodes"]}
+    assert status == {
+        "warn-only": "warning",
+        "crit-only": "error",
+        "both": "error",
+        "info-only": "warning",
+        "quiet": "healthy",
+    }

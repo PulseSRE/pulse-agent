@@ -21,6 +21,17 @@ router = APIRouter(tags=["topology"])
 # ── Topology / Dependency Graph ────────────────────────────────────────────
 
 
+# A node's colour follows its worst open finding. Warning used to map to
+# "error", so a warning painted the node the same red as a critical and the
+# map could not tell the two apart.
+_STATUS_RANK = {"warning": 1, "error": 2}
+
+
+def finding_node_status(severity: str) -> str:
+    """Topology node status for a finding of ``severity``: critical is an error, anything else a warning."""
+    return "error" if (severity or "").lower() == "critical" else "warning"
+
+
 @router.get("/topology")
 async def get_topology(
     namespace: str | None = Query(None),
@@ -69,11 +80,11 @@ async def get_topology(
         _topo_repo = get_monitor_repo()
         active_findings = await _topo_repo.async_fetch_active_findings()
         for f in active_findings or []:
-            sev = f.get("severity", "")
+            status = finding_node_status(f.get("severity", ""))
             for res_str in (f.get("resources") or "").split(","):
                 res_str = res_str.strip()
-                if res_str:
-                    finding_status[res_str] = "error" if sev in ("critical", "warning") else "warning"
+                if res_str and _STATUS_RANK[status] > _STATUS_RANK.get(finding_status.get(res_str, ""), -1):
+                    finding_status[res_str] = status
     except Exception:
         logger.debug("Failed to fetch finding status for topology", exc_info=True)
 

@@ -49,6 +49,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger("pulse_agent.monitor")
 
 
+# After a person rejects a fix for a condition, the same fix is not proposed
+# for that condition again for this long.
+REJECTION_COOLDOWN_S = 24 * 3600
+
+
 def _proposal_outcome(timed_out: bool, timeout_s: int) -> tuple[str, str]:
     """Status and error for a proposal no one approved.
 
@@ -642,6 +647,20 @@ class ClusterMonitor:
                     targeted_plan.strategy = "require_human_review"
                     targeted_plan.description = _remediation
 
+            # A person already said no to this fix for this condition. Asking
+            # again on the next scan re-sends the notification and invites a
+            # second rejection of the same thing; wait out the cooldown.
+            _strategy = targeted_plan.strategy if targeted_plan else ""
+            if trust_level == 2 or _strategy == "require_human_review":
+                try:
+                    if get_monitor_repo().find_recent_rejection(
+                        _finding_corr_key(finding), _strategy, _ts() - REJECTION_COOLDOWN_S * 1000
+                    ):
+                        logger.debug("Not re-proposing %s for %s: rejected recently", _strategy, resource_key)
+                        continue
+                except Exception:
+                    logger.debug("Could not check for a recent rejection", exc_info=True)
+
             if targeted_plan and targeted_plan.strategy == "require_human_review":
                 try:
                     existing = get_monitor_repo().check_existing_human_review(_finding_corr_key(finding))
@@ -679,6 +698,11 @@ class ClusterMonitor:
                 # Persisted with the proposal, so an approval later can refuse
                 # to run a different fix than the one the person was shown.
                 action_report["input"]["fixStrategy"] = targeted_plan.strategy
+                # And the cause it was chosen for, so a rejection later can be
+                # filed against the right (cause, strategy) in fix learning.
+                action_report["input"]["causeCategory"] = targeted_plan.cause_category
+                # And what the fix does, in words, for the person deciding later.
+                action_report["input"]["fixDescription"] = targeted_plan.description
 
             # If an open episode already explains this finding, say so on the
             # proposal. Measured on the reference cluster: all four fixes
@@ -858,6 +882,18 @@ class ClusterMonitor:
                     AUTOFIX_TOTAL.labels(outcome="expired" if timed_out else "rejected").inc()
                 await self._broadcast_raw(action_report)
                 save_action(action_report, category=category, resources=resources, finding=finding)
+                if not timed_out and targeted_plan is not None:
+                    # A person said no to this fix for this cause. Fix learning
+                    # counts that, once per condition, so a strategy people keep
+                    # declining stops being proposed (the REST reject does the same).
+                    from ..fix_learning import record_rejection
+
+                    record_rejection(
+                        action_report["id"],
+                        str(getattr(targeted_plan, "cause_category", "") or ""),
+                        str(getattr(targeted_plan, "strategy", "") or ""),
+                        corr_key,
+                    )
                 return
 
             action_report["status"] = "executing"

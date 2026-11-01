@@ -39,6 +39,39 @@ def save_action(
         logger.error("Failed to save action: %s", e)
 
 
+def _col(row, name: str) -> str:
+    """A column that older schemas may not have, as a string."""
+    try:
+        return row[name] or ""
+    except (KeyError, IndexError):
+        return ""
+
+
+def _link_proposals_to_inbox(actions: list[dict]) -> None:
+    """Give each pending proposal the id of its finding's open inbox item.
+
+    A proposal names a finding, but the inbox is keyed by item; without this
+    the UI could show "a fix is waiting" but not open the item it is for, nor
+    show the Approve button on that item. Proposals only — they are few, and
+    nothing else is answered from the inbox.
+    """
+    proposed = [a for a in actions if a.get("status") == "proposed" and (a.get("findingId") or a.get("correlationKey"))]
+    if not proposed:
+        return
+    try:
+        from ..repositories.inbox_repo import get_inbox_repo
+
+        repo = get_inbox_repo()
+        from .approvals import find_open_inbox_item
+
+        for action in proposed:
+            row = find_open_inbox_item(repo, action.get("findingId") or "", action.get("correlationKey") or "")
+            if row is not None:
+                action["inboxItemId"] = row["id"]
+    except Exception:
+        logger.debug("Could not link proposals to inbox items", exc_info=True)
+
+
 def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = None) -> dict:
     """Retrieve paginated fix history from the database."""
     page = max(page, 1)
@@ -88,9 +121,11 @@ def get_fix_history(page: int = 1, page_size: int = 20, filters: dict | None = N
                     "verificationStatus": r["verification_status"],
                     "verificationEvidence": r["verification_evidence"],
                     "verificationTimestamp": r["verification_timestamp"],
+                    "correlationKey": _col(r, "correlation_key"),
                 }
             )
 
+        _link_proposals_to_inbox(actions)
         return {"actions": actions, "total": total, "page": page, "pageSize": page_size}
     except Exception as e:
         logger.error("Failed to get fix history: %s", e)
@@ -277,6 +312,7 @@ def get_action_detail(action_id: str) -> dict | None:
             "verificationStatus": row["verification_status"],
             "verificationEvidence": row["verification_evidence"],
             "verificationTimestamp": row["verification_timestamp"],
+            "correlationKey": _col(row, "correlation_key"),
         }
     except Exception as e:
         logger.error("Failed to get action detail: %s", e)
