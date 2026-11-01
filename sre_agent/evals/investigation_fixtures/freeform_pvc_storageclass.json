@@ -39,7 +39,16 @@
         "no such",
         "nonexistent",
         "non-existent",
-        "undefined"
+        "undefined",
+        "no storageclass by",
+        "no storageclass named",
+        "no storageclass called",
+        "no storage class by",
+        "no storage class named",
+        "no storage class called",
+        "no fast-ssd",
+        "no 'fast-ssd'",
+        "no \"fast-ssd\""
       ]
     ],
     "should_not_use_tools": [

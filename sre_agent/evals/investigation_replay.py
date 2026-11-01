@@ -208,6 +208,10 @@ def _phase_summary(result) -> dict[str, dict]:
             "status": out.status,
             "confidence": out.confidence,
             "contract_missing": list(getattr(out, "contract_missing", None) or []),
+            # What the phase answered (top_consumer, root_cause ...), trimmed:
+            # without it an artifact shows a phase's confidence but not the
+            # claim that confidence was attached to.
+            "findings": {str(k): str(v)[:300] for k, v in list((getattr(out, "findings", None) or {}).items())[:12]},
         }
         for pid, out in (result.phase_outputs or {}).items()
     }
@@ -547,7 +551,9 @@ class ScriptedClient:
     from ``findings.confidence`` (``None`` omits it), the shape a real model
     returns when it fills only the findings figure.
     ``call_tools`` lists extra tools to call first, which lets a test script a
-    write attempt.
+    write attempt; an entry may be ``(name, input)`` to call it with arguments.
+    ``findings`` overrides a plan phase's findings fields it declares (a
+    ``top_consumer``, say), for answers shaped like a real phase's.
     """
 
     def __init__(self, recorded: dict, answer: dict | None = None, call_tools: list[str] | None = None):
@@ -578,9 +584,10 @@ class ScriptedClient:
         if not already:
             wanted = self.call_tools + [n for n in self.recorded if n in offered][:1]
             blocks = []
-            for name in wanted:
+            for entry in wanted:
+                name, args = entry if isinstance(entry, tuple) else (entry, {})
                 self._ids += 1
-                blocks.append(SimpleNamespace(type="tool_use", id=f"tu_{self._ids}", name=name, input={}))
+                blocks.append(SimpleNamespace(type="tool_use", id=f"tu_{self._ids}", name=name, input=dict(args)))
             if blocks:
                 return _Stream(blocks, "tool_use")
         prompt = next(
@@ -613,6 +620,9 @@ class ScriptedClient:
                 fields["root_cause"] = cause
             if "confidence" in fields:
                 fields["confidence"] = confidence
+            for key, value in (self.answer.get("findings") or {}).items():
+                if key in fields:
+                    fields[key] = value
             body = {
                 "findings": fields,
                 "evidence_summary": f"scripted: {cause}",

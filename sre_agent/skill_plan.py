@@ -20,6 +20,9 @@ class SkillPhase:
     depends_on: list[str] = field(default_factory=list)  # phase IDs that must complete first
     timeout_seconds: int = 120  # hard timeout per phase
     produces: list[str] = field(default_factory=list)  # output field names
+    # Fields of `produces` whose value must name something a call in this phase
+    # examined, not just be filled in (phase_judge.unmeasured_fields).
+    measured: list[str] = field(default_factory=list)
     branch_on: str | None = None  # field from prior output to branch on
     branches: dict[str, list[str]] = field(default_factory=dict)  # branch_value -> skill_names
     parallel_with: list[str] | None = None  # phase IDs to run concurrently

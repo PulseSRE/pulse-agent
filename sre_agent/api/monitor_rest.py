@@ -539,6 +539,7 @@ async def get_plan_template(incident_type: str, _auth=Depends(verify_token)):
                 "depends_on": p.depends_on,
                 "timeout_seconds": p.timeout_seconds,
                 "produces": p.produces,
+                "measured": p.measured,
                 "branch_on": p.branch_on,
                 "branches": p.branches,
                 "parallel_with": p.parallel_with,
@@ -601,6 +602,7 @@ async def create_plan_template(request: Request, _auth=Depends(require_admin)):
                 # The phase contract. Declaring it is what lets phase_judge
                 # check the phase did what it promised instead of assuming.
                 "produces": list(ph.get("produces") or []),
+                **({"measured": [str(x) for x in ph["measured"]]} if ph.get("measured") else {}),
                 "approval_required": bool(ph.get("approval_required", False)),
                 # Graph features: branch_on picks the skill from a
                 # dependency's findings, parallel_with is advisory (the engine
@@ -887,6 +889,7 @@ async def update_plan_template(incident_type: str, request: Request, _auth=Depen
                     "depends_on": p.depends_on,
                     "timeout_seconds": p.timeout_seconds,
                     "produces": p.produces,
+                    "measured": p.measured,
                     "branch_on": p.branch_on,
                     "branches": p.branches,
                     "parallel_with": p.parallel_with,

@@ -23,6 +23,12 @@ from pydantic import BaseModel, Field, field_validator
 # of what the model claimed about itself.
 UNSUPPORTED_CONFIDENCE_CAP = 0.35
 
+# A plan phase that names its culprit without examining it (a declared
+# ``measured`` field the phase's calls never read; phase_judge) is capped here.
+# Its evidence is what every candidate cause has in common, so however much of
+# it there is, it does not say which candidate is right.
+UNMEASURED_CONFIDENCE_CAP = 0.5
+
 # Legacy prose evidence carries no source, so it cannot be weighted as highly as
 # evidence naming the tool or signal it came from.
 UNSOURCED_WEIGHT = 0.5

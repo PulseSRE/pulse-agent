@@ -96,6 +96,7 @@ def _attempt(name: str, dry_run: bool) -> dict:
             "security_notes": list(report.get("security_notes") or [])[:10],
             "confidence": report.get("confidence"),
             "evidence": (report.get("evidenceDetail") or [])[:10],
+            "alternatives_considered": [str(a)[:300] for a in report.get("alternatives_considered") or []][:10],
         },
     }
 

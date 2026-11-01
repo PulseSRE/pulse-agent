@@ -22,6 +22,7 @@ from contextlib import asynccontextmanager
 
 from .evidence import (
     SECURITY_NOTES_INSTRUCTION,
+    UNMEASURED_CONFIDENCE_CAP,
     CallLedger,
     asserted_phase_confidence,
     merge_security_notes,
@@ -387,17 +388,19 @@ class PlanRuntime:
         output = await self._run_phase_once(phase, incident, prior_outputs, hint)
         attempts += 1
 
-        verdict = judge_phase(phase, output)
+        verdict = judge_phase(phase, output, incident)
         while should_retry(verdict, attempts):
             logger.info("Phase '%s' incomplete (%s) — retrying with the gap named", phase.id, verdict.reason)
             hint = verdict.as_retry_hint()
             output = await self._run_phase_once(phase, incident, prior_outputs, hint)
             attempts += 1
-            verdict = judge_phase(phase, output)
+            verdict = judge_phase(phase, output, incident)
 
         if not verdict.satisfied:
             # Downgrade rather than silently passing an unmet contract downstream.
-            output.contract_missing = list(verdict.missing)
+            # A field named without being examined is unmet too, so a phase that
+            # can write does not act on it (the dependency gate reads this list).
+            output.contract_missing = list(verdict.missing) + list(verdict.unmeasured)
             if output.status == "complete":
                 output.status = "partial"
             note = f"[contract unmet: {verdict.reason}]"
@@ -405,6 +408,14 @@ class PlanRuntime:
             if verdict.missing:
                 output.open_questions = list(output.open_questions) + [
                     f"phase '{phase.id}' did not produce: {', '.join(verdict.missing)}"
+                ]
+            if verdict.unmeasured:
+                # The evidence such a phase cites is what every candidate cause
+                # shares (the node is full, pods were evicted), so it lifted a
+                # guess at the culprit to 0.7+, the bar for remembering it.
+                output.confidence = min(output.confidence, UNMEASURED_CONFIDENCE_CAP)
+                output.open_questions = list(output.open_questions) + [
+                    f"phase '{phase.id}' named {', '.join(verdict.unmeasured)} without examining it"
                 ]
             logger.warning("Phase '%s' finished without meeting its contract: %s", phase.id, verdict.reason)
 
