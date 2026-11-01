@@ -80,23 +80,42 @@ def _is_present(value: object) -> bool:
 # category, not something a call could have read.
 _NAME_TOKEN = re.compile(r"[a-z0-9/][a-z0-9._/*-]*")
 
+# Names of resource types and well-known label/taint keys. They appear in tool
+# output ("low on resource: ephemeral-storage") but name what ran out, not
+# what used it up.
+_RESOURCE_TYPE = re.compile(r"^(ephemeral-storage|hugepages-[a-z0-9]+|([a-z0-9-]+\.)*kubernetes\.io(/.*)?)$")
+
+
+def _is_specific(token: str) -> bool:
+    return (
+        len(token) >= 5
+        and any(c in token for c in "-_/.")
+        and any(c.isalpha() for c in token)
+        and not _RESOURCE_TYPE.match(token)
+    )
+
 
 def _specific_names(text: str) -> set[str]:
+    """Specific names in ``text``; a path also yields its specific segments."""
     names = set()
     for token in _NAME_TOKEN.findall(text.lower()):
         token = token.strip("._-*")
-        if len(token) >= 5 and any(c in token for c in "-_/.") and any(c.isalpha() for c in token):
+        if _is_specific(token):
             names.add(token)
+        if "/" in token and not _RESOURCE_TYPE.match(token):
+            names |= {part.strip("._-*") for part in token.split("/") if _is_specific(part.strip("._-*"))}
     return names
 
 
-def _input_names(summary: str) -> set[str]:
-    """Specific names among a call's argument values ("pod_name=api-7f" -> api-7f)."""
-    names: set[str] = set()
-    for part in str(summary or "").split(", "):
-        _, sep, value = part.partition("=")
-        names |= _specific_names(value if sep else part)
-    return names
+# A value that opens by saying it was not found names candidates, not a
+# finding. Live: "Not conclusively identified at pod level — node-level image
+# storage implicated; report-gen-55f only used 120Mi, ruling it out;
+# log-shipper-7d9f-q2x plausible but unconfirmed", reported at 0.71.
+_UNDETERMINED = re.compile(
+    r"^\W*(not\s+(conclusively\s+)?(identified|isolated|determined|confirmed|verified|measured|known)"
+    r"|not\s+conclusively|undetermined|unknown|unclear|inconclusive|unconfirmed|unverified"
+    r"|could\s+not|cannot\s+be|unable\s+to)\b"
+)
 
 
 def _incident_names(incident: dict | None) -> set[str]:
@@ -105,11 +124,39 @@ def _incident_names(incident: dict | None) -> set[str]:
     for resource in (incident or {}).get("resources") or []:
         if isinstance(resource, dict):
             for key in ("name", "namespace"):
-                names |= _specific_names(str(resource.get(key) or ""))
+                value = str(resource.get(key) or "").strip().lower()
+                if value:
+                    names.add(value)
     return names
 
 
-def unmeasured_fields(phase, output, incident: dict | None = None) -> list[str]:
+def _named_in(text: str, name: str) -> bool:
+    return bool(re.search(rf"(?<![a-z0-9]){re.escape(name)}(?![a-z0-9])", text))
+
+
+def _argument_names(value: str, arg: str, exclude: set[str]) -> set[str]:
+    """The names by which ``value`` names the object a call's argument targeted.
+
+    Equal to the argument, whatever its shape ("es-0", "fluentd"), or
+    containing it as a whole word; a pod name also counts by its owner
+    ("fluentd" for fluentd-x7k2p). Only this direction: an argument that merely
+    contains the value (a namespace, a selector) did not examine it.
+    """
+    from .monitor.confidence import _strip_pod_hash
+
+    arg = arg.strip().lower()
+    if not arg or arg in exclude:
+        return set()
+    if value == arg:
+        return {arg}
+    return {
+        candidate
+        for candidate in {arg, _strip_pod_hash(arg)}
+        if len(candidate) >= 3 and candidate not in exclude and _named_in(value, candidate)
+    }
+
+
+def unmeasured_fields(phase, output, incident: dict | None = None, ledger=None) -> list[str]:
     """Declared ``measured`` fields whose value names nothing the phase examined.
 
     A phase declares a field ``measured`` when its value is the diagnosis itself
@@ -118,43 +165,57 @@ def unmeasured_fields(phase, output, incident: dict | None = None) -> list[str]:
     the node's own conditions, metrics and events, which every disk-pressure
     cause shares, were enough evidence to report the guess at 0.7+.
 
-    The value counts as measured when it names a specific thing (an object name
-    or path, not a category) other than the finding's own resources, and that
-    thing is either the target of a call that succeeded in this phase or, for a
-    path, appears in a supporting observation sourced to such a call (a
-    per-path usage breakdown names the path in its output, not its query).
+    A value is examined when a call in this phase that succeeded either
+    targeted it (an object argument: pod_name, name, resource_name, path,
+    container) or returned it (a specific name in the value appears in the
+    tool's own output), and the phase's own ``root_cause`` names it too. Only
+    what ran and what it returned count, from the
+    phase's ``CallLedger``; the model's observations, however they cite a call,
+    are its account of the data, not the data. The finding's own resources
+    never count. ``ledger`` is the phase's ``evidence.CallLedger``; without
+    one nothing was examined.
+
+    The root-cause condition closes a hedge seen live: "Not conclusively
+    isolated — likely unreclaimed container images; log-shipper-7d9f-q2x is
+    the remaining suspect but unverified", after a describe_pod of that pod,
+    with a root cause blaming image GC. The pod was examined, but it is not the
+    culprit the diagnosis asserts.
     """
     findings = getattr(output, "findings", {}) or {}
     exclude = _incident_names(incident)
-    calls = [c for c in getattr(output, "tool_calls", None) or [] if c.get("status", "success") == "success"]
-    targets = set().union(*(_input_names(str(c.get("input") or "")) for c in calls)) - exclude if calls else set()
-    observed = " ".join(
-        str(e.get("observation") or "").lower()
-        for e in getattr(output, "evidence", None) or []
-        if isinstance(e, dict) and e.get("source") and e.get("stance") == "supports"
-    )
+    calls = [c for c in (ledger.calls.values() if ledger is not None else []) if c.read]
+    cause = str(findings.get("root_cause") or "").lower() if "root_cause" in (phase.produces or []) else None
 
     gaps = []
     for name in getattr(phase, "measured", None) or []:
         value = findings.get(name)
         if not _is_present(value):
             continue  # reported as missing by judge_phase
-        named = _specific_names(str(value)) - exclude
-        examined = any(n in t or t in n for n in named for t in targets) or any(
-            "/" in n and n in observed for n in named
-        )
+        text = str(value).strip().lower()
+        if _UNDETERMINED.match(text):
+            gaps.append(name)
+            continue
+        named = {n for n in _specific_names(text) if n not in exclude}
+        examined: set[str] = set()
+        for call in calls:
+            for arg in call.object_args.values():
+                examined |= _argument_names(text, arg, exclude)
+            result = call.result_text.lower()
+            examined |= {n for n in named if n in result}
+        if cause is not None:
+            examined = {n for n in examined if _named_in(cause, n)}
         if not examined:
             gaps.append(name)
     return gaps
 
 
-def judge_phase(phase, output, incident: dict | None = None) -> PhaseVerdict:
+def judge_phase(phase, output) -> PhaseVerdict:
     """Decide whether *output* satisfies *phase*'s declared contract.
 
     A phase that failed outright is not judged against its contract — the failure
     is the finding, and reporting it as "missing root_cause" would bury it.
-    ``incident`` is the finding the plan is investigating; its resources are not
-    accepted as the value of a ``measured`` field.
+    ``output.unexamined`` lists the ``measured`` fields the run that produced
+    it found unexamined (``unmeasured_fields``, which needs that run's calls).
     """
     phase_id = getattr(phase, "id", "?")
     produces = list(getattr(phase, "produces", []) or [])
@@ -178,7 +239,7 @@ def judge_phase(phase, output, incident: dict | None = None) -> PhaseVerdict:
 
     missing = [name for name in produces if not _is_present(findings.get(name, extras.get(name)))]
 
-    unmeasured = unmeasured_fields(phase, output, incident)
+    unmeasured = [f for f in getattr(output, "unexamined", None) or [] if f not in missing]
 
     if missing or unmeasured:
         reasons = []

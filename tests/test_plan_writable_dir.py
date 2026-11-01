@@ -161,3 +161,66 @@ class TestDeleteSemantics:
         with pytest.raises(HTTPException) as exc:
             asyncio.run(monitor_rest.delete_plan_template("crashloop", _auth=None))
         assert exc.value.status_code == 403
+
+
+class TestMeasuredFields:
+    """``measured`` must name fields the phase produces, or it checks nothing."""
+
+    def test_measured_survives_the_round_trip(self, writable_plans):
+        from sre_agent import plan_templates as pt
+
+        try:
+            _create(
+                {
+                    "incident_type": "measured-probe",
+                    "phases": [
+                        {"id": "diag", "skill_name": "sre", "produces": ["root_cause", "top_consumer"]},
+                    ],
+                }
+            )
+            _create(
+                {
+                    "incident_type": "measured-probe-2",
+                    "phases": [
+                        {
+                            "id": "diag",
+                            "skill_name": "sre",
+                            "produces": ["root_cause", "top_consumer"],
+                            "measured": ["top_consumer"],
+                        }
+                    ],
+                }
+            )
+            assert pt.get_template("measured-probe-2").phases[0].measured == ["top_consumer"]
+            assert pt.get_template("measured-probe").phases[0].measured == []
+        finally:
+            pt.load_templates()
+
+    @pytest.mark.parametrize(
+        "measured",
+        [["top_consumer"], "top_consumer", [""], [3]],
+        ids=["not-in-produces", "not-a-list", "empty-name", "not-a-string"],
+    )
+    def test_create_rejects_measured_outside_produces(self, writable_plans, measured):
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as err:
+            _create(
+                {
+                    "incident_type": "measured-bad",
+                    "phases": [{"id": "diag", "skill_name": "sre", "produces": ["root_cause"], "measured": measured}],
+                }
+            )
+        assert err.value.status_code == 400
+        assert not (writable_plans / "measured-bad.yaml").exists()
+
+    def test_update_rejects_measured_outside_produces(self, writable_plans):
+        from fastapi import HTTPException
+
+        from sre_agent.api import monitor_rest
+
+        body = {"phases": [{"id": "triage", "skill_name": "sre", "produces": ["severity"], "measured": ["cause"]}]}
+        with patch("sre_agent.plan_store.persist_plan", return_value=True), pytest.raises(HTTPException) as err:
+            asyncio.run(monitor_rest.update_plan_template("nodes", FakeReq(body), _auth=None))
+        assert err.value.status_code == 400
+        assert not (writable_plans / "nodes.yaml").exists()

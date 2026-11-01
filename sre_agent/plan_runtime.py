@@ -39,6 +39,23 @@ from .skill_plan import (
 
 logger = logging.getLogger("pulse_agent.plan_runtime")
 
+# Seconds of a phase's timeout kept back when a contract retry is given the rest,
+# so the retry ends (and the first answer is kept) before the caller's own
+# timeout for the phase fires.
+_RETRY_TIMEOUT_MARGIN = 2.0
+
+
+def _contract_gaps(outputs) -> str:
+    """How the given phases fell short of their contracts, in words."""
+    unexamined = sorted({f for out in outputs for f in (getattr(out, "unexamined", None) or [])})
+    missing = sorted({f for out in outputs for f in out.contract_missing if f not in unexamined})
+    parts = []
+    if missing:
+        parts.append(f"did not produce {', '.join(missing)}")
+    if unexamined:
+        parts.append(f"named {', '.join(unexamined)} without examining it")
+    return " and ".join(parts) or "did not meet its contract"
+
 
 def _phase_can_write(phase) -> bool:
     """Whether a phase may change the cluster: gated, or run by a skill with write tools."""
@@ -198,15 +215,15 @@ class PlanRuntime:
                     if completed_outputs[dep].status == "partial" and completed_outputs[dep].contract_missing
                 ]
                 if unmet and _phase_can_write(phase):
-                    missing = sorted({m for dep in unmet for m in completed_outputs[dep].contract_missing})
+                    gaps = _contract_gaps([completed_outputs[dep] for dep in unmet])
                     logger.info("Phase '%s' not run: %s did not meet its contract", phase.id, unmet)
                     output = SkillOutput(
                         skill_id=phase.skill_name,
                         phase_id=phase.id,
                         status="needs_escalation",
                         evidence_summary=(
-                            f"Phase '{phase.id}' not run: {', '.join(unmet)} did not produce "
-                            f"{', '.join(missing)}, so there is nothing verified to act on"
+                            f"Phase '{phase.id}' not run: {', '.join(unmet)} {gaps}, "
+                            "so there is nothing verified to act on"
                         ),
                         confidence=0.0,
                     )
@@ -385,16 +402,32 @@ class PlanRuntime:
 
         attempts = 0
         hint = ""
+        # The caller bounds the whole phase by its timeout_seconds; a retry gets
+        # what is left of it. If the retry runs out, the first answer is kept
+        # (and judged as unmet) rather than the caller's timeout discarding
+        # both and failing the phase with no cause at all.
+        deadline = time.monotonic() + float(getattr(phase, "timeout_seconds", 0) or 0)
         output = await self._run_phase_once(phase, incident, prior_outputs, hint)
         attempts += 1
 
-        verdict = judge_phase(phase, output, incident)
+        verdict = judge_phase(phase, output)
         while should_retry(verdict, attempts):
+            remaining = deadline - time.monotonic() - _RETRY_TIMEOUT_MARGIN
+            if remaining <= 0:
+                logger.info("Phase '%s' incomplete (%s) — no time left to retry", phase.id, verdict.reason)
+                break
             logger.info("Phase '%s' incomplete (%s) — retrying with the gap named", phase.id, verdict.reason)
             hint = verdict.as_retry_hint()
-            output = await self._run_phase_once(phase, incident, prior_outputs, hint)
             attempts += 1
-            verdict = judge_phase(phase, output, incident)
+            try:
+                retried = await asyncio.wait_for(
+                    self._run_phase_once(phase, incident, prior_outputs, hint), timeout=remaining
+                )
+            except TimeoutError:
+                logger.warning("Phase '%s' retry timed out; keeping the first answer", phase.id)
+                break
+            output = retried
+            verdict = judge_phase(phase, output)
 
         if not verdict.satisfied:
             # Downgrade rather than silently passing an unmet contract downstream.
@@ -496,6 +529,11 @@ class PlanRuntime:
 
             # Try to extract structured SkillOutput from response
             output = self._parse_skill_output(response, phase, ledger)
+            # Decided here, against this run's calls and what they returned;
+            # the judge only reads the result.
+            from .phase_judge import unmeasured_fields
+
+            output.unexamined = unmeasured_fields(phase, output, incident, ledger)
             return output
 
         except Exception as e:

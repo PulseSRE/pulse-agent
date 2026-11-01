@@ -202,6 +202,14 @@ class ToolCall:
     status: str = "success"
     error_category: str | None = None
     input_summary: str = ""
+    # The call's arguments that name one object (pod_name, name, path ...),
+    # untruncated; namespace and selectors are left out because they name a
+    # set, not the thing examined. See phase_judge.unmeasured_fields.
+    object_args: dict[str, str] = field(default_factory=dict)
+    # What the tool returned (capped), so a claim can be checked against the
+    # data rather than the model's description of it. Never serialized:
+    # ``as_list`` leaves it out.
+    result_text: str = field(default="", repr=False)
 
     @property
     def read(self) -> bool:
@@ -229,6 +237,8 @@ class CallLedger:
             status=str(meta.get("status") or "success"),
             error_category=meta.get("error_category"),
             input_summary=_summarize_input(meta.get("input")),
+            object_args=_object_args(meta.get("input")),
+            result_text=str(meta.get("result_text") or "")[:RESULT_TEXT_LIMIT],
         )
 
     def get(self, ref: str) -> ToolCall | None:
@@ -257,6 +267,23 @@ class CallLedger:
         return [
             {"ref": c.ref, "tool": c.tool, "status": c.status, "input": c.input_summary} for c in self.calls.values()
         ]
+
+
+# Argument keys that name the one object a call reads.
+OBJECT_ARG_KEYS = frozenset(
+    {"name", "pod_name", "pod", "resource_name", "path", "container", "container_name", "deployment_name"}
+)
+RESULT_TEXT_LIMIT = 50_000
+
+
+def _object_args(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(k): str(v)
+        for k, v in raw.items()
+        if str(k) in OBJECT_ARG_KEYS and isinstance(v, (str, int)) and not isinstance(v, bool) and str(v).strip()
+    }
 
 
 def _summarize_input(raw: Any, limit: int = 120) -> str:

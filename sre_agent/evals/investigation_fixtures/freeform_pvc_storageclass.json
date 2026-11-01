@@ -27,7 +27,15 @@
     "path": "freeform",
     "root_cause": [
       [
-        "storageclass",
+        "storageclass ",
+        "storageclass.",
+        "storageclass,",
+        "storageclass;",
+        "storageclass:",
+        "storageclass)",
+        "storageclass'",
+        "storageclass\"",
+        "storageclasses",
         "storage class",
         "fast-ssd"
       ],
@@ -40,15 +48,20 @@
         "nonexistent",
         "non-existent",
         "undefined",
-        "no storageclass by",
-        "no storageclass named",
-        "no storageclass called",
-        "no storage class by",
-        "no storage class named",
-        "no storage class called",
-        "no fast-ssd",
-        "no 'fast-ssd'",
-        "no \"fast-ssd\""
+        "no storageclass by that name",
+        "no storageclass named fast-ssd",
+        "no storageclass named 'fast-ssd'",
+        "no storageclass named \"fast-ssd\"",
+        "no storage class by that name",
+        "no storage class named fast-ssd",
+        "no storage class named 'fast-ssd'",
+        "no storage class named \"fast-ssd\"",
+        "no fast-ssd storageclass",
+        "no fast-ssd storage class",
+        "no 'fast-ssd' storageclass",
+        "no 'fast-ssd' storage class",
+        "no \"fast-ssd\" storageclass",
+        "no \"fast-ssd\" storage class"
       ]
     ],
     "should_not_use_tools": [

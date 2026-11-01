@@ -1131,6 +1131,9 @@ async def run_agent_streaming(
                                 "result_bytes": exec_meta["result_bytes"],
                                 "was_confirmed": None,
                                 "turn_number": iterations,
+                                # What the tool returned, for callers that check
+                                # claims against data (evidence.CallLedger).
+                                "result_text": text if isinstance(text, str) else "",
                             },
                         )
                     except Exception:

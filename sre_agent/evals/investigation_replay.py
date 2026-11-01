@@ -33,6 +33,7 @@ tool-usage audit, plan analytics) is replaced with no-ops.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import contextvars
 import inspect
@@ -572,9 +573,10 @@ def dry_run_expected(expected: dict) -> dict:
 
 
 class _Stream:
-    def __init__(self, blocks: list, stop_reason: str):
+    def __init__(self, blocks: list, stop_reason: str, delay: float = 0.0):
         from types import SimpleNamespace
 
+        self._delay = delay
         self._final = SimpleNamespace(content=blocks, stop_reason=stop_reason, usage=None)
         events = []
         for block in blocks:
@@ -589,6 +591,8 @@ class _Stream:
         self._events = events
 
     async def __aenter__(self):
+        if self._delay:
+            await asyncio.sleep(self._delay)
         return self
 
     async def __aexit__(self, *_args):
@@ -617,6 +621,9 @@ class ScriptedClient:
     write attempt; an entry may be ``(name, input)`` to call it with arguments.
     ``findings`` overrides a plan phase's findings fields it declares (a
     ``top_consumer``, say), for answers shaped like a real phase's.
+    ``retry_answer`` is merged over ``answer`` when the prompt is a phase
+    being asked again for an unmet contract, and ``delay_retry`` (seconds)
+    stalls that answer, for a retry that runs out of time.
     """
 
     def __init__(self, recorded: dict, answer: dict | None = None, call_tools: list[str] | None = None):
@@ -644,19 +651,28 @@ class ScriptedClient:
             for m in messages
             if m.get("role") == "user"
         )
+        prompt = next(
+            (m["content"] for m in messages if m.get("role") == "user" and isinstance(m.get("content"), str)), ""
+        )
+        retry = self._answer_for(prompt) is not self.answer
+        delay = float(self.answer.get("delay_retry") or 0) if retry else 0.0
         if not already:
-            wanted = self.call_tools + [n for n in self.recorded if n in offered][:1]
+            call_tools = self._answer_for(prompt).get("call_tools", self.call_tools)
+            wanted = list(call_tools) + [n for n in self.recorded if n in offered][:1]
             blocks = []
             for entry in wanted:
                 name, args = entry if isinstance(entry, tuple) else (entry, {})
                 self._ids += 1
                 blocks.append(SimpleNamespace(type="tool_use", id=f"tu_{self._ids}", name=name, input=dict(args)))
             if blocks:
-                return _Stream(blocks, "tool_use")
-        prompt = next(
-            (m["content"] for m in messages if m.get("role") == "user" and isinstance(m.get("content"), str)), ""
-        )
+                return _Stream(blocks, "tool_use", delay)
         return _Stream([SimpleNamespace(type="text", text=self._answer_text(prompt, offered, messages))], "end_turn")
+
+    def _answer_for(self, prompt: str) -> dict:
+        """The answer for this prompt: ``retry_answer`` over ``answer`` on a contract retry."""
+        if "Your previous attempt" in prompt and self.answer.get("retry_answer"):
+            return {**self.answer, **self.answer["retry_answer"]}
+        return self.answer
 
     def _answer_text(self, prompt: str, offered: list[str], messages: list[dict] | None = None) -> str:
         source = next((n for n in self.recorded if n in offered), "")
@@ -672,10 +688,11 @@ class ScriptedClient:
         default = {"observation": "recorded tool output", "kind": "resource", "source": source, "stance": "supports"}
         if labels.get(source):
             default["call"] = labels[source]
-        evidence = self.answer.get("evidence", [default])
-        cause = self.answer.get("root_cause", "scripted cause")
-        confidence = self.answer.get("confidence", 0.8)
-        notes = self.answer.get("security_notes", [])
+        answer = self._answer_for(prompt)
+        evidence = answer.get("evidence", [default])
+        cause = answer.get("root_cause", "scripted cause")
+        confidence = answer.get("confidence", 0.8)
+        notes = answer.get("security_notes", [])
         match = re.search(r"Expected outputs: (.+)", prompt)
         if match:  # a plan phase
             fields = {f.strip(): "scripted" for f in match.group(1).split(",")}
@@ -683,7 +700,7 @@ class ScriptedClient:
                 fields["root_cause"] = cause
             if "confidence" in fields:
                 fields["confidence"] = confidence
-            for key, value in (self.answer.get("findings") or {}).items():
+            for key, value in (answer.get("findings") or {}).items():
                 if key in fields:
                     fields[key] = value
             body = {
@@ -691,7 +708,7 @@ class ScriptedClient:
                 "evidence_summary": f"scripted: {cause}",
                 "evidence": evidence,
                 "alternatives_considered": [],
-                "confidence": self.answer.get("top_level_confidence", confidence),
+                "confidence": answer.get("top_level_confidence", confidence),
                 "open_questions": [],
                 "security_notes": notes,
             }
