@@ -62,7 +62,8 @@ UNINFORMATIVE_BRIER = 0.25
 # Absolute ceiling: the expected Brier score of a confidence drawn uniformly at
 # random (E[(U - y)^2] = 1/3). A run worse than guessing is broken whatever the
 # baseline says. Below it, calibration is judged against the baseline (see
-# ``calibration_regression``). Highest seen on unchanged code: 0.2824.
+# ``calibration_regression``). Highest seen: 0.2907, during #216's
+# zero-confidence regression; after its fix (#223) runs score 0.10-0.17.
 BRIER_CEILING = 0.33
 
 
@@ -821,12 +822,15 @@ def calibration_regression(calib: dict, baseline_calib: dict | None) -> dict:
     rates. The squared errors are far from normal (most near 0, a few near 0.6),
     but with ~33 attempts the mean is close enough; Welch rather than a
     fixture-stratified test because attempts within one run are not
-    independent. Replayed over the 35 live-run artifacts since the statistical
-    gate (each against the main-branch runs other than itself), a
-    fixture-stratified permutation test flagged 4, among them the two
-    unrelated pull requests that the fixed 0.25 bar failed (Brier 0.2665 and
-    0.2558); Welch flagged 1 (a main run at 0.2824, p=0.043), about the rate
-    alpha allows.
+    independent.
+
+    Replayed against a baseline from the runs after #223 (main, merge queue
+    and nightly): none of those 7 runs fails when left out of its own
+    baseline, none of the 9 main runs before #216 fails, and 4 of the 9 main
+    runs carrying #216's zero-confidence regression fail (p 0.005-0.025),
+    where the fixed 0.25 bar caught 2. The pull request runs that first made
+    the 0.25 bar look noisy (0.2665, 0.2558) carried that regression too, and
+    fail here (p 0.011-0.016).
     """
     if not baseline_calib or not baseline_calib.get("samples"):
         return {"tested": False, "regressed": False, "reason": "no calibration baseline: absolute checks only"}

@@ -108,10 +108,11 @@ and compared with the pass rate in `sre_agent/evals/investigation_baseline.json`
   if its Brier score is significantly worse than the baseline's (one-sided
   Welch t-test on the per-attempt squared errors against the mean and variance
   in the baseline's `calibration` block, p < 0.05). 0.25 (always answering 0.5)
-  is shown for reference but is no longer a line: with ~33 attempts the Brier
-  score's own noise straddles it, and unrelated changes failed at 0.2665 and
-  0.2558 with no fixture regressed. Replayed over the 35 live gate results since
-  the statistical gate, this test flags one (a main run at 0.2824, p = 0.043)
+  is shown for reference but is no longer a line: a fixed bar both lets real
+  regressions through below it and, with ~33 attempts, sits inside the noise
+  of a run near it. Replayed against the post-#223 baseline, this test fails
+  4 of the 9 main runs that carried #216's zero-confidence regression (the
+  0.25 bar caught 2), and none of the runs before #216 or after #223
 - **overconfident** wrong answers (>= 0.7) are a warning in the output and the
   CI summary; they do not fail the run on their own — their cost is already in
   the Brier score
@@ -121,8 +122,9 @@ and compared with the pass rate in `sre_agent/evals/investigation_baseline.json`
 The nightly run writes a fresh baseline to its `investigation_baseline.json`
 artifact, pass counts and calibration (`brier`, `variance`, `samples`);
 commit it when it reflects main. The calibration block was first seeded from the
-15 live runs on main, the merge queue and the v2.36.0 tag (572 attempts; the
-run ids are in its `note`). The report records the model id the
+7 live runs on main, the merge queue and the nightly after #223 (308 attempts,
+Brier 0.1308; the run ids are in its `note`). Never seed it from runs that
+carried a known regression: a baseline that includes the regression accepts it. The report records the model id the
 provider returned; on Vertex AI that has been the id requested, so it does not
 show which version served the call. All live lanes read `EVAL_MODEL` in
 `.github/workflows/evals.yml`; change the model there, in its own PR.

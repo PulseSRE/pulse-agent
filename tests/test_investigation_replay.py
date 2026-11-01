@@ -517,20 +517,31 @@ def test_t_distribution_tail_matches_tables():
     assert ir.t_sf(-1.812, 10) == pytest.approx(0.95, abs=5e-4)
 
 
-def test_brier_above_the_old_bar_at_the_usual_spread_passes():
-    """The run that failed an unrelated PR: Brier 0.2665 over 33 attempts, nothing regressed.
+def test_a_run_at_the_post_fix_spread_passes_the_packaged_baseline():
+    """Brier ~0.155 over 33 attempts, a little worse than the worst post-#223 run (0.168 is the
+    highest seen): within noise of the packaged baseline, so it passes."""
+    rows = _calib_rows([(0.6, False)] * 8 + [(0.7, True)] * 25)
+    baseline = {**_no_fixture_history(rows, None), "calibration": ir.load_baseline()["calibration"]}
+    gate = ir.statistical_verdict(rows, baseline)
+    calib = gate["calibration"]
+    assert calib["regression"]["tested"] and not calib["regression"]["regressed"], calib
+    assert gate["passed"], calib
 
-    Reproduced as 11 wrong answers at 0.85 and 22 right ones at 0.8 (Brier
-    0.2675, spread 0.33, as in run 41175598067), against the packaged baseline.
+
+def test_the_zero_confidence_regression_fails_the_packaged_baseline():
+    """Run 41175598067 (Brier 0.2665): it carried #216's regression, where correct diagnoses were
+    reported at confidence 0.0. Reproduced as 11 wrong answers at 0.85 and 22 right ones at 0.8
+    (Brier 0.2675, spread 0.33). The fixed 0.25 bar happened to catch this one; the baseline
+    comparison catches it for the right reason, and also runs of that regression below 0.25.
     """
     rows = _calib_rows([(0.85, False)] * 11 + [(0.8, True)] * 22)
     baseline = {**_no_fixture_history(rows, None), "calibration": ir.load_baseline()["calibration"]}
     gate = ir.statistical_verdict(rows, baseline)
     calib = gate["calibration"]
-    assert calib["brier"] > ir.UNINFORMATIVE_BRIER
-    assert calib["regression"]["tested"] and not calib["regression"]["regressed"], calib
-    assert gate["passed"], calib
-    # Overconfident answers are reported, and do not fail the gate on their own.
+    assert calib["brier"] < ir.BRIER_CEILING and calib["absolute_failures"] == []
+    assert calib["regression"]["regressed"], calib
+    assert not gate["passed"]
+    # Overconfident answers are reported as well.
     assert calib["overconfident"] == sorted(f"f{i}" for i in range(11))
 
 
