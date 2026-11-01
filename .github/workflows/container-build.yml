@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Exercise the production Dockerfile before tagging a release. This job
       # builds only; registry publication stays in the release workflow.
       - name: Build production image
