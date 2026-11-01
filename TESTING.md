@@ -103,7 +103,10 @@ and compared with the pass rate in `sre_agent/evals/investigation_baseline.json`
 - **calibration, absolute**: any attempt over its fixture's confidence cap
   (a `calib_*` fixture answering above 0.5 with nothing readable) fails the run,
   whatever that fixture's pass rate; so does a Brier score above 0.33, the
-  expected score of a confidence picked at random
+  expected score of a confidence picked at random, and so does any right answer
+  reported at confidence 0.0 (a broken pipeline, not a judgement: #216's
+  regression, which the baseline comparison caught in only 4 of the 9 main runs
+  that carried it; none of the 232 right answers after #223 was below 0.19)
 - **calibration, against the baseline**: below that ceiling the run fails only
   if its Brier score is significantly worse than the baseline's (one-sided
   Welch t-test on the per-attempt squared errors against the mean and variance
