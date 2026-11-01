@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from sre_agent.evals.acceptance_cli import REQUIRED_SIM_SCENARIOS, check_replay_safety, check_sim_artifact, main
+from sre_agent.evals.acceptance_cli import (
+    REQUIRED_SIM_SCENARIOS,
+    check_replay_safety,
+    check_sim_artifact,
+    main,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -182,7 +187,7 @@ def test_artifact_gate_is_wired_to_ci_and_live_provenance():
     root = Path(__file__).parent.parent
     workflow = (root / ".github/workflows/evals.yml").read_text()
     assert "python -m sre_agent.evals.acceptance_cli" in workflow
-    assert "--sim artifacts/srebench-sim.json --replay artifacts/live_judge.json" in workflow
+    assert "--sim $SIM_FILES --replay artifacts/live_judge.json" in workflow
 
 
 def test_forged_success_check_cannot_override_observed_forbidden_call(tmp_path):
@@ -221,32 +226,45 @@ def test_multiturn_aggregate_cannot_hide_observed_calls(tmp_path):
     assert any("observations disagree" in e for e in check_replay_safety(data, tmp_path))
 
 
-@pytest.mark.parametrize("failed", ["verify", "acceptance", "core", "errors"])
+SIM_STEP = "SRE-Bench sim gate (live model, repeated attempts)"
+
+
+def _sim_step():
+    import yaml
+
+    workflow = yaml.safe_load((Path(__file__).parent.parent / ".github/workflows/evals.yml").read_text())
+    return next(s for s in workflow["jobs"]["evals"]["steps"] if s["name"] == SIM_STEP)
+
+
+def test_sim_step_does_not_claim_to_be_deterministic():
+    """The agent in this lane is a live model; only the simulator and grader are fixed."""
+    assert "deterministic)" not in SIM_STEP
+    assert "SIM_REPEAT=3" in _sim_step()["run"]
+
+
+@pytest.mark.parametrize("failed", ["run", "verify", "acceptance", "core", "errors"])
 def test_ci_collects_all_gate_reports_and_preserves_failure(tmp_path, failed):
     import os
     import subprocess
 
-    import yaml
-
-    workflow = yaml.safe_load((Path(__file__).parent.parent / ".github/workflows/evals.yml").read_text())
-    step = next(s for s in workflow["jobs"]["evals"]["steps"] if s["name"] == "SRE-Bench sim gate (deterministic)")
-    body = step["run"][step["run"].index("BENCH_GATE_STATUS=0") :]
+    step = _sim_step()
+    run = step["run"].replace("${{ github.event_name }}", "pull_request")
+    body = run[run.index('if [ "pull_request" = "schedule" ]') :]
     # Exercise the actual shell control flow with stand-in CLIs. This verifies
     # report/error propagation, not the model or simulator's outcomes.
     stub = """
     sre-bench() {
-      if [ "$1" = verify ]; then
-        echo verify >> "$CALLS"
-        [ "$FAILED" != verify ]; return
-      fi
       case "$*" in
+        run*) echo run >> "$CALLS"; [ "$FAILED" != run ]; return ;;
+        verify*) echo verify >> "$CALLS"; [ "$FAILED" != verify ]; return ;;
         *"--suite core --fail-on-gate"*) echo core >> "$CALLS"; [ "$FAILED" != core ]; return ;;
         *"--suite errors --fail-on-gate"*) echo errors >> "$CALLS"; [ "$FAILED" != errors ]; return ;;
+        *"--suite core --out"*|*"--suite errors --out"*) return 0 ;;
         *) return 99 ;;
       esac
     }
     python() {
-      echo acceptance >> "$CALLS"
+      echo "acceptance $*" >> "$CALLS"
       echo report > "$REPORT"
       [ "$FAILED" != acceptance ]
     }
@@ -260,7 +278,14 @@ def test_ci_collects_all_gate_reports_and_preserves_failure(tmp_path, failed):
     }
     process = subprocess.run(["bash", "-e", "-c", stub + "\n" + body], env=env, capture_output=True, text=True)
     assert process.returncode == 1, process.stderr
-    assert (tmp_path / "calls").read_text().splitlines() == ["verify", "acceptance", "core", "errors"]
+    calls = (tmp_path / "calls").read_text().splitlines()
+    # Every attempt runs, verifies and scores, whichever gate failed first.
+    assert calls[:-1] == ["run", "verify", "core", "errors"] * 3
+    # Acceptance judges all three attempts together.
+    assert calls[-1].startswith("acceptance -m sre_agent.evals.acceptance_cli --sim ")
+    for i in (1, 2, 3):
+        assert f"artifacts/srebench-sim-{i}.json" in calls[-1]
+    assert "--summary-markdown" in calls[-1]
     assert (tmp_path / "report").exists()
 
 
