@@ -166,16 +166,25 @@ async def unwaive_readiness_gate(gate_id: str, actor: str = Depends(require_admi
     from ..repositories import get_readiness_waiver_repo
 
     try:
-        deleted = await asyncio.to_thread(get_readiness_waiver_repo().delete, gate_id)
+        lifted = await asyncio.to_thread(get_readiness_waiver_repo().delete, gate_id)
     except Exception:
         return _storage_unavailable("delete")
-    if deleted:
+    deleted = lifted is not None
+    if lifted is not None:
+        # The row is gone, so the audit record keeps what was lifted.
+        was = _to_json(lifted)
         await asyncio.to_thread(
             record_interaction,
             actor=actor,
             interaction_type="unwaive_readiness_gate",
             item_id=gate_id,
             decision="unwaived",
+            metadata={
+                "reason": was["reason"],
+                "waived_by": was["waived_by"],
+                "created_at": was["created_at"],
+                "expires_at": was["expires_at"],
+            },
         )
         logger.info("Readiness gate %s waiver lifted by %s", gate_id, actor)
     return {"gate_id": gate_id, "deleted": deleted}

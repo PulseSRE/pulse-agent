@@ -55,14 +55,18 @@ class ReadinessWaiverRepository(BaseRepository):
             "expires_at": expires_at,
         }
 
-    def delete(self, gate_id: str) -> bool:
-        """Lift a gate's waiver. True when there was one (expired or not)."""
+    def delete(self, gate_id: str) -> dict | None:
+        """Lift a gate's waiver; return what was lifted (expired or not), or None if there was none.
+
+        The row is gone afterwards, so the caller audits what it said.
+        """
         # execute + commit, not fetchone: fetchone runs on its own pooled
         # connection and never commits, so a DELETE there would not stick.
-        cur = self.db.execute("DELETE FROM readiness_waivers WHERE gate_id = ?", (gate_id,))
-        deleted = cur.rowcount > 0
+        cur = self.db.execute(f"DELETE FROM readiness_waivers WHERE gate_id = ? RETURNING {_COLUMNS}", (gate_id,))
+        row = cur.fetchone()
+        cols = [d[0] for d in cur.description] if row is not None else []
         self.db.commit()
-        return deleted
+        return dict(zip(cols, row)) if row is not None else None
 
 
 # -- Singleton ---------------------------------------------------------------

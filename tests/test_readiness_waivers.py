@@ -192,7 +192,10 @@ def test_delete_lifts_the_waiver_and_is_idempotent(client):
 
 
 def test_waive_and_unwaive_are_in_the_audit_trail(client):
-    client.put("/readiness/waivers/etcd-backup", headers=ADMIN, json={"reason": "accepted"})
+    expires = _future()
+    waived_body = client.put(
+        "/readiness/waivers/etcd-backup", headers=ADMIN, json={"reason": "accepted", "expires_at": expires}
+    ).json()
     client.delete("/readiness/waivers/etcd-backup", headers=OTHER_ADMIN)
     client.delete("/readiness/waivers/etcd-backup", headers=OTHER_ADMIN)  # nothing to lift: not audited
 
@@ -201,6 +204,13 @@ def test_waive_and_unwaive_are_in_the_audit_trail(client):
     assert waived["metadata"]["reason"] == "accepted"
     (lifted,) = _interactions("unwaive_readiness_gate")
     assert (lifted["actor"], lifted["item_id"], lifted["decision"]) == ("bob", "etcd-backup", "unwaived")
+    # The row is gone, so the audit record keeps what was lifted.
+    assert lifted["metadata"] == {
+        "reason": "accepted",
+        "waived_by": "alice",
+        "created_at": waived_body["created_at"],
+        "expires_at": waived_body["expires_at"],
+    }
 
 
 # -- Authorization -------------------------------------------------------------
@@ -227,6 +237,16 @@ def test_writes_need_a_signed_in_admin(client, headers, status):
     assert ids == ["tls-profile"]
     assert _interactions("waive_readiness_gate") == []
     assert _interactions("unwaive_readiness_gate") == []
+
+
+def test_an_admin_refusal_is_logged_as_the_request_it_was(client, caplog):
+    # require_admin guards skills, fixes and waivers alike; its log said
+    # "skill mutation" for all of them.
+    with caplog.at_level("WARNING", logger="pulse_agent.api"):
+        client.put("/readiness/waivers/etcd-backup", headers=NON_ADMIN, json={"reason": "r"})
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("PUT /readiness/waivers/etcd-backup" in m and "mallory" in m for m in messages), messages
+    assert not any("skill" in m.lower() for m in messages)
 
 
 def test_reads_use_the_shared_token_like_readiness(client):
@@ -279,16 +299,16 @@ def test_repository_round_trip_against_postgres():
     assert repo.fetch_active(now + 59_999) == [saved]
     assert repo.fetch_active(now + 60_000) == []
 
-    assert repo.delete("etcd-backup") is True
+    assert repo.delete("etcd-backup") == saved
     assert repo.fetch_active(now) == []
-    assert repo.delete("etcd-backup") is False
+    assert repo.delete("etcd-backup") is None
 
 
 def test_repository_delete_lifts_an_expired_waiver_too():
     repo = ReadinessWaiverRepository(get_database())
     now = int(time.time() * 1000)
     repo.upsert("etcd-backup", "lapsed", "alice", now - 2, now - 1)
-    assert repo.delete("etcd-backup") is True
+    assert repo.delete("etcd-backup")["reason"] == "lapsed"
     assert get_database().fetchall("SELECT gate_id FROM readiness_waivers") == []
 
 
