@@ -465,9 +465,17 @@ def calibration(rows: list[dict]) -> dict:
     ``passed`` here covers only the absolute checks, which mean real breakage
     whatever the baseline: Brier above ``BRIER_CEILING`` (worse than a random
     confidence), or any attempt over a fixture's own confidence cap (the
-    ``calib_*`` fixtures: confidence > 0.5 with nothing readable). The
-    statistical gate adds a comparison with the baseline's Brier
+    ``calib_*`` fixtures: confidence > 0.5 with nothing readable), or any
+    right answer reported at confidence 0.0. The statistical gate adds a comparison with the baseline's Brier
     (``calibration_regression``).
+
+    A right answer at exactly 0.0 is a broken pipeline, not a judgement:
+    confidence is derived from the evidence, so a cause that was found and
+    supported cannot honestly come out at zero. That was #216's regression
+    (a phase's confidence read from a placeholder, fixed by #223), which the
+    Brier comparison caught in only 4 of the 9 main runs that carried it,
+    because one or two such answers sit inside the run-to-run noise. In the
+    7 live runs after #223 (232 right answers) none was below 0.19.
 
     ``overconfident`` lists every wrong answer at or above the bar where the
     monitor would remember it. It is a warning, not a failure: on unchanged code
@@ -491,6 +499,7 @@ def calibration(rows: list[dict]) -> dict:
             "brier": None,
             "overconfident": [],
             "over_confidence_cap": over_cap,
+            "right_at_zero_confidence": [],
             "absolute_failures": ["no attempt reported a confidence"],
             "passed": False,
         }
@@ -499,11 +508,14 @@ def calibration(rows: list[dict]) -> dict:
     right = [c for _, c, ok in samples if ok]
     wrong = [c for _, c, ok in samples if not ok]
     overconfident = sorted({name for name, c, ok in samples if not ok and c >= OVERCONFIDENT})
+    right_at_zero = sorted({name for name, c, ok in samples if ok and c == 0.0})
     absolute: list[str] = []
     if brier > BRIER_CEILING:
         absolute.append(f"brier {brier:.4f} > ceiling {BRIER_CEILING}")
     if over_cap:
         absolute.append(f"confidence over the fixture's cap: {', '.join(over_cap)}")
+    if right_at_zero:
+        absolute.append(f"right answer reported at confidence 0.0: {', '.join(right_at_zero)}")
     return {
         "samples": len(samples),
         "brier": round(brier, 4),
@@ -515,6 +527,7 @@ def calibration(rows: list[dict]) -> dict:
         "overconfident_threshold": OVERCONFIDENT,
         "overconfident": overconfident,
         "over_confidence_cap": over_cap,
+        "right_at_zero_confidence": right_at_zero,
         "absolute_failures": absolute,
         "passed": not absolute,
     }
