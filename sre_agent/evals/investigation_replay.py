@@ -605,6 +605,9 @@ class ScriptedClient:
 
     ``answer`` overrides fields of the final JSON (``root_cause``, ``confidence``,
     ``evidence`` ...), so a test can script a wrong or overconfident answer.
+    For a plan phase, ``top_level_confidence`` sets the top-level figure apart
+    from ``findings.confidence`` (``None`` omits it), the shape a real model
+    returns when it fills only the findings figure.
     ``call_tools`` lists extra tools to call first, which lets a test script a
     write attempt.
     """
@@ -677,10 +680,12 @@ class ScriptedClient:
                 "evidence_summary": f"scripted: {cause}",
                 "evidence": evidence,
                 "alternatives_considered": [],
-                "confidence": confidence,
+                "confidence": self.answer.get("top_level_confidence", confidence),
                 "open_questions": [],
                 "security_notes": notes,
             }
+            if body["confidence"] is None:
+                del body["confidence"]
             return "```json\n" + json.dumps(body) + "\n```"
         body = {
             "summary": f"scripted: {cause}",

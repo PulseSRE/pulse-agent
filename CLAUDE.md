@@ -109,7 +109,7 @@ make release VERSION=X.Y.Z            # agent-only version/badge commit + tag; s
 - Skill routing: ALL trigger patterns in `skill.md` YAML (`trigger_patterns` + `route_priority`), zero hardcoded patterns in `skill_router.py`. `reset_hard_pre_route()` on skill reload. OOM pattern uses `\boom` (start boundary) to avoid matching "headroom".
 
 ### Tools
-- `k8s_tools/` — 12-module package with ~60 K8s tools (`@beta_tool` decorated). Write tools in `WRITE_TOOLS` set require confirmation. Submodules: validators, pods, nodes, deployments, workloads, monitoring, diagnostics, generic, advanced, audit, live_table, finalizers.
+- `k8s_tools/` — 12-module package with ~60 K8s tools (incl. read-only `get_cluster_updates` → `upgrade_graph` and `get_rollout_history` → `rollout_history`) (`@beta_tool` decorated). Write tools in `WRITE_TOOLS` set require confirmation. Submodules: validators, pods, nodes, deployments, workloads, monitoring, diagnostics, generic, advanced, audit, live_table, finalizers.
 - `security_tools.py` — 9 security scanning tools (read-only)
 - `fleet_tools.py` — 7 multi-cluster tools (user token for managed clusters; Secret values never returned)
 - `gitops_tools.py` — 6 ArgoCD tools
@@ -217,7 +217,7 @@ Deployment is owned by the [Pulse Operator](https://github.com/PulseSRE/pulse-op
 - `self_tools.py` — 12 self-description + 4 skill management + 3 K8s API introspection tools
 - `observability.py` — Prometheus metrics registry (tokens, cost, investigations, scanners, autofix); `/metrics` endpoint mounted in `app.py`
 - `prompt_log.py` — prompt logging (hash, sections, tokens, version tracking) for observability and debugging
-- `component_registry.py` — 25 component kinds registered (metrics, data, visualization, status, detail, layout, action); data-driven prompt hints
+- `component_registry.py` — 27 component kinds registered (incl. `upgrade_graph`, `rollout_history`) (metrics, data, visualization, status, detail, layout, action); data-driven prompt hints
 - `slo_registry.py` — SLO definition CRUD, live Prometheus burn-rate queries, persistence to `slo_definitions` table. Budget consumed = (1 − SLI over the window) / (1 − target); burn rate from the last hour's SLI (critical ≥14.4x, warning ≥6x, per the SRE workbook). Targets ≥1 are percentages. Only real good-ratio SLIs are queried (availability; latency/error_rate for the API server); other types report no data rather than a permanent critical
 - `inbox.py` — Ops Inbox CRUD, lifecycle transitions, priority scoring, dedup, snooze, monitor bridge, generator cycle, `create_inbox_task` agent tool
 - `inbox_generators.py` — 16 proactive task generators (cert expiry, trend prediction, degraded operators, upgrades, SLO burn, node pressure, stale findings, privileged workloads, RBAC drift, network policy gaps, route certs, endpoint gaps, skill gaps, skill low performers, skill curation, durable runs awaiting approval). A fetcher that cannot read its source raises `GeneratorUnavailableError`; the cycle then leaves that generator's open items alone instead of auto-resolving them. Items carry a `due_date` from their urgency, which is what ranks them. Values are measured (cert `notAfter`, operator `lastTransitionTime`, SLO burn), not constants

@@ -157,7 +157,16 @@ register_component(
         description="Single big number with trend arrow",
         category="metrics",
         required_fields=["title", "value"],
-        optional_fields=["unit", "trend", "trendValue", "trendGood", "description", "status"],
+        optional_fields=[
+            "unit",
+            "trend",
+            "trendValue",
+            "trendGood",
+            "description",
+            "status",
+            "query",
+            "refreshInterval",
+        ],
         supports_mutations=["change_kind"],
         example={
             "kind": "stat_card",
@@ -168,7 +177,11 @@ register_component(
             "trendValue": "12%",
             "trendGood": "down",
         },
-        prompt_hint="stat_card — Big number with trend arrow. Use for prominent KPIs.",
+        prompt_hint=(
+            "stat_card — Big number with trend arrow. Use for prominent KPIs. "
+            "Give a PromQL instant query in query to keep the value live (refreshInterval seconds, default 60); "
+            "value is then only the initial value."
+        ),
     )
 )
 
@@ -259,15 +272,32 @@ register_component(
         description="Interactive time-series chart (line, bar, area, donut, etc.)",
         category="visualization",
         required_fields=[],
-        optional_fields=["title", "description", "chartType", "series", "query", "time_range"],
+        optional_fields=[
+            "title",
+            "description",
+            "chartType",
+            "series",
+            "query",
+            "timeRange",
+            "refreshInterval",
+            "live",
+            "step",
+            "annotations",
+        ],
         supports_mutations=["change_chart_type", "update_query", "change_kind"],
         example={
             "kind": "chart",
             "chartType": "line",
             "title": "CPU Usage",
             "query": "rate(container_cpu_usage_seconds_total[5m])",
+            "timeRange": "1h",
         },
-        prompt_hint="chart — Time-series chart. Use get_prometheus_query() to create. Types: line, area, bar, donut, stacked_area.",
+        prompt_hint=(
+            "chart — Time-series chart. Use get_prometheus_query() to create. Types: line, area, bar, donut, stacked_area. "
+            "timeRange: '15m'|'1h'|'6h'|'24h'. refreshInterval: seconds between re-queries (default 60). "
+            "live: true for a short sliding window that streams (use with refreshInterval 5-15). step: query step in seconds. "
+            "annotations: [{timestamp (ms or ISO), label, kind: rollout|alert|config}] marks events on the time axis."
+        ),
     )
 )
 
@@ -315,6 +345,114 @@ register_component(
             "lanes": [{"label": "Alerts", "category": "alert", "events": [{"timestamp": 0, "label": "CPU high"}]}],
         },
         prompt_hint="timeline — Swim lane timeline for events, alerts, rollouts.",
+    )
+)
+
+register_component(
+    ComponentKind(
+        name="upgrade_graph",
+        description="OpenShift cluster update graph: current version, recommended/conditional/blocked targets, progress, history",
+        category="visualization",
+        required_fields=["current", "nodes"],
+        optional_fields=["title", "desired", "channels", "edges", "history", "progress", "blockers"],
+        title_required=False,
+        example={
+            "kind": "upgrade_graph",
+            "title": "Cluster updates",
+            "current": {
+                "version": "4.16.3",
+                "image": "quay.io/openshift-release-dev/ocp-release@sha256:aa",
+                "channel": "stable-4.16",
+            },
+            "nodes": [
+                {
+                    "version": "4.16.8",
+                    "image": "quay.io/...@sha256:bb",
+                    "state": "recommended",
+                    "recommended": True,
+                    "risks": [],
+                },
+                {
+                    "version": "4.17.1",
+                    "image": "quay.io/...@sha256:cc",
+                    "state": "conditional",
+                    "recommended": False,
+                    "risks": [
+                        {
+                            "name": "AROBrokenDNSMasq",
+                            "message": "...",
+                            "url": "https://issues.redhat.com/...",
+                            "matchingRules": [],
+                        }
+                    ],
+                },
+            ],
+            "edges": [{"from": "4.16.3", "to": "4.16.8"}, {"from": "4.16.3", "to": "4.17.1"}],
+            "history": [
+                {
+                    "version": "4.16.3",
+                    "state": "Completed",
+                    "startedTime": "2026-09-01T10:00:00Z",
+                    "completionTime": "2026-09-01T11:12:00Z",
+                    "verified": True,
+                }
+            ],
+            "progress": {"phase": "idle"},
+            "blockers": [],
+        },
+        prompt_hint=(
+            "upgrade_graph — Cluster update graph. Produced by get_cluster_updates(); do not hand-build it. "
+            "nodes[].state: recommended|conditional|blocked; conditional nodes carry risks[{name,message,url,matchingRules}]. "
+            "progress: {phase, percent, clusterOperators:{updated,total,degraded[]}, pools[{name,updated,total,degraded}], etaMinutes}. "
+            "blockers[{type: upgradeable|failing|pool, reason, message, link}]. The UI asks for explicit risk acceptance before a conditional update."
+        ),
+    )
+)
+
+register_component(
+    ComponentKind(
+        name="rollout_history",
+        description="Revision timeline of a Deployment/StatefulSet/DaemonSet with image changes and rollback",
+        category="visualization",
+        required_fields=["workload", "revisions"],
+        optional_fields=["title", "inFlight", "correlations"],
+        title_required=False,
+        example={
+            "kind": "rollout_history",
+            "title": "Rollout history — payment-api",
+            "workload": {
+                "kind": "Deployment",
+                "namespace": "production",
+                "name": "payment-api",
+                "gvr": "apps~v1~deployments",
+            },
+            "revisions": [
+                {
+                    "revision": 3,
+                    "name": "payment-api-7d9f",
+                    "createdAt": "2026-10-01T12:00:00Z",
+                    "images": ["registry/payment-api:1.4.2"],
+                    "changeCause": "bump to 1.4.2",
+                    "replicas": {"ready": 3, "desired": 3},
+                    "current": True,
+                    "source": "replicaset",
+                }
+            ],
+            "inFlight": {
+                "strategy": "RollingUpdate",
+                "updated": 3,
+                "ready": 3,
+                "available": 3,
+                "desired": 3,
+                "conditions": [],
+            },
+        },
+        prompt_hint=(
+            "rollout_history — Horizontal revision timeline. Produced by get_rollout_history(kind, namespace, name). "
+            "revisions[{revision,name,createdAt,images[],changeCause,replicas:{ready,desired},current,source: replicaset|controllerrevision}], "
+            "inFlight {strategy,updated,ready,available,desired,conditions[]}, optional correlations[{revision, alertsOrFindings[]}]. "
+            "The UI offers a confirmed rollback per revision."
+        ),
     )
 )
 

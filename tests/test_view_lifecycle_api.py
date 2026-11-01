@@ -97,3 +97,18 @@ class TestClaimEndpoint:
         with patch("sre_agent.db.unclaim_view", return_value=False):
             resp = client.delete("/views/cv-1/claim")
         assert resp.status_code == 409
+
+
+class TestGetViewNormalizes:
+    def test_saved_chart_time_range_is_served_as_time_range_camel(self, client):
+        stored = {
+            "id": "v1",
+            "title": "Old view",
+            "layout": [{"kind": "chart", "title": "CPU", "query": "up", "time_range": "6h"}],
+        }
+        with patch("sre_agent.db.get_view", return_value=stored):
+            resp = client.get("/views/v1")
+        assert resp.status_code == 200
+        widget = resp.json()["layout"][0]
+        assert widget["timeRange"] == "6h"
+        assert "time_range" not in widget
