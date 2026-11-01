@@ -118,6 +118,16 @@ _UNDETERMINED = re.compile(
 )
 
 
+# Where a value's claim ends and its commentary starts: "X (detail) — why;
+# Y was ruled out". Only the claim is the culprit; what the commentary names
+# (a victim it ruled out, a suspect it could not confirm) is not.
+_CLAIM_END = re.compile(r";|\.\s|\s[\u2014\u2013-]\s|\s--\s")  # em dash, en dash, hyphen
+
+
+def _claim(value: str) -> str:
+    return _CLAIM_END.split(value, maxsplit=1)[0].strip()
+
+
 def _incident_names(incident: dict | None) -> set[str]:
     """The finding's own resources: naming them as the culprit restates the finding."""
     names: set[str] = set()
@@ -175,6 +185,12 @@ def unmeasured_fields(phase, output, incident: dict | None = None, ledger=None) 
     never count. ``ledger`` is the phase's ``evidence.CallLedger``; without
     one nothing was examined.
 
+    Only the value's leading claim is matched, not its commentary. Live, a
+    wrong answer read "Unreclaimed/dangling container images (image GC
+    failing); evicted pod report-gen-55f's own usage (120Mi) is too small to be
+    the real driver", and the victim it ruled out was in the events and in the
+    root cause, so it counted as the examined culprit.
+
     The root-cause condition closes a hedge seen live: "Not conclusively
     isolated — likely unreclaimed container images; log-shipper-7d9f-q2x is
     the remaining suspect but unverified", after a describe_pod of that pod,
@@ -191,7 +207,7 @@ def unmeasured_fields(phase, output, incident: dict | None = None, ledger=None) 
         value = findings.get(name)
         if not _is_present(value):
             continue  # reported as missing by judge_phase
-        text = str(value).strip().lower()
+        text = _claim(str(value).strip().lower())
         if _UNDETERMINED.match(text):
             gaps.append(name)
             continue

@@ -192,6 +192,35 @@ def test_live_hedge_naming_a_described_pod_as_unconfirmed_suspect_is_capped():
     _assert_capped(outcome)
 
 
+def test_live_victim_named_in_the_commentary_is_not_the_measured_culprit():
+    """Live repeat run 41324349039, attempt 1: wrong at 0.75 past the second version of this check.
+
+    top_consumer blamed container images, then named the evicted pod it ruled
+    out; that pod is in the events and in the root cause, so it matched.
+    """
+    outcome, client = _run(
+        answer={
+            "root_cause": (
+                "worker-3 ephemeral-storage exhaustion (disk at 94% on /var) caused by failing image garbage "
+                "collection (FreeDiskSpaceFailed), triggering KubeletHasDiskPressure, a disk-pressure NoSchedule "
+                "taint, and pod eviction (report-gen-55f, 120Mi, evicted 5m ago)"
+            ),
+            "findings": {
+                "top_consumer": (
+                    "Unreclaimed/dangling container images (image GC failing to free space); evicted pod "
+                    "report-gen-55f's own usage (120Mi) is too small to be the real driver. Secondary candidate "
+                    "log-shipper-7d9f-q2x not confirmed due to tool unavailability."
+                )
+            },
+            "confidence": 0.75,
+            "evidence": _supports(_NODE_EVIDENCE) + [_PODS_CONTEXT],
+        },
+        call_tools=[_NODE, _EVENTS, _METRICS, _PODS],
+    )
+    _assert_capped(outcome)
+    assert len(_phase_prompts(client, "node_diagnostics")) == 2
+
+
 def test_right_answer_that_read_the_consumer_keeps_its_confidence():
     """The real right answer's shape: the same node evidence plus the log-shipper's logs."""
     logs = {
@@ -322,6 +351,21 @@ def test_a_workload_the_phase_read_is_measured():
 def test_a_read_workload_the_root_cause_does_not_blame_is_not_the_measured_culprit():
     calls = [*_NODE_CALLS, (*_LOGS, _RECORDED["get_pod_logs"])]
     assert _gaps("log-shipper-7d9f-q2x", _IMAGE_GC_CAUSE, *calls) == ["top_consumer"]
+
+
+def test_only_the_leading_claim_of_a_value_is_matched():
+    calls = [*_NODE_CALLS, (*_LOGS, _RECORDED["get_pod_logs"])]
+    cause = "log-shipper-7d9f-q2x filled /var; report-gen-55f was evicted"
+    # The claim names the pod; the commentary after it does not change that.
+    assert _gaps("log-shipper-7d9f-q2x (trace logs) — report-gen-55f only used 120Mi", cause, *calls) == []
+    assert _gaps("log-shipper-7d9f-q2x; secondary: images", cause, *calls) == []
+    # The claim names a category; a pod in the commentary is not the culprit.
+    for value in (
+        "container images; report-gen-55f only used 120Mi",
+        "container images — log-shipper-7d9f-q2x unconfirmed",
+        "Container images. log-shipper-7d9f-q2x was not confirmed",
+    ):
+        assert _gaps(value, cause, *calls) == ["top_consumer"], value
 
 
 def test_a_call_that_failed_examined_nothing():
