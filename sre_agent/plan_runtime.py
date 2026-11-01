@@ -20,7 +20,13 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from .evidence import SECURITY_NOTES_INSTRUCTION, CallLedger, merge_security_notes, parse_security_notes
+from .evidence import (
+    SECURITY_NOTES_INSTRUCTION,
+    CallLedger,
+    asserted_phase_confidence,
+    merge_security_notes,
+    parse_security_notes,
+)
 from .skill_plan import (
     PlanResult,
     SkillOutput,
@@ -520,13 +526,10 @@ class PlanRuntime:
                 evidence = [
                     e.model_copy(update={"call_ref": f"{phase.id}.{e.call_ref}"}) if e.call_ref else e for e in evidence
                 ]
-                try:
-                    asserted = float(data.get("confidence", 0.0))
-                except (TypeError, ValueError):
-                    asserted = 0.0
                 findings = data.get("findings", {})
                 if not isinstance(findings, dict):
                     findings = {}
+                asserted = asserted_phase_confidence(data, findings)
                 # A note the model filed under findings still belongs in its own field.
                 security_notes = merge_security_notes(
                     parse_security_notes(data.get("security_notes")),
@@ -857,6 +860,7 @@ class PlanRuntime:
             "```\n"
             "Each tool result begins with [call cN: tool_name]; in each evidence item, set "
             '"call" to the cN of the result it came from.\n'
+            'Set the top-level "confidence" to how sure you are (0 to 1); the 0.0 above is a placeholder. '
             "Confidence is derived from the evidence you list; claims without evidence count for little."
         )
 
