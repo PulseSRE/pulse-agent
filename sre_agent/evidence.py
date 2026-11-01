@@ -121,6 +121,40 @@ def derive_confidence(evidence: list[Evidence], asserted: float) -> float:
     return round(min(asserted, support_ceiling) * agreement, 2)
 
 
+def _as_confidence(value: Any) -> float | None:
+    """A model-written confidence as a float in [0, 1], or None if it is not a number."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number:  # NaN
+        return None
+    return max(0.0, min(1.0, number))
+
+
+def asserted_phase_confidence(data: dict, findings: dict | None = None) -> float:
+    """The confidence a plan phase's answer asserts, for ``derive_confidence``'s ceiling.
+
+    Diagnose phases declare ``confidence`` in ``produces``, so the output template
+    asks for it twice: once in ``findings`` and once at the top level, where the
+    template's example value is ``0.0``. A model that fills in the findings figure
+    and leaves the top-level placeholder (or drops it as a duplicate) asserted
+    the findings figure, not zero — reading the placeholder as the ceiling turned
+    a well-evidenced, correct diagnosis into confidence 0.0. So the top-level
+    figure is used when it is a positive number, the findings figure otherwise;
+    with neither written the ceiling stays 0.0.
+    """
+    top = _as_confidence(data.get("confidence"))
+    if top:
+        return top
+    in_findings = _as_confidence(findings.get("confidence")) if isinstance(findings, dict) else None
+    if in_findings is not None:
+        return in_findings
+    return top or 0.0
+
+
 # Words in tool names that say nothing about where data came from.
 _GENERIC_TOOL_WORDS = frozenset({"get", "list", "describe", "search", "resource", "resources", "status", "details"})
 
