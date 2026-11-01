@@ -42,11 +42,11 @@ jobs:
       FIXTURE: ${{ inputs.fixture || 'plan_node_disk_pressure' }}
       REPEAT: ${{ inputs.repeat || '10' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -101,7 +101,7 @@ jobs:
               print(f"| {i} | {res} | {conf} | {', '.join(tools)} | {cause} |")
           PY
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: investigation-repeat
