@@ -393,6 +393,18 @@ def _migrate_041_investigation_evidence_detail(db: Database) -> None:
     db.execute("ALTER TABLE investigations ADD COLUMN IF NOT EXISTS evidence_detail TEXT")
 
 
+def _migrate_042_readiness_waivers(db: Database) -> None:
+    """Readiness gate waivers, kept by the agent instead of one browser.
+
+    Waivers lived in the localStorage of whoever clicked "Waive", so a
+    colleague opening the same cluster saw the gate failing, and clearing the
+    browser lost the record of who accepted which risk and why.
+    """
+    from .db_schema import READINESS_WAIVERS_SCHEMA
+
+    db.executescript(READINESS_WAIVERS_SCHEMA)
+
+
 def _migrate_040_monitor_noise(db: Database) -> None:
     """How often each finding has gone away on its own, kept across restarts."""
     from .db_schema import NOISE_MEMORY_SCHEMA
@@ -627,4 +639,5 @@ MIGRATIONS = [
     (39, "fix_outcomes", _migrate_039_fix_outcomes),
     (40, "monitor_noise", _migrate_040_monitor_noise),
     (41, "investigation_evidence_detail", _migrate_041_investigation_evidence_detail),
+    (42, "readiness_waivers", _migrate_042_readiness_waivers),
 ]
