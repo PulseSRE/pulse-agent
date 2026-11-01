@@ -47,6 +47,7 @@ _DATA_TOOL_NAMES = {
     # Cluster info
     "get_cluster_version",
     "get_cluster_updates",
+    "check_upgrade_api_removals",
     "get_cluster_operators",
     "list_operator_subscriptions",
     "get_configmap",

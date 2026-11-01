@@ -104,8 +104,14 @@ scenarios:
 
   - id: sre_deprecated_apis
     prompt: "are there any deprecated APIs on this cluster?"
-    should_use_tools: [list_deprecated_apis]
+    should_use_tools: [check_upgrade_api_removals]
     should_mention: [deprecated]
+    max_tool_calls: 4
+
+  - id: sre_upgrade_api_removals
+    prompt: "is it safe to upgrade to the next OpenShift version, or are removed APIs still in use?"
+    should_use_tools: [check_upgrade_api_removals]
+    should_mention: [api]
     max_tool_calls: 4
 
   - id: sre_explain_pod_spec_containers

@@ -911,49 +911,20 @@ def list_api_resources(group: str = ""):
 
 @beta_tool
 def list_deprecated_apis():
-    """Check for deprecated API versions on this cluster.
+    """List deprecated APIs that are scheduled for removal, and whether anything still calls them.
 
-    Shows API groups where non-preferred (older) versions are still available,
-    indicating resources that may need migration before the next cluster upgrade.
+    Same data as check_upgrade_api_removals (APIRequestCount removedInRelease and
+    last-24h callers, ClusterVersion, admin gates), plus APIs removed in releases
+    after the next upgrade. Prefer check_upgrade_api_removals for "is it safe to
+    upgrade". Read-only.
     """
-    from .k8s_client import _load_k8s
+    # This used to list API groups that serve more than one version and call
+    # them "deprecated". Serving v1 and v1beta1 side by side is not deprecation,
+    # and it said nothing about whether anything used the old version, so the
+    # answer to "are there deprecated APIs?" was a list of most API groups.
+    from .upgrade_api_removals import read_upgrade_api_removals, render_upgrade_api_removals
 
-    _load_k8s()
-
-    api = get_apis_client()
-    result = safe(lambda: api.get_api_versions())
-    if isinstance(result, str):
-        return result
-
-    deprecated = []
-    for g in result.groups:
-        if len(g.versions) > 1:
-            preferred = g.preferred_version.group_version
-            older = [v.group_version for v in g.versions if v.group_version != preferred]
-            if older:
-                deprecated.append(
-                    {
-                        "group": g.name,
-                        "preferred": preferred,
-                        "older": older,
-                    }
-                )
-
-    if not deprecated:
-        return "No deprecated API versions found — all API groups have a single version."
-
-    lines = [f"**{len(deprecated)} API groups** have non-preferred (potentially deprecated) versions:\n"]
-    for d in sorted(deprecated, key=lambda x: x["group"]):
-        lines.append(f"**{d['group']}**")
-        lines.append(f"  Preferred: `{d['preferred']}`")
-        lines.append(f"  Older: {', '.join(f'`{v}`' for v in d['older'])}")
-        lines.append("")
-
-    lines.append("**Action:** Check if any workloads use older API versions with:")
-    lines.append("`kubectl get <resource> -o jsonpath='{.apiVersion}'` or review manifests.")
-    lines.append("Migrate to preferred versions before the next cluster upgrade.")
-
-    return "\n".join(lines)
+    return render_upgrade_api_removals(read_upgrade_api_removals(), all_scheduled=True)
 
 
 # ---------------------------------------------------------------------------

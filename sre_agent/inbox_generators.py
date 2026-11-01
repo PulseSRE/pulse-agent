@@ -185,6 +185,23 @@ def _get_available_updates() -> list[dict]:
     return [{"version": u.get("version"), "channel": u.get("channel", "")} for u in updates]
 
 
+def _get_upgrade_api_removals() -> dict | None:
+    """The API-removal verdict for the next minor on offer, or None when there is none.
+
+    None means checked and nothing to say: not OpenShift, or no newer minor is
+    offered. A read that failed raises, so an open "upgrade blocked" item is
+    left alone rather than resolved by a 403.
+    """
+    from .upgrade_api_removals import read_upgrade_api_removals
+
+    data = read_upgrade_api_removals()
+    if data["status"] != "unknown":
+        return data
+    if data["cause"] in ("not_openshift", "no_newer_minor"):
+        return None
+    raise GeneratorUnavailableError(f"upgrade API removals: {data['reason']}")
+
+
 # Hours of error budget left below which an SLO becomes an inbox item.
 _SLO_HORIZON_HOURS = 72
 
@@ -441,6 +458,56 @@ def gen_upgrade_available() -> list[dict[str, Any]]:
             severity="info",
             urgency_hours=168,
             generator="upgrade_available",
+            confidence=1.0,
+        )
+    ]
+
+
+def gen_upgrade_api_removals() -> list[dict[str, Any]]:
+    """One item while the next minor on offer is blocked by API removals or an unacked gate.
+
+    Stops being produced (and is auto-resolved) once the verdict is go. A new
+    target minor gets its own item, so the old one resolves with it.
+    """
+    data = _get_upgrade_api_removals()
+    if not data or data["status"] != "no_go":
+        return []
+    target = data["target"]["ocp"]
+    in_use = data["inUse"]
+    unacked = [g for g in data["gates"] if g["acked"] is False]
+    if in_use:
+        n = len(in_use)
+        title = f"Upgrade to {target} blocked: {n} removed API{'s' if n != 1 else ''} still in use"
+    else:
+        n = len(unacked)
+        title = f"Upgrade to {target} blocked: {n} admin gate{'s' if n != 1 else ''} not acknowledged"
+
+    lines = [data["reason"]]
+    for api in in_use[:10]:
+        lines.append(
+            f"{api['name']} (removed in Kubernetes {api['removedInRelease']}): {api['requestCount']} requests/24h"
+        )
+        for c in api.get("callers", [])[:3]:
+            platform = " [platform]" if c["platform"] else ""
+            agent = f" ({c['userAgent']})" if c["userAgent"] else ""
+            lines.append(f"  - {c['username'] or '(unknown user)'}{agent}: {c['count']}{platform}")
+        more = api.get("callerCount", 0) - min(3, len(api.get("callers", [])))
+        if more > 0:
+            lines.append(f"  - +{more} more callers")
+    if len(in_use) > 10:
+        lines.append(f"+{len(in_use) - 10} more APIs")
+    for g in unacked:
+        lines.append(f"Admin gate not acknowledged: {g['key']} — {g['description']}")
+    resources = [{"kind": "APIRequestCount", "name": api["name"], "namespace": ""} for api in in_use[:20]]
+    return [
+        _make_assessment(
+            title=title,
+            summary="\n".join(lines),
+            severity="warning",
+            urgency_hours=72,
+            generator="upgrade_api_removals",
+            resources=resources,
+            correlation_key=f"upgrade_api_removals:{target}",
             confidence=1.0,
         )
     ]
@@ -799,6 +866,7 @@ TASK_GENERATORS: list[tuple[str, Any]] = [
     ("trend_prediction", gen_trend_prediction),
     ("degraded_operator", gen_degraded_operator),
     ("upgrade_available", gen_upgrade_available),
+    ("upgrade_api_removals", gen_upgrade_api_removals),
     ("slo_burn", gen_slo_burn),
     ("capacity_projection", gen_capacity_projection),
     ("stale_finding", gen_stale_finding),
