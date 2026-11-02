@@ -11,7 +11,7 @@ from pydantic import BaseModel as _BaseModel
 from pydantic import Field
 
 from ..k8s_client import user_token_context
-from .auth import get_user_token, verify_token
+from .auth import get_user_token, require_user_token, verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -48,6 +48,9 @@ async def get_topology(
     Supports perspective filtering via kinds/relationships/layout_hint params.
     Used by the perspective quick-launch pills for instant view switching.
     """
+    # The graph and the metrics below are cluster reads made for the caller;
+    # without their token they would be the service account's view.
+    require_user_token(user_token)
     from ..view_tools import VALID_LAYOUT_HINTS, VALID_TOPOLOGY_KINDS, VALID_TOPOLOGY_RELATIONSHIPS
 
     kind_set: set[str] | None = None
@@ -288,6 +291,7 @@ async def get_blast_radius(
     _auth=Depends(verify_token),
 ):
     """Compute blast radius tree for a selected node — 'What if this goes down?'"""
+    require_user_token(user_token)
     from ..dependency_graph import get_dependency_graph
 
     graph = get_dependency_graph()
@@ -368,6 +372,7 @@ async def get_finding_impact(
     _auth=Depends(verify_token),
 ):
     """Blast radius and dependency analysis for a single finding."""
+    require_user_token(user_token)
     from fastapi.responses import JSONResponse
 
     from ..dependency_graph import get_dependency_graph
@@ -598,6 +603,7 @@ async def simulate_with_blast_radius(
     body: _SimulateRequest, user_token: str | None = Depends(get_user_token), _auth=Depends(verify_token)
 ):
     """Simulate a tool action and enrich with fix blast radius analysis."""
+    require_user_token(user_token)
     from ..monitor.investigations import simulate_action
 
     sim = simulate_action(body.tool, body.tool_input)

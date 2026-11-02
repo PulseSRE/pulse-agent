@@ -193,6 +193,20 @@ Inbox item `metadata` optional keys added for queue explainability: `priority_fa
 
 **Authentication:** Token-authenticated endpoints accept `Authorization: Bearer <token>` header or `?token=<token>` query parameter. The token is `PULSE_AGENT_WS_TOKEN`. Unauthenticated requests return 401.
 
+**User token (reads as the caller).** With token forwarding on (`PULSE_AGENT_TOKEN_FORWARDING`, default `true`), these routes read the cluster as the caller and also require the signed-in user's `X-Forwarded-Access-Token` header; without it they return 401 instead of reading as the agent's service account. With forwarding off they read as the service account and need no user token.
+
+| Route | 401 body without the user token |
+|-------|------|
+| `GET /topology` | `{"detail": "User access token required: ..."}` |
+| `GET /topology/blast-radius` | `{"detail": "User access token required: ..."}` |
+| `GET /incidents/{finding_id}/impact` | `{"detail": "User access token required: ..."}` |
+| `POST /monitor/simulate` | `{"detail": "User access token required: ..."}` |
+| `GET /query` | `{"detail": "User access token required: ..."}` |
+| `GET /log-counts` | `{"detail": "User access token required: ..."}` |
+| `POST /inbox/{item_id}/claim` | `{"detail": "User access token required: ..."}` |
+| `POST /views/{view_id}/actions` | `{"error": "Your access token did not reach Pulse; sign in again to run this action"}` (every action, read or write) |
+| `POST /fix-history/{action_id}/rollback` | `{"detail": "User access token required for rollback"}` |
+
 ### `/version` Response
 
 ```json
@@ -430,6 +444,8 @@ Auth: Bearer token.
 | `/ws/monitor?token=...` | token | Autonomous cluster monitoring (Protocol v2) |
 
 All WebSocket endpoints require `PULSE_AGENT_WS_TOKEN` via the `token` query parameter. Connections without a valid token are closed with code `4001`.
+
+**User token on `/ws/agent`.** With token forwarding on (`PULSE_AGENT_TOKEN_FORWARDING`, default `true`), `/ws/agent` also requires the signed-in user's `X-Forwarded-Access-Token` header (set by the UI's oauth-proxy/nginx). Without it the connection is accepted and immediately closed with code `4001`, reason `"User access token required"`, so chat never reads the cluster as the agent's service account. `/ws/monitor` does not require it (it pushes the service account's findings by design). With forwarding off, no user token is required.
 
 ---
 

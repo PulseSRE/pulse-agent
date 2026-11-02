@@ -159,7 +159,7 @@ def test_topology_id_round_trips_to_blast_radius(monkeypatch, kind, namespace, r
     child = graph.add_node("Pod", "prod", "pod")
     graph.add_edge(source, child, relationship)
     monkeypatch.setattr("sre_agent.dependency_graph.get_dependency_graph", lambda: graph)
-    result = asyncio.run(topology_rest.get_blast_radius(source, "", None, None))
+    result = asyncio.run(topology_rest.get_blast_radius(source, "", "user-token", None))
     assert result["affected"] == 1
     assert result["source"] == source
     assert result["resources"][0]["id"] == child
@@ -200,7 +200,7 @@ def test_topology_node_status_follows_finding_severity(monkeypatch):
             layout_hint="",
             include_metrics=False,
             group_by="",
-            user_token=None,
+            user_token="user-token",
             _auth=None,
         )
     )
