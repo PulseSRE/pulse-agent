@@ -84,6 +84,15 @@ class TestUpgradeAvailableGenerator:
         assert len(items) == 1
         assert items[0]["severity"] == "info"
         assert items[0]["metadata"]["urgency_hours"] == 168
+        # Deep link to Administration -> Updates, and the ClusterVersion for drawers that only render resources.
+        assert items[0]["metadata"]["ui_link"] == "/admin?tab=updates"
+        assert items[0]["resources"] == [{"kind": "ClusterVersion", "name": "version", "namespace": ""}]
+
+    def test_other_generators_carry_no_ui_link(self):
+        from sre_agent.inbox_generators import _make_assessment
+
+        item = _make_assessment("t", "s", "info", 1, "posture")
+        assert "ui_link" not in item["metadata"]
 
 
 class TestSLOBurnGenerator:

@@ -28,7 +28,7 @@ from datetime import datetime
 from typing import Any
 
 from ..errors import ToolError
-from ..k8s_client import get_apps_client, get_core_client, get_custom_client, safe
+from ..k8s_client import get_apps_client, get_core_client, get_custom_client, get_raw_json, safe
 from .confidence import _strip_pod_hash
 
 logger = logging.getLogger("pulse_agent.monitor")
@@ -88,9 +88,23 @@ def _image(template: Any) -> str:
         return ""
 
 
-def _deployment_rollouts(ns: str, start: int, onset: int) -> list[dict]:
+def _failed(result: Any, errors: list[ToolError] | None) -> bool:
+    """True when ``result`` is a read error; the error is kept in ``errors`` when given.
+
+    The ranking callers treat an unreadable source as "nothing to add"; the
+    ``/changes`` endpoint passes ``errors`` so a forbidden read becomes a 403
+    rather than an empty list that looks like "nothing changed".
+    """
+    if isinstance(result, ToolError):
+        if errors is not None:
+            errors.append(result)
+        return True
+    return False
+
+
+def _deployment_rollouts(ns: str, start: int, onset: int, errors: list[ToolError] | None = None) -> list[dict]:
     rs_list = safe(lambda: get_apps_client().list_namespaced_replica_set(ns))
-    if isinstance(rs_list, ToolError):
+    if _failed(rs_list, errors):
         return []
     by_deploy: dict[str, list[Any]] = {}
     for rs in rs_list.items:
@@ -122,6 +136,7 @@ def _deployment_rollouts(ns: str, start: int, onset: int) -> list[dict]:
                 "namespace": ns,
                 "title": title,
                 "at": at,
+                "actor": None,
             }
             prev_rev = (prev.metadata.annotations or {}).get("deployment.kubernetes.io/revision", "") if prev else ""
             if prev_rev.isdigit():
@@ -135,9 +150,9 @@ def _deployment_rollouts(ns: str, start: int, onset: int) -> list[dict]:
     return out
 
 
-def _controller_revisions(ns: str, start: int, onset: int) -> list[dict]:
+def _controller_revisions(ns: str, start: int, onset: int, errors: list[ToolError] | None = None) -> list[dict]:
     revs = safe(lambda: get_apps_client().list_namespaced_controller_revision(ns))
-    if isinstance(revs, ToolError):
+    if _failed(revs, errors):
         return []
     out = []
     for rev in revs.items:
@@ -155,6 +170,7 @@ def _controller_revisions(ns: str, start: int, onset: int) -> list[dict]:
                         "namespace": ns,
                         "title": f"{kind} {owner} rolled out revision {rev.revision}",
                         "at": at,
+                        "actor": None,
                     }
                 )
     return out
@@ -163,15 +179,18 @@ def _controller_revisions(ns: str, start: int, onset: int) -> list[dict]:
 def _last_edit(obj: Any) -> tuple[int | None, str]:
     latest, manager = None, ""
     for mf in obj.metadata.managed_fields or []:
+        # A status write (a controller recording progress) is not an edit.
+        if getattr(mf, "subresource", None) == "status":
+            continue
         t = _epoch(getattr(mf, "time", None))
         if t is not None and (latest is None or t > latest):
             latest, manager = t, mf.manager or ""
     return latest, manager
 
 
-def _configmap_edits(ns: str, start: int, onset: int) -> list[dict]:
+def _configmap_edits(ns: str, start: int, onset: int, errors: list[ToolError] | None = None) -> list[dict]:
     cms = safe(lambda: get_core_client().list_namespaced_config_map(ns))
-    if isinstance(cms, ToolError):
+    if _failed(cms, errors):
         return []
     out = []
     for cm in cms.items:
@@ -192,9 +211,60 @@ def _configmap_edits(ns: str, start: int, onset: int) -> list[dict]:
                 "namespace": ns,
                 "title": f"ConfigMap {name} {verb}{by}",
                 "at": at,
+                "actor": manager or None,
             }
         )
     return out
+
+
+def referenced_config(pod_spec: Any) -> tuple[set[str], set[str]]:
+    """Names of the ConfigMaps and Secrets a pod spec mounts or references.
+
+    Volumes (including projected sources), ``envFrom``, ``env.valueFrom`` key
+    refs and image pull secrets. Names only: nothing here reads a value.
+    """
+    configmaps: set[str] = set()
+    secrets: set[str] = set()
+    if pod_spec is None:
+        return configmaps, secrets
+    for v in getattr(pod_spec, "volumes", None) or []:
+        cm = getattr(v, "config_map", None)
+        if cm is not None and getattr(cm, "name", None):
+            configmaps.add(cm.name)
+        sec = getattr(v, "secret", None)
+        if sec is not None and getattr(sec, "secret_name", None):
+            secrets.add(sec.secret_name)
+        projected = getattr(v, "projected", None)
+        for src in (getattr(projected, "sources", None) or []) if projected is not None else []:
+            pcm = getattr(src, "config_map", None)
+            if pcm is not None and getattr(pcm, "name", None):
+                configmaps.add(pcm.name)
+            psec = getattr(src, "secret", None)
+            if psec is not None and getattr(psec, "name", None):
+                secrets.add(psec.name)
+    containers = list(getattr(pod_spec, "containers", None) or []) + list(
+        getattr(pod_spec, "init_containers", None) or []
+    )
+    for c in containers:
+        for ef in getattr(c, "env_from", None) or []:
+            if getattr(ef, "config_map_ref", None):
+                configmaps.add(ef.config_map_ref.name)
+            if getattr(ef, "secret_ref", None):
+                secrets.add(ef.secret_ref.name)
+        for e in getattr(c, "env", None) or []:
+            vf = getattr(e, "value_from", None)
+            if vf is None:
+                continue
+            if getattr(vf, "config_map_key_ref", None):
+                configmaps.add(vf.config_map_key_ref.name)
+            if getattr(vf, "secret_key_ref", None):
+                secrets.add(vf.secret_key_ref.name)
+    for ips in getattr(pod_spec, "image_pull_secrets", None) or []:
+        if getattr(ips, "name", None):
+            secrets.add(ips.name)
+    configmaps.discard("")
+    secrets.discard("")
+    return configmaps, secrets
 
 
 def _mounted_configmaps(ns: str) -> dict[str, set[str]]:
@@ -204,24 +274,61 @@ def _mounted_configmaps(ns: str) -> dict[str, set[str]]:
         return {}
     refs: dict[str, set[str]] = {}
     for d in deps.items:
-        spec = d.spec.template.spec
-        names = {v.config_map.name for v in (spec.volumes or []) if getattr(v, "config_map", None)}
-        for c in list(spec.containers or []) + list(spec.init_containers or []):
-            for ef in c.env_from or []:
-                if getattr(ef, "config_map_ref", None):
-                    names.add(ef.config_map_ref.name)
-            for e in c.env or []:
-                vf = getattr(e, "value_from", None)
-                if vf is not None and getattr(vf, "config_map_key_ref", None):
-                    names.add(vf.config_map_key_ref.name)
+        names, _secrets = referenced_config(d.spec.template.spec)
         for n in names:
             refs.setdefault(n, set()).add(d.metadata.name)
     return refs
 
 
-def _argo_syncs(namespaces: set[str], start: int, onset: int) -> list[dict]:
+# Metadata only: the API server never sends ``data`` for a PartialObjectMetadata
+# list, so a Secret's value cannot reach this process, let alone a response.
+_METADATA_ONLY = "application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1"
+
+
+def _secret_edits(
+    ns: str, names: set[str], start: int, onset: int, errors: list[ToolError] | None = None
+) -> list[dict]:
+    """Edits to the named Secrets in ``ns`` (names and timestamps; never values)."""
+    if not names:
+        return []
+    listing = get_raw_json(f"/api/v1/namespaces/{ns}/secrets", "list secrets (metadata only)", accept=_METADATA_ONLY)
+    if _failed(listing, errors) or not isinstance(listing, dict):
+        return []
+    out = []
+    for item in listing.get("items", []) or []:
+        meta = item.get("metadata") or {}
+        name = meta.get("name", "")
+        if name not in names:
+            continue
+        latest, manager = None, ""
+        for mf in meta.get("managedFields") or []:
+            if mf.get("subresource") == "status":
+                continue
+            t = _epoch(mf.get("time"))
+            if t is not None and (latest is None or t > latest):
+                latest, manager = t, mf.get("manager") or ""
+        if latest is None or not (start <= latest <= onset):
+            continue
+        created = _epoch(meta.get("creationTimestamp"))
+        verb = "created" if created is not None and abs(latest - created) < 5 else "edited"
+        by = f" by {manager}" if manager else ""
+        out.append(
+            {
+                "category": "secret",
+                "kind": "Secret",
+                "name": name,
+                "namespace": ns,
+                "title": f"Secret {name} {verb}{by}",
+                "at": latest,
+                "actor": manager or None,
+            }
+        )
+    return out
+
+
+def _argo_syncs(namespaces: set[str], start: int, onset: int, errors: list[ToolError] | None = None) -> list[dict]:
     apps = safe(lambda: get_custom_client().list_cluster_custom_object("argoproj.io", "v1alpha1", "applications"))
-    if isinstance(apps, ToolError) or not isinstance(apps, dict):
+    if _failed(apps, errors) or not isinstance(apps, dict):
         return []
     out = []
     for app in apps.get("items", []):
@@ -232,6 +339,8 @@ def _argo_syncs(namespaces: set[str], start: int, onset: int) -> list[dict]:
             continue
         rev = ((op.get("syncResult") or {}).get("revision") or "")[:8]
         name = app.get("metadata", {}).get("name", "")
+        initiated = (op.get("operation") or {}).get("initiatedBy") or {}
+        actor = initiated.get("username") or ("automated sync" if initiated.get("automated") else None)
         out.append(
             {
                 "category": "gitops",
@@ -240,16 +349,17 @@ def _argo_syncs(namespaces: set[str], start: int, onset: int) -> list[dict]:
                 "namespace": dest,
                 "title": f"Argo CD synced {name}" + (f" to {rev}" if rev else ""),
                 "at": at,
+                "actor": actor,
             }
         )
     return out
 
 
-def _cluster_upgrades(start: int, onset: int) -> list[dict]:
+def _cluster_upgrades(start: int, onset: int, errors: list[ToolError] | None = None) -> list[dict]:
     cv = safe(
         lambda: get_custom_client().get_cluster_custom_object("config.openshift.io", "v1", "clusterversions", "version")
     )
-    if isinstance(cv, ToolError) or not isinstance(cv, dict):
+    if _failed(cv, errors) or not isinstance(cv, dict):
         return []
     out = []
     for h in (cv.get("status") or {}).get("history", []) or []:
@@ -263,6 +373,7 @@ def _cluster_upgrades(start: int, onset: int) -> list[dict]:
                     "namespace": "",
                     "title": f"Cluster upgrade to {h.get('version', '?')} started",
                     "at": at,
+                    "actor": None,
                 }
             )
     return out

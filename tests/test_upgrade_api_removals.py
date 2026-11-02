@@ -493,12 +493,20 @@ class TestInboxGenerator:
         [item] = gen_upgrade_api_removals()
         assert item["title"] == "Upgrade to 4.19 blocked: 1 removed API still in use"
         assert item["correlation_key"] == "upgrade_api_removals:4.19"
-        assert item["metadata"] == {"generator": "upgrade_api_removals", "urgency_hours": 72}
+        assert item["metadata"] == {
+            "generator": "upgrade_api_removals",
+            "urgency_hours": 72,
+            "ui_link": "/admin?tab=updates",
+        }
         assert item["due_date"] > 0
         assert f"{FLOWSCHEMA} (removed in Kubernetes 1.32): 130 requests/24h" in item["summary"]
         assert "alice (kubectl/v1.31.0): 20" in item["summary"]
         assert "[platform]" in item["summary"]
-        assert item["resources"] == [{"kind": "APIRequestCount", "name": FLOWSCHEMA, "namespace": ""}]
+        # ClusterVersion first, so the drawer's first link is the cluster's update state.
+        assert item["resources"] == [
+            {"kind": "ClusterVersion", "name": "version", "namespace": ""},
+            {"kind": "APIRequestCount", "name": FLOWSCHEMA, "namespace": ""},
+        ]
 
     def test_unacked_gate_item(self, mock_k8s):
         from sre_agent.inbox_generators import gen_upgrade_api_removals
@@ -531,6 +539,9 @@ class TestInboxGenerator:
         assert (
             item["title"] == "Upgrade to 4.19 blocked: ClusterVersion not upgradeable (ClusterOperatorsNotUpgradeable)"
         )
+        # No removed API in use, but the item still links to the cluster's update state.
+        assert item["resources"] == [{"kind": "ClusterVersion", "name": "version", "namespace": ""}]
+        assert item["metadata"]["ui_link"] == "/admin?tab=updates"
         assert "machine-config is not upgradeable" in item["summary"]
 
     def test_not_openshift_produces_nothing(self, mock_k8s):
