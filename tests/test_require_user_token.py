@@ -318,10 +318,18 @@ class TestAgentSockets:
     # same gate but is not mounted.
     @pytest.mark.parametrize("path", ["/ws/agent"])
     def test_chat_without_user_token_is_closed(self, client, k8s_stubbed, path):
-        with pytest.raises(WebSocketDisconnect) as exc, client.websocket_connect(f"{path}?token={SHARED}") as ws:
-            ws.receive_json()
+        # Accepted, then closed: a close before accept would reach a browser as
+        # an HTTP 403 (1006) without the code or reason. The message is sent
+        # first so that, were the gate missing, "cleared" would come back and
+        # the test would fail instead of waiting for a close that never comes.
+        # Entering the context outside pytest.raises: a close before accept
+        # raises here, at the handshake, and fails the test.
+        with client.websocket_connect(f"{path}?token={SHARED}") as ws:
+            with pytest.raises(WebSocketDisconnect) as exc:
+                ws.send_json({"type": "clear"})
+                ws.receive_json()
         assert exc.value.code == 4001
-        assert "User access token required" in exc.value.reason
+        assert exc.value.reason == "User access token required"
 
     @pytest.mark.parametrize("path", ["/ws/agent"])
     def test_chat_with_user_token_connects(self, client, k8s_stubbed, path):

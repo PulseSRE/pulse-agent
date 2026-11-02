@@ -95,8 +95,13 @@ async def _reject_without_user_token(websocket: WebSocket) -> bool:
     With forwarding off the service account is the design and nothing is closed.
     The monitor socket is not gated: it pushes the service account's findings
     by design.
+
+    Accepted before closing: a close before accept is answered as an HTTP 403
+    at the handshake, so the browser sees 1006 and never the 4001 or its
+    reason. Called before the session is counted, so nothing to undo.
     """
     if user_token_missing(extract_user_token(websocket.headers)):
+        await websocket.accept()
         await websocket.close(4001, "User access token required")
         return True
     return False

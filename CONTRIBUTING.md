@@ -20,6 +20,8 @@ python -m ruff format --check sre_agent/ tests/
 python scripts/check_discipline.py
 ```
 
+Running pulse-ui's dev server (`pnpm dev`) against a local agent with token forwarding on (the default): set `PULSE_AGENT_WS_TOKEN` (and `PULSE_USER_TOKEN=$(oc whoami -t)` to act as yourself) in the UI's environment, since its dev proxy only adds `X-Forwarded-Access-Token` when that variable is set; without a user token, chat (`/ws/agent`) closes with 4001 and the routes that read as the caller answer 401.
+
 `make verify` runs Ruff lint, Mypy, and pytest. Formatting and discipline checks are separate. Live replay is a separate provider-backed quality gate; an offline check is insufficient evidence of model quality.
 
 ## Conventions

@@ -515,7 +515,11 @@ async def rest_execute_action(
     if user_token_missing(user_token):
         # Without the person's token the tool would run as the agent's service
         # account, with the agent's rights rather than theirs -- for a read as
-        # much as for a write.
+        # much as for a write. Same rule as require_user_token(), but answered
+        # in this route's {"error": ...} shape rather than HTTPException's
+        # {"detail": ...}: pulse-ui's executeAction (customViewStore apiFetch)
+        # shows `body.error` for every failure here (403/404/400 too) and falls
+        # back to the bare status text without it.
         return JSONResponse(
             status_code=401,
             content={"error": "Your access token did not reach Pulse; sign in again to run this action"},
