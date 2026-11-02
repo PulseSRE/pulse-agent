@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from typing import Any
 
 from .. import k8s_client as _kc
 from ..decorators import beta_tool
@@ -93,9 +94,60 @@ def list_pods(namespace: str = "default", label_selector: str = "", field_select
     return (text, component)
 
 
+def _last_termination(cs: Any) -> dict[str, Any] | None:
+    """The container's previous run, if it ended: why, exit code, when, how long it ran.
+
+    For a crashlooping container the current state is only ``waiting:
+    CrashLoopBackOff``; the cause (``OOMKilled``, exit 137) is in
+    ``lastState.terminated``.
+    """
+    last_state = getattr(cs, "last_state", None)
+    term = getattr(last_state, "terminated", None) if last_state is not None else None
+    if term is None:
+        return None
+    started = getattr(term, "started_at", None)
+    finished = getattr(term, "finished_at", None)
+    ran_for_seconds: int | None = None
+    if isinstance(started, datetime) and isinstance(finished, datetime):
+        ran_for_seconds = max(0, int((finished - started).total_seconds()))
+    return {
+        "reason": getattr(term, "reason", None) or "",
+        "exit_code": getattr(term, "exit_code", None),
+        "signal": getattr(term, "signal", None),
+        "message": (getattr(term, "message", None) or "")[:500],
+        "started_at": started.isoformat() if isinstance(started, datetime) else started,
+        "finished_at": finished.isoformat() if isinstance(finished, datetime) else finished,
+        "ran_for_seconds": ran_for_seconds,
+    }
+
+
+def _format_duration(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m{seconds % 60:02d}s"
+    return f"{seconds // 3600}h{(seconds % 3600) // 60:02d}m"
+
+
+def _last_termination_label(last: dict[str, Any] | None) -> str:
+    """'OOMKilled, exit 137, 14:21 (ran 2m03s)' — empty when the container never ended."""
+    if not last:
+        return ""
+    parts = [last["reason"] or "Terminated"]
+    if last["exit_code"] is not None:
+        parts.append(f"exit {last['exit_code']}")
+    finished = last["finished_at"]
+    if isinstance(finished, str) and len(finished) >= 16:
+        parts.append(f"{finished[11:16]} UTC" if finished.endswith(("+00:00", "Z")) else finished[11:16])
+    label = ", ".join(parts)
+    if last["ran_for_seconds"] is not None:
+        label += f" (ran {_format_duration(last['ran_for_seconds'])})"
+    return label
+
+
 @beta_tool
 def describe_pod(namespace: str, pod_name: str):
-    """Get detailed information about a specific pod including conditions, containers, and recent events.
+    """Get detailed information about a specific pod including conditions, containers (with each container's last termination: reason, exit code, when, how long it ran), and recent events.
 
     Args:
         namespace: Kubernetes namespace.
@@ -133,25 +185,43 @@ def describe_pod(namespace: str, pod_name: str):
             }
         )
 
-    for cs in pod.status.container_statuses or []:
+    # Init and ephemeral containers die too (an OOMKilled init container keeps
+    # the pod in Init:CrashLoopBackOff); each entry says which kind it is.
+    statuses = [
+        (ctype, cs)
+        for ctype, attr in (
+            ("init", "init_container_statuses"),
+            ("container", "container_statuses"),
+            ("ephemeral", "ephemeral_container_statuses"),
+        )
+        for cs in (getattr(pod.status, attr, None) or [])
+    ]
+    for ctype, cs in statuses:
         state = "unknown"
         reason = ""
-        if cs.state.running:
+        cstate = getattr(cs, "state", None)
+        if cstate is None:
+            pass
+        elif cstate.running:
             state = "running"
-        elif cs.state.waiting:
+        elif cstate.waiting:
             state = "waiting"
-            reason = cs.state.waiting.reason or ""
-        elif cs.state.terminated:
+            reason = cstate.waiting.reason or ""
+        elif cstate.terminated:
             state = "terminated"
-            reason = cs.state.terminated.reason or ""
+            reason = cstate.terminated.reason or ""
+        last = _last_termination(cs)
         info["containers"].append(
             {
                 "name": cs.name,
+                "type": ctype,
                 "image": cs.image,
                 "ready": cs.ready,
                 "restarts": cs.restart_count,
                 "state": state,
                 "reason": reason,
+                "last_termination": last,
+                "last_terminated": _last_termination_label(last),
             }
         )
 
@@ -221,13 +291,15 @@ def describe_pod(namespace: str, pod_name: str):
                 "title": "Containers",
                 "columns": [
                     {"id": "name", "header": "Name"},
+                    {"id": "type", "header": "Type"},
                     {"id": "image", "header": "Image"},
                     {"id": "state", "header": "State", "type": "status"},
                     {"id": "ready", "header": "Ready", "type": "boolean"},
                     {"id": "restarts", "header": "Restarts"},
                     {"id": "reason", "header": "Reason"},
+                    {"id": "last_terminated", "header": "Last termination"},
                 ],
-                "rows": info["containers"],
+                "rows": [{k: v for k, v in c.items() if k != "last_termination"} for c in info["containers"]],
             }
         )
 

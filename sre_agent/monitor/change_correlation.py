@@ -23,12 +23,22 @@ offers as an action routed through the agent's confirmation gate.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import threading
+import time
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
 from ..errors import ToolError
-from ..k8s_client import get_apps_client, get_core_client, get_custom_client, safe
+from ..k8s_client import (
+    get_apps_client,
+    get_current_user_token,
+    get_custom_client,
+    get_raw_json,
+    safe,
+)
 from .confidence import _strip_pod_hash
 
 logger = logging.getLogger("pulse_agent.monitor")
@@ -88,12 +98,99 @@ def _image(template: Any) -> str:
         return ""
 
 
-def _deployment_rollouts(ns: str, start: int, onset: int) -> list[dict]:
-    rs_list = safe(lambda: get_apps_client().list_namespaced_replica_set(ns))
-    if isinstance(rs_list, ToolError):
+def _failed(result: Any, errors: list[ToolError] | None) -> bool:
+    """True when ``result`` is a read error; the error is kept in ``errors`` when given.
+
+    The ranking callers treat an unreadable source as "nothing to add"; the
+    ``/changes`` endpoint passes ``errors`` so a forbidden read becomes a 403
+    rather than an empty list that looks like "nothing changed".
+    """
+    if isinstance(result, ToolError):
+        if errors is not None:
+            errors.append(result)
+        return True
+    return False
+
+
+# Lists are read in pages; past MAX_LIST_ITEMS the rest is not read and the
+# source is named in ``incomplete`` so a caller can say the answer is partial.
+PAGE_SIZE = 500
+MAX_LIST_ITEMS = 5000
+
+
+def _list_typed(
+    fn: Callable[..., Any], what: str, errors: list[ToolError] | None, incomplete: list[str] | None
+) -> list[Any] | None:
+    """All items of a typed-client list call, paged with ``limit``/``_continue``; None on a read error."""
+    items: list[Any] = []
+    token: str | None = None
+    while True:
+        kwargs: dict[str, Any] = {"limit": PAGE_SIZE}
+        if token:
+            kwargs["_continue"] = token
+        page = safe(lambda: fn(**kwargs))
+        if _failed(page, errors):
+            return None
+        items.extend(getattr(page, "items", None) or [])
+        nxt = getattr(getattr(page, "metadata", None), "_continue", None)
+        if not isinstance(nxt, str) or not nxt or nxt == token:
+            return items
+        if len(items) >= MAX_LIST_ITEMS:
+            if incomplete is not None:
+                incomplete.append(what)
+            return items
+        token = nxt
+
+
+def _list_dicts(
+    fetch: Callable[[str | None], Any], what: str, errors: list[ToolError] | None, incomplete: list[str] | None
+) -> list[dict] | None:
+    """All items of a JSON list (``metadata.continue`` paging); None on a read error."""
+    items: list[dict] = []
+    token: str | None = None
+    while True:
+        page = fetch(token)
+        if _failed(page, errors) or not isinstance(page, dict):
+            return None if isinstance(page, ToolError) else items
+        items.extend(page.get("items") or [])
+        nxt = (page.get("metadata") or {}).get("continue")
+        if not isinstance(nxt, str) or not nxt or nxt == token:
+            return items
+        if len(items) >= MAX_LIST_ITEMS:
+            if incomplete is not None:
+                incomplete.append(what)
+            return items
+        token = nxt
+
+
+def _list_metadata(
+    path: str, what: str, errors: list[ToolError] | None, incomplete: list[str] | None
+) -> list[dict] | None:
+    """A core list as PartialObjectMetadata: names, timestamps, managedFields — never ``data``."""
+
+    def fetch(token: str | None) -> Any:
+        query = {"limit": str(PAGE_SIZE)}
+        if token:
+            query["continue"] = token
+        return get_raw_json(path, what, query=query, accept=_METADATA_ONLY)
+
+    return _list_dicts(fetch, what, errors, incomplete)
+
+
+def _deployment_rollouts(
+    ns: str,
+    start: int,
+    onset: int,
+    errors: list[ToolError] | None = None,
+    incomplete: list[str] | None = None,
+) -> list[dict]:
+    rs_items = _list_typed(
+        lambda **kw: get_apps_client().list_namespaced_replica_set(ns, **kw), f"ReplicaSets in {ns}", errors, incomplete
+    )
+    if rs_items is None:
         return []
     by_deploy: dict[str, list[Any]] = {}
-    for rs in rs_list.items:
+    for rs in rs_items:
         owner = _owner_name(rs, "Deployment")
         if owner:
             by_deploy.setdefault(owner, []).append(rs)
@@ -122,6 +219,7 @@ def _deployment_rollouts(ns: str, start: int, onset: int) -> list[dict]:
                 "namespace": ns,
                 "title": title,
                 "at": at,
+                "actor": None,
             }
             prev_rev = (prev.metadata.annotations or {}).get("deployment.kubernetes.io/revision", "") if prev else ""
             if prev_rev.isdigit():
@@ -135,12 +233,23 @@ def _deployment_rollouts(ns: str, start: int, onset: int) -> list[dict]:
     return out
 
 
-def _controller_revisions(ns: str, start: int, onset: int) -> list[dict]:
-    revs = safe(lambda: get_apps_client().list_namespaced_controller_revision(ns))
-    if isinstance(revs, ToolError):
+def _controller_revisions(
+    ns: str,
+    start: int,
+    onset: int,
+    errors: list[ToolError] | None = None,
+    incomplete: list[str] | None = None,
+) -> list[dict]:
+    revs = _list_typed(
+        lambda **kw: get_apps_client().list_namespaced_controller_revision(ns, **kw),
+        f"ControllerRevisions in {ns}",
+        errors,
+        incomplete,
+    )
+    if revs is None:
         return []
     out = []
-    for rev in revs.items:
+    for rev in revs:
         at = _epoch(rev.metadata.creation_timestamp)
         if at is None or not (start <= at <= onset) or (rev.revision or 0) <= 1:
             continue
@@ -155,6 +264,7 @@ def _controller_revisions(ns: str, start: int, onset: int) -> list[dict]:
                         "namespace": ns,
                         "title": f"{kind} {owner} rolled out revision {rev.revision}",
                         "at": at,
+                        "actor": None,
                     }
                 )
     return out
@@ -163,38 +273,120 @@ def _controller_revisions(ns: str, start: int, onset: int) -> list[dict]:
 def _last_edit(obj: Any) -> tuple[int | None, str]:
     latest, manager = None, ""
     for mf in obj.metadata.managed_fields or []:
+        # A status write (a controller recording progress) is not an edit.
+        if getattr(mf, "subresource", None) == "status":
+            continue
         t = _epoch(getattr(mf, "time", None))
         if t is not None and (latest is None or t > latest):
             latest, manager = t, mf.manager or ""
     return latest, manager
 
 
-def _configmap_edits(ns: str, start: int, onset: int) -> list[dict]:
-    cms = safe(lambda: get_core_client().list_namespaced_config_map(ns))
-    if isinstance(cms, ToolError):
-        return []
+_SKIP_CONFIGMAPS = ("kube-root-ca.crt", "openshift-service-ca.crt")
+
+
+def metadata_edit(meta: dict, kind: str, category: str, ns: str, start: int, onset: int) -> dict | None:
+    """The last edit of an object from its (metadata-only) ``metadata``, if inside the window."""
+    latest, manager = None, ""
+    for mf in meta.get("managedFields") or []:
+        if mf.get("subresource") == "status":
+            continue
+        t = _epoch(mf.get("time"))
+        if t is not None and (latest is None or t > latest):
+            latest, manager = t, mf.get("manager") or ""
+    if latest is None or not (start <= latest <= onset):
+        return None
+    name = meta.get("name", "")
+    created = _epoch(meta.get("creationTimestamp"))
+    verb = "created" if created is not None and abs(latest - created) < 5 else "edited"
+    by = f" by {manager}" if manager else ""
+    return {
+        "category": category,
+        "kind": kind,
+        "name": name,
+        "namespace": ns,
+        "title": f"{kind} {name} {verb}{by}",
+        "at": latest,
+        "actor": manager or None,
+    }
+
+
+def _configmap_edits(
+    ns: str,
+    start: int,
+    onset: int,
+    errors: list[ToolError] | None = None,
+    incomplete: list[str] | None = None,
+) -> list[dict]:
+    """ConfigMap edits in ``ns``, listed as metadata only (no ``data`` is read)."""
+    items = _list_metadata(f"/api/v1/namespaces/{ns}/configmaps", f"ConfigMaps in {ns}", errors, incomplete)
     out = []
-    for cm in cms.items:
-        name = cm.metadata.name
-        if name in ("kube-root-ca.crt", "openshift-service-ca.crt"):
+    for item in items or []:
+        meta = item.get("metadata") or {}
+        if meta.get("name") in _SKIP_CONFIGMAPS:
             continue
-        at, manager = _last_edit(cm)
-        created = _epoch(cm.metadata.creation_timestamp)
-        if at is None or not (start <= at <= onset):
-            continue
-        verb = "created" if created is not None and abs(at - created) < 5 else "edited"
-        by = f" by {manager}" if manager else ""
-        out.append(
-            {
-                "category": "config",
-                "kind": "ConfigMap",
-                "name": name,
-                "namespace": ns,
-                "title": f"ConfigMap {name} {verb}{by}",
-                "at": at,
-            }
-        )
+        change = metadata_edit(meta, "ConfigMap", "config", ns, start, onset)
+        if change:
+            out.append(change)
     return out
+
+
+def referenced_config(pod_spec: Any) -> tuple[set[str], set[str]]:
+    """Names of the ConfigMaps and Secrets a pod spec mounts or references.
+
+    Volumes (including projected sources and a CSI ``nodePublishSecretRef``),
+    ``envFrom`` and ``env.valueFrom`` key refs of containers, init containers
+    and ephemeral containers, and image pull secrets. Names only: nothing here
+    reads a value.
+    """
+    configmaps: set[str] = set()
+    secrets: set[str] = set()
+    if pod_spec is None:
+        return configmaps, secrets
+    for v in getattr(pod_spec, "volumes", None) or []:
+        cm = getattr(v, "config_map", None)
+        if cm is not None and getattr(cm, "name", None):
+            configmaps.add(cm.name)
+        sec = getattr(v, "secret", None)
+        if sec is not None and getattr(sec, "secret_name", None):
+            secrets.add(sec.secret_name)
+        csi = getattr(v, "csi", None)
+        csi_ref = getattr(csi, "node_publish_secret_ref", None) if csi is not None else None
+        if csi_ref is not None and getattr(csi_ref, "name", None):
+            secrets.add(csi_ref.name)
+        projected = getattr(v, "projected", None)
+        for src in (getattr(projected, "sources", None) or []) if projected is not None else []:
+            pcm = getattr(src, "config_map", None)
+            if pcm is not None and getattr(pcm, "name", None):
+                configmaps.add(pcm.name)
+            psec = getattr(src, "secret", None)
+            if psec is not None and getattr(psec, "name", None):
+                secrets.add(psec.name)
+    containers = [
+        c
+        for attr in ("containers", "init_containers", "ephemeral_containers")
+        for c in (getattr(pod_spec, attr, None) or [])
+    ]
+    for c in containers:
+        for ef in getattr(c, "env_from", None) or []:
+            if getattr(ef, "config_map_ref", None):
+                configmaps.add(ef.config_map_ref.name)
+            if getattr(ef, "secret_ref", None):
+                secrets.add(ef.secret_ref.name)
+        for e in getattr(c, "env", None) or []:
+            vf = getattr(e, "value_from", None)
+            if vf is None:
+                continue
+            if getattr(vf, "config_map_key_ref", None):
+                configmaps.add(vf.config_map_key_ref.name)
+            if getattr(vf, "secret_key_ref", None):
+                secrets.add(vf.secret_key_ref.name)
+    for ips in getattr(pod_spec, "image_pull_secrets", None) or []:
+        if getattr(ips, "name", None):
+            secrets.add(ips.name)
+    configmaps.discard("")
+    secrets.discard("")
+    return configmaps, secrets
 
 
 def _mounted_configmaps(ns: str) -> dict[str, set[str]]:
@@ -204,52 +396,154 @@ def _mounted_configmaps(ns: str) -> dict[str, set[str]]:
         return {}
     refs: dict[str, set[str]] = {}
     for d in deps.items:
-        spec = d.spec.template.spec
-        names = {v.config_map.name for v in (spec.volumes or []) if getattr(v, "config_map", None)}
-        for c in list(spec.containers or []) + list(spec.init_containers or []):
-            for ef in c.env_from or []:
-                if getattr(ef, "config_map_ref", None):
-                    names.add(ef.config_map_ref.name)
-            for e in c.env or []:
-                vf = getattr(e, "value_from", None)
-                if vf is not None and getattr(vf, "config_map_key_ref", None):
-                    names.add(vf.config_map_key_ref.name)
+        names, _secrets = referenced_config(d.spec.template.spec)
         for n in names:
             refs.setdefault(n, set()).add(d.metadata.name)
     return refs
 
 
-def _argo_syncs(namespaces: set[str], start: int, onset: int) -> list[dict]:
-    apps = safe(lambda: get_custom_client().list_cluster_custom_object("argoproj.io", "v1alpha1", "applications"))
-    if isinstance(apps, ToolError) or not isinstance(apps, dict):
-        return []
+# Metadata only: the API server sends no ``data`` for PartialObjectMetadata, so
+# no ConfigMap or Secret payload is read. Annotations still are (and
+# ``kubectl.kubernetes.io/last-applied-configuration`` can hold a Secret's
+# data), so callers take names, timestamps and managers only; no Secret value is
+# returned.
+_METADATA_ONLY = "application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1"
+_METADATA_ONE = "application/json;as=PartialObjectMetadata;g=meta.k8s.io;v=v1"
+
+_PLURAL = {"ConfigMap": "configmaps", "Secret": "secrets"}
+_CATEGORY = {"ConfigMap": "config", "Secret": "secret"}
+
+
+def object_metadata(kind: str, ns: str, name: str) -> Any:
+    """``metadata`` of one ConfigMap or Secret (metadata only), or a ToolError."""
+    got = get_raw_json(
+        f"/api/v1/namespaces/{ns}/{_PLURAL[kind]}/{name}",
+        f"get {kind} {ns}/{name} (metadata only)",
+        accept=_METADATA_ONE,
+    )
+    if isinstance(got, ToolError) or not isinstance(got, dict):
+        return got
+    return got.get("metadata") or {}
+
+
+def named_edits(
+    kind: str, ns: str, names: set[str], start: int, onset: int, errors: list[ToolError] | None = None
+) -> list[dict]:
+    """Edits to the named ConfigMaps or Secrets, one metadata-only read each.
+
+    A referenced object that does not exist (404) has no edit to report; any
+    other error is kept in ``errors``.
+    """
     out = []
-    for app in apps.get("items", []):
-        dest = (app.get("spec", {}).get("destination") or {}).get("namespace", "")
-        op = (app.get("status") or {}).get("operationState") or {}
-        at = _epoch(op.get("finishedAt"))
-        if dest not in namespaces or at is None or not (start <= at <= onset):
+    for name in sorted(names):
+        if kind == "ConfigMap" and name in _SKIP_CONFIGMAPS:
             continue
-        rev = ((op.get("syncResult") or {}).get("revision") or "")[:8]
-        name = app.get("metadata", {}).get("name", "")
+        meta = object_metadata(kind, ns, name)
+        if isinstance(meta, ToolError):
+            if meta.status_code != 404 and errors is not None:
+                errors.append(meta)
+            continue
+        if not isinstance(meta, dict):
+            continue
+        change = metadata_edit(meta, kind, _CATEGORY[kind], ns, start, onset)
+        if change:
+            out.append(change)
+    return out
+
+
+# The Argo CD Application list is cluster-wide and can be large. One read per
+# identity (forwarded token, or the service account) per minute serves every
+# /changes call and episode ranking in that minute; only what is used is kept.
+_ARGO_TTL_SECONDS = 60
+_ARGO_CACHE_MAX = 128
+_argo_cache: dict[str, tuple[float, list[dict], bool]] = {}
+_argo_lock = threading.Lock()
+
+
+def clear_argo_cache() -> None:
+    with _argo_lock:
+        _argo_cache.clear()
+
+
+def _compact_app(app: dict) -> dict:
+    op = (app.get("status") or {}).get("operationState") or {}
+    initiated = (op.get("operation") or {}).get("initiatedBy") or {}
+    return {
+        "name": (app.get("metadata") or {}).get("name", ""),
+        "dest": ((app.get("spec") or {}).get("destination") or {}).get("namespace", ""),
+        "finishedAt": op.get("finishedAt"),
+        "revision": ((op.get("syncResult") or {}).get("revision") or "")[:8],
+        "username": initiated.get("username"),
+        "automated": bool(initiated.get("automated")),
+    }
+
+
+def _argo_apps(errors: list[ToolError] | None, incomplete: list[str] | None) -> list[dict] | None:
+    key = hashlib.sha256((get_current_user_token() or "").encode()).hexdigest()
+    now = time.monotonic()
+    with _argo_lock:
+        hit = _argo_cache.get(key)
+    if hit and now - hit[0] < _ARGO_TTL_SECONDS:
+        if hit[2] and incomplete is not None:
+            incomplete.append("Argo CD Applications")
+        return hit[1]
+
+    def fetch(token: str | None) -> Any:
+        kwargs: dict[str, Any] = {"limit": PAGE_SIZE}
+        if token:
+            kwargs["_continue"] = token
+        return safe(
+            lambda: get_custom_client().list_cluster_custom_object("argoproj.io", "v1alpha1", "applications", **kwargs)
+        )
+
+    local_incomplete: list[str] = []
+    items = _list_dicts(fetch, "Argo CD Applications", errors, local_incomplete)
+    if items is None:
+        return None
+    apps = [_compact_app(a) for a in items]
+    with _argo_lock:
+        _argo_cache[key] = (now, apps, bool(local_incomplete))
+        while len(_argo_cache) > _ARGO_CACHE_MAX:
+            _argo_cache.pop(next(iter(_argo_cache)))
+    if local_incomplete and incomplete is not None:
+        incomplete.extend(local_incomplete)
+    return apps
+
+
+def _argo_syncs(
+    namespaces: set[str],
+    start: int,
+    onset: int,
+    errors: list[ToolError] | None = None,
+    incomplete: list[str] | None = None,
+) -> list[dict]:
+    apps = _argo_apps(errors, incomplete)
+    out = []
+    for app in apps or []:
+        at = _epoch(app["finishedAt"])
+        if app["dest"] not in namespaces or at is None or not (start <= at <= onset):
+            continue
+        rev = app["revision"]
+        actor = app["username"] or ("automated sync" if app["automated"] else None)
         out.append(
             {
                 "category": "gitops",
                 "kind": "Application",
-                "name": name,
-                "namespace": dest,
-                "title": f"Argo CD synced {name}" + (f" to {rev}" if rev else ""),
+                "name": app["name"],
+                "namespace": app["dest"],
+                "title": f"Argo CD synced {app['name']}" + (f" to {rev}" if rev else ""),
                 "at": at,
+                "actor": actor,
             }
         )
     return out
 
 
-def _cluster_upgrades(start: int, onset: int) -> list[dict]:
+def _cluster_upgrades(start: int, onset: int, errors: list[ToolError] | None = None) -> list[dict]:
     cv = safe(
         lambda: get_custom_client().get_cluster_custom_object("config.openshift.io", "v1", "clusterversions", "version")
     )
-    if isinstance(cv, ToolError) or not isinstance(cv, dict):
+    if _failed(cv, errors) or not isinstance(cv, dict):
         return []
     out = []
     for h in (cv.get("status") or {}).get("history", []) or []:
@@ -263,6 +557,7 @@ def _cluster_upgrades(start: int, onset: int) -> list[dict]:
                     "namespace": "",
                     "title": f"Cluster upgrade to {h.get('version', '?')} started",
                     "at": at,
+                    "actor": None,
                 }
             )
     return out

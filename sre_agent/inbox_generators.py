@@ -43,7 +43,12 @@ def _make_assessment(
     resources: list[dict] | None = None,
     correlation_key: str | None = None,
     confidence: float = 0.8,
+    ui_link: str | None = None,
 ) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"generator": generator, "urgency_hours": urgency_hours}
+    if ui_link:
+        # The UI page where the item is acted on (a path inside the console).
+        metadata["ui_link"] = ui_link
     return {
         "item_type": "task",
         "title": title,
@@ -58,7 +63,7 @@ def _make_assessment(
         # Urgency only ranks an item through its due date; without one an
         # expiring cert and a week-old posture note sorted the same.
         "due_date": int(time.time() + urgency_hours * 3600),
-        "metadata": {"generator": generator, "urgency_hours": urgency_hours},
+        "metadata": metadata,
     }
 
 
@@ -467,6 +472,13 @@ def gen_degraded_operator() -> list[dict[str, Any]]:
     ]
 
 
+# Upgrade items are acted on in Administration -> Updates. The ClusterVersion
+# resource links to the object itself in drawers that only render resources;
+# ``ui_link`` names the Updates tab for drawers that render it.
+UPDATES_UI_LINK = "/admin?tab=updates"
+_CLUSTER_VERSION_RESOURCE = {"kind": "ClusterVersion", "name": "version", "namespace": ""}
+
+
 def gen_upgrade_available() -> list[dict[str, Any]]:
     updates = _get_available_updates()
     if not updates:
@@ -479,7 +491,9 @@ def gen_upgrade_available() -> list[dict[str, Any]]:
             severity="info",
             urgency_hours=168,
             generator="upgrade_available",
+            resources=[dict(_CLUSTER_VERSION_RESOURCE)],
             confidence=1.0,
+            ui_link=UPDATES_UI_LINK,
         )
     ]
 
@@ -522,7 +536,8 @@ def gen_upgrade_api_removals() -> list[dict[str, Any]]:
         lines.append(f"+{len(in_use) - 10} more APIs")
     for g in unacked:
         lines.append(f"Admin gate not acknowledged: {g['key']} — {g['description']}")
-    resources = [{"kind": "APIRequestCount", "name": api["name"], "namespace": ""} for api in in_use[:20]]
+    resources = [dict(_CLUSTER_VERSION_RESOURCE)]
+    resources += [{"kind": "APIRequestCount", "name": api["name"], "namespace": ""} for api in in_use[:20]]
     return [
         _make_assessment(
             title=title,
@@ -533,6 +548,7 @@ def gen_upgrade_api_removals() -> list[dict[str, Any]]:
             resources=resources,
             correlation_key=f"upgrade_api_removals:{target}",
             confidence=1.0,
+            ui_link=UPDATES_UI_LINK,
         )
     ]
 
