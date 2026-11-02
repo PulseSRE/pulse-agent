@@ -29,6 +29,7 @@ __all__ = [
     "_validate_k8s_name",
     "_validate_k8s_namespace",
     "apply_yaml",
+    "check_upgrade_api_removals",
     "cordon_node",
     "create_live_table",
     "create_network_policy",
@@ -116,6 +117,7 @@ from .deployments import (
 
 # --- Diagnostic tools ---
 from .diagnostics import (
+    check_upgrade_api_removals,
     describe_service,
     get_cluster_operators,
     get_cluster_updates,
@@ -244,6 +246,7 @@ ALL_TOOLS: list[Any] = [
     get_cluster_version,
     get_cluster_operators,  # OpenShift condition->status mapping
     get_cluster_updates,  # ClusterVersion updates/risks/progress -> upgrade_graph
+    check_upgrade_api_removals,  # removed APIs in use + admin-ack gates -> go/no-go
     get_configmap,
     get_node_metrics,  # metrics API + unit parsing
     get_pod_metrics,  # metrics API + sort by cpu/memory

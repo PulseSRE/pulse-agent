@@ -612,6 +612,37 @@ def get_cluster_updates():
 
 
 @beta_tool
+def check_upgrade_api_removals(target_version: str = ""):
+    """Go/no-go for an OpenShift minor upgrade: removed APIs still in use and admin-ack gates.
+
+    Reads APIRequestCount (last 24h of requests per API, with removedInRelease),
+    ClusterVersion and the admin-gates/admin-acks ConfigMaps. Returns the verdict
+    (GO / NO-GO / UNKNOWN) with a plain-English reason, current and target
+    OpenShift/Kubernetes versions, every API removed in the target with its 24h
+    request count and top callers (username, user agent, count; system: users
+    flagged as platform callers), removed-but-unused APIs, and the admin gates for
+    the target with acknowledged / not acknowledged, and ClusterVersion
+    Upgradeable=False as a blocker. Read-only. Use for "is it safe to upgrade",
+    "is the upgrade gated on an admin ack", "who is calling removed APIs". For
+    "what APIs are deprecated" (every scheduled removal), use list_deprecated_apis.
+
+    Args:
+        target_version: OpenShift version to check against, e.g. "4.19". Defaults
+            to the next minor ClusterVersion offers, else the current minor + 1.
+    """
+    from ..upgrade_api_removals import (
+        read_upgrade_api_removals,
+        render_upgrade_api_removals,
+        valid_target_version,
+    )
+
+    target = (target_version or "").strip()
+    if target and (len(target) > 32 or not valid_target_version(target)):
+        return f"Invalid target_version {target_version!r}: expected an OpenShift version such as '4.19' or '4.19.2'."
+    return render_upgrade_api_removals(read_upgrade_api_removals(target))
+
+
+@beta_tool
 def get_configmap(namespace: str, name: str):
     """Get the contents of a ConfigMap.
 

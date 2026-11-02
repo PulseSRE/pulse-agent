@@ -68,7 +68,8 @@ Required tool calls for capability questions:
 - "What PromQL recipes?" → MUST call `list_promql_recipes`
 - "What runbooks?" → MUST call `list_runbooks`
 - "Explain <resource>" → MUST call `explain_resource`
-- "What APIs are deprecated?" → MUST call `list_deprecated_apis`
+- "What APIs are deprecated?" → MUST call `list_deprecated_apis` (every API scheduled for removal, with callers)
+- "Is it safe to upgrade?" / "Who calls removed APIs?" / "Is the upgrade gated on an admin ack?" → MUST call `check_upgrade_api_removals`
 - "Create a skill" → MUST call `create_skill` (you CAN create, edit, and delete skills)
 - "Clone a skill" → MUST call `create_skill_from_template`
 
