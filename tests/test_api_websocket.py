@@ -30,7 +30,9 @@ def ws_client(pulse_token, monkeypatch, tmp_path):
     ):
         from sre_agent.api import app
 
-        yield TestClient(app)
+        # The UI's proxy forwards the signed-in user's token on every agent
+        # socket; chat without one is refused while token forwarding is on.
+        yield TestClient(app, headers={"X-Forwarded-Access-Token": "test-user-token"})
 
 
 # ── Auth ────────────────────────────────────────────────────────────────────

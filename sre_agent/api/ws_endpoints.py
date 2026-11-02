@@ -26,7 +26,7 @@ from .agent_ws import (
     _run_agent_ws,
     _ws_alive,
 )
-from .auth import _get_current_user, _verify_ws_token, extract_user_token
+from .auth import _get_current_user, _verify_ws_token, extract_user_token, user_token_missing
 from .context import _apply_style_hint, _build_context_prefix
 
 # Active monitor sessions — keyed by ws_id, used by /debug/memory
@@ -84,6 +84,22 @@ def _rollback_turn(messages: list[dict], turn_start: int) -> None:
     every later message in the session failed on the same invalid history.
     """
     del messages[turn_start:]
+
+
+async def _reject_without_user_token(websocket: WebSocket) -> bool:
+    """Close an agent chat that arrived without the caller's own token.
+
+    Chat tools read the cluster under ``user_token_context(user_token)``, which
+    does nothing for ``None``: with token forwarding on, a client holding only
+    the shared agent token would chat with the service account's read access.
+    With forwarding off the service account is the design and nothing is closed.
+    The monitor socket is not gated: it pushes the service account's findings
+    by design.
+    """
+    if user_token_missing(extract_user_token(websocket.headers)):
+        await websocket.close(4001, "User access token required")
+        return True
+    return False
 
 
 async def _check_agent_limit(websocket: WebSocket) -> bool:
@@ -148,6 +164,8 @@ async def websocket_agent(websocket: WebSocket, mode: str):
     client_token = _verify_ws_token(websocket)
     if not client_token:
         await websocket.close(4001, "Unauthorized")
+        return
+    if await _reject_without_user_token(websocket):
         return
 
     # Connection limit
@@ -384,6 +402,8 @@ async def websocket_auto_agent(websocket: WebSocket):
     client_token = _verify_ws_token(websocket)
     if not client_token:
         await websocket.close(4001, "Unauthorized")
+        return
+    if await _reject_without_user_token(websocket):
         return
 
     if await _check_agent_limit(websocket):
