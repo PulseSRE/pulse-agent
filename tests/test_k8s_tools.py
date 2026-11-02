@@ -134,6 +134,113 @@ class TestDescribePod:
         data = json.loads(text)
         assert "recent_events" not in data
 
+    def test_reports_last_termination_of_crashlooping_container(self, mock_k8s):
+        from datetime import UTC
+        from datetime import datetime as _dt
+
+        pod = _make_pod("crashy", phase="Waiting", restarts=7, ready=False)
+        cs = pod.status.container_statuses[0]
+        cs.last_state = SimpleNamespace(
+            terminated=SimpleNamespace(
+                reason="OOMKilled",
+                exit_code=137,
+                signal=None,
+                message=None,
+                started_at=_dt(2026, 11, 2, 14, 19, 0, tzinfo=UTC),
+                finished_at=_dt(2026, 11, 2, 14, 21, 3, tzinfo=UTC),
+            ),
+            waiting=None,
+            running=None,
+        )
+        mock_k8s["core"].read_namespaced_pod.return_value = pod
+        mock_k8s["core"].list_namespaced_event.return_value = _list_result([])
+        text, component = describe_pod.call({"namespace": "default", "pod_name": "crashy"})
+        container = json.loads(text)["containers"][0]
+        assert container["state"] == "waiting"
+        assert container["reason"] == "CrashLoopBackOff"
+        last = container["last_termination"]
+        assert last["reason"] == "OOMKilled"
+        assert last["exit_code"] == 137
+        assert last["finished_at"] == "2026-11-02T14:21:03+00:00"
+        assert last["started_at"] == "2026-11-02T14:19:00+00:00"
+        assert last["ran_for_seconds"] == 123
+        assert container["last_terminated"] == "OOMKilled, exit 137, 14:21 UTC (ran 2m03s)"
+        table = next(c for c in component["components"] if c["kind"] == "data_table")
+        assert {"id": "last_terminated", "header": "Last termination"} in table["columns"]
+        assert table["rows"][0]["last_terminated"].startswith("OOMKilled, exit 137")
+
+    def test_oomkilled_init_container_is_reported_and_tagged(self, mock_k8s):
+        from datetime import UTC
+        from datetime import datetime as _dt
+
+        pod = _make_pod("migrate", phase="Pending", ready=False)
+        pod.status.init_container_statuses = [
+            SimpleNamespace(
+                name="db-migrate",
+                image="quay.io/acme/migrate:1",
+                ready=False,
+                restart_count=4,
+                state=SimpleNamespace(
+                    running=None, waiting=SimpleNamespace(reason="CrashLoopBackOff"), terminated=None
+                ),
+                last_state=SimpleNamespace(
+                    terminated=SimpleNamespace(
+                        reason="OOMKilled",
+                        exit_code=137,
+                        started_at=_dt(2026, 11, 2, 14, 20, 0, tzinfo=UTC),
+                        finished_at=_dt(2026, 11, 2, 14, 20, 9, tzinfo=UTC),
+                    )
+                ),
+            )
+        ]
+        pod.status.ephemeral_container_statuses = [
+            SimpleNamespace(
+                name="debugger",
+                image="busybox",
+                ready=False,
+                restart_count=0,
+                state=SimpleNamespace(running=SimpleNamespace(), waiting=None, terminated=None),
+            )
+        ]
+        mock_k8s["core"].read_namespaced_pod.return_value = pod
+        mock_k8s["core"].list_namespaced_event.return_value = _list_result([])
+        text, component = describe_pod.call({"namespace": "default", "pod_name": "migrate"})
+        containers = json.loads(text)["containers"]
+        assert [(c["name"], c["type"]) for c in containers] == [
+            ("db-migrate", "init"),
+            ("main", "container"),
+            ("debugger", "ephemeral"),
+        ]
+        init = containers[0]
+        assert init["reason"] == "CrashLoopBackOff"
+        assert init["last_termination"]["reason"] == "OOMKilled"
+        assert init["last_terminated"] == "OOMKilled, exit 137, 14:20 UTC (ran 9s)"
+        assert containers[2]["state"] == "running" and containers[2]["last_termination"] is None
+        table = next(c for c in component["components"] if c["kind"] == "data_table")
+        assert [r["type"] for r in table["rows"]] == ["init", "container", "ephemeral"]
+
+    def test_no_previous_run_reports_none(self, mock_k8s):
+        pod = _make_pod("fresh")
+        pod.status.container_statuses[0].last_state = SimpleNamespace(terminated=None, waiting=None, running=None)
+        mock_k8s["core"].read_namespaced_pod.return_value = pod
+        mock_k8s["core"].list_namespaced_event.return_value = _list_result([])
+        text, _ = describe_pod.call({"namespace": "default", "pod_name": "fresh"})
+        container = json.loads(text)["containers"][0]
+        assert container["last_termination"] is None
+        assert container["last_terminated"] == ""
+
+    def test_last_termination_without_timestamps(self, mock_k8s):
+        pod = _make_pod("partial", phase="Waiting")
+        pod.status.container_statuses[0].last_state = SimpleNamespace(
+            terminated=SimpleNamespace(reason="Error", exit_code=1, started_at=None, finished_at=None)
+        )
+        mock_k8s["core"].read_namespaced_pod.return_value = pod
+        mock_k8s["core"].list_namespaced_event.return_value = _list_result([])
+        text, _ = describe_pod.call({"namespace": "default", "pod_name": "partial"})
+        container = json.loads(text)["containers"][0]
+        assert container["last_termination"]["ran_for_seconds"] is None
+        assert container["last_terminated"] == "Error, exit 1"
+
 
 class TestDescribeNode:
     def test_returns_details(self, mock_k8s):

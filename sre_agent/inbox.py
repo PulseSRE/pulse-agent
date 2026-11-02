@@ -1205,6 +1205,11 @@ def upsert_inbox_item(item: dict[str, Any]) -> str:
     existing_md = existing.get("metadata") or {}
     if isinstance(existing_md, dict):
         existing_md["priority_factors"] = factors
+        # A UI link added after the item was created (or one that moved) is
+        # carried over; otherwise items opened earlier never get the deep link.
+        new_link = (item.get("metadata") or {}).get("ui_link")
+        if new_link:
+            existing_md["ui_link"] = new_link
         try:
             repo.update_metadata(existing["id"], existing_md, now)
         except Exception:
