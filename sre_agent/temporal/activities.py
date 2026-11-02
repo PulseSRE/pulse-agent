@@ -41,6 +41,7 @@ def plan_to_dict(plan) -> dict:
                 "depends_on": list(p.depends_on),
                 "timeout_seconds": p.timeout_seconds,
                 "produces": list(p.produces),
+                "measured": list(p.measured),
                 "approval_required": p.approval_required,
                 "branch_on": p.branch_on,
                 "branches": dict(p.branches),
@@ -64,6 +65,7 @@ def _phase_from_dict(d: dict):
         depends_on=list(d.get("depends_on", [])),
         timeout_seconds=int(d.get("timeout_seconds", 120)),
         produces=list(d.get("produces", [])),
+        measured=list(d.get("measured", [])),
         approval_required=bool(d.get("approval_required", False)),
         retry_limit=int(d.get("retry_limit", 1)),
     )

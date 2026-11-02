@@ -54,6 +54,7 @@ def load_templates() -> dict[str, SkillPlan]:
                         depends_on=p.get("depends_on", []),
                         timeout_seconds=p.get("timeout_seconds", 120),
                         produces=p.get("produces", []),
+                        measured=p.get("measured", []),
                         branch_on=p.get("branch_on"),
                         branches=p.get("branches", {}),
                         parallel_with=p.get("parallel_with"),

@@ -20,6 +20,9 @@ class SkillPhase:
     depends_on: list[str] = field(default_factory=list)  # phase IDs that must complete first
     timeout_seconds: int = 120  # hard timeout per phase
     produces: list[str] = field(default_factory=list)  # output field names
+    # Fields of `produces` whose value must name something a call in this phase
+    # examined, not just be filled in (phase_judge.unmeasured_fields).
+    measured: list[str] = field(default_factory=list)
     branch_on: str | None = None  # field from prior output to branch on
     branches: dict[str, list[str]] = field(default_factory=dict)  # branch_value -> skill_names
     parallel_with: list[str] | None = None  # phase IDs to run concurrently
@@ -62,6 +65,9 @@ class SkillOutput:
     # because the reason a phase went partial is the part an operator needs and
     # was the part being dropped at the persistence boundary.
     contract_missing: list[str] = field(default_factory=list)
+    # `measured` fields the phase filled in without examining what they name
+    # (phase_judge.unmeasured_fields, decided against the run's own calls).
+    unexamined: list[str] = field(default_factory=list)
     # Structured evidence (evidence.Evidence dicts) the confidence was derived from.
     evidence: list[dict] = field(default_factory=list)
     # The tool calls the phase made (evidence.CallLedger.as_list()); evidence

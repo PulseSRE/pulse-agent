@@ -23,6 +23,12 @@ phases:
     # know what filled it. Required, so the contract judge sends the phase
     # back to find it rather than stopping at the node's own conditions.
     produces: [root_cause, top_consumer, disk_usage, memory_usage, pod_count, confidence]
+    # Filled in is not enough for top_consumer: it must name a workload or
+    # path one of the phase's calls examined. Answers naming "container
+    # images" after reading only the node's conditions, metrics and events
+    # (which every disk-pressure cause shares) were wrong in 18 of 28 live
+    # attempts and still reported at 0.7+; unexamined, the phase is capped.
+    measured: [top_consumer]
 
   - id: drain_cordon
     skill_name: sre

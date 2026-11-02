@@ -539,6 +539,7 @@ async def get_plan_template(incident_type: str, _auth=Depends(verify_token)):
                 "depends_on": p.depends_on,
                 "timeout_seconds": p.timeout_seconds,
                 "produces": p.produces,
+                "measured": p.measured,
                 "branch_on": p.branch_on,
                 "branches": p.branches,
                 "parallel_with": p.parallel_with,
@@ -548,6 +549,29 @@ async def get_plan_template(incident_type: str, _auth=Depends(verify_token)):
             for p in template.phases
         ],
     }
+
+
+def _check_measured(phase: dict) -> None:
+    """``measured`` names fields the phase produces; anything else is a 400.
+
+    A measured field outside ``produces`` would never be checked (the judge
+    only looks at fields the phase promised), so it would read as a
+    safeguard that does nothing.
+    """
+    if "measured" not in phase or phase["measured"] in (None, []):
+        return
+    measured = phase["measured"]
+    if not isinstance(measured, list) or not all(isinstance(m, str) and m.strip() for m in measured):
+        raise HTTPException(
+            status_code=400, detail=f"Phase '{phase.get('id')}': measured must be a list of field names"
+        )
+    produces = phase.get("produces") or []
+    outside = [m for m in measured if m not in produces]
+    if outside:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Phase '{phase.get('id')}': measured fields {outside} are not in produces",
+        )
 
 
 @router.post("/plan-templates")
@@ -584,6 +608,7 @@ async def create_plan_template(request: Request, _auth=Depends(require_admin)):
             raise HTTPException(status_code=400, detail=f"Phase {i} needs an id")
         if not str(ph.get("skill_name") or "").strip():
             raise HTTPException(status_code=400, detail=f"Phase '{ph.get('id')}' needs a skill_name")
+        _check_measured(ph)
 
     template = {
         "id": str(body.get("id") or incident_type),
@@ -601,6 +626,7 @@ async def create_plan_template(request: Request, _auth=Depends(require_admin)):
                 # The phase contract. Declaring it is what lets phase_judge
                 # check the phase did what it promised instead of assuming.
                 "produces": list(ph.get("produces") or []),
+                **({"measured": [str(x) for x in ph["measured"]]} if ph.get("measured") else {}),
                 "approval_required": bool(ph.get("approval_required", False)),
                 # Graph features: branch_on picks the skill from a
                 # dependency's findings, parallel_with is advisory (the engine
@@ -858,6 +884,12 @@ async def update_plan_template(incident_type: str, request: Request, _auth=Depen
         raise HTTPException(status_code=404, detail="Template not found")
 
     body = await request.json()
+    if "phases" in body:
+        if not isinstance(body["phases"], list):
+            raise HTTPException(status_code=400, detail="phases must be a list")
+        for ph in body["phases"]:
+            if isinstance(ph, dict):
+                _check_measured(ph)
 
     # Validate incident_type for path safety
     if not re.match(r"^[a-z0-9][a-z0-9_-]{0,63}$", incident_type):
@@ -887,6 +919,7 @@ async def update_plan_template(incident_type: str, request: Request, _auth=Depen
                     "depends_on": p.depends_on,
                     "timeout_seconds": p.timeout_seconds,
                     "produces": p.produces,
+                    "measured": p.measured,
                     "branch_on": p.branch_on,
                     "branches": p.branches,
                     "parallel_with": p.parallel_with,
