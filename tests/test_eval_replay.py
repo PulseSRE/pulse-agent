@@ -6,6 +6,7 @@ These tests mock the Claude API so no real API key is needed.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1130,3 +1131,67 @@ class TestRegressionGate:
         assert set(data["fixtures"]) == set(list_fixtures()), (
             "baseline is out of step with the fixture suite — refresh with --save-baseline"
         )
+
+
+class TestToolBudgetBeforeWrite:
+    """``max_tool_calls_before_write`` bounds the investigation, not the check after a write."""
+
+    EXPECTED: ClassVar[dict] = {"max_tool_calls_before_write": 8, "max_tool_calls": 12}
+    READS: ClassVar[list[str]] = [
+        "list_deployments",
+        "describe_deployment",
+        "get_pod_logs",
+        "list_pods",
+        "list_resources",
+    ]
+
+    def _result(self, names: list[str]) -> dict:
+        return {
+            "response": "Rolled back.",
+            "tool_calls": [{"name": n, "timestamp": i} for i, n in enumerate(names)],
+            "duration_ms": 1,
+        }
+
+    def _reads(self, n: int) -> list[str]:
+        return [self.READS[i % len(self.READS)] for i in range(n)]
+
+    def _budget_check(self, score: dict) -> dict:
+        return next(c for c in score["checks"] if c["check"].startswith("tool calls before first write"))
+
+    def test_write_at_call_six_then_four_verifications_passes(self):
+        calls = self._reads(5) + ["rollback_deployment"] + self._reads(4)
+        score = score_replay(self._result(calls), self.EXPECTED)
+        assert score["passed"] is True
+        check = self._budget_check(score)
+        assert check["check"] == "tool calls before first write <= 8 (actual: 6)"
+        assert check["kind"] == "structure"
+        assert check["weight"] == 1
+
+    def test_nine_calls_before_write_fails(self):
+        calls = self._reads(9) + ["rollback_deployment"]
+        score = score_replay(self._result(calls), self.EXPECTED)
+        assert score["passed"] is False
+        check = self._budget_check(score)
+        assert check["passed"] is False
+        assert "(actual: 10)" in check["check"]
+
+    def test_no_write_counts_every_call(self):
+        score = score_replay(self._result(self._reads(9)), self.EXPECTED)
+        assert score["passed"] is False
+        check = self._budget_check(score)
+        assert check["passed"] is False
+        assert "(actual: 9)" in check["check"]
+
+    def test_total_above_ceiling_fails(self):
+        calls = self._reads(3) + ["rollback_deployment"] + self._reads(9)
+        score = score_replay(self._result(calls), self.EXPECTED)
+        assert score["passed"] is False
+        assert self._budget_check(score)["passed"] is True
+        total = next(c for c in score["checks"] if c["check"].startswith("tool calls <="))
+        assert total["check"] == "tool calls <= 12 (actual: 13)"
+        assert total["passed"] is False
+
+    def test_rollback_fixture_uses_split_budget(self):
+        expected = load_fixture("release_rollback_bad_deployment")["expected"]
+        assert expected["max_tool_calls_before_write"] == 8
+        assert expected["max_tool_calls"] == 12

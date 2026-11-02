@@ -394,6 +394,8 @@ Each fixture is a JSON file with this structure:
 }
 ```
 
+`max_tool_calls` caps every call in the run. A fixture whose task includes a write can also set `max_tool_calls_before_write`, which counts calls up to and including the first write tool call (the registry's write tools, the set the confirmation gate uses; every call when no write happens). That bounds the investigation without charging the agent for checking its write afterwards; keep `max_tool_calls` on such fixtures as a loop guard. `release_rollback_bad_deployment` uses 8 before the write and 12 in total.
+
 Argument-specific snapshots can use `{"recording_kind": "argument_cases", "cases": [{"input": {"resource": "daemonsets", "namespace": "monitoring"}, "response": "recorded output"}]}` as a tool's recorded value. The matcher accepts documented resource aliases, inferred API groups and default selectors; other arguments require their own case. Missing or ambiguous cases cannot silently return another resource's snapshot. Unmatched cases return the missing-recording sentinel and remain visible in replay diagnostics. Legacy string recordings retain their existing behavior.
 
 Argument cases may declare `initial_state`, `requires_state`, and `set_state`. State is shared only within one shadow tool map and resets for a new fixture run. A transition requires a uniquely matching case with `succeeded: true`; missing, ambiguous, failed, or malformed transitions leave state unchanged. Reads do not advance state.
@@ -429,7 +431,7 @@ Argument cases may declare `initial_state`, `requires_state`, and `set_state`. S
 
 1. Create a JSON file in `sre_agent/evals/fixtures/` following the structure above
 2. Record realistic tool responses in `recorded_responses`
-3. Define `expected` criteria: `should_mention`, `should_use_tools`, `should_not_use_tools`, `max_tool_calls`
+3. Define `expected` criteria: `should_mention`, `should_use_tools`, `should_not_use_tools`, `max_tool_calls` (and `max_tool_calls_before_write` for a fixture that writes)
 4. Test with dry-run: `python -m sre_agent.evals.replay_cli --fixture <name> --dry-run`
 5. Test with judge: `python -m sre_agent.evals.replay_cli --fixture <name> --judge`
 
