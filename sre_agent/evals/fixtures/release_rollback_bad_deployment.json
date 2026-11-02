@@ -23,6 +23,7 @@
             "scale_deployment",
             "apply_yaml"
         ],
-        "max_tool_calls": 8
+        "max_tool_calls_before_write": 8,
+        "max_tool_calls": 12
     }
 }

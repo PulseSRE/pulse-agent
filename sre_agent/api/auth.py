@@ -8,7 +8,7 @@ import hmac
 import logging
 import time
 
-from fastapi import Header, HTTPException, Query
+from fastapi import Header, HTTPException, Query, Request
 
 from ..config import get_settings
 
@@ -157,6 +157,7 @@ def get_owner(
 
 
 def require_admin(
+    request: Request,
     authorization: str | None = Header(None),
     token: str | None = Query(None),
     x_forwarded_access_token: str | None = Header(None, alias="X-Forwarded-Access-Token"),
@@ -181,15 +182,19 @@ def require_admin(
     _verify_rest_token(authorization, token)
     user = _get_current_user(x_forwarded_access_token, x_forwarded_user)
 
+    # This guards every admin endpoint (skills, fix approval, readiness
+    # waivers, ...), so the log names the request rather than assuming one.
+    action = f"{request.method} {request.url.path}"
     configured = get_settings().server.admin_users
     allowed = {u.strip() for u in configured.split(",") if u.strip()}
     if allowed and user not in allowed:
-        logger.warning("Rejected skill mutation by non-admin user '%s'", user)
+        logger.warning("Rejected admin request %s by non-admin user '%s'", action, user)
         raise HTTPException(status_code=403, detail="Administrator access required")
     if not allowed:
         logger.warning(
-            "Skill mutation by '%s' — PULSE_AGENT_ADMIN_USERS is unset, so any "
-            "authenticated user may rewrite the system prompt. Set it in production.",
+            "Admin request %s by '%s' — PULSE_AGENT_ADMIN_USERS is unset, so any "
+            "authenticated user may use admin endpoints. Set it in production.",
+            action,
             user,
         )
     return user

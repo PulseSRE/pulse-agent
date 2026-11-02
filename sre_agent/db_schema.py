@@ -784,3 +784,18 @@ CREATE TABLE IF NOT EXISTS monitor_noise (
     updated_at       BIGINT NOT NULL
 );
 """
+
+
+READINESS_WAIVERS_SCHEMA = """
+-- Readiness gates an administrator accepted the risk of, for the cluster this
+-- agent is installed on (one agent, one database, one cluster). Gate ids are
+-- defined by the UI's readiness checks. Times are epoch milliseconds, and
+-- expires_at NULL means the waiver stands until someone lifts it.
+CREATE TABLE IF NOT EXISTS readiness_waivers (
+    gate_id     TEXT PRIMARY KEY,
+    reason      TEXT NOT NULL,
+    waived_by   TEXT NOT NULL,
+    created_at  BIGINT NOT NULL,
+    expires_at  BIGINT
+);
+"""
