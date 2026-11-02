@@ -1084,7 +1084,11 @@ def _blast_radius_items(blast: Any) -> list[dict[str, Any]]:
 
 
 def claim_and_investigate(item_id: str, username: str) -> bool:
-    """Atomically claim an item and transition to in_progress."""
+    """Atomically claim an item and transition to in_progress.
+
+    Claims only. ``inbox_investigation.request_investigation`` starts the
+    investigation that ``POST /inbox/{id}/investigate`` promises.
+    """
     item = get_inbox_item(item_id)
     if item is None:
         return False
@@ -1605,6 +1609,20 @@ def _phase_a_triage() -> int:
     return triaged
 
 
+def finding_for_item(item: dict[str, Any]) -> dict[str, Any]:
+    """The finding an inbox item is investigated as (triage and requested runs alike)."""
+    return {
+        "id": item.get("finding_id") or item["id"],
+        "title": item["title"],
+        "summary": item.get("summary", ""),
+        "severity": item.get("severity", "warning"),
+        "category": (item.get("metadata") or {}).get("generator", item.get("item_type", "unknown")),
+        "resources": item.get("resources", []),
+        "namespace": item.get("namespace", ""),
+        "confidence": item.get("confidence", 0.5),
+    }
+
+
 def _phase_b_investigate() -> int:
     """Investigate items the triage flagged for review using the SRE agent."""
     repo = get_inbox_repo()
@@ -1637,18 +1655,21 @@ def _phase_b_investigate() -> int:
                 repo.update_resources(item["id"], alive, int(time.time()))
                 item["resources"] = alive
 
+        # One run per item: skip an item a person's request is investigating
+        # (POST /inbox/{id}/investigate), and let such a request see this run.
+        from .inbox_investigation import persist as _persist_run
+        from .inbox_investigation import release as _release_run
+        from .inbox_investigation import reserve as _reserve_run
+
+        run, created = _reserve_run(item["id"], "system:agent", "triage")
+        if not created:
+            continue
+        run.state = "running"
+        run.started_at = int(now)
+
         _last_investigate_time[item["id"]] = now
 
-        finding_dict = {
-            "id": item.get("finding_id") or item["id"],
-            "title": item["title"],
-            "summary": item.get("summary", ""),
-            "severity": item.get("severity", "warning"),
-            "category": item.get("metadata", {}).get("generator", item.get("item_type", "unknown")),
-            "resources": item.get("resources", []),
-            "namespace": item.get("namespace", ""),
-            "confidence": item.get("confidence", 0.5),
-        }
+        finding_dict = finding_for_item(item)
 
         try:
             import asyncio as _asyncio
@@ -1715,13 +1736,22 @@ def _phase_b_investigate() -> int:
                     new_status = "triaged"
 
                 ts = int(time.time())
+                run.state, run.finished_at, run.report_id = "done", ts, investigation_id
+                metadata["investigation_run"] = run.public()
                 repo.update_investigation_result(item["id"], new_status, metadata, ts)
                 _publish_event("inbox_item_updated", item["id"], {"status": new_status})
                 investigated += 1
                 _inbox_logger.info("Investigated %s → %s (confidence: %.2f)", item["id"], new_status, inv_confidence)
-        except Exception:
+        except Exception as e:
             _inbox_logger.exception("Investigation failed for %s", item["id"])
+            run.state, run.finished_at, run.error = "failed", int(time.time()), str(e) or type(e).__name__
+            try:
+                _persist_run(run)
+            except Exception:
+                _inbox_logger.debug("Recording failed run for %s failed", item["id"], exc_info=True)
             update_item_status(item["id"], "agent_review_failed")
+        finally:
+            _release_run(item["id"])
 
     return investigated
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..config import get_settings
@@ -34,13 +35,31 @@ if TYPE_CHECKING:
 logger = logging.getLogger("pulse_agent.monitor")
 
 
-async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> None:
-    """Run proactive read-only investigations for critical findings."""
+@dataclass(frozen=True)
+class InvestigationRefusal:
+    """Why an investigation was not started. ``reason`` is a stable code, ``message`` is for people."""
+
+    reason: str  # circuit_open | daily_budget | cost_budget | cooldown | concurrency
+    message: str
+    retry_after: int | None = None
+
+
+def budget_refusal(monitor: ClusterMonitor) -> InvestigationRefusal | None:
+    """The gates every investigation passes, whoever asked for it.
+
+    The agent's circuit breaker, the daily investigation budget and the daily
+    cost budget. Shared by the monitor's scan and investigations a person asks
+    for (``POST /inbox/{id}/investigate``), so neither can spend past them.
+    """
     from ..agent import _circuit_breaker
 
     if _circuit_breaker.is_open:
         logger.info("Skipping proactive investigations: agent circuit breaker open")
-        return
+        return InvestigationRefusal(
+            "circuit_open",
+            "The agent's model calls are failing and paused (circuit breaker open); try again shortly.",
+            retry_after=max(1, int(get_settings().agent.cb_timeout)),
+        )
 
     _settings = get_settings()
     max_daily = _settings.monitor.max_daily_investigations
@@ -55,7 +74,11 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
         )
         if _METRICS_AVAILABLE:
             INVESTIGATION_BUDGET_REMAINING.set(0)
-        return
+        return InvestigationRefusal(
+            "daily_budget",
+            f"The daily investigation budget is used up ({monitor._daily_investigation_count}/{max_daily}).",
+            retry_after=max(1, int(monitor._daily_investigation_reset + 86400 - time.time())),
+        )
 
     # Cost budget gate (cached — only queries DB every 5 minutes)
     _budget_usd = _settings.cost_budget_usd
@@ -92,9 +115,75 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
                 )
                 if _METRICS_AVAILABLE:
                     COST_BUDGET_EXHAUSTION_TOTAL.inc()
-                return
+                return InvestigationRefusal(
+                    "cost_budget",
+                    f"The daily cost budget is spent (${today_cost:.2f} of ${_budget_usd:.2f}).",
+                )
         except Exception:
             logger.debug("Cost budget check failed", exc_info=True)
+    return None
+
+
+def _charge(monitor: ClusterMonitor, key: str, now: float) -> None:
+    """Count an investigation when it starts: against the cooldown and the daily budget."""
+    monitor._recent_investigations[key] = now
+    monitor._daily_investigation_count += 1
+    if _METRICS_AVAILABLE:
+        INVESTIGATIONS_TOTAL.inc()
+        INVESTIGATION_BUDGET_REMAINING.set(
+            max(0, get_settings().monitor.max_daily_investigations - monitor._daily_investigation_count)
+        )
+
+
+def admit_requested_investigation(
+    monitor: ClusterMonitor, finding: dict, *, running_elsewhere: int = 0
+) -> InvestigationRefusal | None:
+    """Admit an investigation a person asked for, or say why not; charges it when admitted.
+
+    The same budget, cost budget and circuit breaker as the scan
+    (``budget_refusal``), the same per-condition cooldown (keyed like the
+    scan's, so a person and the monitor do not investigate one condition
+    twice inside it), and the same concurrency limit, counting the monitor's
+    running plans plus ``running_elsewhere`` (requested and inbox runs in
+    progress). Category, severity and noise eligibility are the scan's own
+    choices about what to look at unasked, so they do not apply here.
+    """
+    refusal = budget_refusal(monitor)
+    if refusal is not None:
+        return refusal
+
+    settings = get_settings()
+    now = time.time()
+    key = _finding_key(finding)
+    cooldown = settings.monitor.investigation_cooldown
+    last = monitor._recent_investigations.get(key, 0.0)
+    if now - last < cooldown:
+        wait = max(1, int(last + cooldown - now))
+        return InvestigationRefusal(
+            "cooldown",
+            f"This was investigated {int(now - last)}s ago; it can be investigated again in {wait}s.",
+            retry_after=wait,
+        )
+
+    monitor._investigation_tasks = [t for t in monitor._investigation_tasks if not t.done()]
+    running = len(monitor._investigation_tasks) + running_elsewhere
+    limit = settings.monitor.max_concurrent_investigations
+    if running >= limit:
+        return InvestigationRefusal(
+            "concurrency",
+            f"{running} investigations are already running (limit {limit}); try again when one finishes.",
+            retry_after=30,
+        )
+
+    _charge(monitor, key, now)
+    return None
+
+
+async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> None:
+    """Run proactive read-only investigations for critical findings."""
+    if budget_refusal(monitor) is not None:
+        return
+    _settings = get_settings()
 
     max_per_scan = _settings.monitor.investigations_max_per_scan
     cooldown_seconds = _settings.monitor.investigation_cooldown
@@ -176,13 +265,9 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
         # investigation spent its tokens too. Freeform runs used to count only
         # on success, so one that kept failing was retried every scan, outside
         # the daily budget and the cooldown.
-        monitor._recent_investigations[key] = now
         monitor._investigation_fingerprints[key] = content_hash
         investigations_run += 1
-        monitor._daily_investigation_count += 1
-        if _METRICS_AVAILABLE:
-            INVESTIGATIONS_TOTAL.inc()
-            INVESTIGATION_BUDGET_REMAINING.set(max(0, max_daily - monitor._daily_investigation_count))
+        _charge(monitor, key, now)
 
         if template is None:
             # One read-only agent run; short enough to run inside the scan.
