@@ -303,8 +303,12 @@ class TestCompute:
         assert "2 admin gates for 4.19 not acknowledged" in data["reason"]
 
     def test_gate_key_with_unexpected_kube_minor_warns(self):
-        key = "ack-4.18-kube-1.33-api-removals-in-4.19"
-        data = _compute(arcs=_arcs(in_use=False), gates={"data": {key: "x"}}, acks={"data": {key: "true"}})
+        mismatched_gate = "ack-4.18-kube-1.33-api-removals-in-4.19"
+        data = _compute(
+            arcs=_arcs(in_use=False),
+            gates={"data": {mismatched_gate: "x"}},
+            acks={"data": {mismatched_gate: "true"}},
+        )
         assert data["status"] == "go"
         assert data["warnings"] and "Kubernetes 1.33" in data["warnings"][0]
         assert _compute()["warnings"] == []
