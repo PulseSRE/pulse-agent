@@ -18,6 +18,7 @@ from typing import Any
 
 import urllib3
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from kubernetes.config import ConfigException
 
 from ..k8s_client import user_token_context
@@ -89,7 +90,7 @@ async def get_changes(
     until: str | None = Query(None, description="ISO 8601; default now"),
     user_token: str | None = Depends(get_user_token),
     _auth=Depends(verify_token),
-) -> dict[str, Any]:
+) -> Any:
     """Changes to a resource, its owners, the config it references, and the cluster.
 
     ``{"changes": [{"at", "kind", "namespace", "name", "summary", "actor",
@@ -106,6 +107,10 @@ async def get_changes(
     try:
         return await asyncio.to_thread(_run)
     except ChangeReadError as e:
+        if e.status == 404:
+            # A route-missing 404 (an agent without /changes) has no ``code``;
+            # this one does, so the UI can tell "no such resource" apart.
+            return JSONResponse(status_code=404, content={"detail": e.detail, "code": "resource_not_found"})
         raise HTTPException(status_code=e.status, detail=e.detail) from None
     except (ConfigException, urllib3.exceptions.HTTPError, OSError):
         # No cluster config, or the API server cannot be reached: the change

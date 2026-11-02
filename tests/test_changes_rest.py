@@ -425,10 +425,20 @@ def test_forbidden_owner_read_is_403(client, cluster):
     assert "ReplicaSet shop/api-7d9" in r.json()["detail"]
 
 
-def test_missing_resource_is_404(client, cluster):
+def test_missing_resource_is_404_with_a_code(client, cluster):
     cluster.core.read_namespaced_pod.side_effect = ApiException(status=404, reason="Not Found")
     r = _get(client, namespace="shop", kind="Pod", name="gone")
     assert r.status_code == 404
+    body = r.json()
+    assert body["code"] == "resource_not_found"
+    assert "Pod shop/gone" in body["detail"]
+
+
+def test_route_missing_404_has_no_code_so_the_two_are_distinguishable(client):
+    # What an older agent without /changes answers.
+    r = client.get("/no-such-route", headers=AUTH)
+    assert r.status_code == 404
+    assert "code" not in r.json()
 
 
 def test_server_error_on_a_required_read_is_502(client, cluster):
