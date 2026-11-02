@@ -1,0 +1,4 @@
+# False positive: an OpenShift admin-gate key name in a test, flagged by the
+# generic-api-key rule ("key = ..."). Renamed in the next commit, but gitleaks
+# scans full history and branch history is not rewritten.
+5ed91375d455134d4cad22a0e96ec8b83f838565:tests/test_upgrade_api_removals.py:generic-api-key:306

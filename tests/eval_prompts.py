@@ -693,6 +693,18 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "Check deprecated APIs",
     ),
     (
+        "who is still calling APIs that the next upgrade removes?",
+        ["check_upgrade_api_removals"],
+        "sre",
+        "Callers of removed APIs",
+    ),
+    (
+        "is it safe to upgrade, are any removed APIs still being called?",
+        ["check_upgrade_api_removals"],
+        "sre",
+        "Upgrade go/no-go on API removals",
+    ),
+    (
         "create a skill for database troubleshooting",
         ["create_skill"],
         "sre",
