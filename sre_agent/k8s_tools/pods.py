@@ -185,21 +185,36 @@ def describe_pod(namespace: str, pod_name: str):
             }
         )
 
-    for cs in pod.status.container_statuses or []:
+    # Init and ephemeral containers die too (an OOMKilled init container keeps
+    # the pod in Init:CrashLoopBackOff); each entry says which kind it is.
+    statuses = [
+        (ctype, cs)
+        for ctype, attr in (
+            ("init", "init_container_statuses"),
+            ("container", "container_statuses"),
+            ("ephemeral", "ephemeral_container_statuses"),
+        )
+        for cs in (getattr(pod.status, attr, None) or [])
+    ]
+    for ctype, cs in statuses:
         state = "unknown"
         reason = ""
-        if cs.state.running:
+        cstate = getattr(cs, "state", None)
+        if cstate is None:
+            pass
+        elif cstate.running:
             state = "running"
-        elif cs.state.waiting:
+        elif cstate.waiting:
             state = "waiting"
-            reason = cs.state.waiting.reason or ""
-        elif cs.state.terminated:
+            reason = cstate.waiting.reason or ""
+        elif cstate.terminated:
             state = "terminated"
-            reason = cs.state.terminated.reason or ""
+            reason = cstate.terminated.reason or ""
         last = _last_termination(cs)
         info["containers"].append(
             {
                 "name": cs.name,
+                "type": ctype,
                 "image": cs.image,
                 "ready": cs.ready,
                 "restarts": cs.restart_count,
@@ -276,6 +291,7 @@ def describe_pod(namespace: str, pod_name: str):
                 "title": "Containers",
                 "columns": [
                     {"id": "name", "header": "Name"},
+                    {"id": "type", "header": "Type"},
                     {"id": "image", "header": "Image"},
                     {"id": "state", "header": "State", "type": "status"},
                     {"id": "ready", "header": "Ready", "type": "boolean"},

@@ -95,8 +95,15 @@ async def get_changes(
 
     ``{"changes": [{"at", "kind", "namespace", "name", "summary", "actor",
     "source"}], "available": bool}``, newest first. ``unreadable`` is added when
-    an optional source (Secret metadata, Argo CD, ClusterVersion) was refused.
+    an optional source (Secret metadata, Argo CD, ClusterVersion) was refused,
+    ``truncated: true`` when the answer is partial (capped at 500 changes).
     """
+    from ..config import get_settings
+
+    if get_settings().agent.token_forwarding and not user_token:
+        # Without the user's token the reads would run as the service account
+        # and show changes the user may not be allowed to see.
+        raise HTTPException(status_code=401, detail="User access token required")
     canonical = _validate(namespace, kind, name)
     start, end = _window(since, until)
 

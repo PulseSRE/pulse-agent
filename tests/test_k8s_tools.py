@@ -169,6 +169,56 @@ class TestDescribePod:
         assert {"id": "last_terminated", "header": "Last termination"} in table["columns"]
         assert table["rows"][0]["last_terminated"].startswith("OOMKilled, exit 137")
 
+    def test_oomkilled_init_container_is_reported_and_tagged(self, mock_k8s):
+        from datetime import UTC
+        from datetime import datetime as _dt
+
+        pod = _make_pod("migrate", phase="Pending", ready=False)
+        pod.status.init_container_statuses = [
+            SimpleNamespace(
+                name="db-migrate",
+                image="quay.io/acme/migrate:1",
+                ready=False,
+                restart_count=4,
+                state=SimpleNamespace(
+                    running=None, waiting=SimpleNamespace(reason="CrashLoopBackOff"), terminated=None
+                ),
+                last_state=SimpleNamespace(
+                    terminated=SimpleNamespace(
+                        reason="OOMKilled",
+                        exit_code=137,
+                        started_at=_dt(2026, 11, 2, 14, 20, 0, tzinfo=UTC),
+                        finished_at=_dt(2026, 11, 2, 14, 20, 9, tzinfo=UTC),
+                    )
+                ),
+            )
+        ]
+        pod.status.ephemeral_container_statuses = [
+            SimpleNamespace(
+                name="debugger",
+                image="busybox",
+                ready=False,
+                restart_count=0,
+                state=SimpleNamespace(running=SimpleNamespace(), waiting=None, terminated=None),
+            )
+        ]
+        mock_k8s["core"].read_namespaced_pod.return_value = pod
+        mock_k8s["core"].list_namespaced_event.return_value = _list_result([])
+        text, component = describe_pod.call({"namespace": "default", "pod_name": "migrate"})
+        containers = json.loads(text)["containers"]
+        assert [(c["name"], c["type"]) for c in containers] == [
+            ("db-migrate", "init"),
+            ("main", "container"),
+            ("debugger", "ephemeral"),
+        ]
+        init = containers[0]
+        assert init["reason"] == "CrashLoopBackOff"
+        assert init["last_termination"]["reason"] == "OOMKilled"
+        assert init["last_terminated"] == "OOMKilled, exit 137, 14:20 UTC (ran 9s)"
+        assert containers[2]["state"] == "running" and containers[2]["last_termination"] is None
+        table = next(c for c in component["components"] if c["kind"] == "data_table")
+        assert [r["type"] for r in table["rows"]] == ["init", "container", "ephemeral"]
+
     def test_no_previous_run_reports_none(self, mock_k8s):
         pod = _make_pod("fresh")
         pod.status.container_statuses[0].last_state = SimpleNamespace(terminated=None, waiting=None, running=None)

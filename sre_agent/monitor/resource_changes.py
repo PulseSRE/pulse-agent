@@ -18,7 +18,8 @@ RBAC lets them see. A read that is refused is not "nothing changed":
   ``unreadable`` instead of failing the whole answer; a 404 (Argo CD not
   installed, not OpenShift) is simply nothing to report.
 
-Secrets are read as metadata only; no value is ever fetched or returned.
+ConfigMaps and Secrets are read as metadata only (no ``data``); no Secret
+value is returned.
 """
 
 from __future__ import annotations
@@ -37,7 +38,9 @@ from .change_correlation import (
     _deployment_rollouts,
     _epoch,
     _last_edit,
-    _secret_edits,
+    metadata_edit,
+    named_edits,
+    object_metadata,
     referenced_config,
 )
 
@@ -117,6 +120,8 @@ class Scope:
     cronjobs: list[Any] = field(default_factory=list)
     configmaps: set[str] = field(default_factory=set)
     secrets: set[str] = field(default_factory=set)
+    # (kind, metadata) of a ConfigMap/Secret asked for by name, read metadata-only.
+    own: list[tuple[str, dict]] = field(default_factory=list)
 
     def add_refs(self, pod_spec: Any) -> None:
         cms, secs = referenced_config(pod_spec)
@@ -203,10 +208,11 @@ def resolve_scope(namespace: str, kind: str, name: str) -> Scope:
         except AttributeError:
             pass
         scope.cronjobs.append(cj)
-    elif kind == "ConfigMap":
-        scope.configmaps.add(name)
-    elif kind == "Secret":
-        scope.secrets.add(name)
+    elif kind in ("ConfigMap", "Secret"):
+        meta = object_metadata(kind, ns, name)
+        if isinstance(meta, ToolError):
+            raise ChangeReadError(_status_for(meta), f"Could not read {kind} {ns}/{name}: {meta.message}")
+        scope.own.append((kind, meta if isinstance(meta, dict) else {}))
     return scope
 
 
@@ -267,40 +273,54 @@ def _iso(epoch: int) -> str:
     return datetime.fromtimestamp(epoch, UTC).isoformat().replace("+00:00", "Z")
 
 
-def collect_changes(namespace: str, kind: str, name: str, start: int, end: int) -> dict[str, Any]:
-    """``{"changes": [...], "available": True}`` (+ ``unreadable`` when an optional source was refused).
+MAX_RESPONSE_CHANGES = 500
 
+
+def collect_changes(namespace: str, kind: str, name: str, start: int, end: int) -> dict[str, Any]:
+    """``{"changes": [...], "available": True}``.
+
+    Adds ``unreadable`` when an optional source was refused, and
+    ``truncated: True`` when the answer is partial: more than
+    ``MAX_RESPONSE_CHANGES`` changes, or a list too long to read in full.
     Raises ``ChangeReadError`` when a required read fails.
     """
     scope = resolve_scope(namespace, kind, name)
     ns = scope.namespace
     raw: list[dict] = []
     unreadable: list[str] = []
+    incomplete: list[str] = []
 
+    for own_kind, meta in scope.own:
+        change = metadata_edit(meta, own_kind, "config" if own_kind == "ConfigMap" else "secret", ns, start, end)
+        if change:
+            raw.append(change)
     if ns and (scope.namespace_wide or scope.deployments):
         errs: list[ToolError] = []
-        rollouts = _deployment_rollouts(ns, start, end, errs)
+        rollouts = _deployment_rollouts(ns, start, end, errs, incomplete)
         _raise_required(errs, f"ReplicaSets in {ns}")
         raw += [c for c in rollouts if scope.namespace_wide or c["name"] in scope.deployments]
     if ns and (scope.namespace_wide or scope.revisioned):
         errs = []
-        revs = _controller_revisions(ns, start, end, errs)
+        revs = _controller_revisions(ns, start, end, errs, incomplete)
         _raise_required(errs, f"ControllerRevisions in {ns}")
         raw += [c for c in revs if scope.namespace_wide or (c["kind"], c["name"]) in scope.revisioned]
-    if ns and (scope.namespace_wide or scope.configmaps):
+    if ns and scope.namespace_wide:
         errs = []
-        cms = _configmap_edits(ns, start, end, errs)
+        raw += _configmap_edits(ns, start, end, errs, incomplete)
         _raise_required(errs, f"ConfigMaps in {ns}")
-        raw += [c for c in cms if scope.namespace_wide or c["name"] in scope.configmaps]
+    elif ns and scope.configmaps:
+        errs = []
+        raw += named_edits("ConfigMap", ns, scope.configmaps, start, end, errs)
+        _raise_required(errs, f"ConfigMaps in {ns}")
     if ns:
         raw += _job_changes(scope, start, end)
     if ns and scope.secrets:
         errs = []
-        raw += _secret_edits(ns, scope.secrets, start, end, errs)
+        raw += named_edits("Secret", ns, scope.secrets, start, end, errs)
         _note_optional(errs, f"Secret edits in {ns}", unreadable)
     if ns:
         errs = []
-        raw += _argo_syncs({ns}, start, end, errs)
+        raw += _argo_syncs({ns}, start, end, errs, incomplete)
         _note_optional(errs, "Argo CD Applications", unreadable)
     errs = []
     raw += _cluster_upgrades(start, end, errs)
@@ -319,7 +339,10 @@ def collect_changes(namespace: str, kind: str, name: str, start: int, end: int) 
         for c in raw
     ]
     changes.sort(key=lambda c: (c["at"], c["summary"]), reverse=True)
-    result: dict[str, Any] = {"changes": changes, "available": True}
+    truncated = bool(incomplete) or len(changes) > MAX_RESPONSE_CHANGES
+    result: dict[str, Any] = {"changes": changes[:MAX_RESPONSE_CHANGES], "available": True}
     if unreadable:
         result["unreadable"] = unreadable
+    if truncated:
+        result["truncated"] = True
     return result

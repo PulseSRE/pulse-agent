@@ -10,6 +10,7 @@ unreadable, and ``available: false`` when the cluster cannot be reached.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -87,8 +88,15 @@ def _rs(name, deploy, rev, created, image):
     return rs
 
 
-def _cm(name, edited, manager="kubectl-edit"):
-    return _obj(name, managed=[SimpleNamespace(manager=manager, time=edited, subresource=None)])
+def _meta_obj(name, edited, manager="kubectl-edit", created=None):
+    """A ConfigMap/Secret as a metadata-only read returns it."""
+    return {
+        "metadata": {
+            "name": name,
+            "creationTimestamp": (created or _ago(60 * 24 * 30)).isoformat(),
+            "managedFields": [{"manager": manager, "time": edited.isoformat()}],
+        }
+    }
 
 
 def _forbidden(what="replicasets"):
@@ -103,11 +111,14 @@ class Cluster:
         self.tokens: list[str | None] = []
         self.apps.list_namespaced_replica_set.return_value = SimpleNamespace(items=[])
         self.apps.list_namespaced_controller_revision.return_value = SimpleNamespace(items=[])
-        self.core.list_namespaced_config_map.return_value = SimpleNamespace(items=[])
         self.custom.list_cluster_custom_object.side_effect = ApiException(status=404, reason="Not Found")
         self.custom.get_cluster_custom_object.return_value = {"status": {"history": []}}
-        self.secret_listing: object = {"items": []}
+        # plural -> name -> object, served by the metadata-only raw reads
+        self.objects: dict[str, dict[str, dict]] = {"configmaps": {}, "secrets": {}}
+        # path or plural -> error for raw reads
+        self.raw_errors: dict[str, ApiException] = {}
         self.raw_calls: list[tuple[str, str]] = []
+        self.list_continue: str | None = None  # a list that always says "there is more"
 
     def _getter(self, client):
         def get():
@@ -119,13 +130,24 @@ class Cluster:
     def raw(self, path, operation="", *, query=None, accept=""):
         self.tokens.append(k8s_client.get_current_user_token())
         self.raw_calls.append((path, accept))
-        if isinstance(self.secret_listing, ApiException):
-            return classify_api_error(self.secret_listing, operation)
-        return self.secret_listing
+        parts = path.strip("/").split("/")  # api v1 namespaces <ns> <plural> [<name>]
+        plural = parts[4]
+        err = self.raw_errors.get(path) or self.raw_errors.get(plural)
+        if err is not None:
+            return classify_api_error(err, operation)
+        store = self.objects[plural]
+        if len(parts) == 6:
+            obj = store.get(parts[5])
+            if obj is None:
+                return classify_api_error(ApiException(status=404, reason="Not Found"), operation)
+            return obj
+        return {
+            "items": list(store.values()),
+            "metadata": {"continue": self.list_continue} if self.list_continue else {},
+        }
 
     def patches(self):
         return [
-            patch.object(cc, "get_core_client", side_effect=self._getter(self.core)),
             patch.object(cc, "get_apps_client", side_effect=self._getter(self.apps)),
             patch.object(cc, "get_custom_client", side_effect=self._getter(self.custom)),
             patch.object(cc, "get_raw_json", side_effect=self.raw),
@@ -157,8 +179,11 @@ def client(monkeypatch):
     _reset_settings()
 
 
+USER = {"X-Forwarded-Access-Token": "user-oauth-token"}
+
+
 def _get(client, headers=None, **params):
-    return client.get("/changes", params=params, headers={**AUTH, **(headers or {})})
+    return client.get("/changes", params=params, headers={**AUTH, **USER, **(headers or {})})
 
 
 def _crashlooping_pod(cluster):
@@ -177,28 +202,17 @@ def _crashlooping_pod(cluster):
             _rs("web-1a2", "web", 3, _ago(20), "quay.io/acme/web:v3"),  # same namespace, not this pod's
         ]
     )
-    cluster.core.list_namespaced_config_map.return_value = SimpleNamespace(
-        items=[_cm("api-config", _ago(45)), _cm("unrelated", _ago(10))]
-    )
+    cluster.objects["configmaps"] = {
+        "api-config": _meta_obj("api-config", _ago(45)),
+        "unrelated": _meta_obj("unrelated", _ago(10)),
+    }
     cluster.custom.get_cluster_custom_object.return_value = {
         "status": {"history": [{"version": "4.17.3", "startedTime": _ago(90).isoformat()}]}
     }
-    cluster.secret_listing = {
-        "items": [
-            {
-                "metadata": {
-                    "name": "api-db",
-                    "creationTimestamp": _ago(60 * 24 * 30).isoformat(),
-                    "managedFields": [{"manager": "kubectl-edit", "time": _ago(40).isoformat()}],
-                }
-            },
-            {
-                "metadata": {
-                    "name": "someone-elses",
-                    "managedFields": [{"manager": "kubectl-edit", "time": _ago(5).isoformat()}],
-                }
-            },
-        ]
+    cluster.objects["secrets"] = {
+        "api-db": _meta_obj("api-db", _ago(40)),
+        "someone-elses": _meta_obj("someone-elses", _ago(5)),
+        # api-tls and regcred are referenced but do not exist: nothing to report
     }
 
 
@@ -244,17 +258,33 @@ def test_pod_sees_its_deployments_rollout_its_config_and_the_cluster_upgrade(cli
     }
 
 
-def test_secrets_are_read_as_metadata_only_and_no_value_is_returned(client, cluster):
+def test_config_is_read_as_metadata_only_and_no_secret_value_is_returned(client, cluster):
     _crashlooping_pod(cluster)
-    # Even if the API server sent data, the endpoint never looks at it.
-    cluster.secret_listing["items"][0]["data"] = {"password": "aHVudGVyMg=="}
-    cluster.secret_listing["items"][0]["stringData"] = {"password": "hunter2"}
+    secret = cluster.objects["secrets"]["api-db"]
+    # Even if the API server sent data, the endpoint never looks at it ...
+    secret["data"] = {"password": "aHVudGVyMg=="}
+    secret["stringData"] = {"password": "hunter2"}
+    # ... and metadata-only reads still carry annotations, where kubectl apply
+    # keeps the whole object, data included.
+    secret["metadata"]["annotations"] = {
+        "kubectl.kubernetes.io/last-applied-configuration": json.dumps(
+            {"kind": "Secret", "data": {"password": "aHVudGVyMg=="}, "stringData": {"token": "s3cr3t-t0ken"}}
+        )
+    }
     r = _get(client, namespace="shop", kind="Pod", name="api-7d9-x")
     assert r.status_code == 200
-    assert "hunter2" not in r.text and "aHVudGVyMg==" not in r.text and "password" not in r.text
-    assert cluster.raw_calls == [("/api/v1/namespaces/shop/secrets", cc._METADATA_ONLY)]
+    for leaked in ("hunter2", "aHVudGVyMg==", "s3cr3t-t0ken", "password", "last-applied"):
+        assert leaked not in r.text
+    # One metadata-only GET per referenced object; nothing is listed, no typed Secret read.
+    assert sorted(cluster.raw_calls) == [
+        ("/api/v1/namespaces/shop/configmaps/api-config", cc._METADATA_ONE),
+        ("/api/v1/namespaces/shop/secrets/api-db", cc._METADATA_ONE),
+        ("/api/v1/namespaces/shop/secrets/api-tls", cc._METADATA_ONE),
+        ("/api/v1/namespaces/shop/secrets/regcred", cc._METADATA_ONE),
+    ]
     cluster.core.list_namespaced_secret.assert_not_called()
     cluster.core.read_namespaced_secret.assert_not_called()
+    cluster.core.list_namespaced_config_map.assert_not_called()
 
 
 def test_statefulset_pod_sees_its_controller_revisions(client, cluster):
@@ -395,11 +425,35 @@ def test_requires_the_shared_token(client, cluster):
 
 def test_reads_use_the_forwarded_user_token(client, cluster):
     _crashlooping_pod(cluster)
-    r = _get(
-        client, headers={"X-Forwarded-Access-Token": "user-oauth-token"}, namespace="shop", kind="Pod", name="api-7d9-x"
-    )
+    r = _get(client, namespace="shop", kind="Pod", name="api-7d9-x")
     assert r.status_code == 200
     assert cluster.tokens and set(cluster.tokens) == {"user-oauth-token"}
+
+
+def test_without_a_user_token_is_401_and_nothing_is_read_as_the_service_account(client, cluster):
+    _crashlooping_pod(cluster)
+    r = client.get("/changes", params={"namespace": "shop", "kind": "Pod", "name": "api-7d9-x"}, headers=AUTH)
+    assert r.status_code == 401
+    assert r.json()["detail"] == "User access token required"
+    assert cluster.tokens == []
+    cluster.core.read_namespaced_pod.assert_not_called()
+
+
+def test_with_token_forwarding_off_reads_run_as_the_agent(monkeypatch, cluster):
+    monkeypatch.setenv("PULSE_AGENT_WS_TOKEN", TOKEN)
+    monkeypatch.setenv("PULSE_AGENT_TOKEN_FORWARDING", "false")
+    _reset_settings()
+    try:
+        app = FastAPI()
+        app.include_router(changes_rest.router)
+        _crashlooping_pod(cluster)
+        r = TestClient(app).get(
+            "/changes", params={"namespace": "shop", "kind": "Pod", "name": "api-7d9-x"}, headers=AUTH
+        )
+    finally:
+        _reset_settings()
+    assert r.status_code == 200
+    assert set(cluster.tokens) == {None}
 
 
 def test_forbidden_resource_read_is_403_not_an_empty_list(client, cluster):
@@ -443,14 +497,74 @@ def test_route_missing_404_has_no_code_so_the_two_are_distinguishable(client):
 
 def test_server_error_on_a_required_read_is_502(client, cluster):
     _crashlooping_pod(cluster)
-    cluster.core.list_namespaced_config_map.side_effect = ApiException(status=500, reason="Internal")
+    cluster.raw_errors["configmaps"] = ApiException(status=500, reason="Internal")
     r = _get(client, namespace="shop", kind="Pod", name="api-7d9-x")
     assert r.status_code == 502
 
 
+def test_forbidden_referenced_configmap_is_403(client, cluster):
+    _crashlooping_pod(cluster)
+    cluster.raw_errors["configmaps"] = _forbidden()
+    r = _get(client, namespace="shop", kind="Pod", name="api-7d9-x")
+    assert r.status_code == 403
+    assert "ConfigMaps in shop" in r.json()["detail"]
+
+
+# -- kind=ConfigMap / Secret: the object itself is a required read ----------------
+
+
+@pytest.mark.parametrize("kind, plural", [("ConfigMap", "configmaps"), ("Secret", "secrets")])
+def test_config_object_edit_is_reported(client, cluster, kind, plural):
+    cluster.objects[plural]["app-cfg"] = _meta_obj("app-cfg", _ago(20), manager="helm")
+    body = _get(client, namespace="shop", kind=kind, name="app-cfg").json()
+    assert [(c["kind"], c["name"], c["actor"]) for c in body["changes"]] == [(kind, "app-cfg", "helm")]
+    assert cluster.raw_calls == [(f"/api/v1/namespaces/shop/{plural}/app-cfg", cc._METADATA_ONE)]
+
+
+@pytest.mark.parametrize("kind", ["ConfigMap", "Secret"])
+def test_missing_config_object_is_resource_not_found(client, cluster, kind):
+    r = _get(client, namespace="shop", kind=kind, name="nope")
+    assert r.status_code == 404
+    assert r.json()["code"] == "resource_not_found"
+
+
+@pytest.mark.parametrize("kind, plural", [("ConfigMap", "configmaps"), ("Secret", "secrets")])
+def test_forbidden_config_object_is_403(client, cluster, kind, plural):
+    cluster.raw_errors[plural] = _forbidden()
+    r = _get(client, namespace="shop", kind=kind, name="app-cfg")
+    assert r.status_code == 403
+    assert f"{kind} shop/app-cfg" in r.json()["detail"]
+
+
+# -- Bounded answers ------------------------------------------------------------------
+
+
+def test_more_than_500_changes_is_capped_and_marked_truncated(client, cluster):
+    cluster.objects["configmaps"] = {
+        f"cm-{i}": _meta_obj(f"cm-{i}", _ago(1 + i * 0.1)) for i in range(rc.MAX_RESPONSE_CHANGES + 20)
+    }
+    body = _get(client, namespace="shop").json()
+    assert len(body["changes"]) == rc.MAX_RESPONSE_CHANGES
+    assert body["truncated"] is True
+    assert body["changes"][0]["name"] == "cm-0"  # the newest are kept
+
+
+def test_a_list_too_long_to_read_marks_the_answer_truncated(client, cluster, monkeypatch):
+    monkeypatch.setattr(cc, "MAX_LIST_ITEMS", 1)
+    cluster.objects["configmaps"] = {"a": _meta_obj("a", _ago(5))}
+    cluster.list_continue = "more"
+    body = _get(client, namespace="shop").json()
+    assert body["truncated"] is True
+
+
+def test_a_complete_answer_has_no_truncated_key(client, cluster):
+    _crashlooping_pod(cluster)
+    assert "truncated" not in _get(client, namespace="shop", kind="Pod", name="api-7d9-x").json()
+
+
 def test_optional_sources_refused_are_named_not_silently_dropped(client, cluster):
     _crashlooping_pod(cluster)
-    cluster.secret_listing = ApiException(status=403, reason="Forbidden")
+    cluster.raw_errors["secrets"] = _forbidden()
     cluster.custom.get_cluster_custom_object.side_effect = ApiException(status=403, reason="Forbidden")
     r = _get(client, namespace="shop", kind="Pod", name="api-7d9-x")
     assert r.status_code == 200
