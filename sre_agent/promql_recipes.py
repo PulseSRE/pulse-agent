@@ -100,7 +100,7 @@ def inject_cluster_label(query: str, cluster_name: str) -> str:
 
     Handles metric{labels} and bare metric names. Skips if cluster= already present.
     """
-    if not _VALID_CLUSTER_NAME.match(cluster_name):
+    if not _VALID_CLUSTER_NAME.fullmatch(cluster_name):
         raise ValueError(f"Invalid cluster name: {cluster_name!r}")
     if f'cluster="{cluster_name}"' in query:
         return query

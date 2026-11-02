@@ -7,6 +7,7 @@ The registry monitors burn rates and generates alerts when error budgets are dep
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 
 logger = logging.getLogger("pulse_agent.slo")
@@ -28,6 +29,55 @@ class SLODefinition:
         # check_burn_rate answered "ok" for every such SLO forever.
         if self.target >= 1.0:
             self.target = round(self.target / 100.0, 9)
+
+
+VALID_SLO_TYPES = frozenset({"availability", "latency", "error_rate"})
+MAX_WINDOW_DAYS = 90
+
+
+def promql_label_value(value: str) -> str:
+    """Escape a value for use inside a double-quoted PromQL label matcher.
+
+    PromQL strings follow Go escaping: a raw ``"`` ends the string and ``\\``
+    starts an escape sequence, so both are escaped (and line breaks, which
+    would otherwise end the query text). Validation is the first defence;
+    this keeps a value that slipped past it a literal.
+    """
+    return str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r")
+
+
+def slo_definition_error(
+    service_name: object, slo_type: object, target: object = 0.999, window_days: object = 30
+) -> str | None:
+    """Why these SLO fields cannot be registered or queried, or None when valid.
+
+    The service name is interpolated into PromQL that runs as the service
+    account, so it must be a Kubernetes (RFC 1123) name: a free-form name let
+    any holder of the shared token inject PromQL and read its result back
+    through ``GET /slo``.
+    """
+    from .k8s_tools.validators import _validate_k8s_name
+
+    if not isinstance(service_name, str):
+        return "service must be a string"
+    err = _validate_k8s_name(service_name, "service")
+    if err:
+        return err.removeprefix("Error: ")
+    if slo_type not in VALID_SLO_TYPES:
+        return f"type must be one of: {', '.join(sorted(VALID_SLO_TYPES))}"
+    if isinstance(target, bool) or not isinstance(target, (int, float)) or not math.isfinite(target):
+        return "target must be a finite number"
+    if not 0.0 < target < 100.0:
+        return "target must be between 0.0 and 100.0 (exclusive)"
+    if isinstance(window_days, bool) or not isinstance(window_days, int):
+        return "window_days must be an integer"
+    if not 1 <= window_days <= MAX_WINDOW_DAYS:
+        return f"window_days must be between 1 and {MAX_WINDOW_DAYS}"
+    return None
+
+
+def _definition_error(slo: SLODefinition) -> str | None:
+    return slo_definition_error(slo.service_name, slo.slo_type, slo.target, slo.window_days)
 
 
 @dataclass
@@ -58,7 +108,18 @@ class SLORegistry:
         self._slos: dict[str, SLODefinition] = {}
 
     def register(self, slo: SLODefinition, persist: bool = True) -> None:
+        """Register an SLO; ``persist=True`` (a new registration) requires valid fields.
+
+        Rows reloaded from the database (``persist=False``) are kept even when
+        invalid, so they stay visible and deletable, but they are never
+        queried: see ``invalid_reason``.
+        """
         key = f"{slo.service_name}:{slo.slo_type}"
+        err = _definition_error(slo)
+        if err:
+            if persist:
+                raise ValueError(f"Invalid SLO definition: {err}")
+            logger.warning("Stored SLO %r is invalid and will not be queried: %s", key, err)
         self._slos[key] = slo
         logger.info(
             "Registered SLO: %s %s target=%.3f",
@@ -104,6 +165,11 @@ class SLORegistry:
 
     def list_all(self) -> list[SLODefinition]:
         return list(self._slos.values())
+
+    @staticmethod
+    def invalid_reason(slo: SLODefinition) -> str | None:
+        """Why this SLO is never queried (an invalid stored row), or None."""
+        return _definition_error(slo)
 
     def check_burn_rate(self, slo: SLODefinition, current_value: float, recent_value: float | None = None) -> SLOStatus:
         """Evaluate an SLO from its measured SLI.
@@ -186,6 +252,12 @@ class SLORegistry:
             return values
 
         for key, slo in self._slos.items():
+            err = _definition_error(slo)
+            if err:
+                # A row stored before names were validated: report no data
+                # rather than run attacker-shaped PromQL as the service account.
+                logger.warning("Skipping invalid SLO %r: %s", key, err)
+                continue
             query = self._build_prom_query(slo, window)
             if not query:
                 continue
@@ -221,8 +293,10 @@ class SLORegistry:
         and error ratios; compared with a 0.999 target they read as a 0.0 SLI,
         so every such SLO was permanently critical.
         """
-        svc = slo.service_name
-        window = window or f"{slo.window_days}d"
+        if _definition_error(slo):
+            return ""
+        svc = promql_label_value(slo.service_name)
+        window = window or f"{int(slo.window_days)}d"
         apiserver = svc in ("kube-apiserver", "apiserver")
         if slo.slo_type == "availability":
             # Ready replicas over desired, averaged over the window.
@@ -371,6 +445,7 @@ def list_slo_definitions() -> list[dict]:
             "target": slo.target,
             "window_days": slo.window_days,
             "description": slo.description,
+            "invalid_reason": registry.invalid_reason(slo),
         }
         for slo in registry._slos.values()
     ]
