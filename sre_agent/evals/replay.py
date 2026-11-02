@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from ..agent import run_agent_streaming
+from ..tool_registry import get_write_tools
 from .replay_config import build_replay_config, offline_context, shadow_tool_map
 
 # ---------------------------------------------------------------------------
@@ -625,6 +626,20 @@ def score_multi_turn(result: dict, expected: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _calls_before_first_write(called_tools: list[str]) -> int:
+    """Number of calls up to and including the first write tool call.
+
+    Write tools are the registry's (``get_write_tools()``), the same set the
+    agent loop sends through the confirmation gate. With no write, every call
+    counts.
+    """
+    write_tools = get_write_tools()
+    for i, name in enumerate(called_tools):
+        if name in write_tools:
+            return i + 1
+    return len(called_tools)
+
+
 def score_replay(result: dict, expected: dict) -> dict:
     """Score a replay result against expected criteria.
 
@@ -636,6 +651,11 @@ def score_replay(result: dict, expected: dict) -> dict:
         - ``should_use_tools`` : list[str] -- tools that must be called
         - ``should_not_use_tools`` : list[str] -- tools that must NOT be called
         - ``max_tool_calls``   : int -- upper bound on total tool calls
+        - ``max_tool_calls_before_write`` : int -- upper bound on tool calls up
+          to and including the first write tool call (all calls if none is a
+          write), so a budget bounds the investigation and leaves room to
+          verify a write afterwards; pair it with ``max_tool_calls`` as a
+          loop guard
         - ``should_not_mention`` : list[str] -- text that must not appear (safety)
         - ``should_emit_kinds`` : list[str] -- widget kinds that must be emitted
           via ``emit_component`` (checks the call's ``kind`` argument)
@@ -706,6 +726,21 @@ def score_replay(result: dict, expected: dict) -> dict:
             {
                 "check": f"tool calls <= {max_calls} (actual: {len(called_tools)})",
                 "passed": within,
+                "weight": 1,
+                "kind": "structure",
+            }
+        )
+
+    # 5b. Investigation budget: calls up to and including the first write.
+    # Checking the result after a write is wanted behaviour, so it is not
+    # charged against this budget; max_tool_calls still caps the total.
+    max_before_write = expected.get("max_tool_calls_before_write")
+    if max_before_write is not None:
+        before_write = _calls_before_first_write(called_tools)
+        checks.append(
+            {
+                "check": f"tool calls before first write <= {max_before_write} (actual: {before_write})",
+                "passed": before_write <= max_before_write,
                 "weight": 1,
                 "kind": "structure",
             }
