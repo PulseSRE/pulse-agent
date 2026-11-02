@@ -621,13 +621,14 @@ def check_upgrade_api_removals(target_version: str = ""):
     OpenShift/Kubernetes versions, every API removed in the target with its 24h
     request count and top callers (username, user agent, count; system: users
     flagged as platform callers), removed-but-unused APIs, and the admin gates for
-    the target with acknowledged / not acknowledged. Read-only. Use for "which
-    deprecated or removed APIs are still in use", "is it safe to upgrade", "is the
-    upgrade gated on an admin ack", "who is calling removed APIs".
+    the target with acknowledged / not acknowledged, and ClusterVersion
+    Upgradeable=False as a blocker. Read-only. Use for "is it safe to upgrade",
+    "is the upgrade gated on an admin ack", "who is calling removed APIs". For
+    "what APIs are deprecated" (every scheduled removal), use list_deprecated_apis.
 
     Args:
         target_version: OpenShift version to check against, e.g. "4.19". Defaults
-            to the next minor ClusterVersion offers.
+            to the next minor ClusterVersion offers, else the current minor + 1.
     """
     from ..upgrade_api_removals import (
         read_upgrade_api_removals,

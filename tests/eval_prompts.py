@@ -688,15 +688,15 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
     ),
     (
         "are there any deprecated APIs?",
-        ["check_upgrade_api_removals"],
+        ["list_deprecated_apis"],
         "sre",
         "Check deprecated APIs",
     ),
     (
-        "list deprecated APIs scheduled for removal in later releases",
-        ["list_deprecated_apis"],
+        "who is still calling APIs that the next upgrade removes?",
+        ["check_upgrade_api_removals"],
         "sre",
-        "List all deprecated APIs",
+        "Callers of removed APIs",
     ),
     (
         "is it safe to upgrade, are any removed APIs still being called?",

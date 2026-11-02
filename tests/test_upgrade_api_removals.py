@@ -108,6 +108,20 @@ def _arcs(in_use: bool = True) -> list[dict]:
     ]
 
 
+@pytest.fixture(autouse=True)
+def _fresh_generator_cache():
+    from sre_agent.inbox_generators import _reset_upgrade_api_cache
+
+    _reset_upgrade_api_cache()
+    yield
+    _reset_upgrade_api_cache()
+
+
+def _upgradeable_false(cv: dict, reason: str, message: str) -> dict:
+    cv["status"]["conditions"] = [{"type": "Upgradeable", "status": "False", "reason": reason, "message": message}]
+    return cv
+
+
 def _compute(cv=None, arcs=None, gates=None, acks=None, target: str = "") -> dict:
     return compute_upgrade_api_removals(
         _cv() if cv is None else cv,
@@ -182,20 +196,31 @@ class TestCompute:
         ]
 
     def test_acknowledged_gate_is_go(self):
-        data = _compute(arcs=_arcs(in_use=False), acks={"data": {GATE_419: "True"}})
+        data = _compute(arcs=_arcs(in_use=False), acks={"data": {GATE_419: "true"}})
         assert data["status"] == "go"
         assert data["gates"][0]["acked"] is True
+
+    @pytest.mark.parametrize("value", ["True", " true", "TRUE", "yes", ""])
+    def test_only_exactly_true_is_an_ack(self, value):
+        data = _compute(arcs=_arcs(in_use=False), acks={"data": {GATE_419: value}})
+        assert data["status"] == "no_go"
+        assert data["gates"][0]["acked"] is False
+
+    def test_go_reason_says_what_24h_cannot_see(self):
+        data = _compute(arcs=_arcs(in_use=False))
+        assert "less often than daily" in data["reason"]
 
     def test_missing_acks_configmap_means_nothing_acknowledged(self):
         data = _compute(arcs=_arcs(in_use=False), acks=_err(404))
         assert data["status"] == "no_go"
         assert data["gates"][0]["acked"] is False
 
-    def test_missing_gates_configmap_means_no_gates(self):
+    def test_missing_gates_configmap_is_could_not_check(self):
+        # The CVO treats a missing admin-gates ConfigMap as not upgradeable.
         data = _compute(arcs=_arcs(in_use=False), gates=_err(404))
-        assert data["status"] == "go"
-        assert data["gates"] == []
-        assert "no admin gates" in data["reason"]
+        assert data["status"] == "unknown"
+        assert data["cause"] == "read_failed"
+        assert "admin-gates does not exist" in data["reason"]
 
     @pytest.mark.parametrize("status", [403, 500])
     def test_unreadable_apirequestcounts_is_unknown(self, status):
@@ -211,8 +236,9 @@ class TestCompute:
         assert "not available" in data["reason"]
         assert "not served on this cluster" in data["checks"]["apiRequestCounts"]
 
-    @pytest.mark.parametrize("which", ["gates", "acks"])
-    @pytest.mark.parametrize("status", [403, 500])
+    @pytest.mark.parametrize(
+        ("which", "status"), [("gates", 403), ("gates", 404), ("gates", 500), ("acks", 403), ("acks", 500)]
+    )
     def test_unreadable_configmaps_are_unknown(self, which, status):
         data = _compute(arcs=_arcs(in_use=False), **{which: _err(status)})
         assert data["status"] == "unknown"
@@ -227,14 +253,69 @@ class TestCompute:
         assert "Also could not check" in data["reason"]
         assert "admin-gates" in data["reason"]
 
-    def test_no_available_update_and_no_target_is_unknown(self):
-        data = _compute(cv=_cv(updates=("4.18.5",)))
+    def test_planning_window_falls_back_to_next_minor(self):
+        # stable-4.18 offers only z-streams until the admin switches channel;
+        # that is when the admin needs this answer.
+        data = _compute(cv=_cv(updates=("4.18.5",)), acks={"data": {}})
+        assert data["target"] == {"ocp": "4.19", "kubernetes": "1.32", "source": "next_minor"}
+        assert data["status"] == "no_go"
+        assert [a["name"] for a in data["inUse"]] == [FLOWSCHEMA]
+        assert [(g["key"], g["acked"]) for g in data["gates"]] == [(GATE_419, False)]
+        assert "1 admin gate for 4.19 not acknowledged" in data["reason"]
+
+    def test_no_current_version_is_unknown(self):
+        cv = _cv()
+        cv["status"]["history"] = []
+        cv["status"]["desired"] = {}
+        data = _compute(cv=cv)
         assert data["status"] == "unknown"
-        assert data["cause"] == "no_newer_minor"
-        assert "pass a target version (for example 4.19)" in data["reason"]
-        assert data["target"]["ocp"] is None
-        # Still useful for "what is deprecated": the scheduled list is filled.
-        assert FLOWSCHEMA in [a["name"] for a in data["scheduledForRemoval"]]
+        assert data["cause"] == "no_current"
+
+    def test_upgradeable_false_admin_ack_required_is_no_go(self):
+        cv = _upgradeable_false(_cv(), "AdminAckRequired", "Kubernetes 1.32 removes APIs; admin-ack required")
+        data = _compute(cv=cv, arcs=_arcs(in_use=False))  # every gate we can see is acked
+        assert data["status"] == "no_go"
+        assert (
+            "ClusterVersion reports Upgradeable=False (AdminAckRequired): "
+            "Kubernetes 1.32 removes APIs; admin-ack required"
+        ) in data["reason"]
+
+    def test_any_upgradeable_false_blocks_a_minor_upgrade(self):
+        cv = _upgradeable_false(
+            _cv(), "ClusterOperatorsNotUpgradeable", "Cluster operator machine-config should not be upgraded"
+        )
+        data = _compute(cv=cv, arcs=_arcs(in_use=False))
+        assert data["status"] == "no_go"
+        assert "Upgradeable=False (ClusterOperatorsNotUpgradeable)" in data["reason"]
+        assert "machine-config should not be upgraded" in data["reason"]
+
+    def test_gate_scoped_by_current_minor_prefix(self):
+        gates = {
+            "ack-4.18-cgroups-v1-removal": "cgroups v1 is removed.",  # no -in- suffix, current minor prefix
+            "ack-4.17-old-step": "Gate of an earlier step.",  # earlier step: out of scope
+            "ack-4.19-next-step": "Gate of a later step.",  # step out of 4.19: beyond a 4.19 target
+            "unrecognised-gate-key": "Unknown shape.",  # conservative: in scope
+        }
+        data = _compute(arcs=_arcs(in_use=False), gates={"data": gates}, acks={"data": {}})
+        scoped = {g["key"]: g["release"] for g in data["gates"]}
+        assert scoped == {"ack-4.18-cgroups-v1-removal": "4.19", "unrecognised-gate-key": None}
+        assert data["status"] == "no_go"
+        assert "2 admin gates for 4.19 not acknowledged" in data["reason"]
+
+    def test_gate_key_with_unexpected_kube_minor_warns(self):
+        key = "ack-4.18-kube-1.33-api-removals-in-4.19"
+        data = _compute(arcs=_arcs(in_use=False), gates={"data": {key: "x"}}, acks={"data": {key: "true"}})
+        assert data["status"] == "go"
+        assert data["warnings"] and "Kubernetes 1.33" in data["warnings"][0]
+        assert _compute()["warnings"] == []
+
+    def test_caller_identity_is_sanitised_and_capped(self):
+        nasty = "evil\x1b[31m\nuser" + "x" * 300
+        data = _compute(arcs=[_arc(FLOWSCHEMA, "1.32", 1, [_hour((nasty, "agent\x00/1", 1))])])
+        [caller] = data["inUse"][0]["callers"]
+        assert caller["username"].startswith("evil[31muser")
+        assert len(caller["username"]) == 120
+        assert caller["userAgent"] == "agent/1"
 
     def test_conditional_update_counts_as_offered(self):
         data = _compute(cv=_cv(updates=("4.18.5",), conditional=("4.19.0",)))
@@ -247,6 +328,12 @@ class TestCompute:
         assert [g["key"] for g in data["gates"]] == [GATE_419, GATE_420]
         assert data["status"] == "no_go"
         assert "1 admin gate for 4.20 not acknowledged" in data["reason"]
+
+    def test_go_two_minors_ahead_says_later_gates_are_not_covered(self):
+        acks = {"data": {GATE_419: "true", GATE_420: "true"}}
+        data = _compute(cv=_cv(updates=()), arcs=[_arc(PRIORITY, "1.32", 0)], acks=acks, target="4.20")
+        assert data["status"] == "go"
+        assert "Only the admin gates published so far (for the step out of 4.18)" in data["reason"]
 
     def test_removal_releases_sort_numerically(self):
         arcs = [_arc("a.v1beta1.x.io", "1.100", 0), _arc("b.v1beta1.x.io", "1.40", 0)]
@@ -352,6 +439,18 @@ class TestTool:
         assert text.startswith("Verdict: UNKNOWN")
         assert "not available" in text
 
+    def test_planning_window_label(self, mock_k8s):
+        _wire(mock_k8s, cv=_cv(updates=("4.18.5",)))
+        text = check_upgrade_api_removals.call({})
+        assert "Target: OpenShift 4.19 (Kubernetes 1.32) (next minor; not yet offered on channel stable-4.19)" in text
+
+    def test_no_target_skips_listing_apirequestcounts(self, mock_k8s):
+        _wire(mock_k8s)
+        text = check_upgrade_api_removals.call({"target_version": "4.17"})
+        assert text.startswith("Verdict: UNKNOWN — Cannot decide")
+        mock_k8s["custom"].list_cluster_custom_object.assert_not_called()
+        mock_k8s["core"].read_namespaced_config_map.assert_not_called()
+
     def test_rejects_malformed_target_without_reading(self, mock_k8s):
         _wire(mock_k8s)
         text = check_upgrade_api_removals.call({"target_version": "latest; rm -rf"})
@@ -411,13 +510,42 @@ class TestInboxGenerator:
         _wire(mock_k8s, arcs=_arcs(in_use=False))
         assert gen_upgrade_api_removals() == []
 
-    def test_no_newer_minor_and_not_openshift_produce_nothing(self, mock_k8s):
+    def test_planning_window_creates_item(self, mock_k8s):
         from sre_agent.inbox_generators import gen_upgrade_api_removals
 
-        _wire(mock_k8s, cv=_cv(updates=("4.18.5",)))
-        assert gen_upgrade_api_removals() == []
+        _wire(mock_k8s, cv=_cv(updates=("4.18.5",)), acks={})
+        [item] = gen_upgrade_api_removals()
+        assert item["title"] == "Upgrade to 4.19 blocked: 1 removed API still in use"
+        assert f"Admin gate not acknowledged: {GATE_419}" in item["summary"]
+
+    def test_upgradeable_false_item(self, mock_k8s):
+        from sre_agent.inbox_generators import gen_upgrade_api_removals
+
+        cv = _upgradeable_false(_cv(), "ClusterOperatorsNotUpgradeable", "machine-config is not upgradeable")
+        _wire(mock_k8s, cv=cv, arcs=_arcs(in_use=False))
+        [item] = gen_upgrade_api_removals()
+        assert (
+            item["title"] == "Upgrade to 4.19 blocked: ClusterVersion not upgradeable (ClusterOperatorsNotUpgradeable)"
+        )
+        assert "machine-config is not upgradeable" in item["summary"]
+
+    def test_not_openshift_produces_nothing(self, mock_k8s):
+        from sre_agent.inbox_generators import gen_upgrade_api_removals
+
         _wire(mock_k8s, cv=ApiException(status=404, reason="Not Found"))
         assert gen_upgrade_api_removals() == []
+
+    def test_verdict_is_cached_but_failures_are_not(self, mock_k8s):
+        from sre_agent.inbox_generators import GeneratorUnavailableError, gen_upgrade_api_removals
+
+        _wire(mock_k8s, arcs=ApiException(status=403, reason="Forbidden"))
+        with pytest.raises(GeneratorUnavailableError):
+            gen_upgrade_api_removals()
+        _wire(mock_k8s)
+        assert len(gen_upgrade_api_removals()) == 1
+        assert len(gen_upgrade_api_removals()) == 1
+        # Two calls after the failure, one listing: the second came from the cache.
+        assert mock_k8s["custom"].list_cluster_custom_object.call_count == 2
 
     @pytest.mark.parametrize("status", [403, 404, 500])
     def test_unreadable_source_raises_unavailable(self, mock_k8s, status):
@@ -463,10 +591,12 @@ class TestInboxCycle:
                 item = get_inbox_item(row["id"])
                 assert item["title"] == "Upgrade to 4.19 blocked: 1 removed API still in use"
 
+                g._reset_upgrade_api_cache()
                 _wire(mock_k8s, arcs=ApiException(status=403, reason="Forbidden"))
                 run_generator_cycle()
                 assert get_inbox_item(row["id"])["status"] not in ("resolved", "archived")
 
+                g._reset_upgrade_api_cache()
                 _wire(mock_k8s, arcs=_arcs(in_use=False))
                 run_generator_cycle()
                 assert get_inbox_item(row["id"])["status"] == "resolved"

@@ -104,7 +104,7 @@ scenarios:
 
   - id: sre_deprecated_apis
     prompt: "are there any deprecated APIs on this cluster?"
-    should_use_tools: [check_upgrade_api_removals]
+    should_use_tools: [list_deprecated_apis]
     should_mention: [deprecated]
     max_tool_calls: 4
 

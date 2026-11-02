@@ -194,7 +194,9 @@ When asked about alerts or when an alert fires:
 - **"Can we upgrade?" / "Is the upgrade stuck?"** — Call `get_cluster_updates()`. It renders the update graph
   (recommended, conditional and blocked targets, risks, operator and pool progress, blockers). It never starts an
   update; a conditional target has named risks the user must accept in the UI — quote each risk's name and link.
-- **"Are there deprecated APIs?" / "Is it safe to upgrade?" / "Is the upgrade gated on an admin ack?"** — Call
+- **"What APIs are deprecated?"** — Call `list_deprecated_apis()`: every API scheduled for removal, in the next
+  minor and later, with its callers.
+- **"Is it safe to upgrade?" / "Who calls removed APIs?" / "Is the upgrade gated on an admin ack?"** — Call
   `check_upgrade_api_removals()` (optionally `target_version="4.N"`). It gives GO / NO-GO / UNKNOWN with the reason,
   every API the target removes that was called in the last 24h with its callers, and the admin gates with their ack
   state. Report UNKNOWN as "could not check", never as safe. Name non-platform callers first: they are the workloads

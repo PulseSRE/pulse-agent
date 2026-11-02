@@ -185,21 +185,42 @@ def _get_available_updates() -> list[dict]:
     return [{"version": u.get("version"), "channel": u.get("channel", "")} for u in updates]
 
 
-def _get_upgrade_api_removals() -> dict | None:
-    """The API-removal verdict for the next minor on offer, or None when there is none.
+# The generator cycle runs every scan; listing APIRequestCount is one object
+# per served resource version with 24h of per-node, per-user counts, and the
+# answer moves on the scale of hours. A verdict is reused for this long.
+_UPGRADE_API_CACHE_SECONDS = 45 * 60
+_upgrade_api_cache: tuple[float, dict | None] | None = None
 
-    None means checked and nothing to say: not OpenShift, or no newer minor is
-    offered. A read that failed raises, so an open "upgrade blocked" item is
-    left alone rather than resolved by a 403.
+
+def _reset_upgrade_api_cache() -> None:
+    global _upgrade_api_cache
+    _upgrade_api_cache = None
+
+
+def _get_upgrade_api_removals() -> dict | None:
+    """The API-removal verdict for the next minor, or None when there is nothing to check.
+
+    The target is the next minor on offer, else current + 1 (a ``stable-4.N``
+    channel offers only z-streams until the admin switches channel, which is
+    exactly when to plan). None means checked and nothing to say: not
+    OpenShift. A read that failed raises, so an open "upgrade blocked" item is
+    left alone rather than resolved by a 403; failures are not cached.
     """
+    global _upgrade_api_cache
     from .upgrade_api_removals import read_upgrade_api_removals
 
+    now = time.time()
+    if _upgrade_api_cache and now - _upgrade_api_cache[0] < _UPGRADE_API_CACHE_SECONDS:
+        return _upgrade_api_cache[1]
     data = read_upgrade_api_removals()
-    if data["status"] != "unknown":
-        return data
-    if data["cause"] in ("not_openshift", "no_newer_minor"):
-        return None
-    raise GeneratorUnavailableError(f"upgrade API removals: {data['reason']}")
+    if data["status"] == "unknown":
+        if data["cause"] != "not_openshift":
+            raise GeneratorUnavailableError(f"upgrade API removals: {data['reason']}")
+        result = None
+    else:
+        result = data
+    _upgrade_api_cache = (now, result)
+    return result
 
 
 # Hours of error budget left below which an SLO becomes an inbox item.
@@ -464,7 +485,7 @@ def gen_upgrade_available() -> list[dict[str, Any]]:
 
 
 def gen_upgrade_api_removals() -> list[dict[str, Any]]:
-    """One item while the next minor on offer is blocked by API removals or an unacked gate.
+    """One item while the next minor is blocked: removed APIs in use, an unacked gate, or Upgradeable=False.
 
     Stops being produced (and is auto-resolved) once the verdict is go. A new
     target minor gets its own item, so the old one resolves with it.
@@ -478,9 +499,12 @@ def gen_upgrade_api_removals() -> list[dict[str, Any]]:
     if in_use:
         n = len(in_use)
         title = f"Upgrade to {target} blocked: {n} removed API{'s' if n != 1 else ''} still in use"
-    else:
+    elif unacked:
         n = len(unacked)
         title = f"Upgrade to {target} blocked: {n} admin gate{'s' if n != 1 else ''} not acknowledged"
+    else:
+        reason = data["upgradeable"]["reason"] or "Upgradeable=False"
+        title = f"Upgrade to {target} blocked: ClusterVersion not upgradeable ({reason})"
 
     lines = [data["reason"]]
     for api in in_use[:10]:

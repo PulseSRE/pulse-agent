@@ -21,7 +21,7 @@ does the reads. The agent tool, the inbox generator and the tests share both.
 Honesty rules: a read that failed is "could not check", never "go". A 404 on
 APIRequestCount means the API is not served here (not OpenShift), so the
 answer is unknown. A verdict that is already proven -- a removed API still in
-use, or an unacknowledged gate -- stays ``no_go`` even when another read
+use, an unacknowledged gate, or ClusterVersion ``Upgradeable=False`` -- stays ``no_go`` even when another read
 failed, because nothing that read could have returned would make it ``go``.
 """
 
@@ -43,6 +43,11 @@ MAX_CALLERS = 10
 
 _VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)(?:\.(\d+))?(?:[-+].*)?$")
 _GATE_TARGET_RE = re.compile(r"-in-(\d+\.\d+)$")
+_GATE_PREFIX_RE = re.compile(r"^ack-(\d+\.\d+)-")
+_GATE_KUBE_RE = re.compile(r"-kube-(\d+\.\d+)-")
+# Caller identity fields come from request headers anyone can set.
+MAX_FIELD_CHARS = 120
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 # OCP 4.N ships Kubernetes 1.(N+13): 4.16 -> 1.29, 4.19 -> 1.32.
 _OCP4_TO_KUBE_OFFSET = 13
@@ -128,7 +133,7 @@ def _callers(status: dict) -> list[dict[str, Any]]:
     for hour in hours:
         for node in (hour or {}).get("byNode") or []:
             for user in (node or {}).get("byUser") or []:
-                key = (str(user.get("username", "")), str(user.get("userAgent", "")))
+                key = (_clean(user.get("username", "")), _clean(user.get("userAgent", "")))
                 totals[key] = totals.get(key, 0) + int(user.get("requestCount") or 0)
     ranked = sorted(
         ((u.startswith("system:"), -n, u, ua) for (u, ua), n in totals.items() if n > 0),
@@ -136,10 +141,113 @@ def _callers(status: dict) -> list[dict[str, Any]]:
     return [{"username": u, "userAgent": ua, "count": -neg, "platform": platform} for platform, neg, u, ua in ranked]
 
 
+def _clean(value: Any) -> str:
+    """Strip control characters and cap length: these strings reach prompts and the inbox."""
+    text = _CONTROL_RE.sub("", str(value or ""))
+    return text if len(text) <= MAX_FIELD_CHARS else text[: MAX_FIELD_CHARS - 1] + "…"
+
+
 def _cm_data(cm: Any) -> dict[str, str]:
     if isinstance(cm, dict):
         return dict(cm.get("data") or {})
     return dict(getattr(cm, "data", None) or {})
+
+
+def resolve_target(cv: dict, target_version: str = "") -> dict[str, Any]:
+    """Current version, target minor and where the target came from.
+
+    With no ``target_version`` the target is the lowest newer minor that
+    ClusterVersion offers; on a ``stable-4.N`` channel only z-streams are
+    offered until the admin switches channel, so the target falls back to the
+    current minor + 1 (source ``next_minor``) -- that planning window is when
+    this check matters most. ``problem``/``cause`` are set when no target can
+    be formed.
+    """
+    cur_version = current_version(cv)
+    cur_minor = parse_minor(cur_version)
+    cur_kube = kube_minor_for_ocp(cur_minor) if cur_minor else None
+    out: dict[str, Any] = {
+        "current_version": cur_version,
+        "current": cur_minor if cur_kube else None,
+        "current_kube": cur_kube,
+        "target": None,
+        "target_kube": None,
+        "source": None,
+        "problem": "",
+        "cause": None,
+    }
+    if not cur_minor or not cur_kube:
+        out["problem"] = (
+            f"the current OpenShift version could not be determined from ClusterVersion "
+            f"({cur_version or 'no version recorded'})"
+        )
+        out["cause"] = "no_current"
+        return out
+    target: tuple[int, int] | None
+    if target_version:
+        target = parse_minor(target_version)
+        if not target or not kube_minor_for_ocp(target):
+            out["problem"] = f"target {target_version!r} is not an OpenShift 4 version"
+            out["cause"] = "bad_target"
+            return out
+        if target <= cur_minor:
+            out["problem"] = (
+                f"target {_fmt(target)} is not a newer minor than the current {_fmt(cur_minor)}; "
+                "patch updates within a minor do not remove APIs"
+            )
+            out["cause"] = "bad_target"
+            return out
+        out["source"] = "requested"
+    else:
+        newer = [m for m in _offered_minors(cv) if m > cur_minor]
+        if newer:
+            target = newer[0]
+            out["source"] = "available_update"
+        else:
+            target = (cur_minor[0], cur_minor[1] + 1)
+            out["source"] = "next_minor"
+    out["target"] = target
+    out["target_kube"] = kube_minor_for_ocp(target)
+    return out
+
+
+def _gate_scope(key: str, cur: tuple[int, int], target: tuple[int, int]) -> tuple[bool, str | None]:
+    """Whether a gate key applies to the path cur -> target, and the release it gates.
+
+    Keys look like ``ack-4.18-kube-1.32-api-removals-in-4.19``. A ``-in-X.Y``
+    suffix names the release it gates. Without one, the CVO scopes a gate by
+    its ``ack-X.Y-`` prefix: it applies to the step out of X.Y. A key matching
+    neither is kept in scope, because dropping a gate the CVO enforces would
+    turn a blocked upgrade into "go".
+    """
+    m = _GATE_TARGET_RE.search(key)
+    if m:
+        gated = parse_minor(m.group(1))
+        if gated:
+            return cur < gated <= target, _fmt(gated)
+    p = _GATE_PREFIX_RE.match(key)
+    if p:
+        source = parse_minor(p.group(1))
+        if source:
+            return cur <= source < target, _fmt((source[0], source[1] + 1))
+    return True, None
+
+
+def _gate_mapping_warning(key: str) -> str | None:
+    """Cross-check 4.N -> 1.(N+13) against a key that names both releases."""
+    kube = _GATE_KUBE_RE.search(key)
+    target = _GATE_TARGET_RE.search(key)
+    if not kube or not target:
+        return None
+    gated = parse_minor(target.group(1))
+    named = parse_minor(kube.group(1))
+    expected = kube_minor_for_ocp(gated) if gated else None
+    if gated and named and expected and expected != named:
+        return (
+            f"admin gate {key} pairs OpenShift {_fmt(gated)} with Kubernetes {_fmt(named)}, but this check "
+            f"assumes Kubernetes {_fmt(expected)}; removal releases may be off by one minor"
+        )
+    return None
 
 
 def compute_upgrade_api_removals(
@@ -152,19 +260,18 @@ def compute_upgrade_api_removals(
     """Decide go / no_go / unknown for upgrading to ``target_version``.
 
     Each input is what its read returned, or the ``ToolError`` it produced.
-    With no ``target_version`` the target is the lowest minor above the
-    current one that ClusterVersion offers; with none on offer the answer is
-    unknown. An API is in scope when it is removed after the current
-    Kubernetes minor and no later than the target's; in scope with requests
-    in the last 24h it blocks the upgrade, with none it is "removed but
-    unused". A gate is in scope when it names a release after the current
-    minor and no later than the target.
+    The target comes from ``resolve_target``. An API is in scope when it is
+    removed after the current Kubernetes minor and no later than the
+    target's; in scope with requests in the last 24h it blocks the upgrade,
+    with none it is "removed but unused". Gates are scoped by ``_gate_scope``.
+    ClusterVersion ``Upgradeable=False`` blocks every minor upgrade, so it is
+    a blocker of its own whatever the gates say.
     """
     result: dict[str, Any] = {
         "status": "unknown",
         "reason": "",
         # Why the status is unknown: not_openshift | read_failed | no_current |
-        # bad_target | no_newer_minor. None when the status is go or no_go.
+        # bad_target. None when the status is go or no_go.
         "cause": None,
         "current": {"ocp": None, "kubernetes": None},
         "target": {"ocp": None, "kubernetes": None, "source": None},
@@ -174,6 +281,7 @@ def compute_upgrade_api_removals(
         "unused": [],
         "scheduledForRemoval": [],
         "gates": [],
+        "warnings": [],
         "checks": {"clusterVersion": "ok", "apiRequestCounts": "ok", "adminGates": "ok", "adminAcks": "ok"},
     }
     checks = result["checks"]
@@ -196,50 +304,11 @@ def compute_upgrade_api_removals(
     cv = cluster_version or {}
     result["channel"] = (cv.get("spec") or {}).get("channel") or None
     result["upgradeable"] = _upgradeable(cv)
-    cur_version = current_version(cv)
-    cur_minor = parse_minor(cur_version)
-    cur_kube = kube_minor_for_ocp(cur_minor) if cur_minor else None
-    result["current"] = {"ocp": cur_version, "kubernetes": _fmt(cur_kube)}
-
-    target_minor: tuple[int, int] | None = None
-    target_problem = ""
-    target_cause = ""
-    if not cur_minor or not cur_kube:
-        target_cause = "no_current"
-        target_problem = (
-            f"the current OpenShift version could not be determined from ClusterVersion "
-            f"({cur_version or 'no version recorded'})"
-        )
-    elif target_version:
-        target_minor = parse_minor(target_version)
-        if not target_minor or not kube_minor_for_ocp(target_minor):
-            target_problem = f"target {target_version!r} is not an OpenShift 4 version"
-            target_cause = "bad_target"
-            target_minor = None
-        elif target_minor <= cur_minor:
-            target_problem = (
-                f"target {_fmt(target_minor)} is not a newer minor than the current {_fmt(cur_minor)}; "
-                "patch updates within a minor do not remove APIs"
-            )
-            target_cause = "bad_target"
-            target_minor = None
-        else:
-            result["target"]["source"] = "requested"
-    else:
-        newer = [m for m in _offered_minors(cv) if m > cur_minor]
-        if newer:
-            target_minor = newer[0]
-            result["target"]["source"] = "available_update"
-        else:
-            target_cause = "no_newer_minor"
-            target_problem = (
-                f"no update to a newer minor than {_fmt(cur_minor)} is offered on channel "
-                f"{result['channel'] or '(none)'}; pass a target version (for example "
-                f"{cur_minor[0]}.{cur_minor[1] + 1}) to check against it"
-            )
-    target_kube = kube_minor_for_ocp(target_minor) if target_minor else None
-    result["target"]["ocp"] = _fmt(target_minor)
-    result["target"]["kubernetes"] = _fmt(target_kube)
+    t = resolve_target(cv, target_version)
+    cur_minor, cur_kube = t["current"], t["current_kube"]
+    target_minor, target_kube = t["target"], t["target_kube"]
+    result["current"] = {"ocp": t["current_version"], "kubernetes": _fmt(cur_kube)}
+    result["target"] = {"ocp": _fmt(target_minor), "kubernetes": _fmt(target_kube), "source": t["source"]}
 
     # -- APIs removed in the target, and whether anything still calls them --
     if isinstance(api_request_counts, ToolError):
@@ -281,11 +350,14 @@ def compute_upgrade_api_removals(
     # -- Admin gates for the target ----------------------------------------
     gates_data: dict[str, str] | None = None
     if isinstance(admin_gates, ToolError):
-        if admin_gates.status_code == 404:
-            gates_data = {}  # the CVO publishes no gates for this release
-            checks["adminGates"] = "none published"
-        else:
-            checks["adminGates"] = _read_failure("ConfigMap openshift-config-managed/admin-gates", admin_gates)
+        # The CVO treats a missing admin-gates ConfigMap as not upgradeable,
+        # so a 404 is no more a clean bill than a 403.
+        what = "ConfigMap openshift-config-managed/admin-gates"
+        checks["adminGates"] = (
+            f"{what} does not exist (the CVO treats that as not upgradeable)"
+            if admin_gates.status_code == 404
+            else _read_failure(what, admin_gates)
+        )
     else:
         gates_data = _cm_data(admin_gates)
 
@@ -301,16 +373,22 @@ def compute_upgrade_api_removals(
 
     if gates_data is not None and target_minor and cur_minor:
         for key in sorted(gates_data):
-            m = _GATE_TARGET_RE.search(key)
-            gate_minor = parse_minor(m.group(1)) if m else None
-            if not gate_minor or not (cur_minor < gate_minor <= target_minor):
+            in_scope, release = _gate_scope(key, cur_minor, target_minor)
+            if not in_scope:
                 continue
-            acked = None if acks_data is None else str(acks_data.get(key, "")).strip().lower() == "true"
-            result["gates"].append(
-                {"key": key, "description": gates_data[key], "release": _fmt(gate_minor), "acked": acked}
-            )
+            # The CVO accepts exactly "true"; "True" or " true" is not an ack.
+            acked = None if acks_data is None else acks_data.get(key) == "true"
+            result["gates"].append({"key": key, "description": gates_data[key], "release": release, "acked": acked})
+            warning = _gate_mapping_warning(key)
+            if warning:
+                result["warnings"].append(warning)
 
     # -- Verdict -----------------------------------------------------------
+    if t["problem"]:
+        result["reason"] = f"Cannot decide: {t['problem']}."
+        result["cause"] = t["cause"]
+        return result
+
     unacked = [g for g in result["gates"] if g["acked"] is False]
     failed = [v for k, v in checks.items() if k != "clusterVersion" and not _check_ok(v)]
     blockers: list[str] = []
@@ -322,13 +400,14 @@ def compute_upgrade_api_removals(
         )
     if unacked:
         n = len(unacked)
-        releases = ", ".join(sorted({g["release"] for g in unacked}, key=lambda r: parse_minor(r) or (0, 0)))
-        blockers.append(f"{n} admin gate{'s' if n != 1 else ''} for {releases} not acknowledged")
+        releases = sorted({g["release"] for g in unacked if g["release"]}, key=lambda r: parse_minor(r) or (0, 0))
+        scope = f" for {', '.join(releases)}" if releases else ""
+        blockers.append(f"{n} admin gate{'s' if n != 1 else ''}{scope} not acknowledged")
+    up = result["upgradeable"]
+    if up["status"] == "False":
+        # Upgradeable=False blocks minor upgrades by design, whatever the reason.
+        blockers.append(f"ClusterVersion reports Upgradeable=False ({up['reason'] or 'no reason'}): {up['message']}")
 
-    if target_problem:
-        result["reason"] = f"Cannot decide: {target_problem}."
-        result["cause"] = target_cause
-        return result
     if blockers:
         result["status"] = "no_go"
         reason = f"Upgrade to {_fmt(target_minor)} is blocked: " + "; ".join(blockers) + "."
@@ -347,12 +426,22 @@ def compute_upgrade_api_removals(
     if unused:
         parts.append(f"{unused} removed API{'s are' if unused != 1 else ' is'} unused")
     parts.append(f"{acked_n} admin gate{'s' if acked_n != 1 else ''} acknowledged" if acked_n else "no admin gates")
-    result["reason"] = f"Upgrade to {_fmt(target_minor)} is clear of API removals: " + ", ".join(parts) + "."
+    reason = f"Upgrade to {_fmt(target_minor)} is clear of API removals: " + ", ".join(parts) + "."
+    reason += (
+        " APIRequestCount keeps only the last 24h, so a caller that runs less often than daily"
+        " (a weekly job, a quarterly report) does not show here."
+    )
+    if cur_minor and target_minor and target_minor > (cur_minor[0], cur_minor[1] + 1):
+        reason += (
+            f" Only the admin gates published so far (for the step out of {_fmt(cur_minor)}) are covered;"
+            " each intermediate release can publish its own when the cluster reaches it."
+        )
+    result["reason"] = reason
     return result
 
 
 def _check_ok(value: str) -> bool:
-    return value in ("ok", "none published", "none recorded")
+    return value in ("ok", "none recorded")
 
 
 def read_upgrade_api_removals(target_version: str = "") -> dict[str, Any]:
@@ -364,6 +453,12 @@ def read_upgrade_api_removals(target_version: str = "") -> dict[str, Any]:
     group, version, plural, name = CLUSTERVERSION
     cv = _kc.safe(lambda: custom.get_cluster_custom_object(group, version, plural, name))
     if isinstance(cv, ToolError):
+        return compute_upgrade_api_removals(cv, [], {}, {}, target_version)
+
+    if resolve_target(cv, target_version)["problem"]:
+        # No target, no question to ask APIRequestCount: listing it is the
+        # expensive read (one object per served resource version, with 24
+        # hours of per-node, per-user counts each).
         return compute_upgrade_api_removals(cv, [], {}, {}, target_version)
 
     a_group, a_version, a_plural = APIREQUESTCOUNT
@@ -387,11 +482,12 @@ def render_upgrade_api_removals(data: dict[str, Any], *, all_scheduled: bool = F
     lines = [f"Verdict: {verdict} — {data['reason']}"]
     lines.append(f"Current: OpenShift {cur['ocp'] or 'unknown'} (Kubernetes {cur['kubernetes'] or 'unknown'})")
     if tgt["ocp"]:
-        src = " (requested)" if tgt["source"] == "requested" else " (next minor on offer)"
+        src = {
+            "requested": " (requested)",
+            "available_update": " (next minor on offer)",
+            "next_minor": f" (next minor; not yet offered on channel {data['channel'] or '(none)'})",
+        }.get(tgt["source"], "")
         lines.append(f"Target: OpenShift {tgt['ocp']} (Kubernetes {tgt['kubernetes']}){src}")
-    up = data["upgradeable"]
-    if up["status"] == "False":
-        lines.append(f"ClusterVersion Upgradeable=False ({up['reason']}): {up['message']}")
 
     if data["inUse"]:
         lines.append("")
@@ -432,6 +528,8 @@ def render_upgrade_api_removals(data: dict[str, Any], *, all_scheduled: bool = F
                 )
                 for c in api.get("callers", [])[:3]:
                     lines.append(f"    {_caller_line(c)}")
+    for warning in data.get("warnings", []):
+        lines.append(f"Warning: {warning}")
     problems = [f"{k}: {v}" for k, v in data["checks"].items() if not _check_ok(v)]
     if problems:
         lines.append("")

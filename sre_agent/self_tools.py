@@ -911,12 +911,12 @@ def list_api_resources(group: str = ""):
 
 @beta_tool
 def list_deprecated_apis():
-    """List deprecated APIs that are scheduled for removal, and whether anything still calls them.
+    """List every deprecated API scheduled for removal, and who still calls it.
 
-    Same data as check_upgrade_api_removals (APIRequestCount removedInRelease and
-    last-24h callers, ClusterVersion, admin gates), plus APIs removed in releases
-    after the next upgrade. Prefer check_upgrade_api_removals for "is it safe to
-    upgrade". Read-only.
+    Use for "what APIs are deprecated?". Covers removals in the next minor and in
+    later releases (APIRequestCount removedInRelease, last-24h callers), with the
+    next-minor go/no-go on top. For "is it safe to upgrade" use
+    check_upgrade_api_removals. Read-only.
     """
     # This used to list API groups that serve more than one version and call
     # them "deprecated". Serving v1 and v1beta1 side by side is not deprecation,
