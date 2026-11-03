@@ -34,7 +34,9 @@ Verify the image build and actual GitHub release in both repos before deployment
 
 ## MCP server image
 
-The MCP server sidecar is built from [openshift/openshift-mcp-server](https://github.com/openshift/openshift-mcp-server) at the commit pinned in `build-push.yml` (`MCP_SERVER_REF`), not from upstream `main`. A release tag pushes `quay.io/amobrem/pulse-agent:mcp-server-vX.Y.Z` (the operator, from v0.13.0, runs the one matching `spec.agent.image`) and `mcp-server-<commit>`, and still moves the old `mcp-server` tag for operators up to v0.12.0. The build's summary records the commit and tags.
+The MCP server sidecar is built from [openshift/openshift-mcp-server](https://github.com/openshift/openshift-mcp-server) at the commit pinned in `build-push.yml` (`MCP_SERVER_REF`), not from upstream `main`. A release tag pushes `quay.io/amobrem/pulse-agent:mcp-server-vX.Y.Z` and `mcp-server-<commit>`, and still moves the old `mcp-server` tag for operators up to v0.12.0. The build's summary records the commit and tags.
+
+**Which MCP image the operator runs.** It does *not* derive the tag from `spec.agent.image`. From v0.12.1 the operator resolves the sidecar from `RELATED_IMAGE_MCP_SERVER`, a digest pinned in its CSV and `deploy/operator.yaml` (`internal/controller/images.go`), so an operator release runs the one MCP image it was built against until someone changes that pin. Publishing `mcp-server-vX.Y.Z` therefore does not put it on any cluster: pairing a new MCP build with an agent release means updating that digest by hand in the operator's release commit, alongside the agent and UI digests, as its README's "Releasing a new version" step 3 describes.
 
 Moving the pin is a change like any other: a PR that sets `MCP_SERVER_REF` to the new commit, with what changed upstream since the old one (`git log OLD..NEW` in that repo) in the description. To build an MCP image without a release, run `build-push.yml` manually with `mcp_only` (and `mcp_tag` to name it); a manual build never moves `mcp-server`.
 
