@@ -14,7 +14,7 @@
 <body>
 <header class="wrap"><nav class="sites" aria-label="Pulse projects">
 <a class="mark" href="https://github.com/PulseSRE"><svg viewBox="0 0 68 36" aria-hidden="true"><path d="M0 20 H18 L22 24 L28 3 L34 32 L38 20 H50 L54 15 L58 20 H68" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/></svg><span>Pulse</span></a>
-<a class="site" href="https://pulsesre.github.io/pulse-agent/" aria-current="page">Agent</a><a class="site" href="https://pulsesre.github.io/pulse-ui/">UI</a><a class="site" href="https://pulsesre.github.io/pulse-operator/">Operator</a><a class="site" href="https://pulsesre.github.io/sre-bench/">SRE-Bench</a><span class="ver">agent v2.36.0</span>
+<a class="site" href="https://pulsesre.github.io/pulse-agent/" aria-current="page">Agent</a><a class="site" href="https://pulsesre.github.io/pulse-ui/">UI</a><a class="site" href="https://pulsesre.github.io/pulse-operator/">Operator</a><a class="site" href="https://pulsesre.github.io/sre-bench/">SRE-Bench</a><span class="ver">agent v2.37.0</span>
 </nav></header>
 <main>
 <section class="hero wrap" aria-labelledby="title">
@@ -151,6 +151,15 @@
 <div class="wrap">
 <h2 id="new">What's new</h2>
 <div class="release">
+<p class="when"><strong>v2.37.0</strong>3 November 2026<br>Pairs with UI v2.37.0 and operator v0.13.0<br>Migration 042 runs on start</p>
+<ul>
+<li style="--c:var(--ask)"><b>A read as you is refused when you are not there.</b> <span>Routes that read the cluster with your token used to fall back to the agent's own service account when no token arrived, so anyone holding the shared agent token saw what the service account can see. They now answer 401.</span></li>
+<li style="--c:var(--ok)"><b>Go or no-go before an upgrade.</b> <span>The agent answers which APIs the next minor removes that something still calls, who is calling them, and whether the upgrade is held behind an admin acknowledgement — and never says go when a read failed.</span></li>
+<li style="--c:var(--trace)"><b>What changed around a resource.</b> <span>A pod's owners, the ConfigMaps and Secrets it uses, Argo CD syncs and cluster upgrades, in one answer — with each container's last termination, so a crashloop says why it died.</span></li>
+<li style="--c:var(--ink)"><b>A diagnosis has to have looked at what it blames.</b> <span>A node-pressure answer naming a culprit no call ever examined is capped and marked unexamined, instead of being reported at a confidence high enough to be remembered and acted on.</span></li>
+</ul>
+</div>
+<div class="release">
 <p class="when"><strong>v2.36.0</strong>30 October 2026<br>Pairs with UI v2.36.0 and operator v0.11.0<br>Migration 041 runs on start</p>
 <ul>
 <li style="--c:var(--ok)"><b>Evidence names the tool call.</b> <span>Every piece of evidence in a diagnosis cites the call it came from, with its arguments. A call that failed or never ran no longer counts as read, so confidence rests only on what was actually seen.</span></li>
@@ -184,8 +193,8 @@
   <span class="k">namespace:</span> openshiftpulse
 <span class="k">spec:</span>
   <span class="k">vertexAI:</span> { <span class="k">projectId:</span> my-gcp-project, <span class="k">region:</span> us-east5, <span class="k">credentialSecret:</span> gcp-sa-key }
-  <span class="k">agent:</span> { <span class="k">image:</span> <span class="v">quay.io/amobrem/pulse-agent:v2.36.0</span>, <span class="k">trustLevel:</span> 2 }
-  <span class="k">ui:</span>    { <span class="k">image:</span> <span class="v">quay.io/amobrem/openshiftpulse:v2.36.0</span> }</code></pre>
+  <span class="k">agent:</span> { <span class="k">image:</span> <span class="v">quay.io/amobrem/pulse-agent:v2.37.0</span>, <span class="k">trustLevel:</span> 2 }
+  <span class="k">ui:</span>    { <span class="k">image:</span> <span class="v">quay.io/amobrem/openshiftpulse:v2.37.0</span> }</code></pre>
 <ul class="links">
 <li><a href="https://github.com/PulseSRE/pulse-operator#install-via-olm">Install guide</a><span>The canonical steps, in the operator README</span></li>
 <li><a href="https://github.com/PulseSRE/pulse-agent/blob/main/docs/ARCHITECTURE.md">Architecture</a><span>How the agent loop, monitor and skills fit together</span></li>
@@ -198,7 +207,7 @@
 </section>
 </main>
 <footer><div class="wrap">
-<span>Pulse agent v2.36.0. MIT licensed.</span>
+<span>Pulse agent v2.37.0. MIT licensed.</span>
 <span><a href="https://github.com/PulseSRE/pulse-agent">Source</a> &nbsp; <a href="https://github.com/PulseSRE/pulse-agent/releases">Releases</a> &nbsp; <a href="https://github.com/PulseSRE/pulse-agent/blob/main/CHANGELOG.md">Changelog</a></span>
 </div></footer>
 </body>
