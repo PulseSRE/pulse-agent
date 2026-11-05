@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from . import bearer_http
 from .config import get_settings
 
 RENDER_TIMEOUT_S = 60
@@ -40,7 +41,7 @@ def render_draft(spec: dict[str, Any], user_token: str, width: int = 1440) -> di
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {agent.render_token}"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=RENDER_TIMEOUT_S) as resp:
+        with bearer_http.open_with_token(req, timeout=RENDER_TIMEOUT_S) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
         try:

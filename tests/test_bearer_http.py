@@ -193,3 +193,68 @@ def test_mcp_post_uses_it():
     ):
         _mcp_post("http://localhost:8081", {"jsonrpc": "2.0", "id": 1})
     assert opened.call_args.args[0].get_header("Authorization") == "Bearer u-token"
+
+
+class TestTls:
+    def test_the_given_ssl_context_is_the_one_https_uses(self):
+        ctx = ssl.create_default_context()
+        used: list = []
+
+        def fake_open(self, req, data=None, timeout=None):
+            used.extend(h._context for h in self.handlers if isinstance(h, urllib.request.HTTPSHandler))
+            return io.BytesIO(OK_BODY)
+
+        with patch.object(urllib.request.OpenerDirector, "open", fake_open):
+            open_with_token(urllib.request.Request("https://thanos:9091/q"), timeout=5, context=ctx)
+        assert used == [ctx]
+
+
+class TestOrigins:
+    def test_malformed_port_is_refused(self):
+        seen: list = []
+        routes = {"https://thanos:9091/a": (302, {"Location": "https://thanos:99999/b"}, b"")}
+        with pytest.raises(InsecureRedirectError, match="invalid port"):
+            _open("https://thanos:9091/a", routes, seen)
+        assert len(seen) == 1
+
+    def test_dropping_the_token_logs_origins_only(self, caplog):
+        seen: list = []
+        target = "https://elsewhere:8443/path?secret=q1"
+        routes = {
+            "https://thanos:9091/api?query=up": (302, {"Location": target}, b""),
+            target: (200, {}, OK_BODY),
+        }
+        with caplog.at_level("WARNING", logger="pulse_agent.bearer_http"):
+            _open("https://thanos:9091/api?query=up", routes, seen)
+        text = caplog.text
+        assert "https://thanos:9091" in text and "https://elsewhere:8443" in text
+        for leaked in ("secret=q1", "/path", "query=up", "/api", "tok-for-test"):
+            assert leaked not in text
+
+
+def test_no_module_sends_authorization_through_urlopen():
+    """Anything sending an Authorization header over urllib must use bearer_http.open_with_token.
+
+    urllib.request.urlopen follows redirects with the header attached, to any host.
+    """
+    import ast
+    import pathlib
+
+    root = pathlib.Path(bearer_http.__file__).parent
+    # Modules allowed to do both (each with a reason). Keep this empty unless unavoidable.
+    allowlist: dict[str, str] = {}
+    offenders = []
+    for path in sorted(root.rglob("*.py")):
+        rel = path.relative_to(root.parent).as_posix()
+        tree = ast.parse(path.read_text(), filename=rel)
+        uses_urlopen = any(
+            (isinstance(n, ast.Attribute) and n.attr == "urlopen") or (isinstance(n, ast.Name) and n.id == "urlopen")
+            for n in ast.walk(tree)
+        )
+        sets_auth = any(
+            isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value.lower() == "authorization"
+            for n in ast.walk(tree)
+        )
+        if uses_urlopen and sets_auth and rel not in allowlist:
+            offenders.append(rel)
+    assert offenders == [], f"use bearer_http.open_with_token instead of urlopen in: {offenders}"

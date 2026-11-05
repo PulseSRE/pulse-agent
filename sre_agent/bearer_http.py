@@ -19,11 +19,14 @@ Once dropped, the token is not restored by a later redirect back.
 from __future__ import annotations
 
 import http.client
+import logging
 import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import IO, Any
+
+logger = logging.getLogger("pulse_agent.bearer_http")
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
@@ -35,8 +38,21 @@ class InsecureRedirectError(urllib.error.URLError):
 def _origin(url: str) -> tuple[str, str, int | None]:
     parts = urllib.parse.urlsplit(url)
     scheme = parts.scheme.lower()
-    port = parts.port or _DEFAULT_PORTS.get(scheme)
+    try:
+        port = parts.port
+    except ValueError:
+        # A malformed or out-of-range port: refuse rather than guess its origin.
+        raise InsecureRedirectError(
+            f"refused redirect to a URL with an invalid port ({scheme or 'no scheme'})"
+        ) from None
+    if port is None:
+        port = _DEFAULT_PORTS.get(scheme)
     return scheme, (parts.hostname or "").lower(), port
+
+
+def _show(origin: tuple[str, str, int | None]) -> str:
+    scheme, host, port = origin
+    return f"{scheme}://{host}:{port}"
 
 
 class _TokenSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -55,8 +71,15 @@ class _TokenSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
             fp.close()
             raise InsecureRedirectError(f"refused redirect from https to {new[0] or 'an unknown scheme'} ({code})")
         new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
-        if new_req is not None and not (old == new and new[0] == "https"):
+        if new_req is not None and not (old == new and new[0] == "https") and new_req.has_header("Authorization"):
             new_req.remove_header("Authorization")
+            # Origins only: the URL's path and query, and the headers, can carry secrets.
+            logger.warning(
+                "Dropped Authorization on %d redirect from %s to %s",
+                code,
+                _show(old),
+                _show(new),
+            )
         return new_req
 
 
