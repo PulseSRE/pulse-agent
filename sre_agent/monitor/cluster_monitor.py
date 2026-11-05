@@ -236,6 +236,11 @@ class ClusterMonitor:
         self._approval_tasks: set[asyncio.Task] = set()
         self._daily_investigation_count = 0
         self._daily_investigation_reset = time.time()
+        # Investigations people ask for: their own daily allowance and a
+        # per-person share of it (investigation_runner.admit_requested_investigation).
+        self._requested_daily_count = 0
+        self._requested_daily_by_user: dict[str, int] = {}
+        self._requested_daily_reset = time.time()
         self._scan_lock = asyncio.Lock()
         self._last_security_followup: float = 0.0
         self._recent_fix_ids: set[str] = set()

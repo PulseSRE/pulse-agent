@@ -44,13 +44,7 @@ class InvestigationRefusal:
     retry_after: int | None = None
 
 
-def budget_refusal(monitor: ClusterMonitor) -> InvestigationRefusal | None:
-    """The gates every investigation passes, whoever asked for it.
-
-    The agent's circuit breaker, the daily investigation budget and the daily
-    cost budget. Shared by the monitor's scan and investigations a person asks
-    for (``POST /inbox/{id}/investigate``), so neither can spend past them.
-    """
+def _circuit_refusal() -> InvestigationRefusal | None:
     from ..agent import _circuit_breaker
 
     if _circuit_breaker.is_open:
@@ -60,9 +54,11 @@ def budget_refusal(monitor: ClusterMonitor) -> InvestigationRefusal | None:
             "The agent's model calls are failing and paused (circuit breaker open); try again shortly.",
             retry_after=max(1, int(get_settings().agent.cb_timeout)),
         )
+    return None
 
-    _settings = get_settings()
-    max_daily = _settings.monitor.max_daily_investigations
+
+def _daily_refusal(monitor: ClusterMonitor) -> InvestigationRefusal | None:
+    max_daily = get_settings().monitor.max_daily_investigations
     if time.time() - monitor._daily_investigation_reset > 86400:
         monitor._daily_investigation_count = 0
         monitor._daily_investigation_reset = time.time()
@@ -79,49 +75,79 @@ def budget_refusal(monitor: ClusterMonitor) -> InvestigationRefusal | None:
             f"The daily investigation budget is used up ({monitor._daily_investigation_count}/{max_daily}).",
             retry_after=max(1, int(monitor._daily_investigation_reset + 86400 - time.time())),
         )
-
-    # Cost budget gate (cached — only queries DB every 5 minutes)
-    _budget_usd = _settings.cost_budget_usd
-    if _budget_usd > 0:
-        try:
-            now_t = time.time()
-            cached = monitor._cost_budget_cache
-            if cached and (now_t - cached[0]) < 300:
-                today_cost = cached[1]
-            else:
-                from ..observability import estimate_cost_usd
-                from ..repositories import get_analytics_repo
-
-                totals = get_analytics_repo().fetch_token_totals(1)
-                if totals and totals["total_incidents"] > 0:
-                    # Includes investigations now (they record their usage as
-                    # turns) and cache tokens, priced for the configured model.
-                    today_cost = estimate_cost_usd(
-                        int(totals["total_input"]),
-                        int(totals["total_output"]),
-                        int(totals.get("total_cache_read") or 0),
-                        int(totals.get("total_cache_write") or 0),
-                    )
-                else:
-                    today_cost = 0.0
-                monitor._cost_budget_cache = (now_t, today_cost)
-            if _METRICS_AVAILABLE:
-                COST_BUDGET_REMAINING_USD.set(max(0, _budget_usd - today_cost))
-            if today_cost >= _budget_usd:
-                logger.warning(
-                    "Daily cost budget exceeded ($%.2f / $%.2f) — pausing investigations",
-                    today_cost,
-                    _budget_usd,
-                )
-                if _METRICS_AVAILABLE:
-                    COST_BUDGET_EXHAUSTION_TOTAL.inc()
-                return InvestigationRefusal(
-                    "cost_budget",
-                    f"The daily cost budget is spent (${today_cost:.2f} of ${_budget_usd:.2f}).",
-                )
-        except Exception:
-            logger.debug("Cost budget check failed", exc_info=True)
     return None
+
+
+def today_cost(monitor: ClusterMonitor) -> float | None:
+    """Spend over the last 24 hours, cached for 5 minutes; ``None`` without a cost budget.
+
+    Reads the database when the cache is stale, so async callers run it in a
+    thread first (``asyncio.to_thread``); the gate then reads the cache.
+    """
+    if get_settings().cost_budget_usd <= 0:
+        return None
+    now_t = time.time()
+    cached = monitor._cost_budget_cache
+    if cached and (now_t - cached[0]) < 300:
+        return float(cached[1])
+    from ..observability import estimate_cost_usd
+    from ..repositories import get_analytics_repo
+
+    totals = get_analytics_repo().fetch_token_totals(1)
+    if totals and totals["total_incidents"] > 0:
+        # Includes investigations now (they record their usage as
+        # turns) and cache tokens, priced for the configured model.
+        cost = estimate_cost_usd(
+            int(totals["total_input"]),
+            int(totals["total_output"]),
+            int(totals.get("total_cache_read") or 0),
+            int(totals.get("total_cache_write") or 0),
+        )
+    else:
+        cost = 0.0
+    monitor._cost_budget_cache = (now_t, cost)
+    return cost
+
+
+def _cost_refusal(monitor: ClusterMonitor) -> InvestigationRefusal | None:
+    """Cost budget gate (cached — only queries DB every 5 minutes)."""
+    _budget_usd = get_settings().cost_budget_usd
+    if _budget_usd <= 0:
+        return None
+    try:
+        spent = today_cost(monitor)
+        if spent is None:
+            return None
+        if _METRICS_AVAILABLE:
+            COST_BUDGET_REMAINING_USD.set(max(0, _budget_usd - spent))
+        if spent >= _budget_usd:
+            logger.warning(
+                "Daily cost budget exceeded ($%.2f / $%.2f) — pausing investigations",
+                spent,
+                _budget_usd,
+            )
+            if _METRICS_AVAILABLE:
+                COST_BUDGET_EXHAUSTION_TOTAL.inc()
+            # No retry_after: spend is summed over a rolling 24 hours, so there
+            # is no reset time to give; the figure is re-read every 5 minutes.
+            return InvestigationRefusal(
+                "cost_budget",
+                f"The daily cost budget is spent (${spent:.2f} of ${_budget_usd:.2f} over the last 24 hours).",
+            )
+    except Exception:
+        logger.debug("Cost budget check failed", exc_info=True)
+    return None
+
+
+def budget_refusal(monitor: ClusterMonitor) -> InvestigationRefusal | None:
+    """The gates every monitor investigation passes.
+
+    The agent's circuit breaker, the daily investigation budget and the daily
+    cost budget. Investigations people ask for pass the circuit breaker and
+    the cost budget too, but have their own daily allowance
+    (``admit_requested_investigation``), so clicks cannot spend this one.
+    """
+    return _circuit_refusal() or _daily_refusal(monitor) or _cost_refusal(monitor)
 
 
 def _charge(monitor: ClusterMonitor, key: str, now: float) -> None:
@@ -135,20 +161,53 @@ def _charge(monitor: ClusterMonitor, key: str, now: float) -> None:
         )
 
 
-def admit_requested_investigation(
-    monitor: ClusterMonitor, finding: dict, *, running_elsewhere: int = 0
-) -> InvestigationRefusal | None:
-    """Admit an investigation a person asked for, or say why not; charges it when admitted.
+def _requested_daily_refusal(monitor: ClusterMonitor, requester: str) -> InvestigationRefusal | None:
+    settings = get_settings().monitor
+    now = time.time()
+    if now - monitor._requested_daily_reset > 86400:
+        monitor._requested_daily_count = 0
+        monitor._requested_daily_by_user = {}
+        monitor._requested_daily_reset = now
+    retry = max(1, int(monitor._requested_daily_reset + 86400 - now))
+    total, limit = monitor._requested_daily_count, settings.max_daily_requested_investigations
+    if total >= limit:
+        return InvestigationRefusal(
+            "daily_budget",
+            f"The daily allowance for requested investigations is used up ({total}/{limit}).",
+            retry_after=retry,
+        )
+    mine, per_user = (
+        monitor._requested_daily_by_user.get(requester, 0),
+        settings.max_daily_requested_investigations_per_user,
+    )
+    if mine >= per_user:
+        return InvestigationRefusal(
+            "user_budget",
+            f"You have used your daily allowance of requested investigations ({mine}/{per_user}).",
+            retry_after=retry,
+        )
+    return None
 
-    The same budget, cost budget and circuit breaker as the scan
-    (``budget_refusal``), the same per-condition cooldown (keyed like the
-    scan's, so a person and the monitor do not investigate one condition
-    twice inside it), and the same concurrency limit, counting the monitor's
-    running plans plus ``running_elsewhere`` (requested and inbox runs in
-    progress). Category, severity and noise eligibility are the scan's own
-    choices about what to look at unasked, so they do not apply here.
+
+def admit_requested_investigation(
+    monitor: ClusterMonitor, finding: dict, *, requester: str = "", running_elsewhere: int = 0
+) -> InvestigationRefusal | None:
+    """Admit an investigation a person asked for, or say why not. Charges nothing.
+
+    The circuit breaker and cost budget are the scan's; the daily allowance is
+    the requests' own (``max_daily_requested_investigations``, and
+    ``..._per_user`` for each person), so requests cannot use up the budget
+    the monitor keeps for critical findings. The per-condition cooldown is
+    keyed like the scan's, so a person and the monitor do not investigate one
+    condition twice inside it. Concurrency counts the monitor's running plans
+    plus ``running_elsewhere`` (requested and inbox runs in progress), and a
+    request may not take the last slot: that one is kept for the monitor.
+    Category, severity and noise eligibility are the scan's own choices about
+    what to look at unasked, so they do not apply here.
+
+    Call ``charge_requested`` once the run is really starting.
     """
-    refusal = budget_refusal(monitor)
+    refusal = _circuit_refusal() or _requested_daily_refusal(monitor, requester) or _cost_refusal(monitor)
     if refusal is not None:
         return refusal
 
@@ -168,15 +227,23 @@ def admit_requested_investigation(
     monitor._investigation_tasks = [t for t in monitor._investigation_tasks if not t.done()]
     running = len(monitor._investigation_tasks) + running_elsewhere
     limit = settings.monitor.max_concurrent_investigations
-    if running >= limit:
+    if running >= limit - 1:
         return InvestigationRefusal(
             "concurrency",
-            f"{running} investigations are already running (limit {limit}); try again when one finishes.",
+            f"{running} investigations are already running (limit {limit}, one slot kept for the monitor); "
+            "try again when one finishes.",
             retry_after=30,
         )
-
-    _charge(monitor, key, now)
     return None
+
+
+def charge_requested(monitor: ClusterMonitor, finding: dict, requester: str) -> None:
+    """Count an admitted request: the shared cooldown and the requests' own allowance."""
+    monitor._recent_investigations[_finding_key(finding)] = time.time()
+    monitor._requested_daily_count += 1
+    monitor._requested_daily_by_user[requester] = monitor._requested_daily_by_user.get(requester, 0) + 1
+    if _METRICS_AVAILABLE:
+        INVESTIGATIONS_TOTAL.inc()
 
 
 async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> None:
@@ -252,12 +319,15 @@ async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> N
             template = None
 
         if template is not None:
+            from ..inbox_investigation import active_count as _inbox_runs
+
             monitor._investigation_tasks = [t for t in monitor._investigation_tasks if not t.done()]
-            if len(monitor._investigation_tasks) >= _settings.monitor.max_concurrent_investigations:
+            running = len(monitor._investigation_tasks) + _inbox_runs()
+            if running >= _settings.monitor.max_concurrent_investigations:
                 logger.info(
-                    "Skipping investigation for %s — %d tasks already running",
+                    "Skipping investigation for %s — %d investigations already running (incl. inbox runs)",
                     finding.get("title", "")[:40],
-                    len(monitor._investigation_tasks),
+                    running,
                 )
                 continue
 

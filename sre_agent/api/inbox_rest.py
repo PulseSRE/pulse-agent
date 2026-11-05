@@ -126,6 +126,15 @@ async def rest_get_inbox_item(item_id: str):
     return item
 
 
+def _client_metadata(raw: object) -> dict:
+    """Metadata a client may set on an item: not the investigation run record, which only the agent writes."""
+    from ..inbox_investigation import RUN_KEY
+
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if k != RUN_KEY}
+
+
 @router.post("/inbox", status_code=201)
 async def rest_create_inbox_item(
     request: Request,
@@ -145,7 +154,7 @@ async def rest_create_inbox_item(
         "due_date": body.get("due_date"),
         "created_by": owner,
         "resources": body.get("resources", []),
-        "metadata": body.get("metadata", {}),
+        "metadata": _client_metadata(body.get("metadata")),
     }
     item_id = create_inbox_item(item)
     return {"id": item_id, "item_type": item["item_type"], "status": "new"}
@@ -308,8 +317,12 @@ async def rest_get_investigation(item_id: str):
     if item is None:
         raise HTTPException(status_code=404, detail="Item not found")
     run = run_status(item)
-    # The report linked to the item, else the (failed) report of the latest run.
-    inv_id = (item.get("metadata") or {}).get("investigation_id") or (run or {}).get("report_id")
+    # The report linked to the item, else the failed report of the latest run.
+    # A finished run's report is linked as investigation_id; a done run whose
+    # report is not linked is not this occurrence's, so it is not shown.
+    inv_id = (item.get("metadata") or {}).get("investigation_id")
+    if not inv_id and run is not None and run.get("state") == "failed":
+        inv_id = run.get("report_id")
     if not inv_id:
         if run is None:
             raise HTTPException(status_code=404, detail="No investigation linked")

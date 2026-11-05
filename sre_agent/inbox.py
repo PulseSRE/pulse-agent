@@ -1083,6 +1083,13 @@ def _blast_radius_items(blast: Any) -> list[dict[str, Any]]:
     return items
 
 
+def claim_allowed(item: dict[str, Any]) -> bool:
+    """Whether claim_and_investigate's status change is a transition the lifecycle allows."""
+    status = item.get("status", "")
+    target = "in_progress" if status in ("triaged", "claimed") else "claimed"
+    return target in _TRANSITIONS.get(status, [])
+
+
 def claim_and_investigate(item_id: str, username: str) -> bool:
     """Atomically claim an item and transition to in_progress.
 
@@ -1487,6 +1494,10 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
             metadata = recent_item.get("metadata", {})
             metadata.pop("triaged", None)
             metadata.pop("investigation_id", None)
+            # The run record belongs to the occurrence that was resolved;
+            # left in place, GET /inbox/{id}/investigation would show its
+            # report as this occurrence's.
+            metadata.pop("investigation_run", None)
             metadata.pop("action_plan", None)
             repo.update_triage_result(recent_item["id"], "new", metadata, finding.get("summary", ""), now)
             return recent_item["id"]
@@ -1511,6 +1522,9 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
         "correlation_key": corr_key,
         "created_by": "system:monitor",
         "finding_id": finding_id,
+        # The finding's own category: investigating the item later is keyed
+        # (cooldown) like the monitor's investigation of the finding.
+        "metadata": {"finding_category": finding.get("category", "")},
     }
     return create_inbox_item(item)
 
@@ -1614,15 +1628,43 @@ def _phase_a_triage() -> int:
     return triaged
 
 
-def finding_for_item(item: dict[str, Any]) -> dict[str, Any]:
-    """The finding an inbox item is investigated as (triage and requested runs alike)."""
+_FINDING_SEVERITIES = frozenset(("critical", "warning", "info"))
+
+
+def finding_for_item(item: dict[str, Any], monitor: Any = None) -> dict[str, Any]:
+    """The finding an inbox item is investigated as (triage and requested runs alike).
+
+    An item the monitor raised (``finding_id``) is investigated as that
+    finding: its category, title and resources, from the monitor's current
+    findings when it still has it, else from what the bridge recorded. That
+    keeps the cooldown key the same as the monitor's own investigation of the
+    finding (``_finding_key``); keyed by the item's type ("task:...") the
+    shared cooldown never matched. Severity is one of the known values; the
+    rest is sanitized where the prompt is built.
+    """
+    md = item.get("metadata") or {}
+    original: dict[str, Any] | None = None
+    finding_id = item.get("finding_id")
+    if finding_id and monitor is not None:
+        for f in list(getattr(monitor, "_last_findings", {}).values()):
+            if isinstance(f, dict) and f.get("id") == finding_id:
+                original = f
+                break
+    if original is not None:
+        category = original.get("category", "")
+    elif finding_id:
+        corr = item.get("correlation_key") or ""
+        category = md.get("finding_category") or (corr.split(":", 1)[0] if ":" in corr else "") or "unknown"
+    else:
+        category = md.get("generator", item.get("item_type", "unknown"))
+    severity = item.get("severity") if item.get("severity") in _FINDING_SEVERITIES else "warning"
     return {
-        "id": item.get("finding_id") or item["id"],
-        "title": item["title"],
+        "id": finding_id or item["id"],
+        "title": (original or {}).get("title") or item["title"],
         "summary": item.get("summary", ""),
-        "severity": item.get("severity", "warning"),
-        "category": (item.get("metadata") or {}).get("generator", item.get("item_type", "unknown")),
-        "resources": item.get("resources", []),
+        "severity": severity,
+        "category": str(category),
+        "resources": (original or {}).get("resources") or item.get("resources", []),
         "namespace": item.get("namespace", ""),
         "confidence": item.get("confidence", 0.5),
     }
@@ -1702,7 +1744,12 @@ def _phase_b_investigate() -> int:
             except Exception:
                 logger.debug("Failed to select tools for inbox investigation", exc_info=True)
 
-            if result.get("summary"):
+            if not result.get("summary"):
+                # Finished with nothing to attach: still record the run as
+                # done, or it would read as in progress until it timed out.
+                run.state, run.finished_at, run.report_id = "done", int(time.time()), outcome.report_id
+                _persist_run(run)
+            else:
                 investigation_id = outcome.report_id
                 metadata = item.get("metadata", {})
                 metadata.update(investigation_metadata(result, investigation_id))

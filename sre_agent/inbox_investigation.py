@@ -30,12 +30,32 @@ import asyncio
 import logging
 import threading
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger("pulse_agent.inbox")
 
 RUN_KEY = "investigation_run"
+
+# Tools a run a person started is never offered: they are read-only in the
+# sense that they do not change the cluster, but they act on the requester's
+# behalf elsewhere (open inbox tasks, start other agents, write the audit
+# log). Monitor and triage runs are the agent's own and keep them.
+REQUESTED_RUN_EXCLUDED_TOOLS = frozenset(
+    ("create_inbox_task", "request_security_scan", "request_sre_investigation", "record_audit_entry")
+)
+
+# Set inside the task of a run a person started (and copied into its tool
+# threads with the rest of the context), so the investigation can tell.
+_requested_run: ContextVar[bool] = ContextVar("pulse_requested_investigation", default=False)
+
+
+def in_requested_run() -> bool:
+    """True inside an investigation a person started through ``POST /inbox/{id}/investigate``."""
+    return _requested_run.get()
+
+
 ACTIVE_STATES = frozenset(("queued", "running"))
 CLOSED_ITEM_STATES = frozenset(("resolved", "archived"))
 
@@ -128,16 +148,11 @@ def _reset_for_tests() -> None:
 
 
 def persist(run: InvestigationRun) -> None:
-    """Record the run on the item (re-read first: other writers update metadata too)."""
-    from .inbox import _publish_event, get_inbox_item
+    """Record the run on the item, touching only that key (other writers update metadata too)."""
+    from .inbox import _publish_event
     from .repositories.inbox_repo import get_inbox_repo
 
-    item = get_inbox_item(run.item_id)
-    if item is None:
-        return
-    metadata = item.get("metadata") or {}
-    metadata[RUN_KEY] = run.public()
-    get_inbox_repo().update_metadata(run.item_id, metadata, int(time.time()))
+    get_inbox_repo().merge_metadata(run.item_id, {RUN_KEY: run.public()}, int(time.time()))
     _publish_event("inbox_item_updated", run.item_id, {RUN_KEY: run.public()})
 
 
@@ -170,9 +185,10 @@ async def request_investigation(item_id: str, requested_by: str, user_token: str
     Raises ``ItemNotFoundError`` or ``InvestigationRefusedError`` (closed item, budget,
     cost budget, circuit breaker, cooldown or concurrency).
     """
-    from .inbox import claim_and_investigate, finding_for_item, get_inbox_item
+    from . import inbox as _inbox
+    from .inbox import claim_allowed, claim_and_investigate, finding_for_item, get_inbox_item
     from .monitor import get_cluster_monitor
-    from .monitor.investigation_runner import admit_requested_investigation
+    from .monitor.investigation_runner import admit_requested_investigation, charge_requested, today_cost
 
     item = await asyncio.to_thread(get_inbox_item, item_id)
     if item is None:
@@ -187,8 +203,14 @@ async def request_investigation(item_id: str, requested_by: str, user_token: str
             409, "item_closed", f"The item is {item['status']}; reopen it to investigate it again."
         )
 
-    finding = finding_for_item(item)
     monitor = await get_cluster_monitor()
+    finding = finding_for_item(item, monitor)
+    # The cost lookup reads the database; done here, off the event loop, it
+    # leaves a fresh cached figure for the gate below.
+    try:
+        await asyncio.to_thread(today_cost, monitor)
+    except Exception:
+        logger.debug("Cost lookup before a requested investigation failed", exc_info=True)
 
     # Reserve before admitting, with no await in between: two requests racing
     # each other get one run, and the loser is answered with its status.
@@ -196,7 +218,9 @@ async def request_investigation(item_id: str, requested_by: str, user_token: str
     if not created:
         return run.public()
     try:
-        refusal = admit_requested_investigation(monitor, finding, running_elsewhere=active_count() - 1)
+        refusal = admit_requested_investigation(
+            monitor, finding, requester=requested_by, running_elsewhere=active_count() - 1
+        )
     except Exception:
         release(item_id)
         raise
@@ -206,20 +230,31 @@ async def request_investigation(item_id: str, requested_by: str, user_token: str
 
     try:
         # Claim it as before, but never take it from someone who already has
-        # it: the investigation is read-only and useful to whoever owns it.
-        if not item.get("claimed_by") or item.get("claimed_by") == requested_by:
+        # it (the investigation is read-only and useful to whoever owns it),
+        # and only where the lifecycle allows it: an item triage is reviewing
+        # (agent_reviewing) or one already in progress keeps its status.
+        if (not item.get("claimed_by") or item.get("claimed_by") == requested_by) and claim_allowed(item):
             await asyncio.to_thread(claim_and_investigate, item_id, requested_by)
         await asyncio.to_thread(persist, run)
     except Exception:
         release(item_id)
         raise
+    # Charged only now that the run is really starting: a failed claim or
+    # save above spent nothing.
+    charge_requested(monitor, finding, requested_by)
+    _inbox._last_investigate_time[item_id] = time.time()
 
     from .k8s_client import user_token_context
 
     # The task copies the current context when it is created, so the token
-    # set here is what its reads (and the agent loop's tool threads) see.
+    # set here is what its reads (and the agent loop's tool threads) see, and
+    # so is the requested-run marker.
     with user_token_context(user_token):
-        run.task = asyncio.create_task(_execute(run, finding), name=f"inbox-investigate-{item_id}")
+        marker = _requested_run.set(True)
+        try:
+            run.task = asyncio.create_task(_execute(run, finding), name=f"inbox-investigate-{item_id}")
+        finally:
+            _requested_run.reset(marker)
     return run.public()
 
 
@@ -258,13 +293,9 @@ async def _execute(run: InvestigationRun, finding: dict[str, Any]) -> None:
 
 def _attach_result(run: InvestigationRun, result: dict[str, Any]) -> None:
     """Link the report to the item. Status is left alone: a person asked, and owns what happens next."""
-    from .inbox import get_inbox_item, investigation_metadata
+    from .inbox import investigation_metadata
     from .repositories.inbox_repo import get_inbox_repo
 
-    item = get_inbox_item(run.item_id)
-    if item is None:
-        return
-    metadata = item.get("metadata") or {}
-    metadata.update(investigation_metadata(result, run.report_id))
-    metadata["skill_used"] = "sre"
-    get_inbox_repo().update_metadata(run.item_id, metadata, int(time.time()))
+    patch = investigation_metadata(result, run.report_id)
+    patch["skill_used"] = "sre"
+    get_inbox_repo().merge_metadata(run.item_id, patch, int(time.time()))
