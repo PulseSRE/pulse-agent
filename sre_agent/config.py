@@ -81,6 +81,11 @@ class MonitorConfig(BaseModel):
     durable_autofix: bool = False
     investigation_categories: str = "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa,stuck,hot_loop,control_plane"
     max_concurrent_investigations: int = 3
+    # Investigations people ask for (POST /inbox/{id}/investigate) have their
+    # own daily allowance, so clicks cannot spend the budget the monitor keeps
+    # for critical findings, and a per-person share of it.
+    max_daily_requested_investigations: int = 20
+    max_daily_requested_investigations_per_user: int = 10
     # How long a "verified" verdict is held answerable for. A fix whose finding
     # returns with the same correlation key inside this window is downgraded to
     # verified_then_recurred — the verdict was true on the scan that issued it
@@ -225,6 +230,8 @@ class PulseAgentSettings(BaseSettings):
     durable_autofix: bool = False
     investigation_categories: str = "crashloop,workloads,nodes,alerts,cert_expiry,scheduling,oom,image_pull,operators,daemonsets,hpa,stuck,hot_loop,control_plane"
     max_concurrent_investigations: int = 3
+    max_daily_requested_investigations: int = 20
+    max_daily_requested_investigations_per_user: int = 10
     recurrence_window: int = 1800
 
     # Routing
@@ -313,6 +320,8 @@ class PulseAgentSettings(BaseSettings):
             durable_autofix=self.durable_autofix,
             investigation_categories=self.investigation_categories,
             max_concurrent_investigations=self.max_concurrent_investigations,
+            max_daily_requested_investigations=self.max_daily_requested_investigations,
+            max_daily_requested_investigations_per_user=self.max_daily_requested_investigations_per_user,
             recurrence_window=self.recurrence_window,
         )
         self.routing = RoutingConfig(

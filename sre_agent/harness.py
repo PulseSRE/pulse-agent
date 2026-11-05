@@ -355,12 +355,17 @@ def gather_cluster_context(mode: str = "sre") -> str:
 _cluster_context_cache: dict[str, tuple[str, float]] = {}
 
 
-def get_cluster_context(max_age: float = 60, mode: str = "sre") -> str:
-    """Get cached cluster context, refreshing if stale. Mode-aware (keyed by mode)."""
+def get_cluster_context(max_age: float = 60, mode: str = "sre", *, use_cache: bool = True) -> str:
+    """Get cached cluster context, refreshing if stale. Mode-aware (keyed by mode).
+
+    ``use_cache=False`` gathers it fresh and neither reads nor fills the
+    cache: for a caller reading as someone other than the service account
+    whose view the cache holds.
+    """
     import time
 
     now = time.time()
-    cached = _cluster_context_cache.get(mode)
+    cached = _cluster_context_cache.get(mode) if use_cache else None
     if cached and (now - cached[1]) <= max_age:
         return cached[0]
 
@@ -389,7 +394,8 @@ def get_cluster_context(max_age: float = 60, mode: str = "sre") -> str:
                 ctx += "\n\n" + intel
         except Exception:
             logger.debug("Failed to load intelligence context", exc_info=True)
-        _cluster_context_cache[mode] = (ctx, now)
+        if use_cache:
+            _cluster_context_cache[mode] = (ctx, now)
         return ctx
     except Exception as e:
         staleness = int(now - cached[1]) if cached else 0
