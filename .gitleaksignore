@@ -2,8 +2,9 @@
 # generic-api-key rule ("key = ..."). Renamed in the next commit, but gitleaks
 # scans full history and branch history is not rewritten.
 5ed91375d455134d4cad22a0e96ec8b83f838565:tests/test_upgrade_api_removals.py:generic-api-key:306
-# False positive: prose in SECURITY.md on branch fix/prometheus-redirect-token
-# (#237), "token off its origin: Prometheus/Thanos reads", matched by the
-# generic-api-key rule. gitleaks scans every fetched branch, so it fails every PR
-# until ignored; the matched value is the words "Prometheus/Thanos", not a key.
+# False positive in SECURITY.md on branch fix/prometheus-redirect-token (PR 237):
+# a sentence about redirects that the generic-api-key rule reads as a key.
+# gitleaks scans every fetched branch, so it failed every PR. The second line is
+# the first version of this comment, which quoted that sentence (see PR 235).
 b25e9bb9dd640cd17b3ba71fd046e6f44420d9b4:SECURITY.md:generic-api-key:30
+402af7e0fbe86af4688a2f0bd089555500046fb1:.gitleaksignore:generic-api-key:6
