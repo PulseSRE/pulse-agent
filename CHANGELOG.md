@@ -4,6 +4,9 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## Unreleased
 
+### Added
+- **RBAC, SCC and webhook change history (Wave 16).** The RBAC audit scanner now keeps an observed version history of Roles, ClusterRoles, RoleBindings, ClusterRoleBindings, SecurityContextConstraints and admission webhook configurations (`rbac_object_versions`, **migration 043**, kept 30 days; the newest row of each object is always kept). `GET /rbac/changes` (needs the caller's token; read-only) serves each created/updated/deleted object with the version before it, the client that wrote it (`managedFields`) and, when the write went through Pulse, the signed-in user; objects the caller may not `get` are left out and counted. A kind the service account cannot list is reported as unwatched, never as "no changes". New ledger of writes made through Pulse (`pulse_write_ledger`): `POST /rbac/ledger` records a UI write with the actor from the login proxy, and the agent records every write tool it runs. No RBAC is widened: the history uses the reads the agent's service account already has.
+
 ## v2.37.0 (2026-11-03)
 
 Paired with pulse-ui v2.37.0. **Needs pulse-operator v0.13.0**, which grants the two reads this release depends on: `apirequestcounts.apiserver.openshift.io` for the removed-API go/no-go, and `openshiftpulses` so the agent can report its own configuration. On an older operator both return 403 and the features that use them report themselves unavailable rather than guessing. **Migration 042** (forward-only): `readiness_waivers`. Pull requests #209–#231.

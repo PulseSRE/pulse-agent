@@ -14,6 +14,7 @@ from .intelligence_repo import IntelligenceRepository, get_intelligence_repo
 from .monitor_repo import MonitorRepository, get_monitor_repo
 from .prompt_log_repo import PromptLogRepository, get_prompt_log_repo
 from .promql_repo import PromQLRepository, get_promql_repo
+from .rbac_history_repo import RbacHistoryRepository, get_rbac_history_repo
 from .readiness_waiver_repo import ReadinessWaiverRepository, get_readiness_waiver_repo
 from .selector_learning_repo import SelectorLearningRepository, get_selector_learning_repo
 from .skill_analytics_repo import SkillAnalyticsRepository, get_skill_analytics_repo
@@ -32,6 +33,7 @@ __all__ = [
     "MonitorRepository",
     "PromQLRepository",
     "PromptLogRepository",
+    "RbacHistoryRepository",
     "ReadinessWaiverRepository",
     "SLORepository",
     "SelectorLearningRepository",
@@ -47,6 +49,7 @@ __all__ = [
     "get_monitor_repo",
     "get_prompt_log_repo",
     "get_promql_repo",
+    "get_rbac_history_repo",
     "get_readiness_waiver_repo",
     "get_selector_learning_repo",
     "get_skill_analytics_repo",

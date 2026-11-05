@@ -124,6 +124,13 @@ def scan_rbac_changes() -> list[dict]:
     lookback_hours = int(os.environ.get("PULSE_AGENT_AUDIT_RBAC_LOOKBACK", "24"))
     cutoff = datetime.now(UTC) - timedelta(hours=lookback_hours)
 
+    # Keep the observed RBAC/SCC/webhook version history (sre_agent/rbac_history.py)
+    # that GET /rbac/changes serves. It never raises and never fails this scanner:
+    # a kind the service account cannot list is reported as unwatched there.
+    from .rbac_history import observe_safely
+
+    observe_safely()
+
     try:
         rbac = get_rbac_client()
 
