@@ -345,6 +345,41 @@ class TestDedup:
         fetched = get_inbox_item(item_id)
         assert len(fetched["resources"]) == 2
 
+    def test_upsert_carries_a_new_ui_link_into_an_item_created_before_it(self):
+        from sre_agent.inbox import create_inbox_item, get_inbox_item, upsert_inbox_item
+
+        item_id = create_inbox_item(
+            _make_item(
+                title="Cluster upgrade available: 4.18.2",
+                correlation_key="upgrade_available:cluster",
+                resources=[],
+                metadata={"generator": "upgrade_available", "urgency_hours": 168},
+            )
+        )
+        assert "ui_link" not in (get_inbox_item(item_id).get("metadata") or {})
+
+        upsert_inbox_item(
+            _make_item(
+                title="Cluster upgrade available: 4.18.2",
+                correlation_key="upgrade_available:cluster",
+                resources=[{"kind": "ClusterVersion", "name": "version", "namespace": ""}],
+                metadata={"generator": "upgrade_available", "urgency_hours": 168, "ui_link": "/admin?tab=updates"},
+            )
+        )
+        fetched = get_inbox_item(item_id)
+        assert fetched["metadata"]["ui_link"] == "/admin?tab=updates"
+        assert fetched["metadata"]["generator"] == "upgrade_available"
+        assert {"kind": "ClusterVersion", "name": "version", "namespace": ""} in fetched["resources"]
+
+    def test_upsert_without_ui_link_keeps_the_existing_one(self):
+        from sre_agent.inbox import create_inbox_item, get_inbox_item, upsert_inbox_item
+
+        item_id = create_inbox_item(
+            _make_item(correlation_key="k:link", metadata={"generator": "g", "ui_link": "/admin?tab=updates"})
+        )
+        upsert_inbox_item(_make_item(correlation_key="k:link", metadata={"generator": "g"}))
+        assert get_inbox_item(item_id)["metadata"]["ui_link"] == "/admin?tab=updates"
+
     def test_upsert_creates_new_for_different_key(self):
         from sre_agent.inbox import create_inbox_item, upsert_inbox_item
 

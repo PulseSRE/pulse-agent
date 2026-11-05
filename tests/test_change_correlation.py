@@ -28,13 +28,14 @@ def _rs(name, deploy, rev, seconds_before, image):
 
 
 def _cm(name, seconds_before, manager="kubectl-edit"):
-    return SimpleNamespace(
-        metadata=SimpleNamespace(
-            name=name,
-            creation_timestamp=_ts(10 * 86400),
-            managed_fields=[SimpleNamespace(manager=manager, time=_ts(seconds_before))],
-        )
-    )
+    """A ConfigMap as the metadata-only list returns it."""
+    return {
+        "metadata": {
+            "name": name,
+            "creationTimestamp": _ts(10 * 86400).isoformat(),
+            "managedFields": [{"manager": manager, "time": _ts(seconds_before).isoformat()}],
+        }
+    }
 
 
 def _deployment(name, configmap):
@@ -49,16 +50,16 @@ def _deployment(name, configmap):
 
 
 def _cluster(replica_sets=(), configmaps=(), deployments=()):
-    apps, core, custom = MagicMock(), MagicMock(), MagicMock()
+    apps, custom = MagicMock(), MagicMock()
     apps.list_namespaced_replica_set.return_value = SimpleNamespace(items=list(replica_sets))
     apps.list_namespaced_controller_revision.return_value = SimpleNamespace(items=[])
     apps.list_namespaced_deployment.return_value = SimpleNamespace(items=list(deployments))
-    core.list_namespaced_config_map.return_value = SimpleNamespace(items=list(configmaps))
+    raw = MagicMock(return_value={"items": list(configmaps)})
     custom.list_cluster_custom_object.return_value = {"items": []}
     custom.get_cluster_custom_object.return_value = {"status": {"history": []}}
     return (
         patch.object(cc, "get_apps_client", return_value=apps),
-        patch.object(cc, "get_core_client", return_value=core),
+        patch.object(cc, "get_raw_json", raw),
         patch.object(cc, "get_custom_client", return_value=custom),
     )
 
@@ -104,8 +105,8 @@ def test_changes_outside_the_window_are_left_out():
 
 
 def test_a_cluster_upgrade_is_listed_as_cluster_wide():
-    apps_p, core_p, custom_p = _cluster()
-    with apps_p, core_p, custom_p as get_custom:
+    apps_p, raw_p, custom_p = _cluster()
+    with apps_p, raw_p, custom_p as get_custom:
         get_custom.return_value.get_cluster_custom_object.return_value = {
             "status": {"history": [{"version": "4.16.3", "startedTime": _ts(1200).isoformat()}]}
         }
@@ -117,3 +118,152 @@ def test_affected_scope_reads_correlation_keys():
     ns, workloads = cc.affected_scope(["crashloop:shop:Pod/api-5f58f69bd6-w4x22", "alerts::Alert/Watchdog"], ["ops"])
     assert ns == {"shop", "ops"}
     assert ("shop", "api") in workloads
+
+
+def test_configmaps_are_listed_metadata_only_and_paged():
+    pages = [
+        {"items": [_cm("a", 60)], "metadata": {"continue": "tok1"}},
+        {"items": [_cm("b", 120)], "metadata": {}},
+    ]
+    raw = MagicMock(side_effect=pages)
+    with patch.object(cc, "get_raw_json", raw):
+        changes = cc._configmap_edits("shop", ONSET - 3600, ONSET)
+    assert sorted(c["name"] for c in changes) == ["a", "b"]
+    first, second = raw.call_args_list
+    assert first.kwargs["accept"] == cc._METADATA_ONLY and second.kwargs["accept"] == cc._METADATA_ONLY
+    assert first.kwargs["query"] == {"limit": "500"}
+    assert second.kwargs["query"] == {"limit": "500", "continue": "tok1"}
+
+
+def test_a_list_too_long_to_read_is_reported_incomplete():
+    page = {"items": [_cm(f"cm-{i}", 60) for i in range(cc.PAGE_SIZE)], "metadata": {"continue": "more"}}
+    calls = []
+
+    def raw(path, what, *, query=None, accept=""):
+        calls.append(query)
+        return {**page, "metadata": {"continue": f"more{len(calls)}"}}
+
+    incomplete: list[str] = []
+    with patch.object(cc, "get_raw_json", side_effect=raw):
+        cc._configmap_edits("shop", ONSET - 3600, ONSET, [], incomplete)
+    assert len(calls) == cc.MAX_LIST_ITEMS // cc.PAGE_SIZE
+    assert incomplete == ["ConfigMaps in shop"]
+
+
+def test_replicasets_are_read_in_pages():
+    apps = MagicMock()
+    apps.list_namespaced_replica_set.side_effect = [
+        SimpleNamespace(items=[], metadata=SimpleNamespace(_continue="t")),
+        SimpleNamespace(items=[], metadata=SimpleNamespace(_continue=None)),
+    ]
+    with patch.object(cc, "get_apps_client", return_value=apps):
+        cc._deployment_rollouts("shop", ONSET - 3600, ONSET)
+    calls = apps.list_namespaced_replica_set.call_args_list
+    assert calls[0].kwargs == {"limit": 500} and calls[1].kwargs == {"limit": 500, "_continue": "t"}
+
+
+def test_argo_applications_are_read_once_per_identity_per_minute():
+    from sre_agent import k8s_client
+
+    custom = MagicMock()
+    custom.list_cluster_custom_object.return_value = {"items": []}
+    with patch.object(cc, "get_custom_client", return_value=custom):
+        cc._argo_syncs({"shop"}, ONSET - 3600, ONSET)
+        cc._argo_syncs({"web"}, ONSET - 3600, ONSET)
+        assert custom.list_cluster_custom_object.call_count == 1
+        token = k8s_client._user_token_var.set("someone-else")
+        try:
+            cc._argo_syncs({"shop"}, ONSET - 3600, ONSET)
+        finally:
+            k8s_client._user_token_var.reset(token)
+        assert custom.list_cluster_custom_object.call_count == 2
+    assert custom.list_cluster_custom_object.call_args.kwargs == {"limit": 500}
+
+
+def test_a_refused_argo_list_is_not_cached():
+    from kubernetes.client.rest import ApiException
+
+    custom = MagicMock()
+    custom.list_cluster_custom_object.side_effect = ApiException(status=403, reason="Forbidden")
+    errors: list = []
+    with patch.object(cc, "get_custom_client", return_value=custom):
+        cc._argo_syncs({"shop"}, ONSET - 3600, ONSET, errors)
+        cc._argo_syncs({"shop"}, ONSET - 3600, ONSET, errors)
+    assert custom.list_cluster_custom_object.call_count == 2
+    assert [e.status_code for e in errors] == [403, 403]
+
+
+def _container(env_from=(), env=()):
+    return SimpleNamespace(env_from=list(env_from), env=list(env))
+
+
+def test_referenced_config_covers_every_place_a_pod_names_config():
+    spec = SimpleNamespace(
+        volumes=[
+            SimpleNamespace(config_map=SimpleNamespace(name="vol-cm"), secret=None, projected=None, csi=None),
+            SimpleNamespace(
+                config_map=None, secret=SimpleNamespace(secret_name="vol-secret"), projected=None, csi=None
+            ),
+            SimpleNamespace(
+                config_map=None,
+                secret=None,
+                csi=None,
+                projected=SimpleNamespace(
+                    sources=[
+                        SimpleNamespace(config_map=SimpleNamespace(name="proj-cm"), secret=None),
+                        SimpleNamespace(config_map=None, secret=SimpleNamespace(name="proj-secret")),
+                        SimpleNamespace(config_map=None, secret=None),  # serviceAccountToken / downwardAPI
+                    ]
+                ),
+            ),
+            SimpleNamespace(
+                config_map=None,
+                secret=None,
+                projected=None,
+                csi=SimpleNamespace(node_publish_secret_ref=SimpleNamespace(name="csi-secret")),
+            ),
+        ],
+        containers=[
+            _container(
+                env_from=[
+                    SimpleNamespace(config_map_ref=SimpleNamespace(name="envfrom-cm"), secret_ref=None),
+                    SimpleNamespace(config_map_ref=None, secret_ref=SimpleNamespace(name="envfrom-secret")),
+                ]
+            )
+        ],
+        init_containers=[
+            _container(
+                env=[
+                    SimpleNamespace(
+                        value_from=SimpleNamespace(
+                            config_map_key_ref=SimpleNamespace(name="init-cm"), secret_key_ref=None
+                        )
+                    )
+                ]
+            )
+        ],
+        ephemeral_containers=[
+            _container(
+                env_from=[SimpleNamespace(config_map_ref=None, secret_ref=SimpleNamespace(name="debug-secret"))],
+                env=[
+                    SimpleNamespace(
+                        value_from=SimpleNamespace(
+                            config_map_key_ref=None, secret_key_ref=SimpleNamespace(name="debug-key-secret")
+                        )
+                    )
+                ],
+            )
+        ],
+        image_pull_secrets=[SimpleNamespace(name="regcred")],
+    )
+    cms, secrets = cc.referenced_config(spec)
+    assert cms == {"vol-cm", "proj-cm", "envfrom-cm", "init-cm"}
+    assert secrets == {
+        "vol-secret",
+        "proj-secret",
+        "csi-secret",
+        "envfrom-secret",
+        "debug-secret",
+        "debug-key-secret",
+        "regcred",
+    }

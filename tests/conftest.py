@@ -451,6 +451,16 @@ def _list_result(items):
     return SimpleNamespace(items=items)
 
 
+@pytest.fixture(autouse=True)
+def _clear_argo_application_cache():
+    """The change readers cache the Argo CD Application list per identity for a minute."""
+    from sre_agent.monitor.change_correlation import clear_argo_cache
+
+    clear_argo_cache()
+    yield
+    clear_argo_cache()
+
+
 @pytest.fixture
 def mock_k8s():
     """Patch all k8s_client getters to return mocks."""

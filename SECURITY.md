@@ -136,6 +136,9 @@ While paused, or with auto-fix disabled, approvals from the inbox, fix history a
 - Input validation rejects out-of-range values (replicas, grace periods, log lines) instead of clamping them.
 - `/memory/import`, environment-fact writes and memory deletion are admin-only; memory text is sanitised and delimited before it enters a prompt.
 
+### Reads as the caller
+With token forwarding on (the default), routes that read the cluster on the caller's behalf require `X-Forwarded-Access-Token` and answer 401 without it, rather than reading as the service account (`require_user_token()` in `api/auth.py`): `/topology`, `/topology/blast-radius`, `/incidents/{id}/impact`, `/monitor/simulate`, `/query`, `/log-counts`, `/inbox/{id}/claim`, `/views/{id}/actions` and `/fix-history/{id}/rollback`; `/ws/agent` closes with 4001. With forwarding off the service account reads, by design. The monitor (`/ws/monitor`, scanners, investigations) reads as the service account by design.
+
 ### Confirmation Gate
 - **Interactive agent (`/ws/agent`):** Tools classified as writes in the interactive configuration require a `confirm_request`/`confirm_response` round-trip with nonce verification. The registry classifications are enforced centrally; MCP classification and plan/worker authorization follow the scoped rules above. A server falsely annotating a mutating MCP tool as read-only remains outside that guarantee.
 - **Monitor auto-fix (`/ws/monitor` at trust level 3+):** Fixes execute WITHOUT the interactive confirmation gate. This is by design for autonomous remediation. Safety is enforced through rate limiting, cooldown, bare pod protection, and the emergency kill switch instead.

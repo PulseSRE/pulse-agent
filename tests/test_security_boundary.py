@@ -184,8 +184,11 @@ class TestViewActions:
             patch("sre_agent.db.get_view", return_value=_view(button)),
             patch("sre_agent.agent._execute_tool", return_value=("ok", None, {"status": "success"})),
         ):
+            # A read action runs as the caller too, so it needs their token.
             resp = client.post(
-                "/views/cv-1/actions", headers=HEADERS, json={"action": "list_pods", "action_input": {"namespace": "a"}}
+                "/views/cv-1/actions",
+                headers={**HEADERS, "X-Forwarded-User": "mallory", "X-Forwarded-Access-Token": "user-token-abc"},
+                json={"action": "list_pods", "action_input": {"namespace": "a"}},
             )
         assert resp.status_code == 200
 
