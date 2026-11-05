@@ -19,7 +19,7 @@ def _validate_k8s_name(value: str, field: str = "name") -> str | None:
         return f"Error: {field} is required."
     if len(value) > 253:
         return f"Error: {field} too long (max 253 chars)."
-    if not _K8S_NAME_RE.match(value):
+    if not _K8S_NAME_RE.fullmatch(value):
         return f"Error: {field} '{value}' is not a valid Kubernetes name (RFC 1123)."
     return None
 
@@ -30,6 +30,6 @@ def _validate_k8s_namespace(value: str) -> str | None:
         return None  # namespace is often optional
     if len(value) > 63:
         return "Error: namespace too long (max 63 chars)."
-    if not _K8S_NAMESPACE_RE.match(value):
+    if not _K8S_NAMESPACE_RE.fullmatch(value):
         return f"Error: namespace '{value}' is not a valid Kubernetes namespace name."
     return None
