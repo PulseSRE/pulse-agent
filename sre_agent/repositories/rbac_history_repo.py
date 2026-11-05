@@ -16,7 +16,10 @@ from .base import BaseRepository
 _VERSION_COLS = (
     "id, kind, namespace, name, uid, resource_version, change, observed_at, manager, operation, manager_time, content"
 )
-_LEDGER_COLS = "id, at, actor, source, verb, kind, namespace, name, reason, outcome, before, after, detail"
+_LEDGER_COLS = (
+    "id, at, actor, source, verb, kind, namespace, name, resource_version, actor_verified, "
+    "reason, outcome, before, after, detail"
+)
 
 
 def _json(value: Any) -> str | None:
@@ -121,20 +124,23 @@ class RbacHistoryRepository(BaseRepository):
 
     def prune(self, before_ms: int) -> None:
         """Drop versions older than ``before_ms`` except each object's newest row,
-        which is still the "before" of its next change."""
+        which is still the "before" of its next change, and ledger entries older
+        than ``before_ms`` (same retention)."""
         self.db.execute(
             "DELETE FROM rbac_object_versions v WHERE v.observed_at < ? AND v.id <> "
             "(SELECT MAX(id) FROM rbac_object_versions n WHERE n.kind = v.kind AND n.namespace = v.namespace AND n.name = v.name)",
             (before_ms,),
         )
+        self.db.execute("DELETE FROM pulse_write_ledger WHERE at < ?", (before_ms,))
         self.db.commit()
 
     # -- Ledger ---------------------------------------------------------------
 
     def record_write(self, entry: dict) -> dict:
         cur = self.db.execute(
-            "INSERT INTO pulse_write_ledger (at, actor, source, verb, kind, namespace, name, reason, outcome, before, after, detail) "
-            f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING {_LEDGER_COLS}",
+            "INSERT INTO pulse_write_ledger (at, actor, source, verb, kind, namespace, name, resource_version, "
+            "actor_verified, reason, outcome, before, after, detail) "
+            f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING {_LEDGER_COLS}",
             (
                 entry["at"],
                 entry["actor"],
@@ -143,6 +149,8 @@ class RbacHistoryRepository(BaseRepository):
                 entry["kind"],
                 entry.get("namespace", ""),
                 entry["name"],
+                entry.get("resource_version", ""),
+                bool(entry.get("actor_verified", False)),
                 entry.get("reason", ""),
                 entry.get("outcome", "ok"),
                 _json(entry.get("before")),

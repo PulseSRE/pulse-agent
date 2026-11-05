@@ -240,95 +240,172 @@ def test_objects_the_caller_cannot_read_are_hidden_and_counted(client):
     _history(_now_ms())
     with patch.object(rbac_history_rest, "_can_get", return_value=False):
         body = client.get("/rbac/changes", headers=AS_USER).json()
-    assert body["changes"] == [] and body["hidden"] == 1
+    assert body["changes"] == [] and body["hidden"] == 2 and body["system_hidden"] == 0
 
 
 def test_a_failed_access_check_hides_rather_than_shows(client):
     _history(_now_ms())
     with patch.object(rbac_history_rest, "_can_get", side_effect=RuntimeError("apiserver down")):
         body = client.get("/rbac/changes", headers=AS_USER).json()
-    assert body["changes"] == [] and body["hidden"] == 1
+    assert body["changes"] == [] and body["hidden"] == 2 and body["system_hidden"] == 0
 
 
-def test_invalid_input_is_a_400(client):
+def test_invalid_input_is_a_400_and_since_is_clamped_to_retention(client):
     assert client.get("/rbac/changes", headers=AS_USER, params={"kind": "Secret"}).status_code == 400
-    assert client.get("/rbac/changes", headers=AS_USER, params={"since": "2020-01-01T00:00:00Z"}).status_code == 400
     assert client.get("/rbac/changes", headers=AS_USER, params={"namespace": "Bad_NS"}).status_code == 400
-
-
-def test_ledger_records_the_signed_in_actor_and_attributes_the_change(client):
-    r = client.post(
-        "/rbac/ledger",
-        headers=AS_USER,
-        json={
-            "verb": "update",
-            "kind": "Role",
-            "namespace": "payments",
-            "name": "secret-manager",
-            "reason": "restore",
-            "actor": "mallory",
-            "before": {"a": 1},
-            "after": {"a": 2},
-        },
-    )
-    assert r.status_code == 200, r.text
-    assert r.json()["actor"] == "erin" and r.json()["source"] == "ui" and r.json()["has_before"] is True
-    # The observation that sees the change comes after the write.
-    _history(_now_ms() + 1000)
     with patch.object(rbac_history_rest, "_can_get", return_value=True):
+        r = client.get("/rbac/changes", headers=AS_USER, params={"since": "2020-01-01T00:00:00Z"})
+    assert r.status_code == 200
+
+
+def test_system_hidden_counts_only_what_the_caller_could_read(client):
+    _history(_now_ms())
+
+    def can_get(group, plural, ns):
+        return plural != "clusterroles"
+
+    with patch.object(rbac_history_rest, "_can_get", side_effect=can_get):
         body = client.get("/rbac/changes", headers=AS_USER).json()
-    assert body["changes"][0]["actor"]["name"] == "erin"
-    assert body["changes"][0]["actor"]["reason"] == "restore"
-    assert [e["actor"] for e in body["ledger"]] == ["erin"]
+    # The system ClusterRole change is hidden by permission, so it is not also counted as "system".
+    assert body["hidden"] == 1 and body["system_hidden"] == 0 and body["truncated"] is False
 
 
-def test_ledger_needs_an_identity_and_refuses_bad_entries(client):
-    assert (
-        client.post("/rbac/ledger", headers=AUTH, json={"verb": "update", "kind": "Role", "name": "x"}).status_code
-        == 401
-    )
-    assert (
-        client.post("/rbac/ledger", headers=AS_USER, json={"verb": "drop", "kind": "Role", "name": "x"}).status_code
-        == 400
-    )
-    assert (
-        client.post(
-            "/rbac/ledger", headers=AS_USER, json={"verb": "update", "kind": "ConfigMap", "name": "x"}
-        ).status_code
-        == 400
-    )
-    assert (
-        client.post(
-            "/rbac/ledger",
-            headers=AS_USER,
-            json={"verb": "update", "kind": "Secret", "name": "x", "after": {"data": "x"}},
-        ).status_code
-        == 400
-    )
+LEDGER = {
+    "verb": "update",
+    "kind": "Role",
+    "namespace": "payments",
+    "name": "secret-manager",
+    "resource_version": "3",
+    "reason": "restore",
+    "actor": "mallory",
+    "before": {"a": 1},
+    "after": {"a": 2},
+}
 
 
-def test_agent_write_tools_are_recorded_with_the_signed_in_user(_db):
+@pytest.fixture
+def ledger_ok():
+    """The caller's token says erin, and erin may make the write."""
+    rbac_history_rest.reset_rate_limit_for_tests()
+    calls = []
+
+    def can(verb, group, plural, ns, name=""):
+        from sre_agent import k8s_client
+
+        calls.append((verb, group, plural, ns, name, k8s_client.get_current_user_token()))
+        return True
+
+    with (
+        patch.object(rbac_history_rest, "_whoami", return_value="erin"),
+        patch.object(rbac_history_rest, "_can", side_effect=can),
+        patch.object(rbac_history_rest, "_can_get", return_value=True),
+    ):
+        yield calls
+    rbac_history_rest.reset_rate_limit_for_tests()
+
+
+def test_ledger_actor_comes_from_the_token_and_the_write_is_checked_on_the_exact_object(client, ledger_ok):
+    # X-Forwarded-User says "erin" too here, but the actor is what the token review returns.
+    r = client.post("/rbac/ledger", headers={**AS_USER, "X-Forwarded-User": "mallory"}, json=LEDGER)
+    assert r.status_code == 200, r.text
+    row = r.json()
+    assert row["actor"] == "erin" and row["actor_verified"] is True and row["resource_version"] == "3"
+    assert ledger_ok == [
+        ("update", "rbac.authorization.k8s.io", "roles", "payments", "secret-manager", "user-token-erin")
+    ]
+
+
+def test_a_change_is_credited_only_to_the_entry_with_its_resource_version(client, ledger_ok):
+    assert client.post("/rbac/ledger", headers=AS_USER, json={**LEDGER, "resource_version": "2"}).status_code == 200
+    _history(_now_ms() + 1000)  # observes resourceVersion 3
+    body = client.get("/rbac/changes", headers=AS_USER).json()
+    # A write that produced version 2 did not produce the observed version 3: the client is shown, not erin.
+    assert body["changes"][0]["actor"] is None and body["changes"][0]["manager"] == "oc"
+    assert client.post("/rbac/ledger", headers=AS_USER, json=LEDGER).status_code == 200
+    body = client.get("/rbac/changes", headers=AS_USER).json()
+    actor = body["changes"][0]["actor"]
+    assert actor["name"] == "erin" and actor["verified"] is True and actor["reason"] == "restore"
+
+
+def test_a_write_the_caller_may_not_make_is_refused(client, ledger_ok):
+    with patch.object(rbac_history_rest, "_can", return_value=False):
+        r = client.post("/rbac/ledger", headers=AS_USER, json=LEDGER)
+    assert r.status_code == 403
+    assert get_database().fetchall("SELECT id FROM pulse_write_ledger") == []
+
+
+def test_without_the_review_api_the_proxy_user_is_used_and_marked_unverified(client):
+    rbac_history_rest.reset_rate_limit_for_tests()
+    with (
+        patch.object(rbac_history_rest, "_whoami", return_value=None),
+        patch.object(rbac_history_rest, "_can", return_value=True),
+    ):
+        r = client.post("/rbac/ledger", headers=AS_USER, json=LEDGER)
+    assert r.json()["actor"] == "erin" and r.json()["actor_verified"] is False
+
+
+def test_a_refused_token_is_401(client):
+    with patch.object(
+        rbac_history_rest, "_whoami", side_effect=rbac_history_rest._ActorUnknownError("401 Unauthorized")
+    ):
+        assert client.post("/rbac/ledger", headers=AS_USER, json=LEDGER).status_code == 401
+
+
+def test_ledger_needs_the_callers_token_and_refuses_bad_entries(client, ledger_ok):
+    no_token = {**AUTH, "X-Forwarded-User": "erin"}
+    assert client.post("/rbac/ledger", headers=no_token, json=LEDGER).status_code == 401
+    bad = [
+        {**LEDGER, "verb": "drop"},
+        {**LEDGER, "kind": "ConfigMap"},
+        {**LEDGER, "kind": "Secret", "after": {"data": "x"}},
+    ]
+    for b in bad:
+        assert client.post("/rbac/ledger", headers=AS_USER, json=b).status_code == 400, b
+    big = {**LEDGER, "after": {"x": "y" * (65 * 1024)}}
+    assert client.post("/rbac/ledger", headers=AS_USER, json=big).status_code == 413
+    huge = {**LEDGER, "after": {"x": "y" * (300 * 1024)}}
+    assert client.post("/rbac/ledger", headers=AS_USER, json=huge).status_code == 413
+
+
+def test_ledger_writes_are_rate_limited_per_user(client, ledger_ok):
+    codes = [client.post("/rbac/ledger", headers=AS_USER, json=LEDGER).status_code for _ in range(61)]
+    assert codes[:60] == [200] * 60 and codes[60] == 429
+
+
+def test_prune_also_drops_old_ledger_entries(_db):
+    from sre_agent.repositories import get_rbac_history_repo
+
+    repo = get_rbac_history_repo()
+    for at in (T0, T0 + 10_000):
+        repo.record_write({"at": at, "actor": "erin", "source": "ui", "verb": "update", "kind": "Role", "name": "x"})
+    repo.prune(T0 + 5000)
+    assert [r["at"] for r in _db.fetchall("SELECT at FROM pulse_write_ledger")] == [T0 + 10_000]
+
+
+def test_agent_write_tools_store_only_the_target_never_the_arguments(_db):
     from sre_agent.request_context import _current_user
 
     tok = _current_user.set("erin")
     try:
         rbac_history.record_agent_write(
-            "delete_resource", {"kind": "RoleBinding", "namespace": "shop", "name": "x"}, "success"
+            "exec_command", {"namespace": "shop", "pod_name": "web-1", "command": "cat /etc/secret"}, "success"
         )
+        manifest = (
+            "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: cfg, namespace: shop}\ndata: {password: hunter2}\n"
+        )
+        rbac_history.record_agent_write("apply_yaml", {"yaml_content": manifest}, "error", "Forbidden")
     finally:
         _current_user.reset(tok)
-    rows = _db.fetchall("SELECT actor, source, verb, kind, namespace, name, outcome FROM pulse_write_ledger")
-    assert rows == [
-        {
-            "actor": "erin",
-            "source": "agent",
-            "verb": "delete_resource",
-            "kind": "RoleBinding",
-            "namespace": "shop",
-            "name": "x",
-            "outcome": "ok",
-        }
+    rows = _db.fetchall(
+        "SELECT actor, source, verb, kind, namespace, name, outcome, detail FROM pulse_write_ledger ORDER BY id"
+    )
+    assert [(r["verb"], r["kind"], r["namespace"], r["name"], r["outcome"]) for r in rows] == [
+        ("exec_command", "Pod", "shop", "web-1", "ok"),
+        ("apply_yaml", "ConfigMap", "shop", "cfg", "failed"),
     ]
+    assert all(r["actor"] == "erin" and r["source"] == "agent" for r in rows)
+    stored = str(rows)
+    assert "cat /etc/secret" not in stored and "hunter2" not in stored
 
 
 def test_migration_043_is_last_and_idempotent(_db):

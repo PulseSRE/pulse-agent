@@ -258,25 +258,77 @@ def reset_for_tests() -> None:
 # -- Ledger -----------------------------------------------------------------
 
 
-def record_agent_write(tool: str, redacted_input: dict, status_: str, error: str | None = None) -> None:
-    """Record a write tool the agent ran. Best effort: never raises into the tool path."""
+# Which object each write tool acts on: tool → (kind, name input, namespace input).
+# Only these fields are stored for an agent write; free-form arguments (exec
+# commands, manifests, skill text, git content) never are.
+_TOOL_TARGETS: dict[str, tuple[str, str, str]] = {
+    "scale_deployment": ("Deployment", "name", "namespace"),
+    "restart_deployment": ("Deployment", "name", "namespace"),
+    "rollback_deployment": ("Deployment", "name", "namespace"),
+    "delete_pod": ("Pod", "pod_name", "namespace"),
+    "exec_command": ("Pod", "pod_name", "namespace"),
+    "cordon_node": ("Node", "node_name", ""),
+    "uncordon_node": ("Node", "node_name", ""),
+    "drain_node": ("Node", "node_name", ""),
+    "create_network_policy": ("NetworkPolicy", "name", "namespace"),
+    "create_argo_application": ("Application", "name", ""),
+    "remove_finalizer": ("", "name", "namespace"),
+    "create_skill": ("Skill", "name", ""),
+    "create_skill_from_template": ("Skill", "name", ""),
+    "edit_skill": ("Skill", "name", ""),
+    "delete_skill": ("Skill", "name", ""),
+}
+
+
+def agent_write_target(tool: str, tool_input: dict) -> tuple[str, str, str]:
+    """(kind, namespace, name) a write tool acts on, from its inputs; '' where unknown."""
+    if tool == "apply_yaml":
+        # The manifest itself is never stored: only the first object's identity.
+        try:
+            import yaml
+
+            docs = [d for d in yaml.safe_load_all(str(tool_input.get("yaml_content") or "")) if isinstance(d, dict)]
+        except Exception:
+            docs = []
+        if not docs:
+            return "", str(tool_input.get("namespace") or ""), ""
+        meta = docs[0].get("metadata") or {}
+        return (
+            str(docs[0].get("kind") or ""),
+            str(meta.get("namespace") or tool_input.get("namespace") or ""),
+            str(meta.get("name") or "") + (f" (+{len(docs) - 1} more)" if len(docs) > 1 else ""),
+        )
+    kind, name_key, ns_key = _TOOL_TARGETS.get(tool, ("", "name", "namespace"))
+    if tool == "remove_finalizer":
+        kind = str(tool_input.get("kind") or "")
+    name = tool_input.get(name_key)
+    ns = tool_input.get(ns_key) if ns_key else ""
+    return kind, str(ns or "") if isinstance(ns, str) else "", str(name) if isinstance(name, str) else ""
+
+
+def record_agent_write(tool: str, tool_input: dict, status_: str, error: str | None = None) -> None:
+    """Record a write tool the agent ran: who, which tool, the target object and the
+    outcome. Nothing else from the input is kept. Best effort: never raises."""
     try:
         from .repositories import get_rbac_history_repo
         from .request_context import get_current_user
 
         actor = get_current_user() or "pulse-agent (no signed-in user)"
-        kind = str(redacted_input.get("kind") or redacted_input.get("resource_kind") or "")
+        kind, ns, name = agent_write_target(tool, tool_input)
+        result = "ok" if status_ == "success" else f"failed: {(error or '')[:200]}"
         get_rbac_history_repo().record_write(
             {
                 "at": int(time.time() * 1000),
                 "actor": str(actor),
+                # The agent knows the user from the session it serves, not from a token review.
+                "actor_verified": False,
                 "source": "agent",
                 "verb": tool,
                 "kind": kind,
-                "namespace": str(redacted_input.get("namespace") or ""),
-                "name": str(redacted_input.get("name") or redacted_input.get("resource_name") or ""),
+                "namespace": ns,
+                "name": name or "(unknown)",
                 "outcome": "ok" if status_ == "success" else "failed",
-                "detail": {"tool": tool, "input": redacted_input, **({"error": error[:300]} if error else {})},
+                "detail": {"tool": tool, "result": result},
             }
         )
     except Exception:

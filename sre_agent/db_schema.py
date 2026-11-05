@@ -828,8 +828,12 @@ CREATE INDEX IF NOT EXISTS idx_rbac_versions_object ON rbac_object_versions (kin
 CREATE INDEX IF NOT EXISTS idx_rbac_versions_observed ON rbac_object_versions (observed_at DESC);
 
 -- Writes made through Pulse (the UI or the agent): who, what, before and
--- after. actor is the authenticated user from the login proxy, never a name
--- the client sends. source: ui or agent.
+-- after. actor is derived from the caller's own token (SelfSubjectReview),
+-- never a name the client sends. actor_verified is false when that API was
+-- not served and the login proxy's X-Forwarded-User was used instead.
+-- resource_version is the version the write produced (or, for a delete, the
+-- version deleted): a change is credited to an entry only when it matches.
+-- source: ui or agent.
 CREATE TABLE IF NOT EXISTS pulse_write_ledger (
     id         BIGSERIAL PRIMARY KEY,
     at         BIGINT NOT NULL,
@@ -839,6 +843,8 @@ CREATE TABLE IF NOT EXISTS pulse_write_ledger (
     kind       TEXT NOT NULL,
     namespace  TEXT NOT NULL DEFAULT '',
     name       TEXT NOT NULL,
+    resource_version TEXT NOT NULL DEFAULT '',
+    actor_verified BOOLEAN NOT NULL DEFAULT FALSE,
     reason     TEXT NOT NULL DEFAULT '',
     outcome    TEXT NOT NULL DEFAULT 'ok',
     before     JSONB,

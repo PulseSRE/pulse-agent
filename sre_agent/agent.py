@@ -472,7 +472,8 @@ def _record_write(name: str, input_data: dict, meta: dict) -> None:
         return
     from .rbac_history import record_agent_write
 
-    record_agent_write(name, _redact_input(name, input_data), meta.get("status", ""), meta.get("error_message"))
+    # Gets the raw input but stores only the target (kind/namespace/name) and the outcome.
+    record_agent_write(name, input_data, meta.get("status", ""), meta.get("error_message"))
 
 
 def _execute_tool(
