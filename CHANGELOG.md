@@ -4,6 +4,8 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## Unreleased
 
+- **Security: `POST /slo` no longer lets a caller inject PromQL that `GET /slo` runs as the service account.** The SLO service name was interpolated unescaped into `kube_deployment_*{deployment="<service>"}`, so anyone with the shared token could register `a"} or vector(1) #`-style names and read arbitrary metrics through `current_value` with the agent's cluster-monitoring-view binding. `POST /slo` now requires the service to be a Kubernetes (RFC 1123) name (400 otherwise) and validates the other fields (`type` enum, finite `target`, integer `window_days` 1–90, string `description`; 422); `SLORegistry.register` refuses an invalid new SLO, and every label value is escaped (`\\`, `"`, line breaks) before it reaches PromQL. Stored rows that fail validation are kept (visible and deletable) but never queried: they are logged and reported as `no_data` with `invalid_reason`. The shared `_validate_k8s_name`/`_validate_k8s_namespace` and the ACM cluster-label check used `re.match` with `$`, which accepts a trailing newline; they now use `fullmatch`. `get_resource_recommendations` validates `time_range` as a plain duration before it reaches a PromQL subquery. No agent tool registers SLOs.
+
 ## v2.37.0 (2026-11-03)
 
 Paired with pulse-ui v2.37.0. **Needs pulse-operator v0.13.0**, which grants the two reads this release depends on: `apirequestcounts.apiserver.openshift.io` for the removed-API go/no-go, and `openshiftpulses` so the agent can report its own configuration. On an older operator both return 403 and the features that use them report themselves unavailable rather than guessing. **Migration 042** (forward-only): `readiness_waivers`. Pull requests #209–#231.

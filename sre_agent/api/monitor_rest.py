@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -281,6 +282,8 @@ async def get_slo_status(_auth=Depends(verify_token)):
             "target": slo.target,
             "window_days": slo.window_days,
             "description": slo.description,
+            # A stored row whose fields fail validation is never queried.
+            "invalid_reason": registry.invalid_reason(slo),
         }
         if status is None:
             # An SLO with no measurement was dropped from the list, and the UI
@@ -305,50 +308,69 @@ async def get_slo_status(_auth=Depends(verify_token)):
     return {"slos": rows, "total": len(rows)}
 
 
-_VALID_SLO_TYPES = {"availability", "latency", "error_rate"}
-
-
 @router.post("/slo")
 async def register_slo(request: Request, _auth=Depends(verify_token)):
     """Register a new SLO definition."""
-    from ..slo_registry import SLODefinition, get_slo_registry
+    from ..slo_registry import VALID_SLO_TYPES, SLODefinition, get_slo_registry, slo_definition_error
 
     body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="request body must be a JSON object")
 
     service_name = body.get("service", "")
     if not service_name:
         raise HTTPException(status_code=400, detail="service name required")
+    # The service name is interpolated into PromQL that GET /slo runs as the
+    # service account, so it must be a Kubernetes name (the Deployment's).
+    service_err = slo_definition_error(service_name, "availability")
+    if service_err:
+        raise HTTPException(
+            status_code=400,
+            detail=f"invalid service: {service_err} Use the Deployment's name (lowercase letters, digits, '-', '.').",
+        )
 
     # Validate slo_type
     slo_type = body.get("type", "")
-    if slo_type not in _VALID_SLO_TYPES:
+    if slo_type not in VALID_SLO_TYPES:
         raise HTTPException(
             status_code=422,
-            detail=f"slo_type must be one of: {', '.join(sorted(_VALID_SLO_TYPES))}",
+            detail=f"slo_type must be one of: {', '.join(sorted(VALID_SLO_TYPES))}",
         )
 
-    # Validate target (must be a float in (0.0, 100.0) exclusive)
+    # Validate target (must be a finite number in (0.0, 100.0) exclusive)
+    raw_target = body.get("target", "")
     try:
-        target = float(body.get("target", ""))
+        if isinstance(raw_target, bool):
+            raise TypeError
+        target = float(raw_target)
     except (TypeError, ValueError):
         raise HTTPException(status_code=422, detail="target must be a number between 0.0 and 100.0 (exclusive)")
-    if target <= 0.0 or target >= 100.0:
+    if not math.isfinite(target) or target <= 0.0 or target >= 100.0:
         raise HTTPException(status_code=422, detail="target must be between 0.0 and 100.0 (exclusive)")
 
     # Validate window_days (positive integer, max 90)
+    raw_window = body.get("window_days", 30)
     try:
-        window_days = int(body.get("window_days", 30))
-    except (TypeError, ValueError):
+        if isinstance(raw_window, bool) or (isinstance(raw_window, float) and not raw_window.is_integer()):
+            raise TypeError
+        window_days = int(raw_window)
+    except (TypeError, ValueError, OverflowError):
         raise HTTPException(status_code=422, detail="window_days must be a positive integer (max 90)")
     if window_days < 1 or window_days > 90:
         raise HTTPException(status_code=422, detail="window_days must be between 1 and 90")
+
+    description = body.get("description", "")
+    if description is None:
+        description = ""
+    if not isinstance(description, str):
+        raise HTTPException(status_code=422, detail="description must be a string")
 
     slo = SLODefinition(
         service_name=service_name,
         slo_type=slo_type,
         target=target,
         window_days=window_days,
-        description=body.get("description", ""),
+        description=description,
     )
 
     registry = get_slo_registry()
