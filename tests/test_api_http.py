@@ -484,6 +484,24 @@ class TestSLORegistration:
         assert r.status_code == 422
         assert "window_days" in r.json()["detail"]
 
+    def test_injection_in_service_name_is_rejected(self, api_client, api_headers):
+        for service in ('a"} or vector(1) #', "checkout\n", "a\\b", "Checkout", "a b"):
+            r = api_client.post(
+                "/slo",
+                headers=api_headers,
+                json={"service": service, "type": "availability", "target": 99.9},
+            )
+            assert r.status_code == 400, service
+            assert "invalid service" in r.json()["detail"]
+
+    def test_non_finite_target_rejected(self, api_client, api_headers):
+        r = api_client.post(
+            "/slo",
+            headers=api_headers,
+            content='{"service": "api", "type": "availability", "target": NaN}',
+        )
+        assert r.status_code == 422
+
     def test_missing_service_name(self, api_client, api_headers):
         r = api_client.post(
             "/slo",
@@ -498,7 +516,7 @@ class TestSLORegistration:
             r = api_client.post(
                 "/slo",
                 headers=api_headers,
-                json={"service": f"svc-{slo_type}", "type": slo_type, "target": 99.5},
+                json={"service": f"svc-{slo_type.replace('_', '-')}", "type": slo_type, "target": 99.5},
             )
             assert r.status_code == 200, f"Failed for slo_type={slo_type}"
 
