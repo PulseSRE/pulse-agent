@@ -19,6 +19,7 @@ from typing import Any
 
 import yaml
 
+from . import bearer_http
 from .k8s_client import get_current_user_token
 
 logger = logging.getLogger("pulse_agent.mcp_client")
@@ -227,7 +228,7 @@ def _mcp_post(base_url: str, payload: dict, session_id: str = "") -> tuple[dict,
         data=json.dumps(payload).encode(),
         headers=headers,
     )
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with bearer_http.open_with_token(req, timeout=15) as resp:
         sid = resp.headers.get("Mcp-Session-Id", session_id)
         raw = resp.read().decode()
     return _parse_sse_response(raw), sid

@@ -15,7 +15,7 @@ def _mock_prom_labels(metric_names: list[str]):
     mock_resp.read.return_value = response_data
     mock_resp.__enter__ = lambda s: s
     mock_resp.__exit__ = MagicMock(return_value=False)
-    return patch("urllib.request.urlopen", return_value=mock_resp)
+    return patch("sre_agent.bearer_http.open_with_token", return_value=mock_resp)
 
 
 class TestDiscoverMetrics:
@@ -85,7 +85,7 @@ class TestDiscoverMetrics:
         assert mock_urlopen.call_count == 1
 
     def test_prometheus_unreachable_falls_back_to_recipes(self):
-        with patch("urllib.request.urlopen", side_effect=Exception("connection refused")):
+        with patch("sre_agent.bearer_http.open_with_token", side_effect=Exception("connection refused")):
             result = discover_metrics.call({"category": "cpu"})
         assert "Cannot reach" in result
         assert "Recipe:" in result

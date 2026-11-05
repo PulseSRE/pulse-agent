@@ -168,7 +168,7 @@ class TestMcpTokenForwarding:
         reset_tok = _user_token_var.set("user-oauth-token")
         reset_cli = _user_api_client_var.set(None)
         try:
-            with patch("urllib.request.urlopen") as mock_urlopen:
+            with patch("sre_agent.bearer_http.open_with_token") as mock_urlopen:
                 mock_ctx = MagicMock()
                 mock_ctx.__enter__ = MagicMock(return_value=mock_ctx)
                 mock_ctx.__exit__ = MagicMock(return_value=False)
@@ -192,7 +192,7 @@ class TestMcpTokenForwarding:
         from sre_agent.k8s_client import _user_token_var
 
         assert _user_token_var.get() is None
-        with patch("urllib.request.urlopen") as mock_urlopen:
+        with patch("sre_agent.bearer_http.open_with_token") as mock_urlopen:
             mock_ctx = MagicMock()
             mock_ctx.__enter__ = MagicMock(return_value=mock_ctx)
             mock_ctx.__exit__ = MagicMock(return_value=False)

@@ -994,7 +994,7 @@ class TestGetResourceRecommendations:
 
         with (
             patch("builtins.open", side_effect=FileNotFoundError),
-            patch("urllib.request.urlopen", side_effect=mock_urlopen),
+            patch("sre_agent.bearer_http.open_with_token", side_effect=mock_urlopen),
         ):
             result = get_resource_recommendations.call({"namespace": "default"})
 
@@ -1012,7 +1012,7 @@ class TestGetResourceRecommendations:
 
         with (
             patch("builtins.open", side_effect=FileNotFoundError),
-            patch("urllib.request.urlopen", side_effect=mock_urlopen),
+            patch("sre_agent.bearer_http.open_with_token", side_effect=mock_urlopen),
         ):
             result = get_resource_recommendations.call({"namespace": "default"})
 

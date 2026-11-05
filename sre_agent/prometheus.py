@@ -16,6 +16,8 @@ import time as _time
 import urllib.parse
 import urllib.request
 
+from . import bearer_http
+
 logger = logging.getLogger("pulse_agent.prometheus")
 
 
@@ -197,7 +199,9 @@ class PrometheusClient:
                 headers["Authorization"] = f"Bearer {token}"
 
         req = urllib.request.Request(url, headers=headers)
-        resp = urllib.request.urlopen(req, context=ctx, timeout=timeout)
+        # Not urllib.request.urlopen: its redirect handler would carry the
+        # token to whatever host a redirect names (see bearer_http).
+        resp = bearer_http.open_with_token(req, context=ctx, timeout=timeout)
         return json.loads(resp.read())
 
 
