@@ -24,7 +24,7 @@ from ..inbox import (
     unclaim_item,
     update_item_status,
 )
-from .auth import get_owner, get_user_token, require_admin, verify_token
+from .auth import get_owner, get_user_token, require_admin, require_user_token, verify_token
 
 router = APIRouter(tags=["inbox"], dependencies=[Depends(verify_token)])
 
@@ -168,6 +168,9 @@ async def rest_claim_item(
     owner: str = Depends(get_owner),
     user_token: str | None = Depends(get_user_token),
 ):
+    # Claiming builds the item's view by running its view-plan tools as the
+    # claimant; without their token those reads would run as the service account.
+    require_user_token(user_token)
     # claim_item may run tools and an LLM call to build the view; keep it off the event loop.
     ok = await asyncio.to_thread(claim_item, item_id, owner, user_token)
     if not ok:

@@ -221,6 +221,34 @@ def get_user_token(
     return x_forwarded_access_token or None
 
 
+USER_TOKEN_REQUIRED = (
+    "User access token required: X-Forwarded-Access-Token is missing, so Pulse cannot read the cluster as you"
+)
+
+
+def user_token_missing(user_token: str | None) -> bool:
+    """True when token forwarding is on and the caller's own token did not arrive.
+
+    ``user_token_context(None)`` does nothing, so a read wrapped in it runs as
+    the agent's service account. With forwarding on that is never what a
+    user-facing route means: a caller holding only the shared agent token
+    would see whatever the service account can read. With forwarding off the
+    service account is the design, so nothing is missing.
+    """
+    return bool(get_settings().agent.token_forwarding) and not user_token
+
+
+def require_user_token(user_token: str | None, detail: str = USER_TOKEN_REQUIRED) -> str | None:
+    """Raise 401 when a route that reads the cluster as the caller has no caller token.
+
+    Returns ``user_token`` unchanged (``None`` when forwarding is off, which
+    keeps the service-account path).
+    """
+    if user_token_missing(user_token):
+        raise HTTPException(status_code=401, detail=detail)
+    return user_token
+
+
 def _cache_user(token_hash: str, username: str) -> None:
     """Cache a user identity with O(1) LRU eviction."""
     _user_cache[token_hash] = (username, time.time())

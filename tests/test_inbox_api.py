@@ -18,6 +18,8 @@ def auth_headers(pulse_token):
     return {
         "Authorization": f"Bearer {pulse_token}",
         "X-Forwarded-User": "test-admin",
+        # Claiming builds the item's view as the claimant, so it needs their token.
+        "X-Forwarded-Access-Token": "test-admin-token",
     }
 
 

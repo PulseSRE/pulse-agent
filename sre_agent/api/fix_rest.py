@@ -6,14 +6,14 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from ..monitor import (
     execute_rollback,
     get_action_detail,
     get_fix_history,
 )
-from .auth import get_user_token, require_admin, verify_token
+from .auth import get_user_token, require_admin, require_user_token, verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -286,11 +286,9 @@ async def rollback_action(
     user_token: str | None = Depends(get_user_token),
 ):
     """Rollback as an authenticated administrator using their Kubernetes permissions."""
-    from ..config import get_settings
     from ..k8s_client import user_token_context
 
-    if get_settings().agent.token_forwarding and not user_token:
-        raise HTTPException(status_code=401, detail="User access token required for rollback")
+    require_user_token(user_token, "User access token required for rollback")
 
     def run_rollback():
         with user_token_context(user_token):

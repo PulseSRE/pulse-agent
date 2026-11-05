@@ -167,7 +167,9 @@ class TestMultiTurnStickyMode:
 
             from sre_agent.api import app
 
-            yield TestClient(app)
+            # The UI's proxy forwards the signed-in user's token on every agent
+            # socket; chat without one is refused while token forwarding is on.
+            yield TestClient(app, headers={"X-Forwarded-Access-Token": "test-user-token"})
 
     def test_view_designer_stays_sticky_on_follow_up(self, ws_client):
         """After view_designer handles turn 1, a vague follow-up stays in view_designer."""

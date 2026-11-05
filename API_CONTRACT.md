@@ -123,6 +123,8 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 
 Unified worklist for findings, alerts, and predictions -- replaces the old multi-tab Incident Center in the UI.
 
+Generator items carry `metadata.generator`; an item acted on in a specific UI page also carries `metadata.ui_link`, a console path (the upgrade generators `upgrade_available` and `upgrade_api_removals` set `/admin?tab=updates` and list the ClusterVersion `version` in `resources`). A re-generated item copies a new `ui_link` into an open item's metadata, so items opened before the link existed get it on the next generator cycle.
+
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/inbox` | token | List inbox items (filters: status, priority, category, assignee). Returns `collapsedIntoEpisodes`: how many items an open episode already explains and were therefore left out  |
@@ -131,6 +133,7 @@ Unified worklist for findings, alerts, and predictions -- replaces the old multi
 | `GET` | `/episodes` | token | Open episodes, newest first, each with cause, symptom count and affected namespaces |
 | `GET` | `/episodes/{id}` | token | One episode: `episode`, `symptoms`, `changes` (config/RBAC/deployment activity in the 30m before it began, each with `seconds_before`), `recurrence` (`occurrences`, `window_seconds`, optional `interval_seconds` when the cadence is regular) |
 | `POST` | `/episodes/{id}/detach` | token + owner | Record that a symptom was not caused by this episode (`{"correlationKey": "..."}`). Stored, never re-attached |
+| `GET` | `/changes` | token, `get_user_token` | What changed around a resource (`changes_rest.py`). Query `namespace`, `kind`, `name`, `since`, `until` (ISO 8601, zone-less means UTC; default the 2 hours up to now; at most 7 days). Kinds: Pod, ReplicaSet, Deployment, StatefulSet, DaemonSet, Job, CronJob, ConfigMap, Secret (all need `namespace` and `name`), ClusterVersion; no `kind` with a `namespace` means every workload/ConfigMap change in it; neither means cluster-level only. Scope: the resource, its owner chain (Pod→ReplicaSet→Deployment, StatefulSet, DaemonSet, Job→CronJob), the ConfigMaps and Secrets it mounts or references (volumes, projected and CSI secret refs, env/envFrom of containers, init and ephemeral containers, image pull secrets), Argo CD syncs into the namespace, ClusterVersion upgrades. ConfigMaps and Secrets are read as metadata only (`PartialObjectMetadata`); no Secret value is returned. Returns `{"changes": [{"at": ISO, "kind", "namespace", "name", "summary", "actor": str\|null, "source": "rollout"\|"configmap"\|"secret"\|"workload"\|"argo"\|"clusterversion"}], "available": bool}`, newest first, at most 500; `"truncated": true` is added when more changes matched or a list was too long to read in full (lists are paged, 500 per page, up to 5000 objects). `actor` is the field manager (ConfigMap/Secret/CronJob edits) or the Argo CD user, else null. Reads run as the caller (token forwarding); with forwarding on, a request without `X-Forwarded-Access-Token` is 401 `"User access token required"` and nothing is read. A refused read of the resource (including a ConfigMap/Secret asked for by name), its owners, ReplicaSets/ControllerRevisions or referenced ConfigMaps is 403 with the reason (404 with `{"detail": "...", "code": "resource_not_found"}` when the resource does not exist, so it can be told apart from the code-less 404 of an agent without `/changes`; 502 on another API error), never an empty list. A refused read of an optional source (referenced Secrets, Argo CD Applications, ClusterVersion) adds `"unreadable": ["<source>: <reason>"]` instead; a 404 there (not installed, referenced object absent) is nothing to report. The cluster-wide Argo CD Application list is read at most once a minute per identity and cached in compact form. `available: false` (with `changes: []`) when the cluster cannot be reached or no cluster config is loaded. 400 for an invalid name/namespace, an unsupported kind, a missing `name`/`namespace`, a bad timestamp, `since` ≥ `until` or a window over 7 days |
 | `GET` | `/inbox/{item_id}` | token | Get a single inbox item |
 | `POST` | `/inbox` | token | Create a new inbox item |
 | `PATCH` | `/inbox/{item_id}` | token | Update an inbox item |
@@ -189,6 +192,20 @@ Inbox item `metadata` optional keys added for queue explainability: `priority_fa
 | `GET` | `/debug/memory` | token | RSS/GC/cache/session diagnostics |
 
 **Authentication:** Token-authenticated endpoints accept `Authorization: Bearer <token>` header or `?token=<token>` query parameter. The token is `PULSE_AGENT_WS_TOKEN`. Unauthenticated requests return 401.
+
+**User token (reads as the caller).** With token forwarding on (`PULSE_AGENT_TOKEN_FORWARDING`, default `true`), these routes read the cluster as the caller and also require the signed-in user's `X-Forwarded-Access-Token` header; without it they return 401 instead of reading as the agent's service account. With forwarding off they read as the service account and need no user token.
+
+| Route | 401 body without the user token |
+|-------|------|
+| `GET /topology` | `{"detail": "User access token required: ..."}` |
+| `GET /topology/blast-radius` | `{"detail": "User access token required: ..."}` |
+| `GET /incidents/{finding_id}/impact` | `{"detail": "User access token required: ..."}` |
+| `POST /monitor/simulate` | `{"detail": "User access token required: ..."}` |
+| `GET /query` | `{"detail": "User access token required: ..."}` |
+| `GET /log-counts` | `{"detail": "User access token required: ..."}` |
+| `POST /inbox/{item_id}/claim` | `{"detail": "User access token required: ..."}` |
+| `POST /views/{view_id}/actions` | `{"error": "Your access token did not reach Pulse; sign in again to run this action"}` (every action, read or write) |
+| `POST /fix-history/{action_id}/rollback` | `{"detail": "User access token required for rollback"}` |
 
 ### `/version` Response
 
@@ -427,6 +444,8 @@ Auth: Bearer token.
 | `/ws/monitor?token=...` | token | Autonomous cluster monitoring (Protocol v2) |
 
 All WebSocket endpoints require `PULSE_AGENT_WS_TOKEN` via the `token` query parameter. Connections without a valid token are closed with code `4001`.
+
+**User token on `/ws/agent`.** With token forwarding on (`PULSE_AGENT_TOKEN_FORWARDING`, default `true`), `/ws/agent` also requires the signed-in user's `X-Forwarded-Access-Token` header (set by the UI's oauth-proxy/nginx). Without it the connection is accepted and immediately closed with code `4001`, reason `"User access token required"`, so chat never reads the cluster as the agent's service account. `/ws/monitor` does not require it (it pushes the service account's findings by design). With forwarding off, no user token is required.
 
 ---
 

@@ -14,7 +14,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query, Request
 
 from ..config import get_settings
-from .auth import get_owner, get_user_token, verify_token
+from .auth import get_owner, get_user_token, require_user_token, user_token_missing, verify_token
 
 logger = logging.getLogger("pulse_agent.api")
 
@@ -350,7 +350,9 @@ async def rest_query(
 
     # Under the caller's token, not the service account's: this endpoint
     # needs only the shared UI token, so it handed any signed-in user every
-    # metric the agent's cluster-monitoring-view binding can read.
+    # metric the agent's cluster-monitoring-view binding can read. No token
+    # means no query: user_token_context(None) would fall back to the SA.
+    require_user_token(user_token)
     with user_token_context(user_token):
         result = await asyncio.to_thread(get_prometheus_query.func, q, time_range)
 
@@ -388,6 +390,8 @@ async def rest_log_counts(
 
     from ..k8s_client import get_core_client, safe
     from ..k8s_tools.validators import _validate_k8s_namespace
+
+    require_user_token(user_token)
 
     ns_err = _validate_k8s_namespace(namespace)
     if ns_err:
@@ -508,16 +512,18 @@ async def rest_execute_action(
     if input_err:
         return JSONResponse(status_code=400, content={"error": input_err})
 
-    if action in WRITE_TOOL_NAMES and not user_token:
-        from ..config import get_settings as _settings
-
-        if _settings().agent.token_forwarding:
-            # Without the person's token the write would run as the agent's
-            # service account, with the agent's rights rather than theirs.
-            return JSONResponse(
-                status_code=401,
-                content={"error": "Your access token did not reach Pulse; sign in again to run this action"},
-            )
+    if user_token_missing(user_token):
+        # Without the person's token the tool would run as the agent's service
+        # account, with the agent's rights rather than theirs -- for a read as
+        # much as for a write. Same rule as require_user_token(), but answered
+        # in this route's {"error": ...} shape rather than HTTPException's
+        # {"detail": ...}: pulse-ui's executeAction (customViewStore apiFetch)
+        # shows `body.error` for every failure here (403/404/400 too) and falls
+        # back to the bare status text without it.
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Your access token did not reach Pulse; sign in again to run this action"},
+        )
 
     from ..agent import _execute_tool
 
