@@ -188,7 +188,12 @@ async def request_investigation(item_id: str, requested_by: str, user_token: str
     from . import inbox as _inbox
     from .inbox import claim_allowed, claim_and_investigate, finding_for_item, get_inbox_item
     from .monitor import get_cluster_monitor
-    from .monitor.investigation_runner import admit_requested_investigation, charge_requested, today_cost
+    from .monitor.investigation_runner import (
+        InvestigationRefusal,
+        admit_requested_investigation,
+        refund_requested,
+        today_cost,
+    )
 
     item = await asyncio.to_thread(get_inbox_item, item_id)
     if item is None:
@@ -218,15 +223,15 @@ async def request_investigation(item_id: str, requested_by: str, user_token: str
     if not created:
         return run.public()
     try:
-        refusal = admit_requested_investigation(
+        admitted = admit_requested_investigation(
             monitor, finding, requester=requested_by, running_elsewhere=active_count() - 1
         )
     except Exception:
         release(item_id)
         raise
-    if refusal is not None:
+    if isinstance(admitted, InvestigationRefusal):
         release(item_id)
-        raise InvestigationRefusedError(429, refusal.reason, refusal.message, refusal.retry_after)
+        raise InvestigationRefusedError(429, admitted.reason, admitted.message, admitted.retry_after)
 
     try:
         # Claim it as before, but never take it from someone who already has
@@ -237,11 +242,11 @@ async def request_investigation(item_id: str, requested_by: str, user_token: str
             await asyncio.to_thread(claim_and_investigate, item_id, requested_by)
         await asyncio.to_thread(persist, run)
     except Exception:
+        # Admission charged the cooldown and the allowance; a run that never
+        # started gives them back.
+        refund_requested(monitor, admitted)
         release(item_id)
         raise
-    # Charged only now that the run is really starting: a failed claim or
-    # save above spent nothing.
-    charge_requested(monitor, finding, requested_by)
     _inbox._last_investigate_time[item_id] = time.time()
 
     from .k8s_client import user_token_context

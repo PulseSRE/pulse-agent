@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -189,10 +190,24 @@ def _requested_daily_refusal(monitor: ClusterMonitor, requester: str) -> Investi
     return None
 
 
+# Admission and charge of requests happen together under this lock, so two
+# requests cannot both pass a check that only one of them fits under.
+_request_lock = threading.Lock()
+
+
+@dataclass(frozen=True)
+class RequestCharge:
+    """What admitting a request charged, so it can be refunded if the run never starts."""
+
+    key: str
+    requester: str
+    previous_cooldown: float | None
+
+
 def admit_requested_investigation(
     monitor: ClusterMonitor, finding: dict, *, requester: str = "", running_elsewhere: int = 0
-) -> InvestigationRefusal | None:
-    """Admit an investigation a person asked for, or say why not. Charges nothing.
+) -> InvestigationRefusal | RequestCharge:
+    """Admit an investigation a person asked for and charge it, or say why not.
 
     The circuit breaker and cost budget are the scan's; the daily allowance is
     the requests' own (``max_daily_requested_investigations``, and
@@ -200,50 +215,69 @@ def admit_requested_investigation(
     the monitor keeps for critical findings. The per-condition cooldown is
     keyed like the scan's, so a person and the monitor do not investigate one
     condition twice inside it. Concurrency counts the monitor's running plans
-    plus ``running_elsewhere`` (requested and inbox runs in progress), and a
-    request may not take the last slot: that one is kept for the monitor.
+    plus ``running_elsewhere`` (requested and inbox runs in progress). With
+    ``max_concurrent_investigations`` above 1 a request may not take the last
+    slot, which is kept for the monitor; at 1 requests share the single slot
+    (still bounded by the daily allowances), or they could never run.
     Category, severity and noise eligibility are the scan's own choices about
     what to look at unasked, so they do not apply here.
 
-    Call ``charge_requested`` once the run is really starting.
+    The check and the charge are one step under a lock, so parallel requests
+    cannot overshoot an allowance. If the run then fails to start, call
+    ``refund_requested`` with the returned charge. The counters are in memory
+    and start again from zero when the agent restarts.
     """
-    refusal = _circuit_refusal() or _requested_daily_refusal(monitor, requester) or _cost_refusal(monitor)
-    if refusal is not None:
-        return refusal
+    with _request_lock:
+        refusal = _circuit_refusal() or _requested_daily_refusal(monitor, requester) or _cost_refusal(monitor)
+        if refusal is not None:
+            return refusal
 
-    settings = get_settings()
-    now = time.time()
-    key = _finding_key(finding)
-    cooldown = settings.monitor.investigation_cooldown
-    last = monitor._recent_investigations.get(key, 0.0)
-    if now - last < cooldown:
-        wait = max(1, int(last + cooldown - now))
-        return InvestigationRefusal(
-            "cooldown",
-            f"This was investigated {int(now - last)}s ago; it can be investigated again in {wait}s.",
-            retry_after=wait,
-        )
+        settings = get_settings()
+        now = time.time()
+        key = _finding_key(finding)
+        cooldown = settings.monitor.investigation_cooldown
+        last = monitor._recent_investigations.get(key)
+        if last is not None and now - last < cooldown:
+            wait = max(1, int(last + cooldown - now))
+            return InvestigationRefusal(
+                "cooldown",
+                f"This was investigated {int(now - last)}s ago; it can be investigated again in {wait}s.",
+                retry_after=wait,
+            )
 
-    monitor._investigation_tasks = [t for t in monitor._investigation_tasks if not t.done()]
-    running = len(monitor._investigation_tasks) + running_elsewhere
-    limit = settings.monitor.max_concurrent_investigations
-    if running >= limit - 1:
-        return InvestigationRefusal(
-            "concurrency",
-            f"{running} investigations are already running (limit {limit}, one slot kept for the monitor); "
-            "try again when one finishes.",
-            retry_after=30,
-        )
-    return None
+        monitor._investigation_tasks = [t for t in monitor._investigation_tasks if not t.done()]
+        running = len(monitor._investigation_tasks) + running_elsewhere
+        limit = settings.monitor.max_concurrent_investigations
+        request_limit = limit - 1 if limit > 1 else limit
+        if running >= request_limit:
+            kept = " (one slot kept for the monitor)" if limit > 1 else ""
+            return InvestigationRefusal(
+                "concurrency",
+                f"{running} investigations are already running (limit {limit}{kept}); try again when one finishes.",
+                retry_after=30,
+            )
+
+        monitor._recent_investigations[key] = now
+        monitor._requested_daily_count += 1
+        monitor._requested_daily_by_user[requester] = monitor._requested_daily_by_user.get(requester, 0) + 1
+        if _METRICS_AVAILABLE:
+            INVESTIGATIONS_TOTAL.inc()
+        return RequestCharge(key=key, requester=requester, previous_cooldown=last)
 
 
-def charge_requested(monitor: ClusterMonitor, finding: dict, requester: str) -> None:
-    """Count an admitted request: the shared cooldown and the requests' own allowance."""
-    monitor._recent_investigations[_finding_key(finding)] = time.time()
-    monitor._requested_daily_count += 1
-    monitor._requested_daily_by_user[requester] = monitor._requested_daily_by_user.get(requester, 0) + 1
-    if _METRICS_AVAILABLE:
-        INVESTIGATIONS_TOTAL.inc()
+def refund_requested(monitor: ClusterMonitor, charge: RequestCharge) -> None:
+    """Undo an admission whose run never started (the claim or the first save failed)."""
+    with _request_lock:
+        if charge.previous_cooldown is None:
+            monitor._recent_investigations.pop(charge.key, None)
+        else:
+            monitor._recent_investigations[charge.key] = charge.previous_cooldown
+        monitor._requested_daily_count = max(0, monitor._requested_daily_count - 1)
+        mine = monitor._requested_daily_by_user.get(charge.requester, 0) - 1
+        if mine > 0:
+            monitor._requested_daily_by_user[charge.requester] = mine
+        else:
+            monitor._requested_daily_by_user.pop(charge.requester, None)
 
 
 async def run_investigations(monitor: ClusterMonitor, findings: list[dict]) -> None:

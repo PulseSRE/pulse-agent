@@ -346,7 +346,11 @@ async def _run_proactive_investigation(finding: dict, *, client=None) -> dict[st
     # Run as a person (their forwarded token): the context is gathered as
     # them and not cached, so their view never fills the shared cache and the
     # service account's view (namespace names) never reaches their prompt.
-    cluster_ctx = get_cluster_context(use_cache=get_current_user_token() is None)
+    # Gathering reads the cluster (nodes, namespaces, ClusterVersion), so it
+    # runs in a thread; asyncio.to_thread copies the context, token included.
+    import asyncio
+
+    cluster_ctx = await asyncio.to_thread(get_cluster_context, use_cache=get_current_user_token() is None)
     hint = get_component_hint("sre", tool_names=list(readonly_map.keys()))
     effective_system: str | list[dict[str, Any]] = build_cached_system_prompt(
         SRE_SYSTEM_PROMPT + hint,

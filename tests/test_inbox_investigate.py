@@ -748,3 +748,78 @@ async def test_run_record_update_keeps_other_metadata(env, headers):
     assert md["action_plan"] == ["step"]
     assert md["investigation_run"]["state"] == "done"
     assert md["investigation_id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("limit", "others", "expected"),
+    [
+        ("1", 0, 202),  # one slot, idle: requests share it rather than never running
+        ("1", 1, 429),
+        ("2", 0, 202),
+        ("2", 1, 429),  # the second slot is the monitor's
+    ],
+)
+async def test_concurrency_slot_rule_by_limit(env, headers, monkeypatch, limit, others, expected):
+    from sre_agent import inbox_investigation
+    from sre_agent.config import _reset_settings
+
+    monkeypatch.setenv("PULSE_AGENT_MAX_CONCURRENT_INVESTIGATIONS", limit)
+    _reset_settings()
+    for i in range(others):
+        inbox_investigation.reserve(f"other-{i}", "bob", "request")
+    run, _ = _scripted()
+    with patch("sre_agent.monitor.investigation_pipeline._run_proactive_investigation", run):
+        async with _client() as c:
+            item_id = await _create(c, headers)
+            resp = await c.post(f"/inbox/{item_id}/investigate", headers=headers)
+            await _finish(item_id)
+    assert resp.status_code == expected
+    if expected == 429:
+        assert resp.json()["detail"]["reason"] == "concurrency"
+
+
+@pytest.mark.asyncio
+async def test_parallel_admissions_do_not_overshoot_the_per_user_cap(env, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sre_agent.config import _reset_settings
+    from sre_agent.monitor import get_cluster_monitor
+    from sre_agent.monitor.investigation_runner import RequestCharge, admit_requested_investigation
+
+    monkeypatch.setenv("PULSE_AGENT_MAX_DAILY_REQUESTED_INVESTIGATIONS_PER_USER", "3")
+    monkeypatch.setenv("PULSE_AGENT_MAX_CONCURRENT_INVESTIGATIONS", "100")
+    _reset_settings()
+    monitor = await get_cluster_monitor()
+
+    def admit(i: int):
+        finding = {"id": f"f{i}", "category": "task", "title": f"t{i}", "resources": []}
+        return admit_requested_investigation(monitor, finding, requester="alice")
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        results = list(pool.map(admit, range(32)))
+    assert sum(isinstance(r, RequestCharge) for r in results) == 3
+    assert monitor._requested_daily_by_user == {"alice": 3}
+
+
+@pytest.mark.asyncio
+async def test_cluster_context_is_gathered_off_the_event_loop_as_the_caller(env, headers):
+    from sre_agent.evals.investigation_replay import ScriptedClient
+    from sre_agent.k8s_client import get_current_user_token
+
+    loop_thread = threading.current_thread()
+    gathered = []
+
+    def fake_gather(mode="sre"):
+        gathered.append((threading.current_thread() is loop_thread, get_current_user_token()))
+        return "CALLER VIEW"
+
+    with (
+        patch("sre_agent.agent.create_async_client", return_value=ScriptedClient({})),
+        patch("sre_agent.harness.gather_cluster_context", fake_gather),
+    ):
+        async with _client() as c:
+            item_id = await _create(c, headers)
+            await c.post(f"/inbox/{item_id}/investigate", headers=headers)
+            await _finish(item_id)
+    assert gathered == [(False, USER_TOKEN)]
