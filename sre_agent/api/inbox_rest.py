@@ -171,6 +171,15 @@ async def rest_get_inbox_item(item_id: str):
     return item
 
 
+def _client_metadata(raw: object) -> dict:
+    """Metadata a client may set on an item: not the investigation run record, which only the agent writes."""
+    from ..inbox_investigation import RUN_KEY
+
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if k != RUN_KEY}
+
+
 @router.post("/inbox", status_code=201)
 async def rest_create_inbox_item(
     request: Request,
@@ -190,7 +199,7 @@ async def rest_create_inbox_item(
         "due_date": body.get("due_date"),
         "created_by": owner,
         "resources": body.get("resources", []),
-        "metadata": body.get("metadata", {}),
+        "metadata": _client_metadata(body.get("metadata")),
     }
     item_id = create_inbox_item(item)
     return {"id": item_id, "item_type": item["item_type"], "status": "new"}
@@ -257,14 +266,34 @@ async def rest_dismiss_item(item_id: str, owner: str = Depends(get_owner)):
     return {"ok": True}
 
 
-@router.post("/inbox/{item_id}/investigate")
-async def rest_investigate_item(item_id: str, owner: str = Depends(get_owner)):
-    from ..inbox import claim_and_investigate
+@router.post("/inbox/{item_id}/investigate", status_code=202)
+async def rest_investigate_item(
+    item_id: str,
+    owner: str = Depends(get_owner),
+    user_token: str | None = Depends(get_user_token),
+):
+    """Start a read-only investigation of the item, or return the one in progress.
 
-    ok = claim_and_investigate(item_id, owner)
-    if not ok:
-        raise HTTPException(status_code=409, detail="Item not found or already claimed by another user")
-    return {"ok": True, "item_id": item_id}
+    202 with the run's status (``queued``/``running``); 401 without a forwarded
+    user token while token forwarding is on; 404 for an unknown
+    item; 409 for a resolved/archived item; 429 when the budget, cost budget,
+    circuit breaker, cooldown or concurrency limit refuses it, with
+    ``detail.reason``/``detail.message`` and ``Retry-After`` when known.
+    """
+    from ..inbox_investigation import InvestigationRefusedError, ItemNotFoundError, request_investigation
+
+    # The run reads the cluster as the requester (their forwarded token); with
+    # forwarding on and no token those reads would run as the service account.
+    require_user_token(user_token)
+    try:
+        run = await request_investigation(item_id, owner, user_token)
+    except ItemNotFoundError:
+        raise HTTPException(status_code=404, detail="Item not found") from None
+    except InvestigationRefusedError as e:
+        headers = {"Retry-After": str(e.retry_after)} if e.retry_after else None
+        raise HTTPException(status_code=e.status_code, detail=e.detail(), headers=headers) from None
+    # "ok"/"item_id" kept for callers of the old claim-only response.
+    return {"ok": True, **run, "status": run["state"]}
 
 
 @router.post("/inbox/{item_id}/resolve")
@@ -318,19 +347,45 @@ async def rest_record_step(item_id: str, request: Request, owner: str = Depends(
 
 @router.get("/inbox/{item_id}/investigation")
 async def rest_get_investigation(item_id: str):
+    """The item's investigation report and the state of its latest run.
+
+    ``state`` is ``queued``/``running``/``done``/``failed``; ``run`` is the
+    latest run (``error`` says why it failed) or null for a report no run
+    record covers. Before a run has a report the body is ``{item_id, state,
+    run, error}``. The report fields are unchanged from before, so a reader
+    that only knows the report still works; 404 only when there is neither a
+    report nor a run.
+    """
+    from ..inbox_investigation import run_status
+
     item = get_inbox_item(item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Item not found")
+    run = run_status(item)
+    # The report linked to the item, else the failed report of the latest run.
+    # A finished run's report is linked as investigation_id; a done run whose
+    # report is not linked is not this occurrence's, so it is not shown.
     inv_id = (item.get("metadata") or {}).get("investigation_id")
+    if not inv_id and run is not None and run.get("state") == "failed":
+        inv_id = run.get("report_id")
     if not inv_id:
-        raise HTTPException(status_code=404, detail="No investigation linked")
+        if run is None:
+            raise HTTPException(status_code=404, detail="No investigation linked")
+        return {"item_id": item_id, "state": run["state"], "run": run, "error": run.get("error")}
     from ..db import get_database as _get_db
 
     db = _get_db()
     row = db.fetchone("SELECT * FROM investigations WHERE id = ?", (inv_id,))
     if row is None:
-        raise HTTPException(status_code=404, detail="Investigation not found")
+        if run is None:
+            raise HTTPException(status_code=404, detail="Investigation not found")
+        return {"item_id": item_id, "state": run["state"], "run": run, "error": run.get("error")}
     result = dict(row)
+    if run is not None:
+        result["state"] = run["state"]
+    else:
+        result["state"] = "done" if result.get("status") == "completed" else "failed"
+    result["run"] = run
     for field in ("resources", "evidence", "alternatives_considered", "evidence_detail"):
         if field in result and isinstance(result[field], str):
             import json as _json

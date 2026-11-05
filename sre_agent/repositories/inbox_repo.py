@@ -242,6 +242,19 @@ class InboxRepository(BaseRepository):
         )
         self.db.commit()
 
+    def merge_metadata(self, item_id: str, patch: dict[str, Any], now: int) -> None:
+        """Set the top-level metadata keys in ``patch``, leaving every other key as stored.
+
+        ``update_metadata`` writes back a whole dict read earlier, so a writer
+        that read before another writer saved would drop that writer's keys.
+        """
+        self.db.execute(
+            "UPDATE inbox_items SET metadata = (COALESCE(NULLIF(metadata, ''), '{}')::jsonb || ?::jsonb)::text, "
+            "updated_at = ? WHERE id = ?",
+            (json.dumps(patch), now, item_id),
+        )
+        self.db.commit()
+
     def update_metadata_and_view(
         self,
         item_id: str,

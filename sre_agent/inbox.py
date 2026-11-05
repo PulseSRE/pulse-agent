@@ -1083,8 +1083,19 @@ def _blast_radius_items(blast: Any) -> list[dict[str, Any]]:
     return items
 
 
+def claim_allowed(item: dict[str, Any]) -> bool:
+    """Whether claim_and_investigate's status change is a transition the lifecycle allows."""
+    status = item.get("status", "")
+    target = "in_progress" if status in ("triaged", "claimed") else "claimed"
+    return target in _TRANSITIONS.get(status, [])
+
+
 def claim_and_investigate(item_id: str, username: str) -> bool:
-    """Atomically claim an item and transition to in_progress."""
+    """Atomically claim an item and transition to in_progress.
+
+    Claims only. ``inbox_investigation.request_investigation`` starts the
+    investigation that ``POST /inbox/{id}/investigate`` promises.
+    """
     item = get_inbox_item(item_id)
     if item is None:
         return False
@@ -1483,6 +1494,10 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
             metadata = recent_item.get("metadata", {})
             metadata.pop("triaged", None)
             metadata.pop("investigation_id", None)
+            # The run record belongs to the occurrence that was resolved;
+            # left in place, GET /inbox/{id}/investigation would show its
+            # report as this occurrence's.
+            metadata.pop("investigation_run", None)
             metadata.pop("action_plan", None)
             repo.update_triage_result(recent_item["id"], "new", metadata, finding.get("summary", ""), now)
             return recent_item["id"]
@@ -1507,6 +1522,9 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
         "correlation_key": corr_key,
         "created_by": "system:monitor",
         "finding_id": finding_id,
+        # The finding's own category: investigating the item later is keyed
+        # (cooldown) like the monitor's investigation of the finding.
+        "metadata": {"finding_category": finding.get("category", "")},
     }
     return create_inbox_item(item)
 
@@ -1610,6 +1628,48 @@ def _phase_a_triage() -> int:
     return triaged
 
 
+_FINDING_SEVERITIES = frozenset(("critical", "warning", "info"))
+
+
+def finding_for_item(item: dict[str, Any], monitor: Any = None) -> dict[str, Any]:
+    """The finding an inbox item is investigated as (triage and requested runs alike).
+
+    An item the monitor raised (``finding_id``) is investigated as that
+    finding: its category, title and resources, from the monitor's current
+    findings when it still has it, else from what the bridge recorded. That
+    keeps the cooldown key the same as the monitor's own investigation of the
+    finding (``_finding_key``); keyed by the item's type ("task:...") the
+    shared cooldown never matched. Severity is one of the known values; the
+    rest is sanitized where the prompt is built.
+    """
+    md = item.get("metadata") or {}
+    original: dict[str, Any] | None = None
+    finding_id = item.get("finding_id")
+    if finding_id and monitor is not None:
+        for f in list(getattr(monitor, "_last_findings", {}).values()):
+            if isinstance(f, dict) and f.get("id") == finding_id:
+                original = f
+                break
+    if original is not None:
+        category = original.get("category", "")
+    elif finding_id:
+        corr = item.get("correlation_key") or ""
+        category = md.get("finding_category") or (corr.split(":", 1)[0] if ":" in corr else "") or "unknown"
+    else:
+        category = md.get("generator", item.get("item_type", "unknown"))
+    severity = item.get("severity") if item.get("severity") in _FINDING_SEVERITIES else "warning"
+    return {
+        "id": finding_id or item["id"],
+        "title": (original or {}).get("title") or item["title"],
+        "summary": item.get("summary", ""),
+        "severity": severity,
+        "category": str(category),
+        "resources": (original or {}).get("resources") or item.get("resources", []),
+        "namespace": item.get("namespace", ""),
+        "confidence": item.get("confidence", 0.5),
+    }
+
+
 def _phase_b_investigate() -> int:
     """Investigate items the triage flagged for review using the SRE agent."""
     repo = get_inbox_repo()
@@ -1642,18 +1702,21 @@ def _phase_b_investigate() -> int:
                 repo.update_resources(item["id"], alive, int(time.time()))
                 item["resources"] = alive
 
+        # One run per item: skip an item a person's request is investigating
+        # (POST /inbox/{id}/investigate), and let such a request see this run.
+        from .inbox_investigation import persist as _persist_run
+        from .inbox_investigation import release as _release_run
+        from .inbox_investigation import reserve as _reserve_run
+
+        run, created = _reserve_run(item["id"], "system:agent", "triage")
+        if not created:
+            continue
+        run.state = "running"
+        run.started_at = int(now)
+
         _last_investigate_time[item["id"]] = now
 
-        finding_dict = {
-            "id": item.get("finding_id") or item["id"],
-            "title": item["title"],
-            "summary": item.get("summary", ""),
-            "severity": item.get("severity", "warning"),
-            "category": item.get("metadata", {}).get("generator", item.get("item_type", "unknown")),
-            "resources": item.get("resources", []),
-            "namespace": item.get("namespace", ""),
-            "confidence": item.get("confidence", 0.5),
-        }
+        finding_dict = finding_for_item(item)
 
         try:
             import asyncio as _asyncio
@@ -1681,7 +1744,12 @@ def _phase_b_investigate() -> int:
             except Exception:
                 logger.debug("Failed to select tools for inbox investigation", exc_info=True)
 
-            if result.get("summary"):
+            if not result.get("summary"):
+                # Finished with nothing to attach: still record the run as
+                # done, or it would read as in progress until it timed out.
+                run.state, run.finished_at, run.report_id = "done", int(time.time()), outcome.report_id
+                _persist_run(run)
+            else:
                 investigation_id = outcome.report_id
                 metadata = item.get("metadata", {})
                 metadata.update(investigation_metadata(result, investigation_id))
@@ -1720,13 +1788,22 @@ def _phase_b_investigate() -> int:
                     new_status = "triaged"
 
                 ts = int(time.time())
+                run.state, run.finished_at, run.report_id = "done", ts, investigation_id
+                metadata["investigation_run"] = run.public()
                 repo.update_investigation_result(item["id"], new_status, metadata, ts)
                 _publish_event("inbox_item_updated", item["id"], {"status": new_status})
                 investigated += 1
                 _inbox_logger.info("Investigated %s → %s (confidence: %.2f)", item["id"], new_status, inv_confidence)
-        except Exception:
+        except Exception as e:
             _inbox_logger.exception("Investigation failed for %s", item["id"])
+            run.state, run.finished_at, run.error = "failed", int(time.time()), str(e) or type(e).__name__
+            try:
+                _persist_run(run)
+            except Exception:
+                _inbox_logger.debug("Recording failed run for %s failed", item["id"], exc_info=True)
             update_item_status(item["id"], "agent_review_failed")
+        finally:
+            _release_run(item["id"])
 
     return investigated
 
