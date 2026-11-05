@@ -395,6 +395,9 @@ def test_connectivity(source_namespace: str, source_pod: str, target_host: str, 
     return f"Connection to {target_host}:{target_port} FAILED. No connectivity tools available in the container."
 
 
+_PROM_DURATION_RE = re.compile(r"[1-9][0-9]{0,3}[smhdw]")
+
+
 @beta_tool
 def get_resource_recommendations(namespace: str, time_range: str = "24h"):
     """Analyze resource usage vs requests/limits and recommend right-sizing. Shows over-provisioned and under-provisioned workloads.
@@ -407,6 +410,9 @@ def get_resource_recommendations(namespace: str, time_range: str = "24h"):
 
     if err := _validate_k8s_namespace(namespace):
         return err
+    # Interpolated into a PromQL subquery range, so only a plain duration.
+    if not _PROM_DURATION_RE.fullmatch(time_range or ""):
+        return f"Error: time_range {time_range!r} must be a duration like '30m', '24h' or '7d'."
 
     prom = get_prometheus_client()
 

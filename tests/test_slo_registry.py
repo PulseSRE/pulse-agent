@@ -276,3 +276,159 @@ class TestDeletedDefaultsStayDeleted:
         reg = SLORegistry()
         _register_defaults(reg, skip=set())
         assert reg.get(*self.KEY) is not None
+
+
+class TestPromQLInjection:
+    """A service name reached PromQL unescaped and GET /slo ran it as the service account."""
+
+    INJECTIONS = (
+        'a"} or vector(1) #',
+        "checkout\n",
+        "check\nout",
+        "a\\",
+        'a"',
+        "Checkout",
+        "a" * 254,
+        "",
+    )
+
+    def test_escaping_keeps_quotes_and_backslashes_literal(self):
+        from sre_agent.slo_registry import promql_label_value
+
+        assert promql_label_value("checkout") == "checkout"
+        assert promql_label_value('a"} or vector(1) #') == 'a\\"} or vector(1) #'
+        assert promql_label_value("a\\") == "a\\\\"
+        assert promql_label_value('\\"') == '\\\\\\"'
+        assert promql_label_value("a\nb\r") == "a\\nb\\r"
+
+    def test_escaped_injection_parses_as_one_literal_selector(self):
+        import promql_parser
+
+        from sre_agent.slo_registry import promql_label_value
+
+        value = 'a"} or vector(1) #\n\\'
+        expr = promql_parser.parse(f'up{{deployment="{promql_label_value(value)}"}}')
+        assert type(expr).__name__ == "VectorSelector"
+        assert "vector(1)" not in str(expr).split("{")[0]
+
+    def test_invalid_names_are_rejected(self):
+        from sre_agent.slo_registry import slo_definition_error
+
+        for name in self.INJECTIONS:
+            assert slo_definition_error(name, "availability") is not None, repr(name)
+
+    def test_other_fields_are_validated(self):
+        from sre_agent.slo_registry import slo_definition_error
+
+        assert slo_definition_error("api", "availability", 0.999, 30) is None
+        assert slo_definition_error("kube-apiserver", "latency", 99.9, 90) is None
+        assert slo_definition_error("api", "throughput") is not None
+        assert slo_definition_error("api", "availability", float("nan")) is not None
+        assert slo_definition_error("api", "availability", float("inf")) is not None
+        assert slo_definition_error("api", "availability", "0.999") is not None
+        assert slo_definition_error("api", "availability", 0.999, 91) is not None
+        assert slo_definition_error("api", "availability", 0.999, "30d") is not None
+        assert slo_definition_error("api", "availability", 0.999, True) is not None
+
+    def test_register_rejects_an_invalid_new_slo(self):
+        import pytest
+
+        reg = SLORegistry()
+        with pytest.raises(ValueError):
+            reg.register(SLODefinition(service_name='a"} or vector(1) #', slo_type="availability", target=0.999))
+        assert reg.list_all() == []
+
+    def test_valid_query_is_unchanged(self):
+        reg = SLORegistry()
+        q = reg._build_prom_query(SLODefinition(service_name="checkout", slo_type="availability", target=0.999))
+        assert q == (
+            'avg_over_time(kube_deployment_status_replicas_available{deployment="checkout"}[30d]) / '
+            'avg_over_time(kube_deployment_spec_replicas{deployment="checkout"}[30d])'
+        )
+
+    def test_invalid_stored_row_is_skipped_not_queried(self):
+        from unittest.mock import MagicMock, patch
+
+        from sre_agent.slo_registry import _load_persisted
+
+        bad = 'a"} or vector(1) #'
+        repo = MagicMock()
+        repo.fetch_all.return_value = [
+            {"service_name": bad, "slo_type": "availability", "target": 0.999, "window_days": 30, "description": ""},
+            {
+                "service_name": "checkout",
+                "slo_type": "availability",
+                "target": 0.999,
+                "window_days": 30,
+                "description": "",
+            },
+        ]
+        reg = SLORegistry()
+        with patch("sre_agent.repositories.get_slo_repo", return_value=repo):
+            _load_persisted(reg)
+        # Kept, so it stays visible and deletable, but marked invalid.
+        stored = reg.get(bad, "availability")
+        assert stored is not None and reg.invalid_reason(stored)
+        assert reg._build_prom_query(stored) == ""
+
+        client = MagicMock()
+        client.query.return_value = {"status": "success", "data": {"result": [{"value": [0, "1"]}]}}
+        with patch("sre_agent.prometheus.get_prometheus_client", return_value=client):
+            values = reg.query_prometheus_values()
+        queries = [c.args[0] for c in client.query.call_args_list]
+        assert len(queries) == 1 and 'deployment="checkout"' in queries[0]
+        assert all("vector(1)" not in q for q in queries)
+        assert values == {"checkout:availability": 1.0}
+
+    def test_get_slo_reports_invalid_stored_row_as_no_data(self):
+        from unittest.mock import patch
+
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from sre_agent.api import monitor_rest
+        from sre_agent.api.auth import verify_token
+
+        bad = 'a"} or vector(1) #'
+        reg = SLORegistry()
+        reg.register(SLODefinition(bad, "availability", 0.999), persist=False)
+        reg.register(SLODefinition("api", "availability", 0.999), persist=False)
+        with (
+            patch("sre_agent.slo_registry.get_slo_registry", return_value=reg),
+            patch.object(reg, "query_prometheus_values", return_value={"api:availability": 0.9995}),
+        ):
+            app = FastAPI()
+            app.include_router(monitor_rest.router)
+            app.dependency_overrides[verify_token] = lambda: None
+            body = TestClient(app).get("/slo").json()
+        rows = {r["service"]: r for r in body["slos"]}
+        assert rows[bad]["alert_level"] == "no_data" and rows[bad]["current_value"] is None
+        assert rows[bad]["invalid_reason"]
+        assert rows["api"]["alert_level"] == "ok" and rows["api"]["invalid_reason"] is None
+
+
+class TestValidatorsRejectTrailingNewline:
+    """``^...$`` with ``re.match`` accepted ``"name\\n"``: ``$`` matches before a final newline."""
+
+    def test_k8s_name_and_namespace(self):
+        from sre_agent.k8s_tools.validators import _validate_k8s_name, _validate_k8s_namespace
+
+        assert _validate_k8s_name("checkout\n") is not None
+        assert _validate_k8s_namespace("default\n") is not None
+        assert _validate_k8s_name("checkout") is None
+        assert _validate_k8s_namespace("default") is None
+
+    def test_cluster_label(self):
+        import pytest
+
+        from sre_agent.promql_recipes import inject_cluster_label
+
+        with pytest.raises(ValueError):
+            inject_cluster_label("up", "prod\n")
+        assert 'cluster="prod"' in inject_cluster_label("up", "prod")
+
+    def test_resource_recommendations_time_range(self):
+        from sre_agent.k8s_tools.advanced import get_resource_recommendations
+
+        out = get_resource_recommendations.func("default", "1h:]) or vector(1) #")
+        assert out.startswith("Error: time_range")

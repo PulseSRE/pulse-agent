@@ -76,8 +76,8 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/plan-templates` | token | List investigation plan templates |
 | `GET` | `/plan-templates/{type}` | token | Get a single plan template by incident type |
 | `GET` | `/fix-history/resolutions` | token | Recent resolution outcomes with verification status (query: `days`, `limit`) |
-| `GET` | `/slo` | token | SLO status: budget consumed = (1−SLI)/(1−target), burn rate from the last hour (critical ≥14.4x, warning ≥6x), `budget_remaining_hours`; targets ≥1 are percentages; SLOs without data are listed with `alert_level: "no_data"` |
-| `POST` | `/slo` | token | Register new SLO definition |
+| `GET` | `/slo` | token | SLO status: budget consumed = (1−SLI)/(1−target), burn rate from the last hour (critical ≥14.4x, warning ≥6x), `budget_remaining_hours`; targets ≥1 are percentages; SLOs without data are listed with `alert_level: "no_data"`; a stored SLO whose fields fail validation is never queried and carries `invalid_reason` (null otherwise) |
+| `POST` | `/slo` | token | Register new SLO definition. `service` must be a Kubernetes (RFC 1123) name, else 400; `type` one of availability/latency/error_rate, finite `target` in (0, 100), integer `window_days` 1–90, string `description`, else 422 |
 | `DELETE` | `/slo/{service}/{slo_type}` | token | Remove SLO definition. A deleted default SLO stays deleted across restarts until it is registered again with `POST /slo` |
 | `GET` | `/analytics/fix-strategies` | token | Fix strategy effectiveness per category+tool (query: `days` 1-365) |
 | `GET` | `/analytics/learning` | token | Agent learning feed: weight updates, scaffolded skills, routing decisions (query: `days` 1-365) |
