@@ -220,13 +220,17 @@ async def rest_investigate_item(
 ):
     """Start a read-only investigation of the item, or return the one in progress.
 
-    202 with the run's status (``queued``/``running``); 404 for an unknown
+    202 with the run's status (``queued``/``running``); 401 without a forwarded
+    user token while token forwarding is on; 404 for an unknown
     item; 409 for a resolved/archived item; 429 when the budget, cost budget,
     circuit breaker, cooldown or concurrency limit refuses it, with
     ``detail.reason``/``detail.message`` and ``Retry-After`` when known.
     """
     from ..inbox_investigation import InvestigationRefusedError, ItemNotFoundError, request_investigation
 
+    # The run reads the cluster as the requester (their forwarded token); with
+    # forwarding on and no token those reads would run as the service account.
+    require_user_token(user_token)
     try:
         run = await request_investigation(item_id, owner, user_token)
     except ItemNotFoundError:
