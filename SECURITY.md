@@ -61,6 +61,10 @@ Durable plan start, phase approval, and cancellation require `require_admin`. Ap
 
 These controls do not add generic policy rules or snapshots to every tool. Keep Temporal/MCP providers trusted and verify actual deployment credentials, approvals, denial behavior, and RBAC before enabling writes.
 
+### Alertmanager silences
+
+`create_silence` and `expire_silence` (`sre_agent/silence_tools.py`) are confirmation-gated write tools that call Alertmanager (`alertmanager-main.openshift-monitoring.svc:9094`) with the caller's forwarded token, so the person's own `monitoring-alertmanager-edit` binding decides. **With `PULSE_AGENT_TOKEN_FORWARDING=false` both refuse** with a message pointing to Alerts › Silences: the write would otherwise run as the agent's service account. `createdBy` is the signed-in user, never model input. Matchers must include an exact match on `alertname` or a resource label (`node`, `pod`, `deployment`, `statefulset`, `daemonset`, `job_name`, `persistentvolumeclaim`) or an application namespace; `severity`, `prometheus`, a platform namespace or a regex alone is refused. Watchdog's label set, or any firing Watchdog, is never hidden. A silence may hide at most `PULSE_AGENT_SILENCE_MAX_HIDDEN_ALERTS` (10) of the alerts firing now, and at most `PULSE_AGENT_SILENCE_MAX_HIDDEN_FRACTION` (25%) of them once it hides `PULSE_AGENT_SILENCE_FRACTION_MIN_ALERTS` (3) or more; when the firing alerts cannot be read, nothing is created. Regexes are capped at 200 characters and nested quantifiers are refused. Silence comments, creators, alert names and Inbox titles returned to the model are sanitized and fenced in `--- BEGIN/END CLUSTER DATA ---`.
+
 ### Monitor trust levels
 
 | Level | Current server behavior |

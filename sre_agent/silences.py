@@ -8,14 +8,23 @@ Safety rules (``validate_matchers``):
 
 - At least one matcher, at most 20, label names in Prometheus syntax, regexes
   that compile.
-- At least one *positive* matcher (``=`` or ``=~``) that is narrow: an ``=``
-  with a non-empty value, or an ``=~`` that matches neither the empty string
-  nor arbitrary probe strings. A silence of only negative matchers, or of
-  ``=~".*"``/``=~".+"``, would mute every alert on the cluster; it is refused,
-  not confirmed.
-- A silence whose ``alertname`` matcher matches ``Watchdog`` is refused:
-  Watchdog is the dead man's switch that tells an external pager Alertmanager
-  is alive.
+- At least one *anchoring* matcher: a positive equality (``=``, not a regex)
+  with a non-empty value on ``alertname`` or on a resource label (``node``,
+  ``pod``, ``deployment``, ``statefulset``, ``daemonset``, ``job_name``,
+  ``persistentvolumeclaim``), or on ``namespace`` outside ``openshift-*`` /
+  ``kube-*``. ``severity``, ``prometheus``, a platform namespace or a regex
+  alone would mute whole classes of alerts and are refused.
+- Watchdog, the dead man's switch that tells an external pager Alertmanager is
+  alive, is never hidden: neither its real label set
+  (``WATCHDOG_LABELS``) nor any Watchdog firing now may match.
+- Against the alerts firing now (``check_against_firing``): no silence may
+  hide more than ``silence_max_hidden_alerts`` (default 10) of them, or more
+  than ``silence_max_hidden_fraction`` (default 25%) once it hides at least
+  ``silence_fraction_min_alerts`` (default 3). The floor keeps a 2-alert
+  maintenance silence possible on a quiet cluster.
+- Regexes are bounded: at most ``MAX_REGEX_LEN`` characters, no nested
+  quantifiers, and label values longer than ``MAX_MATCH_VALUE_LEN`` are
+  compared by their prefix, so a preview cannot be made to backtrack forever.
 """
 
 from __future__ import annotations
@@ -36,7 +45,21 @@ _MATCHER_RE = re.compile(r'\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(=~|!~|!=|=)\s*"((?:[^"
 _SILENCE_ID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 # Strings no narrow matcher should accept. A regex that matches all of them
 # matches (for practical purposes) every value of its label.
-_PROBES = ("", "x", "pulse-probe-7f3a9c", "Z9_q.r/s:t")
+MAX_REGEX_LEN = 200
+MAX_MATCH_VALUE_LEN = 1024
+# A group containing a quantifier, itself quantified: (a+)+, (x*)*, (a|aa){2,}.
+_NESTED_QUANTIFIER_RE = re.compile(r"\((?:[^()\\]|\\.)*[*+}](?:[^()\\]|\\.)*\)\s*[*+{]")
+ANCHOR_LABELS = frozenset(
+    {"alertname", "node", "pod", "deployment", "statefulset", "daemonset", "job_name", "persistentvolumeclaim"}
+)
+_PLATFORM_NS_RE = re.compile(r"^(openshift|kube)(-.*)?$")
+# Watchdog's label set on OpenShift's platform Prometheus.
+WATCHDOG_LABELS = {
+    "alertname": "Watchdog",
+    "namespace": "openshift-monitoring",
+    "severity": "none",
+    "prometheus": "openshift-monitoring/k8s",
+}
 
 
 class SilenceInputError(ValueError):
@@ -64,7 +87,11 @@ class Matcher:
         return {"name": self.name, "value": self.value, "isRegex": self.is_regex, "isEqual": self.is_equal}
 
     def matches_value(self, value: str) -> bool:
+        # Bounded input: a pathological label value cannot make matching slow.
+        value = value[:MAX_MATCH_VALUE_LEN]
         if self.is_regex:
+            if regex_problem(self.value):
+                return False
             try:
                 hit = re.fullmatch(self.value, value) is not None
             except re.error:
@@ -112,18 +139,26 @@ def matchers_from_api(raw: list[dict]) -> list[Matcher]:
     ]
 
 
-def _is_narrow(m: Matcher) -> bool:
-    if not m.is_equal:
-        return False
-    if not m.is_regex:
-        return m.value != ""
+def regex_problem(pattern: str) -> str | None:
+    """Why this regex is not accepted (too long, nested quantifiers, does not compile), or None."""
+    if len(pattern) > MAX_REGEX_LEN:
+        return f"is longer than {MAX_REGEX_LEN} characters"
+    if _NESTED_QUANTIFIER_RE.search(pattern):
+        return "has a nested quantifier such as (a+)+, which can take exponential time to match"
     try:
-        compiled = re.compile(m.value)
-    except re.error:
+        re.compile(pattern)
+    except re.error as e:
+        return f"does not compile: {e}"
+    return None
+
+
+def is_anchor(m: Matcher) -> bool:
+    """A positive equality on something specific: an alert name, a resource, or an application namespace."""
+    if not m.is_equal or m.is_regex or not m.value:
         return False
-    if compiled.fullmatch("") is not None:
-        return False
-    return not all(compiled.fullmatch(p) is not None for p in _PROBES if p)
+    if m.name in ANCHOR_LABELS:
+        return True
+    return m.name == "namespace" and not _PLATFORM_NS_RE.match(m.value)
 
 
 def validate_matchers(matchers: list[Matcher]) -> None:
@@ -136,22 +171,49 @@ def validate_matchers(matchers: list[Matcher]) -> None:
             raise SilenceInputError(f"{m.name!r} is not a valid label name.")
         if len(m.value) > MAX_VALUE_LEN:
             raise SilenceInputError(f"The value for {m.name} is longer than {MAX_VALUE_LEN} characters.")
-        if m.is_regex:
-            try:
-                re.compile(m.value)
-            except re.error as e:
-                raise SilenceInputError(f"The regex for {m.name} does not compile: {e}") from None
-    if not any(_is_narrow(m) for m in matchers):
+        if m.is_regex and (problem := regex_problem(m.value)):
+            raise SilenceInputError(f"The regex for {m.name} {problem}.")
+    if not any(is_anchor(m) for m in matchers):
         raise SilenceInputError(
-            "These matchers would match every alert: at least one must be a positive matcher (= or =~) that "
-            'names something specific, such as alertname="KubeNodeUnreachable" or node="worker-5".'
+            "These matchers are too broad: at least one must be an exact (=) match on alertname or on a resource "
+            "(node, pod, deployment, statefulset, daemonset, job_name, persistentvolumeclaim), or on a namespace "
+            'outside openshift-*/kube-*, such as alertname="KubeNodeUnreachable" or node="worker-5". '
+            "severity, prometheus or a regex alone would mute whole classes of alerts."
         )
-    for m in matchers:
-        if m.name == "alertname" and m.is_equal and m.matches_value("Watchdog"):
-            raise SilenceInputError(
-                "Watchdog cannot be silenced: it is the always-firing alert that tells the external pager "
-                "Alertmanager is alive."
-            )
+    if labels_match(WATCHDOG_LABELS, matchers):
+        raise SilenceInputError(
+            "Watchdog cannot be silenced: it is the always-firing alert that tells the external pager "
+            "Alertmanager is alive, and these matchers would hide it."
+        )
+
+
+def _limits() -> tuple[int, float, int]:
+    from .config import get_settings
+
+    a = get_settings().agent
+    return a.silence_max_hidden_alerts, a.silence_max_hidden_fraction, a.silence_fraction_min_alerts
+
+
+def check_against_firing(matchers: list[Matcher], firing: list[dict]) -> list[dict]:
+    """Refuse a silence that would hide a firing Watchdog or too many of the alerts firing now.
+
+    Returns the alerts it would hide.
+    """
+    hidden = [a for a in firing if labels_match(a.get("labels") or {}, matchers)]
+    if any((a.get("labels") or {}).get("alertname") == "Watchdog" for a in hidden):
+        raise SilenceInputError("Watchdog cannot be silenced, and these matchers would hide the Watchdog firing now.")
+    max_count, max_fraction, fraction_floor = _limits()
+    if len(hidden) > max_count:
+        raise SilenceInputError(
+            f"These matchers would hide {len(hidden)} alerts firing now, more than the {max_count} a silence may hide. "
+            "Narrow them (add alertname or the resource) or silence in parts."
+        )
+    if firing and len(hidden) >= fraction_floor and len(hidden) / len(firing) > max_fraction:
+        raise SilenceInputError(
+            f"These matchers would hide {len(hidden)} of the {len(firing)} alerts firing now "
+            f"({len(hidden) / len(firing):.0%}), more than the {max_fraction:.0%} a silence may hide. Narrow them."
+        )
+    return hidden
 
 
 def validate_duration(minutes: Any) -> int:
@@ -183,6 +245,18 @@ def validate_silence_id(silence_id: Any) -> str:
     if not _SILENCE_ID_RE.match(sid):
         raise SilenceInputError(f"{sid!r} is not an Alertmanager silence id (a UUID).")
     return sid
+
+
+def require_user_writes() -> None:
+    """Silence writes run as the person, never as the agent's service account."""
+    from .config import get_settings
+
+    if not get_settings().agent.token_forwarding:
+        raise SilenceInputError(
+            "Silences are not changed from chat on this deployment: token forwarding is off "
+            "(PULSE_AGENT_TOKEN_FORWARDING=false), so the write would run as Pulse's service account instead of "
+            "as you. Use Alerts > Silences, which writes with your own permissions."
+        )
 
 
 def labels_match(labels: dict[str, str], matchers: list[Matcher]) -> bool:
@@ -266,6 +340,7 @@ def preview_create(args: dict) -> dict[str, Any]:
 
     preview: dict[str, Any] = {"kind": "silence_create", "valid": False}
     try:
+        require_user_writes()
         req = build_request(args, get_current_user())
     except SilenceInputError as e:
         preview["error"] = str(e)
@@ -289,11 +364,18 @@ def preview_create(args: dict) -> dict[str, Any]:
     try:
         firing = alertmanager.list_alerts(active=True, silenced=False, inhibited=False)
         preview["hides"] = split_by_matchers(firing, req.matchers)
+        check_against_firing(req.matchers, firing)
+    except SilenceInputError as e:
+        preview["valid"] = False
+        preview["error"] = str(e)
     except alertmanager.AlertmanagerError as e:
         # The silence can still be reviewed from its matchers; what it would
         # hide right now is unknown, and says so rather than "nothing".
         preview["hides"] = None
         preview["hidesError"] = e.describe()
+        # The tool refuses what it cannot check against the alerts firing now.
+        preview["valid"] = False
+        preview["error"] = f"Pulse cannot check how many alerts this would hide. {e.describe()}"
     return preview
 
 
@@ -302,6 +384,7 @@ def preview_expire(args: dict) -> dict[str, Any]:
 
     preview: dict[str, Any] = {"kind": "silence_expire", "valid": False}
     try:
+        require_user_writes()
         sid = validate_silence_id(args.get("silence_id"))
     except SilenceInputError as e:
         preview["error"] = str(e)

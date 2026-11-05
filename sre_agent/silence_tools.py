@@ -25,14 +25,17 @@ from typing import Any
 from . import alertmanager
 from .decorators import beta_tool
 from .k8s_tools.validators import _validate_k8s_name, _validate_k8s_namespace
+from .monitor.confidence import sanitize_block
 from .silences import (
     MAX_DURATION_MINUTES,
     Matcher,
     SilenceInputError,
     build_request,
+    check_against_firing,
     describe_duration,
     labels_match,
     matchers_from_api,
+    require_user_writes,
     split_by_matchers,
     validate_matchers,
     validate_silence_id,
@@ -60,6 +63,15 @@ def _matchers_text(matchers: list[Matcher]) -> str:
     return ", ".join(str(m) for m in matchers)
 
 
+def _cluster_text(text: Any, limit: int = 500) -> str:
+    """Text that came from the cluster (silence comments and creators, alert and Inbox names), made safe to show the model."""
+    return sanitize_block(str(text or ""))[:limit].replace("\n", " ")
+
+
+def _cluster_block(lines: list[str]) -> str:
+    return "--- BEGIN CLUSTER DATA ---\n" + "\n".join(lines) + "\n--- END CLUSTER DATA ---"
+
+
 @beta_tool
 def create_silence(matchers: str, duration_minutes: int, comment: str):
     """Create an Alertmanager silence. Requires the user's confirmation.
@@ -78,10 +90,16 @@ def create_silence(matchers: str, duration_minutes: int, comment: str):
     from .request_context import get_current_user
 
     try:
-        req = build_request(
-            {"matchers": matchers, "duration_minutes": duration_minutes, "comment": comment},
-            get_current_user(),
-        )
+        require_user_writes()
+        args = {"matchers": matchers, "duration_minutes": duration_minutes, "comment": comment}
+        build_request(args, get_current_user())  # refuse bad input before any read
+        try:
+            firing = alertmanager.list_alerts(active=True, silenced=False, inhibited=False)
+        except alertmanager.AlertmanagerError as e:
+            return f"Silence not created: Pulse cannot check how many alerts it would hide. {e.describe()}"
+        # Times are taken now, at write time, not when the request was confirmed.
+        req = build_request(args, get_current_user())
+        check_against_firing(req.matchers, firing)
     except SilenceInputError as e:
         return f"Silence not created: {e}"
     try:
@@ -115,6 +133,7 @@ def expire_silence(silence_id: str):
         silence_id: The silence's UUID.
     """
     try:
+        require_user_writes()
         sid = validate_silence_id(silence_id)
     except SilenceInputError as e:
         return f"Silence not expired: {e}"
@@ -125,15 +144,20 @@ def expire_silence(silence_id: str):
     state = (silence.get("status") or {}).get("state", "")
     described = _matchers_text(matchers_from_api(silence.get("matchers") or []))
     if state == "expired":
-        return f"Silence {sid} ({described}) had already expired; nothing changed."
+        return f"Silence {sid} had already expired; nothing changed.\n" + _cluster_block(
+            [f"Matchers: {_cluster_text(described)}"]
+        )
     try:
         alertmanager.expire_silence(sid)
     except alertmanager.AlertmanagerError as e:
         return f"Silence not expired. {e.describe()}"
     logger.info("Silence %s (%s) expired", sid, described)
-    return (
-        f"Silence {sid} expired. It matched {described} and was created by "
-        f"{silence.get('createdBy', 'unknown')} ({silence.get('comment', '')}). Its alerts notify again."
+    return f"Silence {sid} expired. Its alerts notify again.\n" + _cluster_block(
+        [
+            f"Matchers: {_cluster_text(described)}",
+            f"Created by: {_cluster_text(silence.get('createdBy', 'unknown'), 200)}",
+            f"Comment: {_cluster_text(silence.get('comment', ''))}",
+        ]
     )
 
 
@@ -156,11 +180,12 @@ def list_silences(state: str = "active"):
     lines = []
     for s in sorted(shown, key=lambda x: x.get("endsAt", "")):
         lines.append(
-            f"- {s.get('id')} [{(s.get('status') or {}).get('state', '?')}] "
-            f"{_matchers_text(matchers_from_api(s.get('matchers') or []))} "
-            f"until {s.get('endsAt', '?')} by {s.get('createdBy', '?')}: {s.get('comment', '')}"
+            f"- {_cluster_text(s.get('id'), 64)} [{_cluster_text((s.get('status') or {}).get('state', '?'), 20)}] "
+            f"{_cluster_text(_matchers_text(matchers_from_api(s.get('matchers') or [])))} "
+            f"until {_cluster_text(s.get('endsAt', '?'), 40)} by {_cluster_text(s.get('createdBy', '?'), 200)}: "
+            f"{_cluster_text(s.get('comment', ''))}"
         )
-    return f"{len(shown)} {state if state != 'all' else ''} silence(s):\n" + "\n".join(lines)
+    return f"{len(shown)} {state if state != 'all' else ''} silence(s):\n" + _cluster_block(lines)
 
 
 def _target_from_item(item: dict) -> tuple[dict[str, str], str, dict]:
@@ -293,27 +318,43 @@ def propose_silence(
     except SilenceInputError as e:
         return f"No silence proposed: {e}"
 
+    try:
+        check_against_firing(matchers, firing)
+    except SilenceInputError as e:
+        return f"No silence proposed: {e}"
     hides = split_by_matchers(firing, matchers)
     not_hidden = [a for a in split_by_matchers(firing, target) if a not in hides]
     minutes, why_duration = _proposal_minutes(item.get("due_date"), time.time())
     comment_parts = [reason.strip()] if reason.strip() else []
-    if item.get("title"):
-        comment_parts.append(f"(Inbox: {item['title']})")
+    if item.get("id"):
+        # The item's id, not its title: a title is cluster text and would be
+        # copied verbatim into the silence and the model's next call.
+        comment_parts.append(f"(Inbox item {_cluster_text(item['id'], 64)})")
     comment = " ".join(comment_parts) or "<say why these alerts are expected, e.g. planned maintenance>"
 
+    data = [
+        f"Would hide {len(hides)} firing alert(s) now, and any new alert with these labels until it ends:",
+        *[
+            f"  - [{_cluster_text(a['severity'] or '?', 20)}] {_cluster_text(a['alertname'], 120)} since {_cluster_text(a['startsAt'][:19], 20)}"
+            for a in hides
+        ],
+    ]
+    if not_hidden:
+        data.append("Would NOT hide (same target, other alerts):")
+        data += [
+            f"  - [{_cluster_text(a['severity'] or '?', 20)}] {_cluster_text(a['alertname'], 120)}" for a in not_hidden
+        ]
+    if item.get("title"):
+        data.append(f"Inbox item: {_cluster_text(item['title'], 200)}")
+    if item.get("claimed_by"):
+        data.append(f"Inbox owner: {_cluster_text(item['claimed_by'], 200)}")
     lines = [
         "Proposed silence (not created):",
         f"  matchers: {_matchers_text(matchers)}",
         f"  duration_minutes: {minutes} ({describe_duration(minutes)}; {why_duration})",
         f"  comment: {comment}",
-        f"Would hide {len(hides)} firing alert(s) now, and any new alert with these labels until it ends:",
-        *[f"  - [{a['severity'] or '?'}] {a['alertname']} since {a['startsAt'][:19]}" for a in hides],
+        _cluster_block(data),
     ]
-    if not_hidden:
-        lines.append("Would NOT hide (same target, other alerts):")
-        lines += [f"  - [{a['severity'] or '?'}] {a['alertname']}" for a in not_hidden]
-    if item.get("claimed_by"):
-        lines.append(f"Inbox owner: {item['claimed_by']}")
     lines.append(
         "To create it, call create_silence with exactly these matchers, duration_minutes and a real comment; "
         "the user reviews and confirms it."
