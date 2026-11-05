@@ -307,6 +307,9 @@ class TestWriteToolSet:
             "edit_skill",
             "delete_skill",
             "create_skill_from_template",
+            # A silence hides alerts from the on-call; expiring one starts them paging again.
+            "create_silence",
+            "expire_silence",
         }
         assert expected == WRITE_TOOLS
 
@@ -938,23 +941,34 @@ class TestStrictWriteTools:
         assert out[1]["input_schema"]["additionalProperties"] is False
         assert "strict" not in write and "additionalProperties" not in write["input_schema"]
 
-    def test_skipped_when_over_api_limits(self):
+    def test_over_api_limits_as_many_as_fit_are_strict(self):
         from sre_agent.agent import apply_strict_write_tools
 
         defs = [self._def(f"w{i}", ["a", "b"], []) for i in range(13)]  # 26 optional params > 24
         out = apply_strict_write_tools(defs, {d["name"] for d in defs})
-        assert all("strict" not in d for d in out)
+        assert [d["name"] for d in out if d.get("strict")] == [f"w{i}" for i in range(12)]  # 24 optional
+        many = [self._def(f"x{i}", ["a"], ["a"]) for i in range(25)]
+        out = apply_strict_write_tools(many, {d["name"] for d in many})
+        assert sum(1 for d in out if d.get("strict")) == 20
+
+    def test_self_validating_write_tools_are_the_ones_left_non_strict(self):
+        from sre_agent.agent import apply_strict_write_tools
+
+        defs = [self._def("create_silence", ["m"], ["m"])] + [self._def(f"x{i}", ["a"], ["a"]) for i in range(20)]
+        out = apply_strict_write_tools(defs, {d["name"] for d in defs})
+        assert "strict" not in out[0] and all(d.get("strict") for d in out[1:])
 
     def test_real_write_tools_fit_strict_limits(self):
-        """All registered write tools must stay inside the strict limits, or the
-        flag silently stops applying. Fails when a new write tool would break it."""
-        from sre_agent.agent import _STRICT_MAX_OPTIONAL, _STRICT_MAX_TOOLS, TOOL_MAP
+        """Every registered write tool outside _STRICT_LAST must fit the strict
+        limits together, so offering all of them never leaves a cluster write
+        non-strict. Fails when a new write tool would break it."""
+        from sre_agent.agent import _STRICT_LAST, _STRICT_MAX_OPTIONAL, _STRICT_MAX_TOOLS, TOOL_MAP
         from sre_agent.security_agent import TOOL_MAP as SEC
         from sre_agent.tool_registry import get_write_tools
         from sre_agent.view_designer import TOOL_MAP as VD
 
         all_tools = {**TOOL_MAP, **SEC, **VD}
-        defs = [all_tools[n].to_dict() for n in get_write_tools() if n in all_tools]
+        defs = [all_tools[n].to_dict() for n in get_write_tools() if n in all_tools and n not in _STRICT_LAST]
         optional = sum(
             len(set(d["input_schema"].get("properties", {})) - set(d["input_schema"].get("required", []))) for d in defs
         )

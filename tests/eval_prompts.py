@@ -230,6 +230,18 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "Stuck deletion diagnosis",
     ),
     (
+        "silence the alerts on worker-5 for 2 hours, we are replacing its disk",
+        ["propose_silence", "create_silence"],
+        "sre",
+        "Silence proposal then a confirm-gated create",
+    ),
+    (
+        "expire the maintenance silence for worker-5, the node is back",
+        ["list_silences", "expire_silence"],
+        "sre",
+        "Find the silence, then a confirm-gated expire",
+    ),
+    (
         "force the kuadrant.io/dnsrecord finalizer off dnsrecords.kuadrant.io",
         ["remove_finalizer"],
         "sre",

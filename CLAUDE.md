@@ -116,6 +116,7 @@ make release VERSION=X.Y.Z            # agent-only version/badge commit + tag; s
 - `predict_tools.py` — 3 predictive analytics tools
 - `timeline_tools.py` — 1 incident correlation tool
 - `git_tools.py` — 2 tools (`propose_git_change`, `get_argo_app_source`)
+- `silence_tools.py` — 4 Alertmanager silence tools: `create_silence`/`expire_silence` (write, confirm preview from `silences.py` via `confirm_preview.py`) and `propose_silence`/`list_silences` (read). Client in `alertmanager.py` (caller's token, `PULSE_AGENT_ALERTMANAGER_URL`)
 - `handoff_tools.py` — 2 agent-to-agent handoff tools (`request_security_scan`, `request_sre_investigation`)
 - `tool_registry.py` — central registry with `TOOL_CATEGORIES` and `WRITE_TOOL_NAMES`. `@beta_tool(category="views", is_write=True)` for auto-registration with metadata. Plain `@beta_tool` unchanged.
 - `tool_discovery.py` — `discover_tools()` imports all tool modules, populates `TOOL_REGISTRY`. Called in `app.py` lifespan.
@@ -271,6 +272,7 @@ Repository agent definitions with hooks in `.claude/settings.json`:
 | `PULSE_AGENT_MULTI_SKILL_THRESHOLD` | ORCA score gap for multi-skill activation | `0.15` |
 | `PULSE_AGENT_NOISE_THRESHOLD` | Noise score threshold for suppressing findings | `0.7` |
 | `PULSE_AGENT_RECURRENCE_WINDOW` | How long a "verified" verdict stays answerable (seconds, 0=off) | `1800` |
+| `PULSE_AGENT_ALERTMANAGER_URL` | Alertmanager v2 base URL for silences | `https://alertmanager-main.openshift-monitoring.svc:9094` |
 | `PULSE_AGENT_SCAN_INTERVAL` | Monitor scan interval (seconds) | `60` |
 | `PULSE_AGENT_TEMPORAL_CACHE_TTL` | Temporal signal cache TTL (seconds) | `60` |
 | `PULSE_AGENT_TOKEN_FORWARDING` | Forward user OAuth token to K8s API | `true` |

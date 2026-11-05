@@ -118,6 +118,51 @@ async def rest_reset_inbox(actor: str = Depends(require_admin)):
     return result
 
 
+# Declared before /inbox/{item_id} for the same reason as /inbox/mutes above.
+@router.get("/inbox/by-alert")
+async def rest_inbox_by_alert(request: Request, user_token: str | None = Depends(get_user_token)):
+    """The Inbox item, related items and episode for one firing alert.
+
+    Every query parameter is an alert label (``alertname`` required), e.g.
+    ``/inbox/by-alert?alertname=KubePodCrashLooping&namespace=payments&pod=api-1``.
+    """
+    from ..alert_triage import AlertLabelsError, triage_for_alert, validate_labels
+
+    require_user_token(user_token)
+    try:
+        labels = validate_labels(dict(request.query_params))
+    except AlertLabelsError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    try:
+        return await asyncio.to_thread(triage_for_alert, labels)
+    except Exception:
+        logger.exception("Inbox lookup for alert %s failed", labels.get("alertname"))
+        raise HTTPException(status_code=503, detail="The Inbox could not be read") from None
+
+
+@router.post("/inbox/by-alert")
+async def rest_inbox_by_alerts(body: dict, user_token: str | None = Depends(get_user_token)):
+    """Batch form of GET /inbox/by-alert: ``{"alerts": [{"labels": {...}}]}`` -> ``{"results": [...]}``, same order."""
+    from ..alert_triage import MAX_BATCH, AlertLabelsError, triage_for_alerts, validate_labels
+
+    require_user_token(user_token)
+    alerts = body.get("alerts") if isinstance(body, dict) else None
+    if not isinstance(alerts, list):
+        raise HTTPException(status_code=400, detail='Body must be {"alerts": [{"labels": {...}}]}')
+    if len(alerts) > MAX_BATCH:
+        raise HTTPException(status_code=400, detail=f"At most {MAX_BATCH} alerts per request")
+    try:
+        label_sets = [validate_labels((a or {}).get("labels") if isinstance(a, dict) else None) for a in alerts]
+    except AlertLabelsError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    try:
+        results = await asyncio.to_thread(triage_for_alerts, label_sets)
+    except Exception:
+        logger.exception("Inbox lookup for %d alerts failed", len(label_sets))
+        raise HTTPException(status_code=503, detail="The Inbox could not be read") from None
+    return {"results": results}
+
+
 @router.get("/inbox/{item_id}")
 async def rest_get_inbox_item(item_id: str):
     item = get_inbox_item(item_id)

@@ -132,6 +132,9 @@ class PrometheusConfig(BaseModel):
     acm_thanos_url: str = ""
     acm_thanos_enabled: bool | None = None
     insecure: bool = False
+    # Alertmanager v2 API for silences (sre_agent/alertmanager.py); empty
+    # means alertmanager-main in openshift-monitoring.
+    alertmanager_url: str = ""
 
 
 class TemporalConfig(BaseModel):
@@ -265,6 +268,7 @@ class PulseAgentSettings(BaseSettings):
     acm_thanos_url: str = ""
     acm_thanos_enabled: bool | None = None
     prometheus_insecure: bool = False
+    alertmanager_url: str = ""
 
     # Temporal
     temporal_host: str = ""
@@ -347,6 +351,7 @@ class PulseAgentSettings(BaseSettings):
             acm_thanos_url=self.acm_thanos_url,
             acm_thanos_enabled=self.acm_thanos_enabled,
             insecure=self.prometheus_insecure,
+            alertmanager_url=self.alertmanager_url,
         )
         self.temporal = TemporalConfig(
             host=self.temporal_host,
