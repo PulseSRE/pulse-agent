@@ -245,7 +245,7 @@ class TestCallerToken:
             patch.object(PrometheusClient, "_get_url", return_value="https://thanos:9091"),
             patch.object(PrometheusClient, "_build_ssl_context", return_value=None),
             patch.object(PrometheusClient, "_get_token", return_value="sa-token"),
-            patch("urllib.request.urlopen", side_effect=urlopen),
+            patch("sre_agent.bearer_http.open_with_token", side_effect=urlopen),
         ):
             with k8s_client.user_token_context("user-token-abc"):
                 client.request("api/v1/query", {"query": "up"}, 5, PrometheusBackend.LOCAL)

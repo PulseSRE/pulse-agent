@@ -107,9 +107,9 @@ class TestEndToEndTokenFlow:
         reset_tok = _user_token_var.set("mcp-test-token")
         reset_cli = _user_api_client_var.set(None)
         try:
-            import urllib.request
+            from sre_agent import bearer_http
 
-            with patch.object(urllib.request, "urlopen") as mock_urlopen:
+            with patch.object(bearer_http, "open_with_token") as mock_urlopen:
                 mock_ctx = MagicMock()
                 mock_ctx.__enter__ = MagicMock(return_value=mock_ctx)
                 mock_ctx.__exit__ = MagicMock(return_value=False)
