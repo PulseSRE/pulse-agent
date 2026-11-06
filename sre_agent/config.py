@@ -30,6 +30,11 @@ class AgentConfig(BaseModel):
     cb_threshold: int = 3
     cb_timeout: float = 60.0
     token_forwarding: bool = True
+    # Silences (sre_agent/silences.py): the most firing alerts one may hide, and
+    # the largest share of them once it hides at least silence_fraction_min_alerts.
+    silence_max_hidden_alerts: int = 10
+    silence_max_hidden_fraction: float = 0.25
+    silence_fraction_min_alerts: int = 3
     # Harness-level deny policy (sre_agent/policy.py): rules that hold
     # regardless of which model is configured or what a chat approver clicks.
     protected_namespaces: str = "production,openshift-*,kube-system"
@@ -137,6 +142,9 @@ class PrometheusConfig(BaseModel):
     acm_thanos_url: str = ""
     acm_thanos_enabled: bool | None = None
     insecure: bool = False
+    # Alertmanager v2 API for silences (sre_agent/alertmanager.py); empty
+    # means alertmanager-main in openshift-monitoring.
+    alertmanager_url: str = ""
 
 
 class TemporalConfig(BaseModel):
@@ -192,6 +200,11 @@ class PulseAgentSettings(BaseSettings):
     loop_max_seconds: float = 0.0
     tool_timeout: int = 30
     token_forwarding: bool = True
+    # Silences (sre_agent/silences.py): the most firing alerts one may hide, and
+    # the largest share of them once it hides at least silence_fraction_min_alerts.
+    silence_max_hidden_alerts: int = 10
+    silence_max_hidden_fraction: float = 0.25
+    silence_fraction_min_alerts: int = 3
     protected_namespaces: str = "production,openshift-*,kube-system"
     allow_node_ops: bool = False
     strict_write_tools: bool = False
@@ -272,6 +285,7 @@ class PulseAgentSettings(BaseSettings):
     acm_thanos_url: str = ""
     acm_thanos_enabled: bool | None = None
     prometheus_insecure: bool = False
+    alertmanager_url: str = ""
 
     # Temporal
     temporal_host: str = ""
@@ -294,6 +308,9 @@ class PulseAgentSettings(BaseSettings):
             cb_threshold=self.cb_threshold,
             cb_timeout=self.cb_timeout,
             token_forwarding=self.token_forwarding,
+            silence_max_hidden_alerts=self.silence_max_hidden_alerts,
+            silence_max_hidden_fraction=self.silence_max_hidden_fraction,
+            silence_fraction_min_alerts=self.silence_fraction_min_alerts,
             protected_namespaces=self.protected_namespaces,
             allow_node_ops=self.allow_node_ops,
             strict_write_tools=self.strict_write_tools,
@@ -356,6 +373,7 @@ class PulseAgentSettings(BaseSettings):
             acm_thanos_url=self.acm_thanos_url,
             acm_thanos_enabled=self.acm_thanos_enabled,
             insecure=self.prometheus_insecure,
+            alertmanager_url=self.alertmanager_url,
         )
         self.temporal = TemporalConfig(
             host=self.temporal_host,

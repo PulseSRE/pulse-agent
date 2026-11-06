@@ -103,8 +103,11 @@ class SkillExecutor:
             try:
                 if not _ws_alive.get(self.session_id, True):
                     return False
+                from ..confirm_preview import build_preview_async
+
+                preview = await build_preview_async(tool_name, tool_input, self._user_token)
                 confirm_future = await _create_and_register_future(
-                    self.session_id, tool_name, tool_input, self.websocket
+                    self.session_id, tool_name, tool_input, self.websocket, preview=preview
                 )
                 return await asyncio.wait_for(confirm_future, timeout=120)
             except (asyncio.CancelledError, TimeoutError):
@@ -701,8 +704,14 @@ def _cleanup_stale_pending():
         _turn_starts.pop(sid, None)
 
 
-async def _create_and_register_future(ws_id: str, tool_name: str, tool_input: dict, websocket: WebSocket):
-    """Create a Future on the event loop and send the confirm request with a JIT nonce."""
+async def _create_and_register_future(
+    ws_id: str, tool_name: str, tool_input: dict, websocket: WebSocket, preview: dict | None = None
+):
+    """Create a Future on the event loop and send the confirm request with a JIT nonce.
+
+    ``preview`` (see ``confirm_preview``) is added when the server could build
+    one: what the write will do, computed as the caller.
+    """
     import secrets
 
     _cleanup_stale_pending()  # Opportunistic cleanup
@@ -712,14 +721,15 @@ async def _create_and_register_future(ws_id: str, tool_name: str, tool_input: di
     _pending_confirms[ws_id] = future
     _pending_nonces[ws_id] = nonce
     _pending_timestamps[ws_id] = time.time()
-    await websocket.send_json(
-        {
-            "type": "confirm_request",
-            "tool": tool_name,
-            "input": tool_input,
-            "nonce": nonce,
-        }
-    )
+    message: dict = {
+        "type": "confirm_request",
+        "tool": tool_name,
+        "input": tool_input,
+        "nonce": nonce,
+    }
+    if preview is not None:
+        message["preview"] = preview
+    await websocket.send_json(message)
     return future
 
 

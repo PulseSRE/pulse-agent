@@ -423,6 +423,24 @@ class InboxRepository(BaseRepository):
             (corr_key,),
         )
 
+    def find_active_tasks_for_resource(self, resource_key: str, exclude_key: str, limit: int = 3) -> list[Any]:
+        """Open tasks about one resource under any category.
+
+        ``resource_key`` is the part of a correlation key after its category
+        (``"<namespace>:<Kind>/<name>"``), so a firing alert finds the crashloop
+        or OOM item already open for the same pod.
+        """
+        escaped = resource_key.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return (
+            self.db.fetchall(
+                "SELECT * FROM inbox_items WHERE correlation_key LIKE ? ESCAPE '\\' AND correlation_key <> ? "
+                "AND item_type = 'task' AND status NOT IN ('resolved', 'archived') "
+                "ORDER BY priority_score DESC LIMIT ?",
+                ("%:" + escaped, exclude_key, limit),
+            )
+            or []
+        )
+
     # -- Agent pipeline (triage / investigate / plan) ------------------------
 
     def fetch_new_for_triage(self, limit: int = 5) -> list[Any]:

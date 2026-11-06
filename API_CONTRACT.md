@@ -134,6 +134,8 @@ Generator items carry `metadata.generator`; an item acted on in a specific UI pa
 | `GET` | `/episodes/{id}` | token | One episode: `episode`, `symptoms`, `changes` (config/RBAC/deployment activity in the 30m before it began, each with `seconds_before`), `recurrence` (`occurrences`, `window_seconds`, optional `interval_seconds` when the cadence is regular) |
 | `POST` | `/episodes/{id}/detach` | token + owner | Record that a symptom was not caused by this episode (`{"correlationKey": "..."}`). Stored, never re-attached |
 | `GET` | `/changes` | token, `get_user_token` | What changed around a resource (`changes_rest.py`). Query `namespace`, `kind`, `name`, `since`, `until` (ISO 8601, zone-less means UTC; default the 2 hours up to now; at most 7 days). Kinds: Pod, ReplicaSet, Deployment, StatefulSet, DaemonSet, Job, CronJob, ConfigMap, Secret (all need `namespace` and `name`), ClusterVersion; no `kind` with a `namespace` means every workload/ConfigMap change in it; neither means cluster-level only. Scope: the resource, its owner chain (Pod→ReplicaSet→Deployment, StatefulSet, DaemonSet, Job→CronJob), the ConfigMaps and Secrets it mounts or references (volumes, projected and CSI secret refs, env/envFrom of containers, init and ephemeral containers, image pull secrets), Argo CD syncs into the namespace, ClusterVersion upgrades. ConfigMaps and Secrets are read as metadata only (`PartialObjectMetadata`); no Secret value is returned. Returns `{"changes": [{"at": ISO, "kind", "namespace", "name", "summary", "actor": str\|null, "source": "rollout"\|"configmap"\|"secret"\|"workload"\|"argo"\|"clusterversion"}], "available": bool}`, newest first, at most 500; `"truncated": true` is added when more changes matched or a list was too long to read in full (lists are paged, 500 per page, up to 5000 objects). `actor` is the field manager (ConfigMap/Secret/CronJob edits) or the Argo CD user, else null. Reads run as the caller (token forwarding); with forwarding on, a request without `X-Forwarded-Access-Token` is 401 `"User access token required"` and nothing is read. A refused read of the resource (including a ConfigMap/Secret asked for by name), its owners, ReplicaSets/ControllerRevisions or referenced ConfigMaps is 403 with the reason (404 with `{"detail": "...", "code": "resource_not_found"}` when the resource does not exist, so it can be told apart from the code-less 404 of an agent without `/changes`; 502 on another API error), never an empty list. A refused read of an optional source (referenced Secrets, Argo CD Applications, ClusterVersion) adds `"unreadable": ["<source>: <reason>"]` instead; a 404 there (not installed, referenced object absent) is nothing to report. The cluster-wide Argo CD Application list is read at most once a minute per identity and cached in compact form. `available: false` (with `changes: []`) when the cluster cannot be reached or no cluster config is loaded. 400 for an invalid name/namespace, an unsupported kind, a missing `name`/`namespace`, a bad timestamp, `since` ≥ `until` or a window over 7 days |
+| `GET` | `/inbox/by-alert` | token, `require_user_token` | The Inbox item, related items and episode for one firing alert (`alert_triage.py`). Every query parameter is an alert label; `alertname` is required, e.g. `?alertname=KubePodCrashLooping&namespace=payments&pod=api-7f9c4d-x2k8q`. Declared before `/inbox/{item_id}`. Response: see "Alert triage" below |
+| `POST` | `/inbox/by-alert` | token, `require_user_token` | Batch form: body `{"alerts": [{"labels": {...}}]}` (at most 200) → `{"results": [<Alert triage>, ...]}` in the same order. The Alerts page uses this. An agent without the route answers 405 (or 404), which the UI reads as "not available on this agent" |
 | `GET` | `/inbox/{item_id}` | token | Get a single inbox item |
 | `POST` | `/inbox` | token | Create a new inbox item |
 | `PATCH` | `/inbox/{item_id}` | token | Update an inbox item |
@@ -594,6 +596,29 @@ See [Component Specs](#component-specs) for all `spec.kind` values.
 | `tool` | `string` | Tool name requiring confirmation |
 | `input` | `object` | Tool input parameters (shown to user) |
 | `nonce` | `string` | JIT nonce for replay prevention — client must echo this back |
+
+`preview` (optional object) is added when the server can describe the write better than its input does. It is computed as the caller, from the same code the tool runs, before the person decides; it is advisory (the tool re-validates when it runs) and is left out when it cannot be built in 8 s. Present for:
+
+- `create_silence`: `{"kind": "silence_create", "valid": bool, "error"?: str, "matchers": [{"name", "value", "isRegex", "isEqual", "text"}], "durationMinutes", "duration", "startsAt", "endsAt", "createdBy", "comment", "hides": [{"alertname", "severity", "namespace", "labels", "startsAt"}] | null, "hidesError"?: str, "undo"}`. `createdBy` is the signed-in user (never model input); `valid: false` with `error` means the tool will refuse (empty or all-matching matchers, Watchdog, duration outside 5 min–7 days, no comment, unknown user); `hides: null` with `hidesError` means the firing alerts could not be read, which is "unknown", not "none".
+- With `PULSE_AGENT_TOKEN_FORWARDING=false` both tools refuse (they never write as the service account) and the preview is `valid: false` with that reason. `valid: false` also covers matchers that are too broad (no exact match on `alertname`, a resource label or an application namespace), Watchdog, more than 10 / 25% of the firing alerts (settings `silence_max_hidden_alerts`, `silence_max_hidden_fraction`, `silence_fraction_min_alerts`), and firing alerts that could not be read (then `hides: null` as well).
+- `expire_silence`: `{"kind": "silence_expire", "valid": bool, "error"?: str, "silenceId", "state", "matchers": [...], "createdBy", "comment", "endsAt"}`.
+
+#### Alert triage
+
+`GET`/`POST /inbox/by-alert` recompute the correlation key the firing-alerts scanner gives an alert's finding (`monitor/scanners._alert_resources` + `inbox._finding_corr_key`) and look it up; database only, nothing reads the cluster.
+
+```json
+{
+  "alertname": "KubePodCrashLooping",
+  "correlationKey": "alerts:payments:Pod/api",
+  "resource": {"kind": "Pod", "name": "api-7f9c4d-x2k8q", "namespace": "payments"},
+  "item": <TriageItem> | null,
+  "related": [<TriageItem>],
+  "episode": {"id": "ep-1", "causeTitle": "HighErrorRate", "causeItem": <TriageItem> | null} | null
+}
+```
+
+`TriageItem`: `{"id", "title", "status", "severity", "namespace", "claimedBy", "dueDate", "findingId", "correlationKey", "investigation": {"id", "summary", "suspectedCause", "recommendedFix", "confidence"} | null, "fixReady": bool}`. `item` is the open task the monitor made for this alert. `related` (at most 3, highest priority first) are open tasks about the same resource under another category, e.g. the OOM item for the pod a `KubePodCrashLooping` alert is about; empty for alerts with no resource label. `episode` is the open episode this alert's finding is a symptom of. Pending alerts never have an item (the scanner only reads firing ones). Team-wide like `GET /inbox/{item_id}`: any caller with the agent token and a user token sees every item, not only their own. 400 for a missing `alertname`, an invalid label name or a value over 1024 characters; 401 without the caller's token (forwarding on); 503 when the Inbox cannot be read, never an empty answer.
 
 #### `done` — Agent turn complete
 

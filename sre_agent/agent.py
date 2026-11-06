@@ -57,6 +57,7 @@ from .self_tools import (
     list_runbooks,
     list_ui_components,
 )
+from .silence_tools import SILENCE_TOOLS
 from .timeline_tools import TIMELINE_TOOLS
 from .tool_registry import get_write_tools
 from .view_tools import (
@@ -71,6 +72,7 @@ ALL_TOOLS: list[Any] = (
     + TIMELINE_TOOLS
     + GIT_TOOLS
     + PREDICT_TOOLS
+    + SILENCE_TOOLS
     + [
         request_security_scan,
         namespace_summary,
@@ -412,10 +414,14 @@ MAX_TOOL_RESULT_LENGTH = 50_000  # ~50KB cap to prevent WebSocket overflow
 
 
 # Strict tool use limits (Anthropic API): at most 20 strict tools per request
-# and 24 optional parameters across all strict schemas. Pulse's 19 write tools
-# fit; MCP or future tools could push past it, so check rather than assume.
+# and 24 optional parameters across all strict schemas. MCP or future tools can
+# push past it, so check rather than assume.
 _STRICT_MAX_TOOLS = 20
 _STRICT_MAX_OPTIONAL = 24
+# Write tools that parse and validate their own input completely, so they are
+# the ones left non-strict when a turn offers more write tools than the limits
+# allow. They stay confirmation-gated either way; strict only types arguments.
+_STRICT_LAST = frozenset({"create_silence", "expire_silence"})
 
 
 PLAN_ONLY_SYSTEM_NOTE = (
@@ -433,31 +439,44 @@ def _with_system_note(system, note: str):
 
 
 def apply_strict_write_tools(tool_defs: list[dict], write_tools: set[str]) -> list[dict]:
-    """Return tool_defs with ``strict: true`` on write tools, when within limits.
+    """Return tool_defs with ``strict: true`` on write tools, within the API's limits.
 
     Strict mode guarantees a valid tool name and schema-typed arguments, so a
     mutation cannot receive ``replicas: "2"`` or omit a required field. It needs
     ``additionalProperties: false`` on the input schema. Tool definitions are
     copied, never mutated, because they are shared module-level objects.
-    If the write tools would exceed the API's strict limits, none are made
-    strict and a warning is logged; a 400 would fail the whole turn.
+
+    When the turn offers more write tools than the limits allow, as many as fit
+    are made strict, in offered order with ``_STRICT_LAST`` at the end, and the
+    rest are logged; exceeding the limits would 400 the whole turn. (This used
+    to drop strict from every write tool as soon as one more was registered.)
     """
     targets = [d for d in tool_defs if d.get("name") in write_tools and "input_schema" in d]
-    optional = sum(
-        len(set(d["input_schema"].get("properties", {})) - set(d["input_schema"].get("required", []))) for d in targets
-    )
     if not targets:
         return tool_defs
-    if len(targets) > _STRICT_MAX_TOOLS or optional > _STRICT_MAX_OPTIONAL:
+
+    def _optional(d: dict) -> int:
+        schema = d["input_schema"]
+        return len(set(schema.get("properties", {})) - set(schema.get("required", [])))
+
+    ordered = sorted(targets, key=lambda d: d.get("name") in _STRICT_LAST)
+    strict_names: set[str] = set()
+    optional = 0
+    left_out: list[str] = []
+    for d in ordered:
+        if len(strict_names) < _STRICT_MAX_TOOLS and optional + _optional(d) <= _STRICT_MAX_OPTIONAL:
+            strict_names.add(d["name"])
+            optional += _optional(d)
+        else:
+            left_out.append(d["name"])
+    if left_out:
         logger.warning(
-            "strict_write_tools skipped: %d write tools / %d optional params exceed API limits (%d / %d)",
-            len(targets),
-            optional,
+            "strict_write_tools: %d write tools left non-strict to stay inside API limits (%d tools / %d optional): %s",
+            len(left_out),
             _STRICT_MAX_TOOLS,
             _STRICT_MAX_OPTIONAL,
+            ", ".join(left_out),
         )
-        return tool_defs
-    strict_names = {d["name"] for d in targets}
     out = []
     for d in tool_defs:
         if d.get("name") in strict_names and "input_schema" in d:
