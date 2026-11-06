@@ -1,0 +1,6 @@
+# Changes here can change what CI checks, including the secret scan
+# (a PR runs its own copy of secret-scan.yml and reads its own .gitleaksignore).
+# These entries block a merge only when code owner review is required on main.
+/.github/workflows/ @alimobrem
+/.github/CODEOWNERS @alimobrem
+/.gitleaksignore @alimobrem
