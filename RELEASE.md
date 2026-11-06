@@ -40,6 +40,12 @@ The MCP server sidecar is built from [openshift/openshift-mcp-server](https://gi
 
 Moving the pin is a change like any other: a PR that sets `MCP_SERVER_REF` to the new commit, with what changed upstream since the old one (`git log OLD..NEW` in that repo) in the description. To build an MCP image without a release, run `build-push.yml` manually with `mcp_only` (and `mcp_tag` to name it); a manual build never moves `mcp-server`.
 
+## Helm runner image
+
+The UI's Helm install, upgrade, rollback and uninstall Jobs (and the preview Job from pulse-ui #192) run `Dockerfile.helm-runner` from pulse-ui. pulse-ui's [build-push.yml](https://github.com/PulseSRE/pulse-ui/blob/main/.github/workflows/build-push.yml) now builds it on every release tag (and manual run), alongside the UI and render images: `quay.io/amobrem/openshiftpulse-helm-runner:vX.Y.Z` and `:latest`, linux/amd64. Before pushing, it runs `command -v helm awk sha256sum` and `helm version` inside the built image (the #192 preview pipes `helm template` through awk and sha256sum; `Dockerfile.helm-runner` gains gawk in that PR, so a release tagged before it merges fails this check) and fails the release if any is missing. The run summary records the pushed digest.
+
+**Pulse Operator must pin the new digest.** The UI refuses a runner image that is not digest-pinned (`helmInstall.ts`), so publishing a tag does not put it on a cluster. Update the digest by hand in the operator's release commit, alongside the agent, UI and MCP digests, resolving it with `skopeo inspect --format '{{.Digest}}' docker://quay.io/amobrem/openshiftpulse-helm-runner:vX.Y.Z`. As of pulse-operator v0.13.0, the operator has no setting for this image: it does not list it in `RELATED_IMAGE_*`/`relatedImages`, and its `/config.js` does not set `window.__OPENSHIFTPULSE_CONFIG__.helmInstall.runnerImage`, which is where the UI reads it. Until the operator supplies the image, Helm actions on an operator-deployed UI have no runner image and fail.
+
 ## Every release covers all three repositories
 
 A release of the agent/UI pair also checks the operator: what shipped in it since its last tag, and whether its docs name the new pair. When pulse-operator `main` has commits since its last tag, it is released in the same pass (it was not, from v0.11.0 to v0.12.0, so the self-heal fix sat merged and unshipped while v2.36.0 went out).
