@@ -228,7 +228,7 @@ def _set_test_db_url(monkeypatch):
     # PrometheusClient._build_ssl_context() raises PrometheusConfigError when it
     # finds no in-cluster CA bundle, which is every environment that is not a
     # pod. That happens before any HTTP call, so tests which mock
-    # urllib.request.urlopen never reached their mock and saw FAIL_UNREACHABLE
+    # the HTTP transport (bearer_http.open_with_token) never reached their mock and saw FAIL_UNREACHABLE
     # instead of the parsed response they assert on. Nothing here is testing TLS
     # (the one test that does, test_prometheus_client.py, mocks settings
     # directly and is unaffected) -- this just gets the mocked transport back in

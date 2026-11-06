@@ -25,6 +25,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from . import bearer_http
+
 logger = logging.getLogger("pulse_agent.alertmanager")
 
 DEFAULT_URL = "https://alertmanager-main.openshift-monitoring.svc:9094"
@@ -86,7 +88,8 @@ def request(method: str, path: str, body: Any = None, *, params: dict | None = N
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     ctx = get_prometheus_client()._build_ssl_context() if url.startswith("https") else None
     try:
-        with urllib.request.urlopen(req, context=ctx, timeout=timeout) as resp:
+        # Never urlopen with a bearer token: a redirect to another host would carry it along.
+        with bearer_http.open_with_token(req, context=ctx, timeout=timeout) as resp:
             raw = resp.read()
     except urllib.error.HTTPError as e:
         try:

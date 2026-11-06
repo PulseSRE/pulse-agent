@@ -17,6 +17,7 @@ import urllib.request
 
 from kubernetes.client.rest import ApiException
 
+from . import bearer_http
 from .decorators import beta_tool
 from .k8s_client import get_custom_client
 
@@ -62,7 +63,7 @@ def _github_api(method: str, path: str, body: dict | None = None, token: str = "
     data = json.dumps(body).encode() if body else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with bearer_http.open_with_token(req, timeout=30) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
         error_body = e.read().decode() if e.fp else ""

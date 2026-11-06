@@ -3,7 +3,7 @@
 ``create_silence``/``expire_silence`` are write tools (confirmation-gated);
 ``propose_silence``/``list_silences`` only read. Alertmanager is faked at the
 module boundary (``sre_agent.alertmanager``), except in the client tests,
-which fake ``urlopen`` to check the request itself.
+which fake ``bearer_http.open_with_token`` (the token-safe opener) to check the request itself.
 """
 
 from __future__ import annotations
@@ -560,14 +560,14 @@ def test_client_sends_the_callers_token_and_decodes_json(monkeypatch):
     _reset_settings()
     seen = {}
 
-    def fake_urlopen(req, context=None, timeout=None):
+    def fake_urlopen(req, *, timeout=None, context=None):
         seen["url"] = req.full_url
         seen["auth"] = req.get_header("Authorization")
         seen["method"] = req.get_method()
         seen["body"] = json.loads(req.data) if req.data else None
         return _Resp(json.dumps({"silenceID": SID}).encode())
 
-    with patch("urllib.request.urlopen", fake_urlopen), user_token_context("caller-token"):
+    with patch("sre_agent.bearer_http.open_with_token", fake_urlopen), user_token_context("caller-token"):
         assert alertmanager.create_silence({"matchers": []}) == SID
     assert seen == {
         "url": "https://am.example:9094/api/v2/silences",
@@ -578,16 +578,16 @@ def test_client_sends_the_callers_token_and_decodes_json(monkeypatch):
 
 
 def test_client_turns_http_and_network_errors_into_alertmanager_errors():
-    def forbidden(req, context=None, timeout=None):
+    def forbidden(req, *, timeout=None, context=None):
         raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, io.BytesIO(b"forbidden: alertmanagers/api"))
 
-    with patch("urllib.request.urlopen", forbidden), pytest.raises(AlertmanagerError) as e:
+    with patch("sre_agent.bearer_http.open_with_token", forbidden), pytest.raises(AlertmanagerError) as e:
         alertmanager.list_silences()
     assert e.value.status == 403 and "alertmanagers/api" in e.value.detail
 
-    def down(req, context=None, timeout=None):
+    def down(req, *, timeout=None, context=None):
         raise urllib.error.URLError("connection refused")
 
-    with patch("urllib.request.urlopen", down), pytest.raises(AlertmanagerError) as e:
+    with patch("sre_agent.bearer_http.open_with_token", down), pytest.raises(AlertmanagerError) as e:
         alertmanager.list_alerts()
     assert e.value.status == 0 and "could not be reached" in e.value.describe()
