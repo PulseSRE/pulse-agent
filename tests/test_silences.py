@@ -138,12 +138,19 @@ def test_narrow_sets_pass(text):
     validate_matchers(parse_matchers(text))
 
 
-@pytest.mark.parametrize("pattern", ["(a+)+", "(x*)*z", "a" * 201])
+@pytest.mark.parametrize("pattern", ["(a+)+", "(x*)*z", "(a|a)*b", "(a|aa)*c", r"(\w|\w)*Z", "(ab){2,}", "a" * 201])
 def test_slow_or_huge_regexes_are_refused(pattern):
     with pytest.raises(SilenceInputError, match="regex"):
         validate_matchers([Matcher("node", "worker-5"), Matcher("pod", pattern, is_regex=True)])
     # Matching never runs them either (the preview path).
     assert Matcher("pod", pattern, is_regex=True).matches_value("a" * 50) is False
+
+
+def test_an_alternation_without_a_repeated_group_is_accepted():
+    validate_matchers(
+        [Matcher("node", "worker-5"), Matcher("alertname", "KubeletDown|KubeNodeUnreachable", is_regex=True)]
+    )
+    validate_matchers([Matcher("node", "worker-5"), Matcher("pod", "(api|web)-.*", is_regex=True)])
 
 
 def test_long_label_values_are_matched_by_prefix():

@@ -22,8 +22,8 @@ Safety rules (``validate_matchers``):
   than ``silence_max_hidden_fraction`` (default 25%) once it hides at least
   ``silence_fraction_min_alerts`` (default 3). The floor keeps a 2-alert
   maintenance silence possible on a quiet cluster.
-- Regexes are bounded: at most ``MAX_REGEX_LEN`` characters, no nested
-  quantifiers, and label values longer than ``MAX_MATCH_VALUE_LEN`` are
+- Regexes are bounded: at most ``MAX_REGEX_LEN`` characters, no quantified
+  groups, and label values longer than ``MAX_MATCH_VALUE_LEN`` are
   compared by their prefix, so a preview cannot be made to backtrack forever.
 """
 
@@ -48,7 +48,11 @@ _SILENCE_ID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9
 MAX_REGEX_LEN = 200
 MAX_MATCH_VALUE_LEN = 1024
 # A group containing a quantifier, itself quantified: (a+)+, (x*)*, (a|aa){2,}.
-_NESTED_QUANTIFIER_RE = re.compile(r"\((?:[^()\\]|\\.)*[*+}](?:[^()\\]|\\.)*\)\s*[*+{]")
+# Any quantified group: (a+)+, but also overlapping alternations such as
+# (a|a)*b or (\w|\w)*Z, which backtrack exponentially without a nested
+# quantifier. Python's re has no match timeout, and a timed-out preview thread
+# keeps running, so these are refused rather than bounded.
+_QUANTIFIED_GROUP_RE = re.compile(r"\)\s*[*+?{]")
 ANCHOR_LABELS = frozenset(
     {"alertname", "node", "pod", "deployment", "statefulset", "daemonset", "job_name", "persistentvolumeclaim"}
 )
@@ -140,11 +144,11 @@ def matchers_from_api(raw: list[dict]) -> list[Matcher]:
 
 
 def regex_problem(pattern: str) -> str | None:
-    """Why this regex is not accepted (too long, nested quantifiers, does not compile), or None."""
+    """Why this regex is not accepted (too long, a quantified group, does not compile), or None."""
     if len(pattern) > MAX_REGEX_LEN:
         return f"is longer than {MAX_REGEX_LEN} characters"
-    if _NESTED_QUANTIFIER_RE.search(pattern):
-        return "has a nested quantifier such as (a+)+, which can take exponential time to match"
+    if _QUANTIFIED_GROUP_RE.search(pattern):
+        return "repeats a group, such as (a|a)* or (a+)+, which can take exponential time to match; list the values instead"
     try:
         re.compile(pattern)
     except re.error as e:
