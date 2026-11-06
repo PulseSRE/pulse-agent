@@ -140,7 +140,7 @@ class TestRenderClient:
 
         with (
             patch.object(view_render, "get_settings", return_value=self._settings()),
-            patch("urllib.request.urlopen", return_value=Resp()) as urlopen,
+            patch("sre_agent.bearer_http.open_with_token", return_value=Resp()) as urlopen,
         ):
             assert view_render.render_draft({"title": "x", "layout": []}, "alice")["width"] == 1440
         req = urlopen.call_args.args[0]
@@ -154,7 +154,7 @@ class TestRenderClient:
         err = urllib.error.HTTPError("u", 400, "bad", {}, io.BytesIO(b'{"error":"too many widgets"}'))
         with (
             patch.object(view_render, "get_settings", return_value=self._settings()),
-            patch("urllib.request.urlopen", side_effect=err),
+            patch("sre_agent.bearer_http.open_with_token", side_effect=err),
         ):
             with pytest.raises(view_render.RenderUnavailableError, match="400: too many widgets"):
                 view_render.render_draft({}, "t")
@@ -162,7 +162,7 @@ class TestRenderClient:
     def test_unreachable(self):
         with (
             patch.object(view_render, "get_settings", return_value=self._settings()),
-            patch("urllib.request.urlopen", side_effect=urllib.error.URLError("refused")),
+            patch("sre_agent.bearer_http.open_with_token", side_effect=urllib.error.URLError("refused")),
         ):
             with pytest.raises(view_render.RenderUnavailableError, match="unreachable"):
                 view_render.render_draft({}, "t")

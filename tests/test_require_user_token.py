@@ -271,6 +271,31 @@ class TestInboxClaim:
         assert claim.call_args.args == ("i-1", "mallory", None)
 
 
+# --- inbox investigate -------------------------------------------------------------
+
+
+class TestInboxInvestigate:
+    def test_investigate_without_token_is_401_and_nothing_starts(self, client):
+        with patch("sre_agent.inbox_investigation.request_investigation") as start:
+            resp = client.post("/inbox/i-1/investigate", headers=NO_TOKEN)
+        assert resp.status_code == 401
+        start.assert_not_called()
+
+    def test_investigate_runs_with_the_callers_token(self, client):
+        run = {"item_id": "i-1", "state": "queued"}
+        with patch("sre_agent.inbox_investigation.request_investigation", AsyncMock(return_value=run)) as start:
+            resp = client.post("/inbox/i-1/investigate", headers=AS_USER)
+        assert resp.status_code == 202
+        assert start.call_args.args == ("i-1", "mallory", "user-token-abc")
+
+    def test_forwarding_off_investigates_as_the_service_account(self, sa_client):
+        run = {"item_id": "i-1", "state": "queued"}
+        with patch("sre_agent.inbox_investigation.request_investigation", AsyncMock(return_value=run)) as start:
+            resp = sa_client.post("/inbox/i-1/investigate", headers=NO_TOKEN)
+        assert resp.status_code == 202
+        assert start.call_args.args == ("i-1", "mallory", None)
+
+
 # --- rollback keeps its message ------------------------------------------------------
 
 

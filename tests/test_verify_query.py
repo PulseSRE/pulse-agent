@@ -20,7 +20,7 @@ def _mock_prom_instant(status: str, results: list | None = None, error: str = ""
     mock_resp.read.return_value = response_data
     mock_resp.__enter__ = lambda s: s
     mock_resp.__exit__ = MagicMock(return_value=False)
-    return patch("urllib.request.urlopen", return_value=mock_resp)
+    return patch("sre_agent.bearer_http.open_with_token", return_value=mock_resp)
 
 
 class TestVerifyQuery:
@@ -46,7 +46,7 @@ class TestVerifyQuery:
         assert "parse error" in result
 
     def test_fail_unreachable(self):
-        with patch("urllib.request.urlopen", side_effect=Exception("connection refused")):
+        with patch("sre_agent.bearer_http.open_with_token", side_effect=Exception("connection refused")):
             result = verify_query.call({"query": "up"})
         assert "FAIL_UNREACHABLE" in result
 
