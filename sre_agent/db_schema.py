@@ -828,12 +828,8 @@ CREATE INDEX IF NOT EXISTS idx_rbac_versions_object ON rbac_object_versions (kin
 CREATE INDEX IF NOT EXISTS idx_rbac_versions_observed ON rbac_object_versions (observed_at DESC);
 
 -- Writes made through Pulse (the UI or the agent): who, what, before and
--- after. actor is derived from the caller's own token (SelfSubjectReview),
--- never a name the client sends. actor_verified is false when that API was
--- not served and the login proxy's X-Forwarded-User was used instead.
--- resource_version is the version the write produced (or, for a delete, the
--- version deleted): a change is credited to an entry only when it matches.
--- source: ui or agent.
+-- after. actor is the authenticated user from the login proxy, never a name
+-- the client sends. source: ui or agent.
 CREATE TABLE IF NOT EXISTS pulse_write_ledger (
     id         BIGSERIAL PRIMARY KEY,
     at         BIGINT NOT NULL,
@@ -843,8 +839,6 @@ CREATE TABLE IF NOT EXISTS pulse_write_ledger (
     kind       TEXT NOT NULL,
     namespace  TEXT NOT NULL DEFAULT '',
     name       TEXT NOT NULL,
-    resource_version TEXT NOT NULL DEFAULT '',
-    actor_verified BOOLEAN NOT NULL DEFAULT FALSE,
     reason     TEXT NOT NULL DEFAULT '',
     outcome    TEXT NOT NULL DEFAULT 'ok',
     before     JSONB,
@@ -853,4 +847,13 @@ CREATE TABLE IF NOT EXISTS pulse_write_ledger (
 );
 CREATE INDEX IF NOT EXISTS idx_pulse_write_ledger_at ON pulse_write_ledger (at DESC);
 CREATE INDEX IF NOT EXISTS idx_pulse_write_ledger_object ON pulse_write_ledger (kind, namespace, name, at DESC);
+"""
+
+RBAC_LEDGER_VERIFY_SCHEMA = """
+-- The ledger entry's resourceVersion (the version the write produced, or for a
+-- delete the version deleted): a change is credited to an entry only when it
+-- matches. actor_verified: the actor came from the caller's own token
+-- (SelfSubjectReview), not only from the login proxy's X-Forwarded-User.
+ALTER TABLE pulse_write_ledger ADD COLUMN IF NOT EXISTS resource_version TEXT NOT NULL DEFAULT '';
+ALTER TABLE pulse_write_ledger ADD COLUMN IF NOT EXISTS actor_verified BOOLEAN NOT NULL DEFAULT FALSE
 """

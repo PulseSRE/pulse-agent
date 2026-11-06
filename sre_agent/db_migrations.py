@@ -418,6 +418,17 @@ def _migrate_043_rbac_history(db: Database) -> None:
     db.executescript(RBAC_HISTORY_SCHEMA)
 
 
+def _migrate_044_rbac_ledger_verify(db: Database) -> None:
+    """Ledger entries carry the resourceVersion they produced and whether the actor was verified.
+
+    Added after 043 shipped on some databases: 043 is left as it was, because a
+    database that already ran it would never get columns added there.
+    """
+    from .db_schema import RBAC_LEDGER_VERIFY_SCHEMA
+
+    db.executescript(RBAC_LEDGER_VERIFY_SCHEMA)
+
+
 def _migrate_040_monitor_noise(db: Database) -> None:
     """How often each finding has gone away on its own, kept across restarts."""
     from .db_schema import NOISE_MEMORY_SCHEMA
@@ -654,4 +665,5 @@ MIGRATIONS = [
     (41, "investigation_evidence_detail", _migrate_041_investigation_evidence_detail),
     (42, "readiness_waivers", _migrate_042_readiness_waivers),
     (43, "rbac_history", _migrate_043_rbac_history),
+    (44, "rbac_ledger_verify", _migrate_044_rbac_ledger_verify),
 ]

@@ -201,6 +201,10 @@ def _actor_for(change: dict, ledger: list[dict]) -> dict | None:
             continue
         if (e.get("resource_version") or "") != rv:
             continue
+        # The write must have been recorded by the time the change was observed:
+        # an entry posted later cannot claim a change it did not report first.
+        if e["at"] > change["observed_at"]:
+            continue
         if (change["change"] == "deleted") != (e.get("verb") == "delete"):
             continue
         return {
@@ -398,11 +402,6 @@ async def record_ledger(
         raise HTTPException(status_code=503, detail="Could not verify who you are; nothing was recorded") from None
     actor = verified or _get_current_user(x_forwarded_access_token, x_forwarded_user)
 
-    if _rate_limited(actor):
-        return JSONResponse(
-            status_code=429, content={"detail": f"At most {LEDGER_RATE_PER_MINUTE} ledger entries per minute"}
-        )
-
     # Only a write the caller is allowed to make can be recorded as theirs.
     group, plural, namespaced = _LEDGER_KINDS[kind]
 
@@ -420,6 +419,12 @@ async def record_ledger(
     if not allowed:
         raise HTTPException(
             status_code=403, detail=f"You may not {verb} {kind} {name}, so it is not recorded as your write"
+        )
+
+    # Counted only once the write is known to be the caller's to record.
+    if _rate_limited(actor):
+        return JSONResponse(
+            status_code=429, content={"detail": f"At most {LEDGER_RATE_PER_MINUTE} ledger entries per minute"}
         )
 
     from ..repositories import get_rbac_history_repo

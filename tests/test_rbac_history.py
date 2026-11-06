@@ -317,14 +317,38 @@ def test_ledger_actor_comes_from_the_token_and_the_write_is_checked_on_the_exact
 
 def test_a_change_is_credited_only_to_the_entry_with_its_resource_version(client, ledger_ok):
     assert client.post("/rbac/ledger", headers=AS_USER, json={**LEDGER, "resource_version": "2"}).status_code == 200
-    _history(_now_ms() + 1000)  # observes resourceVersion 3
-    body = client.get("/rbac/changes", headers=AS_USER).json()
-    # A write that produced version 2 did not produce the observed version 3: the client is shown, not erin.
-    assert body["changes"][0]["actor"] is None and body["changes"][0]["manager"] == "oc"
     assert client.post("/rbac/ledger", headers=AS_USER, json=LEDGER).status_code == 200
+    _history(_now_ms() + 1000)  # observes resourceVersion 3, after both writes were recorded
     body = client.get("/rbac/changes", headers=AS_USER).json()
     actor = body["changes"][0]["actor"]
+    # Credited to the entry that produced version 3, not the one that produced 2.
     assert actor["name"] == "erin" and actor["verified"] is True and actor["reason"] == "restore"
+    assert [e["resource_version"] for e in body["ledger"]] == ["3", "2"]
+
+
+def test_an_entry_posted_after_the_change_was_observed_cannot_claim_it(client, ledger_ok):
+    _history(_now_ms() - 5000)  # version 3 observed first
+    assert client.post("/rbac/ledger", headers=AS_USER, json=LEDGER).status_code == 200  # then a matching claim
+    body = client.get("/rbac/changes", headers=AS_USER).json()
+    assert body["changes"][0]["actor"] is None and body["changes"][0]["manager"] == "oc"
+
+
+def test_a_failed_access_check_is_503_and_nothing_is_recorded(client):
+    rbac_history_rest.reset_rate_limit_for_tests()
+    with (
+        patch.object(rbac_history_rest, "_whoami", return_value="erin"),
+        patch.object(rbac_history_rest, "_can", side_effect=RuntimeError("apiserver down")),
+    ):
+        r = client.post("/rbac/ledger", headers=AS_USER, json=LEDGER)
+    assert r.status_code == 503
+    assert get_database().fetchall("SELECT id FROM pulse_write_ledger") == []
+
+
+def test_refused_entries_do_not_use_up_the_rate_limit(client, ledger_ok):
+    with patch.object(rbac_history_rest, "_can", return_value=False):
+        for _ in range(70):
+            assert client.post("/rbac/ledger", headers=AS_USER, json=LEDGER).status_code == 403
+    assert client.post("/rbac/ledger", headers=AS_USER, json=LEDGER).status_code == 200
 
 
 def test_a_write_the_caller_may_not_make_is_refused(client, ledger_ok):
@@ -408,12 +432,15 @@ def test_agent_write_tools_store_only_the_target_never_the_arguments(_db):
     assert "cat /etc/secret" not in stored and "hunter2" not in stored
 
 
-def test_migration_043_is_last_and_idempotent(_db):
-    from sre_agent.db_migrations import MIGRATIONS, _migrate_043_rbac_history
+def test_migrations_043_044_are_last_and_idempotent(_db):
+    from sre_agent.db_migrations import MIGRATIONS, _migrate_043_rbac_history, _migrate_044_rbac_ledger_verify
 
-    assert MIGRATIONS[-1] == (43, "rbac_history", _migrate_043_rbac_history)
+    assert MIGRATIONS[-2] == (43, "rbac_history", _migrate_043_rbac_history)
+    assert MIGRATIONS[-1] == (44, "rbac_ledger_verify", _migrate_044_rbac_ledger_verify)
     _migrate_043_rbac_history(_db)
     _migrate_043_rbac_history(_db)
+    _migrate_044_rbac_ledger_verify(_db)
+    _migrate_044_rbac_ledger_verify(_db)
     tables = {
         r["table_name"]
         for r in _db.fetchall(
@@ -421,3 +448,22 @@ def test_migration_043_is_last_and_idempotent(_db):
         )
     }
     assert tables == {"rbac_object_versions", "pulse_write_ledger"}
+
+
+def test_044_adds_the_columns_to_a_database_that_ran_the_original_043(_db):
+    from sre_agent.db_migrations import _migrate_044_rbac_ledger_verify
+
+    _db.execute("ALTER TABLE pulse_write_ledger DROP COLUMN resource_version, DROP COLUMN actor_verified")
+    _db.commit()
+    try:
+        _migrate_044_rbac_ledger_verify(_db)
+    finally:
+        cols = {
+            r["column_name"]
+            for r in _db.fetchall(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'pulse_write_ledger'"
+            )
+        }
+        if "resource_version" not in cols:
+            _migrate_044_rbac_ledger_verify(_db)
+    assert {"resource_version", "actor_verified"} <= cols

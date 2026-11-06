@@ -169,6 +169,7 @@ Migrations are forward-only and recorded in `schema_migrations`. The current reg
 | 041 | `investigation_evidence_detail` (structured evidence on saved investigations) |
 | 042 | `readiness_waivers` (readiness gate waivers: reason, admin who waived, created/expiry times) |
 | 043 | `rbac_object_versions` (observed versions of RBAC/SCC/webhook objects), `pulse_write_ledger` (writes made through Pulse: actor, verb, object, before/after) |
+| 044 | `pulse_write_ledger.resource_version`, `pulse_write_ledger.actor_verified` (ledger entries credited by exact resourceVersion; actor verified from the caller's token) |
 
 Add the next unused integer and migration callable to `MIGRATIONS` in `db_migrations.py`; maintain the fresh-install DDL in `db_schema.py` too. Test fresh creation and upgrade behavior. Do not manually insert a migration row to silence a failing migration: that can leave the application using columns which do not exist.
 
