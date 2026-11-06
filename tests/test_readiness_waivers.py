@@ -323,7 +323,7 @@ def test_repository_orders_oldest_first():
 def test_migration_042_creates_the_table_idempotently():
     from sre_agent.db_migrations import MIGRATIONS, _migrate_042_readiness_waivers
 
-    assert MIGRATIONS[-1] == (42, "readiness_waivers", _migrate_042_readiness_waivers)
+    assert (42, "readiness_waivers", _migrate_042_readiness_waivers) in MIGRATIONS
     db = get_database()
     _migrate_042_readiness_waivers(db)
     _migrate_042_readiness_waivers(db)  # idempotent

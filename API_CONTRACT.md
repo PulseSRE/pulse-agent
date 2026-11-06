@@ -67,6 +67,8 @@ Defines the REST and WebSocket protocol between the Pulse UI and Pulse Agent. Bo
 | `GET` | `/readiness` | token | Installation diagnostics: nine scoped checks with healthy/unhealthy/unknown results; provider connectivity is not probed; 60-second cache. See [readiness guide](docs/INSTALLATION_READINESS.md). |
 | `GET` | `/readiness/waivers` | token | Active readiness gate waivers for this cluster (the agent's own; its database belongs to one cluster): `{"waivers": [{"gate_id", "reason", "waived_by", "created_at", "expires_at"}]}`, times ISO 8601 UTC, `expires_at` null when the waiver has no expiry. Waivers past `expires_at` are not returned. 503 when the database is unreachable |
 | `PUT` | `/readiness/waivers/{gate_id}` | admin | Waive a gate (or replace its waiver). Body `{"reason": "<non-empty, ≤2000 chars>", "expires_at": "<ISO 8601 with time zone, in the future>" \| null}`; returns the waiver. `waived_by` is the authenticated admin (when `PULSE_AGENT_ADMIN_USERS` is unset, any authenticated user, as for fix approval); an author in the body is ignored. 400 for an empty reason, a bad or past `expires_at` or an invalid gate id (`^[a-z0-9][a-z0-9._-]{0,99}$`). Recorded in `/interactions` as `waive_readiness_gate` |
+| `GET` | `/rbac/changes` | token + user token | Observed changes to Roles, ClusterRoles, RoleBindings, ClusterRoleBindings, SecurityContextConstraints and Validating/MutatingWebhookConfigurations, newest first. See "RBAC change history" below |
+| `POST` | `/rbac/ledger` | token + user token | Record a write made through the Pulse UI. See "RBAC change history" below |
 | `DELETE` | `/readiness/waivers/{gate_id}` | admin | Lift a gate's waiver. Idempotent: `{"gate_id", "deleted": true\|false}` (never 404, so a 404 means an agent without waiver support). Recorded in `/interactions` as `unwaive_readiness_gate` when a waiver was lifted, with the lifted waiver's `reason`, `waived_by`, `created_at` and `expires_at` in `metadata` (the row itself is deleted) |
 | `GET` | `/analytics/readiness` | token | Readiness gate summary: pass/fail/attention counts, pass rate, attention items |
 | `GET` | `/postmortems` | token | Auto-generated postmortems, newest first (query: `limit` 1-100) |
@@ -208,6 +210,54 @@ Inbox item `metadata` optional keys added for queue explainability: `priority_fa
 | `POST /inbox/{item_id}/claim` | `{"detail": "User access token required: ..."}` |
 | `POST /views/{view_id}/actions` | `{"error": "Your access token did not reach Pulse; sign in again to run this action"}` (every action, read or write) |
 | `POST /fix-history/{action_id}/rollback` | `{"detail": "User access token required for rollback"}` |
+
+### RBAC change history (`rbac_history_rest.py`)
+
+The agent's own observation, not the API audit log (which Pulse cannot read). On each RBAC audit scan the agent lists the watched kinds as its service account and stores a version when an object appears, its content changes (server-owned metadata and `status` excluded) or it disappears. Several edits between two scans collapse into one; nothing before the first observation (`history.since`) is known.
+
+`GET /rbac/changes` — requires the shared token and, with token forwarding on, `X-Forwarded-Access-Token` (401 otherwise). Query: `since` (ISO 8601, default 7 days ago; anything older is clamped to the 30-day retention), `kind` (one of the seven kinds; 400 otherwise), `namespace` (exact; `""` for cluster-scoped), `name`, `include_system` (default false: names starting `system:`/`openshift-`/`openshift:` and objects in `openshift-*`/`kube-*` are left out and counted in `system_hidden`), `limit` (1–500, default 200).
+
+```json
+{
+  "history": {
+    "since": "2026-10-29T08:00:00+00:00",        // first observation; null when none yet
+    "last_observed_at": "2026-11-05T14:40:00+00:00",
+    "last_error": null,                           // the last observation's failure, if any
+    "kinds": ["Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding", "SecurityContextConstraints", "ValidatingWebhookConfiguration", "MutatingWebhookConfiguration"],
+    "unwatched": [{"kind": "SecurityContextConstraints", "reason": "403 Forbidden"}],   // not listable by the agent: changes unknown
+    "retention_days": 30,
+    "source": "observed"
+  },
+  "changes": [{
+    "id": 812, "kind": "Role", "namespace": "payments", "name": "secret-manager",
+    "change": "updated",                          // created | updated | deleted
+    "observed_at": "2026-11-05T02:14:30+00:00",
+    "resource_version": "48121", "uid": "…",
+    "manager": "oc", "operation": "Update", "manager_time": "2026-11-05T02:14:02Z",   // newest managedFields entry: a client, not a person
+    "actor": {"name": "erin", "verified": true, "source": "ui", "at": "…", "ledger_id": 41, "reason": "…"},   // null unless a ledger entry has this object's exact resource_version (for a deletion: the version deleted)
+    "previous_id": 640,
+    "before": { /* the version before, as stored: no managedFields/resourceVersion/uid/creationTimestamp/generation/status; null for created */ },
+    "after":  { /* this version; null for deleted */ }
+  }],
+  "ledger": [{"id": 41, "at": "…", "actor": "erin", "source": "ui", "verb": "update", "kind": "Role", "namespace": "payments", "name": "secret-manager", "resource_version": "48121", "actor_verified": true, "reason": "…", "outcome": "ok", "has_before": true, "has_after": true}],
+  "hidden": 0,          // changes left out because the caller may not `get` that kind in that namespace (checked with SelfSubjectAccessReview as the caller; a failed check hides)
+  "system_hidden": 12, // platform objects the caller could read, left out (counted after the permission filter)
+  "truncated": false    // true when more matched than `limit`
+}
+```
+
+503 `{"detail": …}` when the database is unreachable. An agent without this route answers 404; the UI then says the history is not available and shows bindings by creation time only.
+
+"Restore previous" is done by the UI with the user's own token: it reads the live object, PUTs `before` with the live `metadata.resourceVersion` (409 if it changed since) or, when the object is gone, POSTs `before` without `ownerReferences`; dry run (`dryRun=All`) first. The agent never writes RBAC for this.
+
+`POST /rbac/ledger` — shared token and, with token forwarding on, `X-Forwarded-Access-Token` (401 otherwise). Body `{"verb": "create"|"update"|"patch"|"delete", "kind", "namespace"?, "name", "resource_version"?, "reason"? (≤2000), "outcome"?: "ok"|"failed", "before"?, "after"?, "detail"?}`; the whole body at most 256 KiB (checked before it is read), `before`/`after` at most 64 KiB each, `detail` at most 4 KiB (413 otherwise). `resource_version` is the version the write returned (for a delete, the version deleted); only an entry whose `resource_version` equals an observed version, and that was recorded no later than that version was observed, is credited with that change. `kind` is one of the seven kinds above or `Group`, `User`, `Identity`, `OAuthAccessToken`, `OAuth`, `Secret`; a `Secret` entry may not carry `before`/`after`.
+
+- **Checked before it is recorded:** a SelfSubjectAccessReview as the caller for `verb` on that exact object (name and namespace); 403 if the caller may not make that write, 503 if the check cannot run. Nothing is stored in either case.
+- **Actor:** from the caller's own token via SelfSubjectReview (`authentication.k8s.io/v1 selfsubjectreviews`, no service-account permission needed); `actor_verified: true`. When that API is not served, the login proxy's `X-Forwarded-User` is used and the entry is marked `actor_verified: false`. A token the review refuses is 401. An `actor` in the body is always ignored.
+- **Rate limit:** 60 entries per user per minute (429).
+- Ledger entries are kept 30 days, like the versions.
+
+Returns the ledger row (as in `ledger` above). The agent adds a row for every write tool it runs (`source: "agent"`, `verb` = the tool name, `actor_verified: false`). Only the target is stored — kind, namespace and name taken from the tool's own inputs (for `apply_yaml`, the first object's kind/namespace/name from the manifest, never the manifest) — and the outcome; free-form arguments (exec commands, manifests, skill or git content) are never stored. Agent rows for kinds other than the seven RBAC kinds are stored but not served by `/rbac/changes` yet (RBAC kinds only); a Timeline feed is a follow-up.
 
 ### `/version` Response
 

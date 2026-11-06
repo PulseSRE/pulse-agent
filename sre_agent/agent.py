@@ -485,6 +485,16 @@ def apply_strict_write_tools(tool_defs: list[dict], write_tools: set[str]) -> li
     return out
 
 
+def _record_write(name: str, input_data: dict, meta: dict) -> None:
+    """Put a write tool the agent ran in the Pulse write ledger (who, which tool, inputs, outcome)."""
+    if name not in get_write_tools():
+        return
+    from .rbac_history import record_agent_write
+
+    # Gets the raw input but stores only the target (kind/namespace/name) and the outcome.
+    record_agent_write(name, input_data, meta.get("status", ""), meta.get("error_message"))
+
+
 def _execute_tool(
     name: str,
     input_data: dict,
@@ -574,6 +584,7 @@ def _execute_tool(
                     "error_category": err.category,
                     "result_bytes": len(err.message),
                 }
+                _record_write(name, input_data, meta)
                 return str(err), None, meta
             # An attached screenshot (tool_images) is not text: keep it out of the
             # length cap, which would cut the base64 and break the image.
@@ -597,6 +608,7 @@ def _execute_tool(
                 )
             )
             meta = {"status": "success", "error_message": None, "error_category": None, "result_bytes": result_bytes}
+            _record_write(name, input_data, meta)
             if image is not None:
                 text = attach_image(text, image["data"], image["media_type"])
             return text, component, meta
@@ -628,6 +640,7 @@ def _execute_tool(
                 "error_category": err.category,
                 "result_bytes": 0,
             }
+            _record_write(name, input_data, meta)
             return f"Error executing {name}: {type(e).__name__}", None, meta
 
 

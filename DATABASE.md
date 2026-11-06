@@ -116,7 +116,7 @@ Plan phase audit traces use `skill_selection_log.channel_weights` for the stored
 | `user_events` | Raw UI/user event stream | event_type, user_id, payload (JSONB) |
 | `user_interactions` | Aggregated interaction outcomes | interaction_type, outcome, user_id |
 
-Additional tables support operational flags, inbox mutes, episodes and symptoms, cluster memory (`environment_facts`, `workload_baselines`), learning candidates, user skills, runtime artifact/version storage, the fix-outcome ledger (`fix_outcomes`: one verification verdict per applied fix, read by `fix_learning.py`) and persisted noise counts (`monitor_noise`: how often each finding key cleared on its own, so a restart does not reset noise suppression) and readiness gate waivers (`readiness_waivers`: one row per waived gate with the reason, the admin who waived it and an optional expiry; expired rows are kept but not active). The feature grouping above is a navigation aid; `db_schema.py` is the complete DDL.
+Additional tables support operational flags, inbox mutes, episodes and symptoms, cluster memory (`environment_facts`, `workload_baselines`), learning candidates, user skills, runtime artifact/version storage, the fix-outcome ledger (`fix_outcomes`: one verification verdict per applied fix, read by `fix_learning.py`) and persisted noise counts (`monitor_noise`: how often each finding key cleared on its own, so a restart does not reset noise suppression) and readiness gate waivers (`readiness_waivers`: one row per waived gate with the reason, the admin who waived it and an optional expiry; expired rows are kept but not active), the observed RBAC/SCC/webhook version history (`rbac_object_versions`: a row when an object appears, its content changes or it disappears; `baseline` rows are the first observation, not changes; 30-day retention keeps each object's newest row) and the Pulse write ledger (`pulse_write_ledger`: who wrote what through the UI or the agent). The feature grouping above is a navigation aid; `db_schema.py` is the complete DDL.
 
 Full DDL: `sre_agent/db_schema.py`
 
@@ -168,6 +168,8 @@ Migrations are forward-only and recorded in `schema_migrations`. The current reg
 | 040 | `monitor_noise` |
 | 041 | `investigation_evidence_detail` (structured evidence on saved investigations) |
 | 042 | `readiness_waivers` (readiness gate waivers: reason, admin who waived, created/expiry times) |
+| 043 | `rbac_object_versions` (observed versions of RBAC/SCC/webhook objects), `pulse_write_ledger` (writes made through Pulse: actor, verb, object, before/after) |
+| 044 | `pulse_write_ledger.resource_version`, `pulse_write_ledger.actor_verified` (ledger entries credited by exact resourceVersion; actor verified from the caller's token) |
 
 Add the next unused integer and migration callable to `MIGRATIONS` in `db_migrations.py`; maintain the fresh-install DDL in `db_schema.py` too. Test fresh creation and upgrade behavior. Do not manually insert a migration row to silence a failing migration: that can leave the application using columns which do not exist.
 

@@ -405,6 +405,30 @@ def _migrate_042_readiness_waivers(db: Database) -> None:
     db.executescript(READINESS_WAIVERS_SCHEMA)
 
 
+def _migrate_043_rbac_history(db: Database) -> None:
+    """RBAC/SCC/webhook version history and the ledger of writes made through Pulse.
+
+    "Recent RBAC changes" sorted bindings by creationTimestamp, so an edit to
+    an existing Role, an SCC change or a webhook change never showed, and
+    there was no previous version to restore. The API audit log is not
+    readable from Pulse, so the agent keeps its own observed history.
+    """
+    from .db_schema import RBAC_HISTORY_SCHEMA
+
+    db.executescript(RBAC_HISTORY_SCHEMA)
+
+
+def _migrate_044_rbac_ledger_verify(db: Database) -> None:
+    """Ledger entries carry the resourceVersion they produced and whether the actor was verified.
+
+    Added after 043 shipped on some databases: 043 is left as it was, because a
+    database that already ran it would never get columns added there.
+    """
+    from .db_schema import RBAC_LEDGER_VERIFY_SCHEMA
+
+    db.executescript(RBAC_LEDGER_VERIFY_SCHEMA)
+
+
 def _migrate_040_monitor_noise(db: Database) -> None:
     """How often each finding has gone away on its own, kept across restarts."""
     from .db_schema import NOISE_MEMORY_SCHEMA
@@ -640,4 +664,6 @@ MIGRATIONS = [
     (40, "monitor_noise", _migrate_040_monitor_noise),
     (41, "investigation_evidence_detail", _migrate_041_investigation_evidence_detail),
     (42, "readiness_waivers", _migrate_042_readiness_waivers),
+    (43, "rbac_history", _migrate_043_rbac_history),
+    (44, "rbac_ledger_verify", _migrate_044_rbac_ledger_verify),
 ]

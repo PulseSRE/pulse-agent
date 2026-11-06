@@ -799,3 +799,61 @@ CREATE TABLE IF NOT EXISTS readiness_waivers (
     expires_at  BIGINT
 );
 """
+
+RBAC_HISTORY_SCHEMA = """
+-- Observed versions of RBAC, SCC and admission-webhook objects, so a change
+-- can be shown with what it replaced and restored. The agent lists these
+-- objects on each audit scan and stores a row only when one appears, changes
+-- or disappears. change: baseline (first time the kind was observed: not a
+-- change), created, updated, deleted. content is the object without
+-- server-owned fields (managedFields, resourceVersion, uid, ...), NULL for a
+-- deletion, whose last content is the previous row. manager/operation/
+-- manager_time are the newest managedFields entry: a client name, not a
+-- person. Times are epoch milliseconds.
+CREATE TABLE IF NOT EXISTS rbac_object_versions (
+    id               BIGSERIAL PRIMARY KEY,
+    kind             TEXT NOT NULL,
+    namespace        TEXT NOT NULL DEFAULT '',
+    name             TEXT NOT NULL,
+    uid              TEXT NOT NULL DEFAULT '',
+    resource_version TEXT NOT NULL DEFAULT '',
+    change           TEXT NOT NULL,
+    observed_at      BIGINT NOT NULL,
+    manager          TEXT NOT NULL DEFAULT '',
+    operation        TEXT NOT NULL DEFAULT '',
+    manager_time     TEXT,
+    content          JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_rbac_versions_object ON rbac_object_versions (kind, namespace, name, id DESC);
+CREATE INDEX IF NOT EXISTS idx_rbac_versions_observed ON rbac_object_versions (observed_at DESC);
+
+-- Writes made through Pulse (the UI or the agent): who, what, before and
+-- after. actor is the authenticated user from the login proxy, never a name
+-- the client sends. source: ui or agent.
+CREATE TABLE IF NOT EXISTS pulse_write_ledger (
+    id         BIGSERIAL PRIMARY KEY,
+    at         BIGINT NOT NULL,
+    actor      TEXT NOT NULL,
+    source     TEXT NOT NULL,
+    verb       TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    namespace  TEXT NOT NULL DEFAULT '',
+    name       TEXT NOT NULL,
+    reason     TEXT NOT NULL DEFAULT '',
+    outcome    TEXT NOT NULL DEFAULT 'ok',
+    before     JSONB,
+    after      JSONB,
+    detail     JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_pulse_write_ledger_at ON pulse_write_ledger (at DESC);
+CREATE INDEX IF NOT EXISTS idx_pulse_write_ledger_object ON pulse_write_ledger (kind, namespace, name, at DESC);
+"""
+
+RBAC_LEDGER_VERIFY_SCHEMA = """
+-- The ledger entry's resourceVersion (the version the write produced, or for a
+-- delete the version deleted): a change is credited to an entry only when it
+-- matches. actor_verified: the actor came from the caller's own token
+-- (SelfSubjectReview), not only from the login proxy's X-Forwarded-User.
+ALTER TABLE pulse_write_ledger ADD COLUMN IF NOT EXISTS resource_version TEXT NOT NULL DEFAULT '';
+ALTER TABLE pulse_write_ledger ADD COLUMN IF NOT EXISTS actor_verified BOOLEAN NOT NULL DEFAULT FALSE
+"""

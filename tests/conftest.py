@@ -209,6 +209,26 @@ def _isolate_noise_memory(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_rbac_history(request, monkeypatch):
+    """Keep the RBAC version history and write ledger out of unrelated tests.
+
+    The audit RBAC scanner records observed versions and every agent write
+    tool records a ledger row, both through the shared test database. Tests of
+    the history itself opt back in with ``@pytest.mark.real_rbac_history``.
+    """
+    from sre_agent import rbac_history
+
+    rbac_history.reset_for_tests()
+    if request.node.get_closest_marker("real_rbac_history"):
+        yield
+        rbac_history.reset_for_tests()
+        return
+    monkeypatch.setattr(rbac_history, "observe_safely", lambda: None)
+    monkeypatch.setattr(rbac_history, "record_agent_write", lambda *a, **k: None)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _stub_async_anthropic_client(monkeypatch):
     """Prevent any test from constructing a real async Anthropic client."""
     if _has_live_ai_backend():
@@ -535,3 +555,4 @@ def mock_security_k8s():
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_noise_store: use the real persisted noise counts")
+    config.addinivalue_line("markers", "real_rbac_history: record RBAC versions and ledger rows in the test database")
