@@ -22,17 +22,26 @@ Safety rules (``validate_matchers``):
   than ``silence_max_hidden_fraction`` (default 25%) once it hides at least
   ``silence_fraction_min_alerts`` (default 3). The floor keeps a 2-alert
   maintenance silence possible on a quiet cluster.
-- Regexes are bounded: at most ``MAX_REGEX_LEN`` characters, no quantified
-  groups, and label values longer than ``MAX_MATCH_VALUE_LEN`` are
-  compared by their prefix, so a preview cannot be made to backtrack forever.
+- Regexes are compiled and matched with RE2 (``google-re2``), the engine
+  Alertmanager itself uses (Go's ``regexp``), so matching takes linear time
+  and what Pulse counts as hidden is what Alertmanager will hide. A pattern
+  RE2 rejects (backreferences, lookarounds) is refused here, as Alertmanager
+  would refuse it. On top of that, as defence in depth: at most
+  ``MAX_REGEX_LEN`` characters, no quantified groups, at most
+  ``MAX_UNBOUNDED_QUANTIFIERS`` unbounded quantifiers (``*``, ``+``,
+  ``{n,}``), and label values longer than ``MAX_MATCH_VALUE_LEN`` are compared
+  by their prefix.
 """
 
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+
+import re2
 
 MAX_MATCHERS = 20
 MAX_VALUE_LEN = 1024
@@ -47,12 +56,18 @@ _SILENCE_ID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9
 # matches (for practical purposes) every value of its label.
 MAX_REGEX_LEN = 200
 MAX_MATCH_VALUE_LEN = 1024
-# A group containing a quantifier, itself quantified: (a+)+, (x*)*, (a|aa){2,}.
-# Any quantified group: (a+)+, but also overlapping alternations such as
-# (a|a)*b or (\w|\w)*Z, which backtrack exponentially without a nested
-# quantifier. Python's re has no match timeout, and a timed-out preview thread
-# keeps running, so these are refused rather than bounded.
+# Silence regexes are never run with Python's re: it backtracks, holds the GIL
+# while it does, and has no match timeout, so one pattern such as
+# ".*" * 14 + "X" (41 characters) froze the whole process for seconds before
+# anyone confirmed anything. RE2 matches in time linear in the input.
+_RE2_OPTIONS = re2.Options()
+_RE2_OPTIONS.log_errors = False  # a refused pattern is reported to the caller, not logged by the C++ library
+# Defence in depth on top of RE2: no quantified group, (a+)+ or (a|b)*, and at
+# most this many unbounded quantifiers per pattern. A narrow silence needs
+# neither; listing the values is clearer to the person approving it.
 _QUANTIFIED_GROUP_RE = re.compile(r"\)\s*[*+?{]")
+MAX_UNBOUNDED_QUANTIFIERS = 2
+_UNBOUNDED_BRACE_RE = re.compile(r"\{\d*,\}")
 ANCHOR_LABELS = frozenset(
     {"alertname", "node", "pod", "deployment", "statefulset", "daemonset", "job_name", "persistentvolumeclaim"}
 )
@@ -96,10 +111,11 @@ class Matcher:
         if self.is_regex:
             if regex_problem(self.value):
                 return False
-            try:
-                hit = re.fullmatch(self.value, value) is not None
-            except re.error:
+            compiled, _ = _re2_compile(self.value)
+            if compiled is None:
                 return False
+            # Alertmanager anchors silence regexes at both ends: ^(?:re)$.
+            hit = compiled.fullmatch(value) is not None
         else:
             hit = value == self.value
         return hit if self.is_equal else not hit
@@ -143,16 +159,73 @@ def matchers_from_api(raw: list[dict]) -> list[Matcher]:
     ]
 
 
+@functools.lru_cache(maxsize=512)
+def _re2_compile(pattern: str) -> tuple[Any, str | None]:
+    """The RE2 program for ``pattern`` and None, or None and RE2's reason for rejecting it."""
+    try:
+        return re2.compile(pattern, options=_RE2_OPTIONS), None
+    except re2.error as e:
+        reason = e.args[0] if e.args else e
+        if isinstance(reason, bytes):
+            reason = reason.decode("utf-8", "replace")
+        return None, str(reason)
+
+
+def count_unbounded_quantifiers(pattern: str) -> int:
+    """``*``, ``+`` and ``{n,}`` outside character classes and escapes."""
+    count = 0
+    i, n = 0, len(pattern)
+    in_class = False
+    while i < n:
+        c = pattern[i]
+        if c == "\\":
+            if pattern.startswith("\\Q", i):  # \Q...\E is literal text
+                end = pattern.find("\\E", i + 2)
+                i = n if end < 0 else end + 2
+                continue
+            i += 2
+            continue
+        if in_class:
+            if c == "]":
+                in_class = False
+        elif c == "[":
+            in_class = True
+            # A ']' first in the class ([]a] or [^]a]) is a literal.
+            j = i + 1
+            if j < n and pattern[j] == "^":
+                j += 1
+            if j < n and pattern[j] == "]":
+                j += 1
+            i = j
+            continue
+        elif c in "*+" or (c == "{" and _UNBOUNDED_BRACE_RE.match(pattern, i)):
+            count += 1
+        i += 1
+    return count
+
+
 def regex_problem(pattern: str) -> str | None:
-    """Why this regex is not accepted (too long, a quantified group, does not compile), or None."""
+    """Why this regex is not accepted, or None.
+
+    Refused: longer than ``MAX_REGEX_LEN``; rejected by RE2 (Alertmanager's
+    engine, so Alertmanager would reject it too); a quantified group; more
+    than ``MAX_UNBOUNDED_QUANTIFIERS`` unbounded quantifiers.
+    """
     if len(pattern) > MAX_REGEX_LEN:
         return f"is longer than {MAX_REGEX_LEN} characters"
+    _, error = _re2_compile(pattern)
+    if error is not None:
+        return (
+            f"does not compile as an Alertmanager (RE2) regex: {error}. RE2 has no backreferences or "
+            "lookarounds such as (?=...) or (?!...)"
+        )
     if _QUANTIFIED_GROUP_RE.search(pattern):
-        return "repeats a group, such as (a|a)* or (a+)+, which can take exponential time to match; list the values instead"
-    try:
-        re.compile(pattern)
-    except re.error as e:
-        return f"does not compile: {e}"
+        return "repeats a group, such as (a|b)* or (a+)+; list the values instead"
+    if count_unbounded_quantifiers(pattern) > MAX_UNBOUNDED_QUANTIFIERS:
+        return (
+            f"has more than {MAX_UNBOUNDED_QUANTIFIERS} unbounded repeats (*, + or {{n,}}); "
+            "name the values or use a shorter pattern"
+        )
     return None
 
 
@@ -252,14 +325,25 @@ def validate_silence_id(silence_id: Any) -> str:
 
 
 def require_user_writes() -> None:
-    """Silence writes run as the person, never as the agent's service account."""
+    """Silence writes run as the person, never as the agent's service account.
+
+    Refused when token forwarding is off, and also when it is on but no token
+    of the caller's reached this request: Alertmanager's client would
+    otherwise send the service account's token instead.
+    """
     from .config import get_settings
+    from .k8s_client import get_current_user_token
 
     if not get_settings().agent.token_forwarding:
         raise SilenceInputError(
             "Silences are not changed from chat on this deployment: token forwarding is off "
             "(PULSE_AGENT_TOKEN_FORWARDING=false), so the write would run as Pulse's service account instead of "
             "as you. Use Alerts > Silences, which writes with your own permissions."
+        )
+    if not get_current_user_token():
+        raise SilenceInputError(
+            "Your access token did not reach Pulse with this request, and silences are never changed as "
+            "Pulse's service account. Sign in again and retry, or use Alerts > Silences."
         )
 
 
