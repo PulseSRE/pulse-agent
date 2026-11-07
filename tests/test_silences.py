@@ -184,6 +184,70 @@ def test_matching_is_linear_even_for_patterns_python_re_would_backtrack_on():
     assert time.perf_counter() - started < 0.5
 
 
+# Bounded repeats are not counted as unbounded, so input limits alone do not
+# bound the time: under Python's re, ".{0,100}" * 5 + "X" takes ~13 s against a
+# 450-character value and ".{0,200}" * 5 + "X" minutes against 1024. RE2 is
+# what keeps both fast.
+@pytest.mark.timeout(30)
+def test_bounded_repeats_cannot_make_matching_slow():
+    big = ".{0,200}" * 5 + "X"
+    started = time.perf_counter()
+    with pytest.raises(SilenceInputError, match="more than 100 times"):
+        validate_matchers(parse_matchers(f'namespace=~"{big}", alertname="Foo"'))
+    alerts = [_alert("Foo", namespace="n" * 1024)]
+    assert silences.split_by_matchers(alerts, [Matcher("namespace", big, is_regex=True)]) == []
+    assert time.perf_counter() - started < 1.0
+
+    # Within every input limit, so only RE2 keeps this one fast.
+    allowed = ".{0,100}" * 5 + "X"
+    assert silences.regex_problem(allowed) is None
+    ms = [Matcher("alertname", "Foo"), Matcher("namespace", allowed, is_regex=True)]
+    started = time.perf_counter()
+    validate_matchers(ms)
+    alerts = [_alert("Foo", namespace="n" * 450), _alert("Foo", namespace="n" * 1024), _alert("Foo", namespace="nX")]
+    assert [a["namespace"] for a in silences.split_by_matchers(alerts, ms)] == ["nX"]
+    assert time.perf_counter() - started < 1.0
+
+
+def test_matching_never_uses_pythons_re():
+    def forbidden(*a, **k):
+        raise AssertionError("silence regexes must be matched with RE2, not Python's re")
+
+    ms = parse_matchers('node="worker-5", alertname=~"KubeNodeUnreachable|KubeletDown"')
+    with patch("sre_agent.silences.re.fullmatch", forbidden), patch("sre_agent.silences.re.search", forbidden):
+        validate_matchers(ms)
+        hidden = silences.split_by_matchers(FIRING, ms)
+        assert Matcher("pod", "api-.*", is_regex=True).matches_value("api-1")
+    assert [a["alertname"] for a in hidden] == ["KubeNodeUnreachable", "KubeletDown"]
+
+
+def test_regex_matchers_are_anchored_at_both_ends_like_alertmanager():
+    api = Matcher("pod", "api", is_regex=True)
+    assert api.matches_value("api")
+    assert not api.matches_value("xapi") and not api.matches_value("apix")
+    # ^(?:a|ab)$: the alternation is inside the anchors, so "ab" matches.
+    assert Matcher("pod", "a|ab", is_regex=True).matches_value("ab")
+    assert not Matcher("pod", "a|ab", is_regex=True).matches_value("abc")
+    # Negative regex matchers use the same anchoring.
+    assert Matcher("pod", "api", is_regex=True, is_equal=False).matches_value("xapi")
+
+
+def test_lone_surrogates_are_refused_in_patterns_and_do_not_raise_in_values():
+    assert silences.regex_problem("api-\ud800") == "is not valid UTF-8"
+    with pytest.raises(SilenceInputError, match="UTF-8"):
+        validate_matchers([Matcher("node", "worker-5"), Matcher("pod", "api-\ud800", is_regex=True)])
+    assert Matcher("pod", "api-.*", is_regex=True).matches_value("api-\ud800")
+    assert not Matcher("pod", "api-x", is_regex=True).matches_value("api-\ud800")
+
+
+def test_large_counted_repeats_are_refused():
+    assert silences.max_repeat_count("a{3}b{2,7}c{4,}") == 7
+    assert silences.max_repeat_count("[{]x\\{500}") == 0
+    validate_matchers([Matcher("node", "worker-5"), Matcher("pod", "api-[0-9]{1,100}", is_regex=True)])
+    with pytest.raises(SilenceInputError, match="more than 100 times"):
+        validate_matchers([Matcher("node", "worker-5"), Matcher("pod", "a{101}", is_regex=True)])
+
+
 @pytest.mark.parametrize(
     "pattern",
     [

@@ -22,15 +22,19 @@ Safety rules (``validate_matchers``):
   than ``silence_max_hidden_fraction`` (default 25%) once it hides at least
   ``silence_fraction_min_alerts`` (default 3). The floor keeps a 2-alert
   maintenance silence possible on a quiet cluster.
-- Regexes are compiled and matched with RE2 (``google-re2``), the engine
-  Alertmanager itself uses (Go's ``regexp``), so matching takes linear time
-  and what Pulse counts as hidden is what Alertmanager will hide. A pattern
-  RE2 rejects (backreferences, lookarounds) is refused here, as Alertmanager
-  would refuse it. On top of that, as defence in depth: at most
-  ``MAX_REGEX_LEN`` characters, no quantified groups, at most
+- Regexes are compiled and matched only with RE2 (``google-re2``, the C++
+  library). RE2 runs in time linear in the input, and that is what keeps
+  matching fast; nothing else here bounds it. Alertmanager uses Go's
+  ``regexp``, which implements the same RE2 syntax, so a pattern RE2 rejects
+  (backreferences, lookarounds) is refused here as Alertmanager would refuse
+  it, and what Pulse counts as hidden should be what Alertmanager hides; the
+  two implementations differ in a few corners, so this is close parity, not a
+  guarantee. On top of that, as simple input limits (not a complexity
+  bound: bounded repeats such as ``.{0,100}`` are not counted as unbounded):
+  at most ``MAX_REGEX_LEN`` characters, no quantified groups, at most
   ``MAX_UNBOUNDED_QUANTIFIERS`` unbounded quantifiers (``*``, ``+``,
-  ``{n,}``), and label values longer than ``MAX_MATCH_VALUE_LEN`` are compared
-  by their prefix.
+  ``{n,}``), no counted repeat above ``MAX_REPEAT_COUNT``, and label values
+  longer than ``MAX_MATCH_VALUE_LEN`` are compared by their prefix.
 """
 
 from __future__ import annotations
@@ -62,12 +66,15 @@ MAX_MATCH_VALUE_LEN = 1024
 # anyone confirmed anything. RE2 matches in time linear in the input.
 _RE2_OPTIONS = re2.Options()
 _RE2_OPTIONS.log_errors = False  # a refused pattern is reported to the caller, not logged by the C++ library
-# Defence in depth on top of RE2: no quantified group, (a+)+ or (a|b)*, and at
-# most this many unbounded quantifiers per pattern. A narrow silence needs
-# neither; listing the values is clearer to the person approving it.
+# Input limits on top of RE2 (RE2 is what bounds the time): no quantified
+# group, (a+)+ or (a|b)*, at most this many unbounded quantifiers per pattern,
+# and no counted repeat above MAX_REPEAT_COUNT. A narrow silence needs none of
+# them; listing the values is clearer to the person approving it.
 _QUANTIFIED_GROUP_RE = re.compile(r"\)\s*[*+?{]")
 MAX_UNBOUNDED_QUANTIFIERS = 2
+MAX_REPEAT_COUNT = 100
 _UNBOUNDED_BRACE_RE = re.compile(r"\{\d*,\}")
+_COUNTED_REPEAT_RE = re.compile(r"\{(\d+)(?:,(\d*))?\}")
 ANCHOR_LABELS = frozenset(
     {"alertname", "node", "pod", "deployment", "statefulset", "daemonset", "job_name", "persistentvolumeclaim"}
 )
@@ -109,11 +116,16 @@ class Matcher:
         # Bounded input: a pathological label value cannot make matching slow.
         value = value[:MAX_MATCH_VALUE_LEN]
         if self.is_regex:
+            # Cached per pattern, so checking every firing alert costs one lookup.
             if regex_problem(self.value):
                 return False
             compiled, _ = _re2_compile(self.value)
             if compiled is None:
                 return False
+            # RE2 takes UTF-8; a lone surrogate (valid JSON, never a Go string)
+            # is compared as U+FFFD rather than raising.
+            if not value.isascii():
+                value = value.encode("utf-8", "replace").decode("utf-8")
             # Alertmanager anchors silence regexes at both ends: ^(?:re)$.
             hit = compiled.fullmatch(value) is not None
         else:
@@ -159,11 +171,16 @@ def matchers_from_api(raw: list[dict]) -> list[Matcher]:
     ]
 
 
+_NOT_UTF8 = "is not valid UTF-8"
+
+
 @functools.lru_cache(maxsize=512)
 def _re2_compile(pattern: str) -> tuple[Any, str | None]:
     """The RE2 program for ``pattern`` and None, or None and RE2's reason for rejecting it."""
     try:
         return re2.compile(pattern, options=_RE2_OPTIONS), None
+    except UnicodeEncodeError:  # a lone surrogate cannot be passed to RE2
+        return None, _NOT_UTF8
     except re2.error as e:
         reason = e.args[0] if e.args else e
         if isinstance(reason, bytes):
@@ -172,8 +189,21 @@ def _re2_compile(pattern: str) -> tuple[Any, str | None]:
 
 
 def count_unbounded_quantifiers(pattern: str) -> int:
-    """``*``, ``+`` and ``{n,}`` outside character classes and escapes."""
+    """``*``, ``+`` and ``{n,}`` outside character classes and escapes.
+
+    Bounded repeats (``{n}``, ``{n,m}``) are not counted; see ``max_repeat_count``.
+    """
+    return _scan_quantifiers(pattern)[0]
+
+
+def max_repeat_count(pattern: str) -> int:
+    """The largest count in a ``{n}``/``{n,m}``/``{n,}`` repeat outside classes and escapes (0 if none)."""
+    return _scan_quantifiers(pattern)[1]
+
+
+def _scan_quantifiers(pattern: str) -> tuple[int, int]:
     count = 0
+    largest = 0
     i, n = 0, len(pattern)
     in_class = False
     while i < n:
@@ -200,20 +230,29 @@ def count_unbounded_quantifiers(pattern: str) -> int:
             continue
         elif c in "*+" or (c == "{" and _UNBOUNDED_BRACE_RE.match(pattern, i)):
             count += 1
+            if c == "{" and (m := _COUNTED_REPEAT_RE.match(pattern, i)):
+                largest = max(largest, int(m.group(1)))
+        elif c == "{" and (m := _COUNTED_REPEAT_RE.match(pattern, i)):
+            largest = max(largest, int(m.group(1)), int(m.group(2) or 0))
         i += 1
-    return count
+    return count, largest
 
 
+@functools.lru_cache(maxsize=512)
 def regex_problem(pattern: str) -> str | None:
     """Why this regex is not accepted, or None.
 
-    Refused: longer than ``MAX_REGEX_LEN``; rejected by RE2 (Alertmanager's
-    engine, so Alertmanager would reject it too); a quantified group; more
-    than ``MAX_UNBOUNDED_QUANTIFIERS`` unbounded quantifiers.
+    Refused: longer than ``MAX_REGEX_LEN``; rejected by RE2 (the same syntax
+    as Go's regexp, which Alertmanager uses, so Alertmanager would almost
+    certainly reject it too); a quantified group; more than
+    ``MAX_UNBOUNDED_QUANTIFIERS`` unbounded quantifiers; a counted repeat
+    above ``MAX_REPEAT_COUNT``.
     """
     if len(pattern) > MAX_REGEX_LEN:
         return f"is longer than {MAX_REGEX_LEN} characters"
     _, error = _re2_compile(pattern)
+    if error == _NOT_UTF8:
+        return error
     if error is not None:
         return (
             f"does not compile as an Alertmanager (RE2) regex: {error}. RE2 has no backreferences or "
@@ -226,6 +265,8 @@ def regex_problem(pattern: str) -> str | None:
             f"has more than {MAX_UNBOUNDED_QUANTIFIERS} unbounded repeats (*, + or {{n,}}); "
             "name the values or use a shorter pattern"
         )
+    if max_repeat_count(pattern) > MAX_REPEAT_COUNT:
+        return f"repeats something more than {MAX_REPEAT_COUNT} times ({{n,m}}); name the values instead"
     return None
 
 

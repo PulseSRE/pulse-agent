@@ -23,7 +23,7 @@ dependencies = [
     # RE2 (linear-time, Alertmanager's own regex engine) for silence matchers.
     # Ships manylinux_2_28 wheels for cp312 on x86_64 and aarch64, so the UBI9
     # image build needs no compiler.
-    "google-re2>=1.1",
+    "google-re2>=1.1.20240702,<2",
 ]
 
 [project.optional-dependencies]
