@@ -5,6 +5,8 @@ ARG DEPS_HASH=unknown
 LABEL deps-hash=$DEPS_HASH
 
 COPY pyproject.toml .
-RUN pip install --no-cache-dir anthropic[vertex] kubernetes rich fastapi uvicorn[standard] websockets cryptography
+# Not kept in sync with pyproject.toml (it lacks psycopg2-binary, asyncpg, temporalio and others);
+# Dockerfile.fast reinstalls with --no-deps, so anything missing here is missing at runtime.
+RUN pip install --no-cache-dir anthropic[vertex] kubernetes rich fastapi uvicorn[standard] websockets cryptography "google-re2>=1.1.20240702,<2"
 
 USER 1001

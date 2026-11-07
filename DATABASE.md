@@ -122,7 +122,7 @@ Full DDL: `sre_agent/db_schema.py`
 
 ## Migrations
 
-Migrations are forward-only and recorded in `schema_migrations`. The current registry ends at **042**. The migration registry is authoritative, including changes to existing tables:
+Migrations are forward-only and recorded in `schema_migrations`. The current registry ends at **044**. The migration registry is authoritative, including changes to existing tables:
 
 | Version | Name |
 |---|---|
