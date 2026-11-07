@@ -5,9 +5,12 @@ equivalent, and the API server's service proxy cannot carry the caller's
 token to the ``kube-rbac-proxy`` in front of ``alertmanager-main``. So this
 talks to the same in-cluster endpoint the UI's ``/api/alertmanager/`` proxy
 does (``alertmanager-main.openshift-monitoring.svc:9094``), with the same
-bearer token rule as :mod:`sre_agent.prometheus`: the caller's forwarded
-token when a request runs on someone's behalf, the service account's only
-when there is no caller (token forwarding off). Alertmanager's proxy then
+bearer token rule as :mod:`sre_agent.prometheus` for reads: the caller's
+forwarded token when a request runs on someone's behalf, the service
+account's only when there is no caller (token forwarding off). Writes
+(creating or expiring a silence) are only ever sent with the caller's token:
+without one the request is refused here and never falls back to the service
+account. Alertmanager's proxy then
 applies the caller's own RBAC (``monitoring-alertmanager-view`` to read,
 ``monitoring-alertmanager-edit`` to create or expire a silence).
 
@@ -35,12 +38,16 @@ DEFAULT_URL = "https://alertmanager-main.openshift-monitoring.svc:9094"
 class AlertmanagerError(RuntimeError):
     """An Alertmanager request failed. ``status`` is 0 when it never answered."""
 
-    def __init__(self, status: int, detail: str):
+    def __init__(self, status: int, detail: str, *, local: bool = False):
         super().__init__(detail)
         self.status = status
         self.detail = detail
+        # Refused by Pulse before anything was sent; ``detail`` says why.
+        self.local = local
 
     def describe(self) -> str:
+        if self.local:
+            return self.detail
         if self.status == 401:
             return "Alertmanager did not accept your credentials (401). Sign in again."
         if self.status == 403:
@@ -61,13 +68,27 @@ def _base_url() -> str:
     return (get_settings().prometheus.alertmanager_url or DEFAULT_URL).rstrip("/")
 
 
-def _token() -> str:
+_READ_METHODS = frozenset({"GET", "HEAD"})
+
+
+def _token(method: str = "GET") -> str:
     from .k8s_client import get_current_user_token
     from .prometheus import get_prometheus_client
 
-    # Same order as PrometheusClient.request: the caller first, the service
-    # account only when no caller is attached to this request.
-    return get_current_user_token() or get_prometheus_client()._get_token()
+    user_token = get_current_user_token()
+    if method.upper() not in _READ_METHODS:
+        # A write is sent as the caller or not at all, never as the service account.
+        if not user_token:
+            raise AlertmanagerError(
+                401,
+                "Your access token did not reach Pulse with this request, and silences are never changed as "
+                "Pulse's service account. Sign in again and retry.",
+                local=True,
+            )
+        return user_token
+    # Reads: same order as PrometheusClient.request, the caller first, the
+    # service account only when no caller is attached to this request.
+    return user_token or get_prometheus_client()._get_token()
 
 
 def request(method: str, path: str, body: Any = None, *, params: dict | None = None, timeout: int = 10) -> Any:
@@ -82,7 +103,7 @@ def request(method: str, path: str, body: Any = None, *, params: dict | None = N
     if body is not None:
         data = json.dumps(body).encode()
         headers["Content-Type"] = "application/json"
-    token = _token()
+    token = _token(method)
     if token:
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
