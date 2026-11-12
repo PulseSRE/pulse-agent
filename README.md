@@ -231,6 +231,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 | `PULSE_AGENT_AUTOFIX_ENABLED` | Enable monitor auto-fix | `true` |
 | `PULSE_AGENT_MAX_TRUST_LEVEL` | Server monitor trust level (0-4); effective trust is floored here. Also accepts `PULSE_AGENT_TRUST_LEVEL`, the name the operator injects from `spec.agent.trustLevel` | `2` (ask first) |
 | `PULSE_AGENT_PROTECTED_NAMESPACES` | Protected namespaces for the pod-deletion deny rule on chat and auto-fix paths (comma list, `*` wildcards) | `production,openshift-*,kube-system` |
+| `PULSE_AGENT_PROPOSAL_NAMESPACES` | Namespaces where a chat write is proposed, and runs only when the user approves it as its own message (comma list, `*` wildcards; `""` disables) | the protected namespaces |
 | `PULSE_AGENT_ALLOW_NODE_OPS` | Allow node-level operations (cordon/drain) through chat confirmation | `false` |
 | `PULSE_AGENT_RECURRENCE_WINDOW` | Seconds after a verified fix within which the same problem returning is recorded as a recurrence | `1800` |
 | `PULSE_AGENT_SCAN_INTERVAL` | Monitor scan interval (seconds) | `60` |

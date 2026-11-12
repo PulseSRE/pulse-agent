@@ -285,6 +285,7 @@ Repository agent definitions with hooks in `.claude/settings.json`:
 | `PULSE_AGENT_HARNESS` | Enable harness optimizations | `1` |
 | `PULSE_AGENT_MAX_TRUST_LEVEL` | Server-side max trust level (0-4) | `2` |
 | `PULSE_AGENT_PROTECTED_NAMESPACES` | Namespaces where raw pod deletion is denied (comma list, `*` wildcards; empty disables) | `production,openshift-*,kube-system` |
+| `PULSE_AGENT_PROPOSAL_NAMESPACES` | Namespaces where a chat write is a `write_proposal` the user approves as its own message, not a confirm mid-turn (`proposals.py`; `""` disables) | the protected namespaces |
 | `PULSE_AGENT_ALLOW_NODE_OPS` | Break-glass: permit `drain_node`/`cordon_node` | `false` |
 | `PULSE_AGENT_MEMORY` | Enable self-improving memory | `1` (enabled) |
 | `PULSE_AGENT_MAX_DAILY_REQUESTED_INVESTIGATIONS` | Daily allowance for investigations people start (`POST /inbox/{id}/investigate`), separate from the monitor's | `20` |

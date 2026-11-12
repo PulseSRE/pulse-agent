@@ -42,6 +42,7 @@ from .harness import (
 from .inbox import create_inbox_task
 from .k8s_tools import ALL_TOOLS as _K8S_TOOLS
 from .predict_tools import PREDICT_TOOLS
+from .proposals import proposed_result, requires_proposal
 from .runbooks import ALERT_TRIAGE_CONTEXT, RUNBOOKS  # noqa: F401 — RUNBOOKS re-exported for backward compat
 from .self_tools import (
     create_skill,
@@ -1230,6 +1231,32 @@ async def run_agent_streaming(
                             "turn_number": iterations,
                         },
                     )
+                    continue
+                # In a proposal namespace a write is offered, not run: the user
+                # approves it as its own message, which starts a new turn (see
+                # proposals.py). Only callers that can show a proposal opt in.
+                proposal_ns = requires_proposal(block.input) if event_bus.handles_proposals else None
+                if proposal_ns:
+                    proposal_id = await event_bus.on_proposal(block.name, block.input, proposal_ns)
+                    reason = proposed_result(block.name, proposal_ns, proposal_id)
+                    results_map[block.id] = (reason, None)
+                    await event_bus.on_tool_result(
+                        {
+                            "tool_name": block.name,
+                            "tool_use_id": block.id,
+                            "call_ref": call_refs.get(block.id, ""),
+                            "input": block.input,
+                            "status": "proposed" if proposal_id else "denied",
+                            "error_message": None if proposal_id else reason,
+                            "error_category": None if proposal_id else "proposal_unavailable",
+                            "duration_ms": 0,
+                            "result_bytes": len(reason),
+                            "was_confirmed": False,
+                            "turn_number": iterations,
+                        },
+                    )
+                    if not proposal_id:
+                        failed_ids.add(block.id)
                     continue
                 confirmed = await event_bus.on_confirm(block.name, block.input)
                 if not is_explicit_approval(confirmed):

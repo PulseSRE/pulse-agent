@@ -124,6 +124,7 @@ class PulseAgentAdapter:
 
         from sre_agent import tool_contracts
         from sre_agent.agent import create_async_client, run_agent_streaming
+        from sre_agent.event_bus import EventBus
         from sre_agent.orchestrator import build_orchestrated_config
 
         # Route the task through pulse's real skill router, as production does
@@ -153,6 +154,15 @@ class PulseAgentAdapter:
             tool.approve(tool_input)
             return True
 
+        proposed: list[str] = []
+
+        async def on_proposal(tool_name: str, tool_input: dict, namespace: str) -> str:
+            # As in chat, a write in a proposal namespace is offered, not run.
+            # The task is one message: no later turn approves it, so it never
+            # reaches the sim (a person approving would be a new task).
+            proposed.append(tool_name)
+            return f"p_bench_{len(proposed)}"
+
         async def _run() -> str:
             client = create_async_client()
             try:
@@ -163,7 +173,7 @@ class PulseAgentAdapter:
                     tool_defs=tool_defs,
                     tool_map=tool_map,
                     write_tools=write_tools & offered,
-                    on_confirm=on_confirm,
+                    event_bus=EventBus.from_callbacks(on_confirm=on_confirm, on_proposal=on_proposal),
                     mode="sre",
                 )
             finally:

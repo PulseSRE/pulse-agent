@@ -553,6 +553,20 @@ All WebSocket endpoints require `PULSE_AGENT_WS_TOKEN` via the `token` query par
 | `approved` | `boolean` | yes | Whether the user approved the action |
 | `nonce` | `string` | yes | Must match the nonce from `confirm_request` (replay prevention) |
 
+#### `approve_proposal` / `reject_proposal` — Answer a `write_proposal`
+
+```json
+{"type": "approve_proposal", "id": "p_3f9a1c2b7d4e", "nonce": "abc123..."}
+{"type": "reject_proposal", "id": "p_3f9a1c2b7d4e"}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | `string` | yes | The `id` from `write_proposal` |
+| `nonce` | `string` | approve only | Must match the proposal's `nonce` |
+
+An approval runs exactly the proposed tool and input, once, as the signed-in user, through the same path as a confirmed write (deny policy, user-token check, verification contract, write ledger). The server answers with `proposal_resolved`, then, if it ran, starts a normal agent turn whose user message says what was approved and what it returned, so the agent checks the result. It counts against the message rate limit. A reject only closes the proposal; no turn runs.
+
 #### `clear` — Clear conversation history
 
 ```json
@@ -652,6 +666,42 @@ See [Component Specs](#component-specs) for all `spec.kind` values.
 - `create_silence`: `{"kind": "silence_create", "valid": bool, "error"?: str, "matchers": [{"name", "value", "isRegex", "isEqual", "text"}], "durationMinutes", "duration", "startsAt", "endsAt", "createdBy", "comment", "hides": [{"alertname", "severity", "namespace", "labels", "startsAt"}] | null, "hidesError"?: str, "undo"}`. `createdBy` is the signed-in user (never model input); `valid: false` with `error` means the tool will refuse (empty or all-matching matchers, Watchdog, duration outside 5 min–7 days, no comment, unknown user); `hides: null` with `hidesError` means the firing alerts could not be read, which is "unknown", not "none".
 - With `PULSE_AGENT_TOKEN_FORWARDING=false` both tools refuse (they never write as the service account) and the preview is `valid: false` with that reason. `valid: false` also covers matchers that are too broad (no exact match on `alertname`, a resource label or an application namespace), Watchdog, more than 10 / 25% of the firing alerts (settings `silence_max_hidden_alerts`, `silence_max_hidden_fraction`, `silence_fraction_min_alerts`), and firing alerts that could not be read (then `hides: null` as well).
 - `expire_silence`: `{"kind": "silence_expire", "valid": bool, "error"?: str, "silenceId", "state", "matchers": [...], "createdBy", "comment", "endsAt"}`.
+
+#### `write_proposal` — A write offered for approval, not run
+
+In a proposal namespace (`PULSE_AGENT_PROPOSAL_NAMESPACES`; unset means `PULSE_AGENT_PROTECTED_NAMESPACES`, `""` means none) a write tool the agent calls in `/ws/agent` is not run and no `confirm_request` is sent. The turn continues and ends; the write runs only if the user sends `approve_proposal`, which starts a new turn.
+
+```json
+{
+  "type": "write_proposal",
+  "id": "p_3f9a1c2b7d4e",
+  "nonce": "abc123...",
+  "tool": "restart_deployment",
+  "input": {"namespace": "production", "name": "payments-api"},
+  "namespace": "production",
+  "expiresAt": 1763000000000,
+  "preview": {}
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Proposal id, echoed in `approve_proposal` / `reject_proposal` |
+| `nonce` | `string` | Echoed in `approve_proposal` (replay prevention) |
+| `tool` / `input` | `string` / `object` | Exactly what will run if approved |
+| `namespace` | `string` | The namespace that made this a proposal |
+| `expiresAt` | `number` | Epoch ms; after it an approval runs nothing (15 min) |
+| `preview` | `object?` | As on `confirm_request` |
+
+Proposals are held in memory per WebSocket session (at most 10): a reconnect or an agent restart drops them, and an approval of a dropped one returns `status: "not_found"`.
+
+#### `proposal_resolved` — What happened to a proposal
+
+```json
+{"type": "proposal_resolved", "id": "p_3f9a1c2b7d4e", "status": "applied", "message": "Restarted deployment payments-api"}
+```
+
+`status` is `applied` (it ran), `failed` (it ran and the tool, the deny policy or RBAC refused it; `message` says why), `rejected`, `expired`, `not_found` or `nonce_mismatch` (nothing ran).
 
 #### Alert triage
 

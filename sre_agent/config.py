@@ -38,6 +38,9 @@ class AgentConfig(BaseModel):
     # Harness-level deny policy (sre_agent/policy.py): rules that hold
     # regardless of which model is configured or what a chat approver clicks.
     protected_namespaces: str = "production,openshift-*,kube-system"
+    # Chat writes in these namespaces are proposals the user approves in a
+    # separate message (sre_agent/proposals.py). None: the protected list.
+    proposal_namespaces: str | None = None
     allow_node_ops: bool = False
     # Grammar-constrained (strict) inputs for write tools. Off until verified
     # against the configured provider: an API that rejects a strict schema
@@ -206,6 +209,7 @@ class PulseAgentSettings(BaseSettings):
     silence_max_hidden_fraction: float = 0.25
     silence_fraction_min_alerts: int = 3
     protected_namespaces: str = "production,openshift-*,kube-system"
+    proposal_namespaces: str | None = None
     allow_node_ops: bool = False
     strict_write_tools: bool = False
     render_url: str = ""
@@ -312,6 +316,7 @@ class PulseAgentSettings(BaseSettings):
             silence_max_hidden_fraction=self.silence_max_hidden_fraction,
             silence_fraction_min_alerts=self.silence_fraction_min_alerts,
             protected_namespaces=self.protected_namespaces,
+            proposal_namespaces=self.proposal_namespaces,
             allow_node_ops=self.allow_node_ops,
             strict_write_tools=self.strict_write_tools,
             render_url=self.render_url,
@@ -387,6 +392,12 @@ class PulseAgentSettings(BaseSettings):
 
     def get_protected_namespaces(self) -> list[str]:
         return [s.strip() for s in self.protected_namespaces.split(",") if s.strip()]
+
+    def get_proposal_namespaces(self) -> list[str]:
+        """Namespaces where a chat write is a proposal; unset means the protected ones, "" means none."""
+        if self.proposal_namespaces is None:
+            return self.get_protected_namespaces()
+        return [s.strip() for s in self.proposal_namespaces.split(",") if s.strip()]
 
     @field_validator("model")
     @classmethod

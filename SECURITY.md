@@ -92,6 +92,7 @@ they do not depend on the model:
 | Rule | Default | Override |
 |------|---------|----------|
 | `delete_pod` denied in protected namespaces | `production`, `openshift-*`, `kube-system` | `PULSE_AGENT_PROTECTED_NAMESPACES` (comma list, `*` wildcards; empty disables) |
+| A chat write there is a proposal: not run in that turn, run once only on the user's separate approval | the protected namespaces | `PULSE_AGENT_PROPOSAL_NAMESPACES` (`""` disables) |
 | `drain_node` / `cordon_node` require break-glass | denied | `PULSE_AGENT_ALLOW_NODE_OPS=1` |
 
 `restart_deployment` remains available in protected namespaces by design: it is

@@ -15,6 +15,7 @@ from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from ..config import get_settings
 from ..monitor import MonitorClient, get_cluster_monitor, get_fix_history
 from ..orchestrator import build_orchestrated_config, classify_intent, fix_typos
+from ..proposals import get_store as get_proposal_store
 from .agent_ws import (
     MAX_MESSAGE_SIZE,
     MAX_MESSAGES_PER_MINUTE,
@@ -25,6 +26,7 @@ from .agent_ws import (
     _pending_timestamps,
     _run_agent_ws,
     _ws_alive,
+    handle_proposal_message,
 )
 from .auth import _get_current_user, _verify_ws_token, extract_user_token, user_token_missing
 from .context import _apply_style_hint, _build_context_prefix
@@ -237,6 +239,14 @@ async def websocket_agent(websocket: WebSocket, mode: str):
                 break  # Client disconnected
 
             msg_type = data.get("type")
+            if msg_type in ("approve_proposal", "reject_proposal"):
+                # An approved proposal ran; the agent gets the user's turn
+                # saying so, and checks the result like any other turn.
+                approved_turn = await handle_proposal_message(websocket, session_id, data, user_token)
+                if approved_turn is None:
+                    continue
+                data = {"type": "message", "content": approved_turn}
+                msg_type = "message"
             if msg_type != "message":
                 continue
 
@@ -394,6 +404,7 @@ async def websocket_agent(websocket: WebSocket, mode: str):
         _pending_nonces.pop(session_id, None)
         _pending_timestamps.pop(session_id, None)
         _ws_alive.pop(session_id, None)
+        get_proposal_store().drop_session(session_id)
         _active_agent_count = max(0, _active_agent_count - 1)
         structlog.contextvars.unbind_contextvars("session_id", "user", "endpoint")
 
@@ -462,6 +473,14 @@ async def websocket_auto_agent(websocket: WebSocket):
                 break  # Client disconnected
 
             msg_type = data.get("type")
+            if msg_type in ("approve_proposal", "reject_proposal"):
+                # An approved proposal ran; the agent gets the user's turn
+                # saying so, and checks the result like any other turn.
+                approved_turn = await handle_proposal_message(websocket, session_id, data, user_token)
+                if approved_turn is None:
+                    continue
+                data = {"type": "message", "content": approved_turn}
+                msg_type = "message"
             if msg_type != "message":
                 continue
 
@@ -931,6 +950,7 @@ async def websocket_auto_agent(websocket: WebSocket):
         _pending_nonces.pop(session_id, None)
         _pending_timestamps.pop(session_id, None)
         _ws_alive.pop(session_id, None)
+        get_proposal_store().drop_session(session_id)
         _active_agent_count = max(0, _active_agent_count - 1)
         structlog.contextvars.unbind_contextvars("session_id", "user", "endpoint")
 

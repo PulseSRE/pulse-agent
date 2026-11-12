@@ -116,6 +116,27 @@ class SkillExecutor:
             finally:
                 _pending_confirms.pop(self.session_id, None)
 
+        async def on_proposal(tool_name: str, tool_input: dict, namespace: str) -> str | None:
+            # Same rule as on_confirm: a parallel secondary skill offers no writes.
+            if skill_tag and not write_tools:
+                return None
+            if not _ws_alive.get(self.session_id, True):
+                return None
+            from ..proposals import describe, get_store
+
+            proposal = get_store().create(self.session_id, tool_name, tool_input, namespace, config["tool_map"])
+            event = describe(proposal)
+            try:
+                from ..confirm_preview import build_preview_async
+
+                preview = await build_preview_async(tool_name, tool_input, self._user_token)
+                if preview is not None:
+                    event["preview"] = preview
+            except Exception:
+                logger.debug("Proposal preview failed for %s", tool_name, exc_info=True)
+            await _ws_send(event)
+            return proposal.id
+
         _base_tool_result_handler = _build_tool_result_handler(self.session_id, skill_tag or mode, write_tools)
 
         async def on_tool_result(info: dict):
@@ -156,6 +177,7 @@ class SkillExecutor:
             on_component=on_component,
             on_tool_result=on_tool_result,
             on_usage=on_usage,
+            on_proposal=on_proposal,
         )
 
         # Let create_dashboard check this turn's widgets before it saves.
@@ -845,3 +867,78 @@ def _make_receive_loop(
             await incoming.put(None)
 
     return _receive_loop
+
+
+_APPROVAL_RESULT_CHARS = 3000
+
+
+async def handle_proposal_message(
+    websocket: WebSocket, session_id: str, data: dict, user_token: str | None
+) -> str | None:
+    """Answer ``approve_proposal`` / ``reject_proposal``.
+
+    Returns the user turn to run next (an approval that ran), or None when
+    there is nothing to run. An approval runs exactly the proposed call —
+    the model does not re-decide it — through the same execution path as a
+    confirmed write: the deny policy, the user-token check, verification
+    contracts and the write ledger all apply. Then the agent gets a turn in
+    which the user says what they approved and what happened, so it checks
+    the result rather than assuming it.
+    """
+    from ..agent import _execute_tool_with_timeout, _in_caller_context
+    from ..proposals import approval_message, get_store
+
+    msg_type = data.get("type")
+    proposal_id = data.get("id")
+    if not isinstance(proposal_id, str) or not proposal_id:
+        await websocket.send_json({"type": "error", "message": "Proposal id missing."})
+        return None
+
+    if msg_type == "reject_proposal":
+        get_store().discard(session_id, proposal_id)
+        await websocket.send_json({"type": "proposal_resolved", "id": proposal_id, "status": "rejected"})
+        return None
+
+    proposal, reason = get_store().take(session_id, proposal_id, data.get("nonce", ""))
+    if proposal is None:
+        if reason == "nonce_mismatch":
+            logger.warning("Proposal nonce mismatch -- possible replay (session=%s)", session_id)
+        message = {
+            "not_found": "This proposal is no longer open (already answered, or the session restarted). Ask again.",
+            "expired": "This proposal expired. Nothing ran. Ask again to get a fresh one.",
+            "nonce_mismatch": "This approval did not match the proposal. Nothing ran.",
+        }.get(reason, "Nothing ran.")
+        await websocket.send_json(
+            {"type": "proposal_resolved", "id": proposal_id, "status": reason or "failed", "message": message}
+        )
+        return None
+
+    await websocket.send_json({"type": "tool_use", "tool": proposal.tool})
+    loop = asyncio.get_running_loop()
+    try:
+        text, _component, meta = await loop.run_in_executor(
+            None,
+            _in_caller_context(_execute_tool_with_timeout),
+            proposal.tool,
+            proposal.input,
+            proposal.tool_map,
+            None,
+            user_token,
+            None,
+        )
+    except Exception as e:
+        logger.warning("Approved proposal %s failed to run", proposal.id, exc_info=True)
+        text, meta = f"Error: {type(e).__name__}", {"status": "error"}
+    ok = meta.get("status") == "success"
+    result_text = text if isinstance(text, str) else str(text)
+    if len(result_text) > _APPROVAL_RESULT_CHARS:
+        result_text = result_text[:_APPROVAL_RESULT_CHARS] + " ... (truncated)"
+    await websocket.send_json(
+        {
+            "type": "proposal_resolved",
+            "id": proposal.id,
+            "status": "applied" if ok else "failed",
+            "message": result_text,
+        }
+    )
+    return approval_message(proposal, result_text, ok)

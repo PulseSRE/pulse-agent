@@ -5,6 +5,9 @@ parameters on ``run_agent_streaming()``.  Existing callers pass individual
 callbacks; ``EventBus.from_callbacks()`` wraps them transparently.
 
 ``on_confirm`` is special — it's bidirectional (returns ``bool``).
+``on_proposal`` is optional and also returns a value: the id of the proposal
+it offered the user, or None. A caller that sets it opts in to proposal
+namespaces (see ``proposals.py``); one that does not keeps the old behaviour.
 All other events are fire-and-forget.
 """
 
@@ -56,6 +59,18 @@ class EventBus:
     _on_component: Any = None
     _on_tool_result: Any = None
     _on_usage: Any = None
+    _on_proposal: Any = None
+
+    @property
+    def handles_proposals(self) -> bool:
+        return self._on_proposal is not None
+
+    async def on_proposal(self, tool_name: str, input_data: dict, namespace: str) -> str | None:
+        """Offer a write as a proposal; return its id, or None if none was offered."""
+        if self._on_proposal is None:
+            return None
+        result = await _invoke_optional(self._on_proposal, tool_name, input_data, namespace)
+        return result if isinstance(result, str) and result else None
 
     async def on_text(self, text: str) -> None:
         if self._on_text is not None:
@@ -99,6 +114,7 @@ class EventBus:
         on_component: Any = None,
         on_tool_result: Any = None,
         on_usage: Any = None,
+        on_proposal: Any = None,
     ) -> EventBus:
         """Create an EventBus from individual callback functions."""
         return cls(
@@ -109,4 +125,5 @@ class EventBus:
             _on_component=on_component,
             _on_tool_result=on_tool_result,
             _on_usage=on_usage,
+            _on_proposal=on_proposal,
         )
