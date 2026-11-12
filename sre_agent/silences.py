@@ -123,7 +123,8 @@ class Matcher:
             if compiled is None:
                 return False
             # RE2 takes UTF-8; a lone surrogate (valid JSON, never a Go string)
-            # is compared as U+FFFD rather than raising.
+            # is replaced with "?" (encode(..., "replace")) rather than raising.
+            # Alertmanager never sends one, so only the not-raising matters.
             if not value.isascii():
                 value = value.encode("utf-8", "replace").decode("utf-8")
             # Alertmanager anchors silence regexes at both ends: ^(?:re)$.
