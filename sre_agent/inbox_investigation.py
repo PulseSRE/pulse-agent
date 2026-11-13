@@ -7,7 +7,7 @@ so a task created and then "investigated" never got an investigation and
 ``GET /inbox/{id}/investigation`` stayed 404 for good.
 
 This module starts the investigation itself, through the same pipeline inbox
-triage uses (``investigation_pipeline.investigate``, freeform, read-only),
+triage uses (``investigation_pipeline.investigate``, read-only),
 admitted by the monitor's budget, cooldown and concurrency rules
 (``investigation_runner.admit_requested_investigation``). It also keeps one
 record of the run per item, in-process and in the item's metadata
@@ -16,6 +16,14 @@ record of the run per item, in-process and in the item's metadata
 * a second request while a run is in progress returns that run, not a new one;
 * ``GET /inbox/{id}/investigation`` can say ``queued``/``running``/``done``/
   ``failed`` (with the error) and not only return a finished report.
+
+Strategy: an item with a known category runs the monitor's plan template for
+it (``monitor.plan_executor.template_for``, the selection the scan uses), so
+a page's Diagnose of a crash-looping pod runs ``crashloop-resolution`` as a
+monitor finding would. The category is the monitor finding's for an item the
+monitor raised, else the client's ``metadata.category_hint`` when it is one of
+``PLAN_CATEGORY_HINTS`` (anything else is ignored). With no category, no
+matching template, or a lookup that fails, the run is freeform as before.
 
 Reads use the requester's forwarded token when there is one: the run's task is
 created inside ``user_token_context``, and the agent loop carries the context
@@ -56,6 +64,40 @@ def in_requested_run() -> bool:
     return _requested_run.get()
 
 
+# The inbox item metadata key a client sets to say what kind of problem it is
+# asking about (pulse-ui's page Diagnose), and the values honoured: the
+# scanners' categories that have a plan template. Anything else is ignored, so
+# a client cannot pick an arbitrary template or put free text in the prompt.
+CATEGORY_HINT_KEY = "category_hint"
+PLAN_CATEGORY_HINTS = frozenset(("crashloop", "oom", "image_pull", "scheduling", "nodes"))
+
+
+def category_hint(item: dict[str, Any]) -> str | None:
+    """The item's client-supplied category, when it is one of ``PLAN_CATEGORY_HINTS``."""
+    md = item.get("metadata") or {}
+    hint = md.get(CATEGORY_HINT_KEY) if isinstance(md, dict) else None
+    return hint if isinstance(hint, str) and hint in PLAN_CATEGORY_HINTS else None
+
+
+def plan_template_for(item: dict[str, Any], finding: dict[str, Any]):
+    """The plan template to investigate ``item`` with, or None for a freeform run.
+
+    Only an item the monitor raised, or one with a valid category hint, gets a
+    plan: other items (generator tasks, plain tasks) carry a category that was
+    never meant to pick one. The template is the monitor's own choice for the
+    finding (``template_for``). A failed lookup falls back to freeform.
+    """
+    if not item.get("finding_id") and category_hint(item) is None:
+        return None
+    from .monitor.plan_executor import template_for
+
+    try:
+        return template_for(finding)
+    except Exception:
+        logger.warning("Plan template lookup failed for inbox item %s", item.get("id"), exc_info=True)
+        return None
+
+
 ACTIVE_STATES = frozenset(("queued", "running"))
 CLOSED_ITEM_STATES = frozenset(("resolved", "archived"))
 
@@ -76,6 +118,11 @@ class InvestigationRun:
     finished_at: int | None = None
     error: str = ""
     report_id: str = ""
+    # The plan template the run uses ("" for freeform) and its time budget, so
+    # a reader knows how long to wait (a plan's phases can take far longer
+    # than a freeform run).
+    plan_id: str = ""
+    timeout_seconds: int = 0
     task: asyncio.Task | None = field(default=None, repr=False, compare=False)
 
     def public(self) -> dict[str, Any]:
@@ -89,6 +136,9 @@ class InvestigationRun:
             "finished_at": self.finished_at,
             "error": self.error or None,
             "report_id": self.report_id or None,
+            "strategy": "plan" if self.plan_id else "freeform",
+            "plan_id": self.plan_id or None,
+            "timeout_seconds": self.timeout_seconds or None,
         }
 
 
@@ -172,7 +222,10 @@ def run_status(item: dict[str, Any]) -> dict[str, Any] | None:
         from .config import get_settings
 
         since = int(recorded.get("started_at") or recorded.get("queued_at") or 0)
-        limit = int(get_settings().monitor.investigation_timeout) + _STALE_GRACE_SECONDS
+        budget = recorded.get("timeout_seconds")
+        if not isinstance(budget, int) or budget <= 0:
+            budget = int(get_settings().monitor.investigation_timeout)
+        limit = budget + _STALE_GRACE_SECONDS
         if time.time() - since > limit:
             recorded["state"] = "failed"
             recorded["error"] = "Interrupted: the agent restarted before the investigation finished."
@@ -188,6 +241,7 @@ async def request_investigation(item_id: str, requested_by: str, user_token: str
     from . import inbox as _inbox
     from .inbox import claim_allowed, claim_and_investigate, finding_for_item, get_inbox_item
     from .monitor import get_cluster_monitor
+    from .monitor.investigation_pipeline import investigation_timeout
     from .monitor.investigation_runner import (
         InvestigationRefusal,
         admit_requested_investigation,
@@ -210,6 +264,8 @@ async def request_investigation(item_id: str, requested_by: str, user_token: str
 
     monitor = await get_cluster_monitor()
     finding = finding_for_item(item, monitor)
+    # Loading templates reads files the first time, so off the event loop.
+    template = await asyncio.to_thread(plan_template_for, item, finding)
     # The cost lookup reads the database; done here, off the event loop, it
     # leaves a fresh cached figure for the gate below.
     try:
@@ -222,6 +278,8 @@ async def request_investigation(item_id: str, requested_by: str, user_token: str
     run, created = reserve(item_id, requested_by, "request")
     if not created:
         return run.public()
+    run.plan_id = str(getattr(template, "id", "") or "")
+    run.timeout_seconds = int(investigation_timeout(template))
     try:
         admitted = admit_requested_investigation(
             monitor, finding, requester=requested_by, running_elsewhere=active_count() - 1
@@ -257,13 +315,13 @@ async def request_investigation(item_id: str, requested_by: str, user_token: str
     with user_token_context(user_token):
         marker = _requested_run.set(True)
         try:
-            run.task = asyncio.create_task(_execute(run, finding), name=f"inbox-investigate-{item_id}")
+            run.task = asyncio.create_task(_execute(run, finding, template), name=f"inbox-investigate-{item_id}")
         finally:
             _requested_run.reset(marker)
     return run.public()
 
 
-async def _execute(run: InvestigationRun, finding: dict[str, Any]) -> None:
+async def _execute(run: InvestigationRun, finding: dict[str, Any], template=None) -> None:
     from .monitor import investigation_pipeline
 
     run.state = "running"
@@ -274,7 +332,9 @@ async def _execute(run: InvestigationRun, finding: dict[str, Any]) -> None:
         logger.debug("Recording investigation start for %s failed", run.item_id, exc_info=True)
 
     try:
-        outcome = await investigation_pipeline.investigate(None, finding, attach_to_inbox=False)
+        # monitor=None: nothing is broadcast (plan progress included) and the
+        # item is updated here, not by the pipeline.
+        outcome = await investigation_pipeline.investigate(None, finding, template, attach_to_inbox=False)
         run.report_id = outcome.report_id
         if outcome.completed:
             await asyncio.to_thread(_attach_result, run, outcome.to_inbox_result())
