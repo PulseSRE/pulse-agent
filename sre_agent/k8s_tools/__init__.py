@@ -80,12 +80,16 @@ __all__ = [
     "list_resources",
     "list_routes",
     "list_statefulsets",
+    "patch_workload_container",
     "record_audit_entry",
     "remove_finalizer",
     "restart_consumers",
     "restart_deployment",
+    "restart_workload",
     "rollback_deployment",
+    "rollback_workload",
     "scale_deployment",
+    "scale_workload",
     "search_logs",
     "test_connectivity",
     "top_pods_by_restarts",
@@ -203,6 +207,14 @@ from .validators import (
     _validate_k8s_namespace,
 )
 
+# --- Workload writes (all three kinds, confirm previews) ---
+from .workload_writes import (
+    patch_workload_container,
+    restart_workload,
+    rollback_workload,
+    scale_workload,
+)
+
 # --- Workload tools ---
 from .workloads import (
     list_cronjobs,
@@ -232,6 +244,10 @@ WRITE_TOOLS = {
     "test_connectivity",
     "remove_finalizer",
     "restart_consumers",
+    "patch_workload_container",
+    "scale_workload",
+    "restart_workload",
+    "rollback_workload",
 }
 
 ALL_TOOLS: list[Any] = [
@@ -292,6 +308,11 @@ ALL_TOOLS: list[Any] = [
     exec_command,  # run commands in pods
     remove_finalizer,  # forces a stuck deletion; confirmation-gated
     test_connectivity,  # network connectivity tests
+    # Deployment/StatefulSet/DaemonSet writes with dry-run diff previews
+    patch_workload_container,
+    scale_workload,
+    restart_workload,
+    rollback_workload,
     # Audit
     record_audit_entry,
     # Live table

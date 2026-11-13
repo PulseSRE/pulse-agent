@@ -230,6 +230,42 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "Restart every consumer of a changed Secret in one confirm",
     ),
     (
+        "the api pods in payments keep getting OOMKilled, raise the memory limit on the api deployment to 1Gi",
+        ["patch_workload_container"],
+        "sre",
+        "Container memory limit patch (confirm-gated, dry-run diff)",
+    ),
+    (
+        "the checkout container is killed by its liveness probe while starting, give it a startup probe with 5 minutes",
+        ["patch_workload_container"],
+        "sre",
+        "Startup probe patch copied from liveness",
+    ),
+    (
+        "add the quay-creds pull secret to the worker statefulset in builds",
+        ["patch_workload_container"],
+        "sre",
+        "Image pull secret patch",
+    ),
+    (
+        "restart the postgres statefulset in db",
+        ["restart_workload"],
+        "sre",
+        "StatefulSet restart",
+    ),
+    (
+        "scale the kafka statefulset in streaming to 5 replicas",
+        ["scale_workload"],
+        "sre",
+        "StatefulSet scale",
+    ),
+    (
+        "roll back the fluentd daemonset in logging to the previous revision",
+        ["rollback_workload"],
+        "sre",
+        "DaemonSet rollback via ControllerRevisions",
+    ),
+    (
         "delete pod nginx-abc-xyz in default namespace",
         ["delete_pod"],
         "sre",
