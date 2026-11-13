@@ -78,6 +78,17 @@ TOOL_CATEGORIES = {
             "rollback",
             "restart",
             "workload",
+            # Single keywords match on the query's word stems, so "stateful" and
+            # "daemon" never matched "statefulset"/"daemonset" for the budget ranking.
+            "statefulset",
+            "daemonset",
+            "roll back",
+            "limit",
+            "probe",
+            "readiness",
+            "liveness",
+            "pull secret",
+            "imagepullsecret",
         ],
         "tools": [
             "list_resources",
@@ -92,6 +103,12 @@ TOOL_CATEGORIES = {
             "rollback_deployment",
             "get_rollout_history",
             "delete_pod",
+            # Deployment, StatefulSet and DaemonSet writes with a dry-run diff
+            # preview: the chat side of the pod page's guided fixes.
+            "patch_workload_container",
+            "scale_workload",
+            "restart_workload",
+            "rollback_workload",
         ],
     },
     "networking": {

@@ -421,7 +421,18 @@ _STRICT_MAX_OPTIONAL = 24
 # Write tools that parse and validate their own input completely, so they are
 # the ones left non-strict when a turn offers more write tools than the limits
 # allow. They stay confirmation-gated either way; strict only types arguments.
-_STRICT_LAST = frozenset({"create_silence", "expire_silence"})
+_STRICT_LAST = frozenset(
+    {
+        "create_silence",
+        "expire_silence",
+        # k8s_tools/workload_writes.py: kind, quantities, probe timings, replicas
+        # and revision are type- and range-checked by the tool itself.
+        "patch_workload_container",
+        "scale_workload",
+        "restart_workload",
+        "rollback_workload",
+    }
+)
 
 
 PLAN_ONLY_SYSTEM_NOTE = (
