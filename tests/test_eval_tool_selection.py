@@ -14,6 +14,7 @@ from sre_agent import (
     inbox,  # noqa: F401
     k8s_tools,  # noqa: F401
     predict_tools,  # noqa: F401
+    rbac_tools,  # noqa: F401
     security_tools,  # noqa: F401
     self_tools,  # noqa: F401
     silence_tools,  # noqa: F401

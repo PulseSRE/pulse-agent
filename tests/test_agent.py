@@ -312,6 +312,13 @@ class TestWriteToolSet:
             "expire_silence",
             # Approving an InstallPlan installs an operator version; OLM cannot un-approve.
             "approve_installplan",
+            # Rolling restart of every consumer of a ConfigMap/Secret, in one confirm.
+            "restart_consumers",
+            # Deployment/StatefulSet/DaemonSet writes with dry-run diff previews.
+            "patch_workload_container",
+            "scale_workload",
+            "restart_workload",
+            "rollback_workload",
         }
         assert expected == WRITE_TOOLS
 
