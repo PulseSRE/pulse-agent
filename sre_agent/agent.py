@@ -825,6 +825,7 @@ async def run_agent_streaming(
         policy_denied_reason = requested_denied_write_reason(denied_request_ns)
         logger.info("Turn asks for a policy-denied write in %s; writes are off for this turn", denied_request_ns)
 
+    from .credential_redaction import redact_credentials
     from .loop_budget import LoopBudget, compact_tool_results
     from .tool_images import drop_stale_images, result_content
 
@@ -1350,7 +1351,8 @@ async def run_agent_streaming(
                 if block.id not in results_map:
                     failed_ids.add(block.id)
                 text, component = results_map.get(block.id, (f"Error: no result for {block.name}", None))
-                content = result_content(text)
+                # Credential values are masked in code, not only by the prompt rule.
+                content = result_content(redact_credentials(text))
                 if label_tool_calls:
                     content = _label_result(content, call_refs.get(block.id, ""), block.name)
                 result_block: dict[str, Any] = {

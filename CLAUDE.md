@@ -161,6 +161,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - RBAC: read-only by default, write ops opt-in via `rbac.allowWriteOperations`
 - Confirmation gate enforced in code (not just prompt)
 - Prompt injection defense in system prompt
+- Credential values in tool results (URL passwords, bearer tokens, `password=`/`token:`-style pairs) are masked in code before the model reads them (`credential_redaction.py`, applied in the agent loop)
 - Input validation: replicas 0-100, log lines 1-1000, grace period 1-300s
 - Token forwarding: user OAuth token from `X-Forwarded-Access-Token` forwarded to K8s API calls for per-user RBAC enforcement. Monitor scans use SA. Toggle: `PULSE_AGENT_TOKEN_FORWARDING`
 
