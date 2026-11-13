@@ -513,7 +513,15 @@ def _populate_risk_levels() -> None:
     try:
         from .agent import WRITE_TOOLS
 
-        high_risk = {"drain_node", "delete_pod", "rollback_deployment", "cordon_node", "uncordon_node"}
+        high_risk = {
+            "drain_node",
+            "delete_pod",
+            "rollback_deployment",
+            "cordon_node",
+            "uncordon_node",
+            "grant_access",
+            "revoke_access",
+        }
         medium_risk = {"scale_deployment", "restart_deployment", "apply_yaml", "patch_resource"}
 
         for tool in WRITE_TOOLS:

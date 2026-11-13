@@ -9,7 +9,9 @@ from ..tool_registry import TOOL_REGISTRY, WRITE_TOOL_NAMES
 
 _DOUBLE_BRACE_RE = re.compile(r"\}(\s*)\{")
 
-ACTION_BLOCKED_TOOLS = frozenset({"drain_node", "exec_command"})
+# Access changes are never a dashboard button: a button runs without the chat
+# confirmation card and its binding diff and risk preview.
+ACTION_BLOCKED_TOOLS = frozenset({"drain_node", "exec_command", "grant_access", "revoke_access"})
 
 
 def _fix_promql(query: str) -> str:

@@ -22,9 +22,10 @@ PREVIEW_TIMEOUT_SECONDS = 8.0
 
 
 def _builders() -> dict[str, Callable[[dict], dict[str, Any]]]:
+    from .rbac_writes import PREVIEW_BUILDERS as ACCESS_PREVIEWS
     from .silences import preview_create, preview_expire
 
-    return {"create_silence": preview_create, "expire_silence": preview_expire}
+    return {"create_silence": preview_create, "expire_silence": preview_expire, **ACCESS_PREVIEWS}
 
 
 def has_preview(tool_name: str) -> bool:

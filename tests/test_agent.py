@@ -310,6 +310,9 @@ class TestWriteToolSet:
             # A silence hides alerts from the on-call; expiring one starts them paging again.
             "create_silence",
             "expire_silence",
+            # Access changes: a binding diff preview, never auto-approved for a HIGH-risk grant.
+            "grant_access",
+            "revoke_access",
         }
         assert expected == WRITE_TOOLS
 
