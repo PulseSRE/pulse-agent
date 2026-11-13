@@ -117,6 +117,7 @@ make release VERSION=X.Y.Z            # agent-only version/badge commit + tag; s
 - `timeline_tools.py` — 1 incident correlation tool
 - `git_tools.py` — 2 tools (`propose_git_change`, `get_argo_app_source`)
 - `silence_tools.py` — 4 Alertmanager silence tools: `create_silence`/`expire_silence` (write, confirm preview from `silences.py` via `confirm_preview.py`) and `propose_silence`/`list_silences` (read). Client in `alertmanager.py` (caller's token, `PULSE_AGENT_ALERTMANAGER_URL`)
+- `rbac_tools.py` — 3 read-only RBAC tools in the `security` category (also in `operations`, so the `sre` skill reaches them): `who_can` (OpenShift (Local)ResourceAccessReview plus the binding → role chain, a port of pulse-ui's WhoCanPanel), `effective_permissions` (SelfSubjectRulesReview impersonating the subject, alone and per group, as the UI's subject page), `get_rbac_changes` (the `/rbac/changes` history and Pulse write ledger, filtered by the caller's access). All need the caller's forwarded token; the agent SA has no access-review or impersonate grant
 - `handoff_tools.py` — 2 agent-to-agent handoff tools (`request_security_scan`, `request_sre_investigation`)
 - `tool_registry.py` — central registry with `TOOL_CATEGORIES` and `WRITE_TOOL_NAMES`. `@beta_tool(category="views", is_write=True)` for auto-registration with metadata. Plain `@beta_tool` unchanged.
 - `tool_discovery.py` — `discover_tools()` imports all tool modules, populates `TOOL_REGISTRY`. Called in `app.py` lifespan.

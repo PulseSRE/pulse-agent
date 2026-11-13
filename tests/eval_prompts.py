@@ -490,6 +490,30 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "RBAC risk scan",
     ),
     (
+        "who can delete secrets in payments?",
+        ["who_can"],
+        "sre",
+        "Who-can (ResourceAccessReview) reached from the sre skill",
+    ),
+    (
+        "which users can create pods/exec cluster-wide",
+        ["who_can"],
+        "security",
+        "Who-can cluster-wide",
+    ),
+    (
+        "what is the deployer service account allowed to do in the payments namespace",
+        ["effective_permissions"],
+        "security",
+        "Effective permissions of a subject (rules review, impersonated)",
+    ),
+    (
+        "show RBAC changes from the last 24 hours, who granted cluster-admin?",
+        ["get_rbac_changes"],
+        "security",
+        "RBAC change history and the Pulse write ledger",
+    ),
+    (
         "check pod security across the cluster",
         ["scan_pod_security"],
         "security",
