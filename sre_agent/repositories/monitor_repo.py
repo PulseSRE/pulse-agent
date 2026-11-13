@@ -857,53 +857,93 @@ class MonitorRepository(BaseRepository):
 
     # ── Activity events (monitor_rest.py) ─────────────────────────────────────
 
+    # The activity feed (GET /activity). These four queries named columns the
+    # tables do not have (actions.namespace; findings.investigated, finding_type
+    # and target; postmortems.summary and created_at), each failure was
+    # swallowed, and the endpoint answered {"events": []} on a cluster with
+    # 1,315 recorded fix actions. They now read the tables as they are.
+
+    @staticmethod
+    def _since_ms(days: int) -> int:
+        import time
+
+        return int((time.time() - int(days) * 86400) * 1000)
+
+    @staticmethod
+    def _action_namespace(row: dict) -> str:
+        """The namespace an action targeted: from its correlation key, else its resources."""
+        key = row.get("correlation_key") or ""
+        parts = key.split(":")
+        if len(parts) >= 3 and parts[1]:
+            return parts[1]
+        try:
+            resources = json.loads(row.get("resources") or "[]")
+        except (TypeError, ValueError):
+            return ""
+        if isinstance(resources, list) and resources and isinstance(resources[0], dict):
+            return str(resources[0].get("namespace") or "")
+        return ""
+
     def fetch_activity_actions(self, days: int) -> list[dict]:
-        """Aggregated actions by category/namespace/status."""
+        """Fix actions that ran, counted by category, namespace and status."""
+        self.ensure_tables()
+        rows = self.db.fetchall(
+            "SELECT COALESCE(category, 'unknown') AS category, status, correlation_key, resources "
+            "FROM actions WHERE timestamp >= ? AND status IN ('completed', 'failed', 'rolled_back') "
+            "AND COALESCE(tool, '') <> 'require_human_review'",
+            (self._since_ms(days),),
+        )
+        counts: dict[tuple[str, str, str], int] = {}
+        for row in rows or []:
+            r = dict(row)
+            key = (r["category"], self._action_namespace(r), r["status"])
+            counts[key] = counts.get(key, 0) + 1
+        out = [{"category": c, "namespace": ns, "status": st, "cnt": n} for (c, ns, st), n in counts.items()]
+        return sorted(out, key=lambda r: (-r["cnt"], r["category"], r["namespace"], r["status"]))
+
+    def fetch_activity_verifications(self, days: int) -> list[dict]:
+        """What verification concluded about the fixes that ran, by category and verdict."""
+        self.ensure_tables()
         return self.db.fetchall(
-            "SELECT "
-            "COALESCE(category, 'unknown') as category, "
-            "COALESCE(namespace, '') as namespace, "
-            "COUNT(*) as cnt, "
-            "status "
-            "FROM actions "
-            "WHERE timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000 "
-            "AND status IN ('completed', 'failed', 'rolled_back') "
-            "GROUP BY category, namespace, status "
-            "ORDER BY cnt DESC",
-            (days,),
+            "SELECT COALESCE(category, 'unknown') AS category, verification_status, COUNT(*) AS cnt "
+            "FROM actions WHERE timestamp >= ? AND verification_status IS NOT NULL "
+            "AND verification_status <> '' AND COALESCE(tool, '') <> 'require_human_review' "
+            "GROUP BY category, verification_status ORDER BY cnt DESC",
+            (self._since_ms(days),),
         )
 
     def fetch_self_healed_count(self, days: int) -> list[dict]:
-        """Count of self-healed findings."""
+        """Monitor-raised inbox items resolved in the period with no fix run for their condition."""
+        import time
+
+        since_s = int(time.time()) - int(days) * 86400
         return self.db.fetchall(
-            "SELECT COUNT(*) as cnt FROM findings "
-            "WHERE resolved = 1 "
-            "AND id NOT IN (SELECT finding_id FROM actions WHERE finding_id IS NOT NULL) "
-            "AND timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000",
-            (days,),
+            "SELECT COUNT(*) AS cnt FROM inbox_items i "
+            "WHERE i.created_by = 'system:monitor' AND i.status = 'resolved' AND i.resolved_at >= ? "
+            "AND i.correlation_key IS NOT NULL AND i.correlation_key <> '' "
+            "AND NOT EXISTS (SELECT 1 FROM actions a WHERE a.correlation_key = i.correlation_key "
+            "AND a.status IN ('completed', 'failed', 'rolled_back', 'dispatched') AND a.timestamp >= ?)",
+            (since_s, self._since_ms(days)),
         )
 
     def fetch_postmortem_activity(self, days: int) -> list[dict]:
-        """Recent postmortem count and latest summary."""
+        """Postmortems generated in the period, and the latest one's root cause."""
+        since = self._since_ms(days)
         return self.db.fetchall(
-            "SELECT COUNT(*) as cnt, "
-            "MAX(summary) as latest_summary "
-            "FROM postmortems "
-            "WHERE created_at >= NOW() - INTERVAL '%s days'",
-            (days,),
+            "SELECT COUNT(*) AS cnt, "
+            "(SELECT root_cause FROM postmortems WHERE generated_at >= ? ORDER BY generated_at DESC LIMIT 1) "
+            "AS latest_summary FROM postmortems WHERE generated_at >= ?",
+            (since, since),
         )
 
     def fetch_investigated_findings(self, days: int, limit: int = 5) -> list[dict]:
-        """Recently investigated findings by type/target."""
+        """Investigations run in the period, by category."""
+        self.ensure_tables()
         return self.db.fetchall(
-            "SELECT finding_type, target, COUNT(*) as cnt "
-            "FROM findings "
-            "WHERE investigated = 1 "
-            "AND timestamp >= EXTRACT(EPOCH FROM NOW() - INTERVAL '1 day' * %s)::BIGINT * 1000 "
-            "GROUP BY finding_type, target "
-            "ORDER BY cnt DESC "
-            "LIMIT %s",
-            (days, limit),
+            "SELECT COALESCE(category, 'unknown') AS finding_type, '' AS target, COUNT(*) AS cnt "
+            "FROM investigations WHERE timestamp >= ? "
+            "GROUP BY category ORDER BY cnt DESC LIMIT ?",
+            (self._since_ms(days), limit),
         )
 
     # ── Fix history (fix_rest.py) ─────────────────────────────────────────────
