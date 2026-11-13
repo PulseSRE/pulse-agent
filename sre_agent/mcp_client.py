@@ -39,6 +39,8 @@ class MCPConnection:
     tool_schemas: dict[str, dict] = field(default_factory=dict)  # name → {description, inputSchema}
     prompts: list[str] = field(default_factory=list)
     prompt_schemas: dict[str, dict] = field(default_factory=dict)  # name → {description, arguments}
+    # Tools the server advertises that the agent does not offer (writes, exec), name → reason.
+    withheld_tools: dict[str, str] = field(default_factory=dict)
     process: Any = None  # subprocess for stdio transport
     error: str = ""
     _sse_base_url: str = ""
@@ -189,6 +191,7 @@ def _connect_stdio(conn: MCPConnection) -> MCPConnection:
             raise
         conn.tools = [t["name"] for t in tool_defs]
         conn.tool_schemas = {t["name"]: t for t in tool_defs}
+        conn.withheld_tools = {}
         conn.connected = True
         logger.info("MCP '%s' connected: %d tools from %s", conn.name, len(conn.tools), conn.toolsets)
     except FileNotFoundError:
@@ -307,6 +310,7 @@ def _connect_sse_attempt(conn: MCPConnection, base_url: str) -> MCPConnection:
 
         conn.tools = [t["name"] for t in tool_defs]
         conn.tool_schemas = {t["name"]: t for t in tool_defs}
+        conn.withheld_tools = {}
 
         # Discover prompts (MCP prompts/list)
         try:
@@ -418,6 +422,10 @@ def _discover_tools_stdio(process: subprocess.Popen, toolsets: list[str]) -> lis
 
 def call_mcp_tool(conn: MCPConnection, tool_name: str, arguments: dict) -> str:
     """Call a tool on an MCP server and return the text result."""
+    from .mcp_tool_policy import MCP_WITHHELD_TOOLS
+
+    if tool_name in MCP_WITHHELD_TOOLS or tool_name in conn.withheld_tools:
+        return f"Error: MCP tool '{tool_name}' is disabled: it runs as the MCP server's service account, not as you"
     if not conn.connected:
         return f"Error: MCP server '{conn.name}' is not connected"
 
@@ -523,15 +531,30 @@ def register_mcp_tools(conn: MCPConnection) -> int:
     Returns the number of tools registered.
     """
     from .mcp_renderer import render_mcp_output
+    from .mcp_tool_policy import mcp_withheld_reason
     from .tool_registry import TOOL_REGISTRY, register_tool, unregister_tool
 
-    advertised = set(conn.tools) | set(conn.prompts)
+    # conn.tools holds what was registered last time; withheld tools are kept
+    # aside so a re-registration re-evaluates them rather than forgetting them.
+    candidates = list(dict.fromkeys([*conn.tools, *conn.withheld_tools]))
+    advertised = set(candidates) | set(conn.prompts)
     for name, existing in list(TOOL_REGISTRY.items()):
         if isinstance(existing, MCPTool) and existing.connection is conn and name not in advertised:
             unregister_tool(name)
+
     count = 0
     registered_names = []
-    for tool_name in (name for name in list(conn.tools) if name not in conn.prompts):
+    withheld: dict[str, str] = {}
+    for tool_name in (name for name in candidates if name not in conn.prompts):
+        # MCP tools run with the MCP server's own authority, outside the user's
+        # RBAC and the native confirm previews: only reads are offered.
+        reason = mcp_withheld_reason(tool_name, (conn.tool_schemas.get(tool_name) or {}).get("annotations"))
+        if reason is not None:
+            withheld[tool_name] = reason
+            existing = TOOL_REGISTRY.get(tool_name)
+            if isinstance(existing, MCPTool) and existing.connection is conn:
+                unregister_tool(tool_name)
+            continue
         # Native tools and another connection's tools must never be replaced.
         existing = TOOL_REGISTRY.get(tool_name)
         if existing is not None:
@@ -559,8 +582,8 @@ def register_mcp_tools(conn: MCPConnection) -> int:
         input_schema = schema_def.get("inputSchema", {"type": "object", "properties": {}, "required": []})
         tool = MCPTool(tool_name, fn, description, input_schema=input_schema, connection=conn)
         annotations = schema_def.get("annotations") or {}
-        # Servers are administrator-configured and trusted to describe reads.
-        # Missing or destructive annotations fail closed behind confirmation.
+        # Only reads reach this point. Should a listed read lack annotations,
+        # it still fails closed behind confirmation rather than running silently.
         from .action_policy import mcp_requires_confirmation
 
         register_tool(tool, is_write=mcp_requires_confirmation(annotations))
@@ -568,6 +591,9 @@ def register_mcp_tools(conn: MCPConnection) -> int:
         count += 1
 
     conn.tools = registered_names
+    conn.withheld_tools = withheld
+    if withheld:
+        logger.info("MCP '%s': withheld %d write/exec tools: %s", conn.name, len(withheld), sorted(withheld))
 
     # Register MCP prompts as tools (prompts are callable workflows)
     for prompt_name in conn.prompts:
@@ -768,6 +794,7 @@ def list_mcp_connections() -> list[dict]:
             "transport": c.transport,
             "connected": c.connected,
             "tools": c.tools,
+            "withheld_tools": [{"name": n, "reason": r} for n, r in sorted(c.withheld_tools.items())],
             "prompts": c.prompts,
             "toolsets": c.toolsets,
             "error": c.error,

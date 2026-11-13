@@ -406,7 +406,8 @@ _SELF_DESCRIBE_KEYWORDS = {
 
 # MCP tools that duplicate native tools — skip these when building tool_defs.
 # Native tools are faster (direct K8s API), have validation, and richer rendering.
-# MCP tools only fill gaps (e.g. helm_list, helm_install have no native equivalent).
+# MCP tools only fill read gaps (e.g. helm_list has no native equivalent); MCP writes are
+# never registered (mcp_tool_policy.py).
 _MCP_NATIVE_OVERLAP: set[str] = {
     "pods_list",  # native: list_pods
     "pods_list_in_namespace",  # native: list_pods(namespace=...)

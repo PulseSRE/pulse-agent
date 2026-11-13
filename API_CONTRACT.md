@@ -182,7 +182,7 @@ Inbox item `metadata` optional keys added for queue explainability: `priority_fa
 | `GET` | `/prompt/stats` | token | Prompt token cost breakdown |
 | `GET` | `/prompt/versions/{skill}` | token | Prompt version history for a skill |
 | `GET` | `/prompt/log` | token | Prompt audit log (hash, sections, tokens) |
-| `GET` | `/admin/mcp` | token | List MCP server connections and status |
+| `GET` | `/admin/mcp` | token | List MCP server connections and status. Each connection's `tools` are the registered (read-only) tools; `withheld_tools` (`[{name, reason}]`) are tools the server advertises that the agent does not offer because they write or execute as the MCP service account |
 | `POST` | `/admin/mcp/toolsets` | admin | Toggle MCP toolsets on/off. Under the Pulse Operator it patches `spec.agent.mcp.toolsets` on the OpenShiftPulse CR; returns **409** when the operator manages the MCP server and the agent cannot change the CR (detail carries the `oc patch openshiftpulse` command for an admin) |
 | `POST` | `/admin/mcp` | admin | Register a new MCP server connection |
 | `DELETE` | `/admin/mcp/{name}` | admin | Remove an MCP server connection |

@@ -164,7 +164,7 @@ Verification contracts cover five native write tools. They check first, capture 
 - **Verified-Trajectory Learning** (`trajectory.py`) -- A diagnosis becomes a reusable skill only after its fix is confirmed resolved. A fix that did not hold drops its candidate unlearned
 
 ### MCP Integration
-- **36 MCP Tools** from the OpenShift MCP server (sidecar pod) across 11 toolsets: core, config, helm, observability, openshift, ossm, netedge, tekton, kiali, kubevirt, kcp
+- **Read-only MCP tools** from the OpenShift MCP server (sidecar pod). Its write and exec tools (Helm install/uninstall, resource create/update/delete/scale, pod exec/run/delete, node debug) run as the MCP service account, so the agent does not offer them; changes go through Pulse's own confirm-gated tools, which use your token
 - **Auto-Discovery** -- MCP tools registered alongside native tools at startup
 - **Toggle from UI** -- Enable/disable individual toolsets from the Toolbox page
 

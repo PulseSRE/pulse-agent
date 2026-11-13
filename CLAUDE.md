@@ -166,7 +166,7 @@ Rules: validate inputs with `_validate_k8s_name()`/`_validate_k8s_namespace()`, 
 - Image: `quay.io/amobrem/pulse-agent:mcp-server-vX.Y.Z`, one per agent release, built from upstream openshift-mcp-server at the commit pinned in `build-push.yml` (`MCP_SERVER_REF`); see RELEASE.md "MCP server image". The mutable `mcp-server` tag is kept only for operators up to v0.12.0
 - SSE transport, auto-discovery, 3-tier rendering
 - 11 toolsets: core, config, helm, observability, openshift, ossm, netedge, tekton, kiali, kubevirt, kcp
-- 36 MCP tools registered alongside native tools
+- Read-only: only MCP reads are registered (`mcp_tool_policy.py`; 83 of the 118 tools in the pinned sidecar build, 53 of 75 under the operator's default toolsets). The 35 that write or execute (`helm_install`/`helm_uninstall`, `resources_create_or_update`/`resources_delete`/`resources_scale`, `pods_exec`/`pods_run`/`pods_delete`, `nodes_debug_exec`, netedge `exec_dns_in_pod` and router inspection, OVN/OVS, CNI diagnostics, KubeVirt/Tekton/Istio writes) run as the MCP service account and are withheld; changes go through native confirm-gated tools. `GET /admin/mcp` lists them per connection as `withheld_tools`. When `MCP_SERVER_REF` moves, regenerate `tests/fixtures/mcp_sidecar_tools.json` with `scripts/mcp_tool_inventory.py` and classify new tools
 - Health probes (readiness + liveness on `/healthz`)
 - Toggle toolsets from the Toolbox UI
 - CI (`build-push.yml`) builds the MCP image on release tags, or alone via a manual run with `mcp_only`
@@ -214,7 +214,8 @@ Deployment is owned by the [Pulse Operator](https://github.com/PulseSRE/pulse-op
 - `skill_tools.py` — progressive skill disclosure: `skill_search` (tier 0, names + descriptions), `skill_load` (tier 1, one skill's procedure), `skill_load(name, reference=...)` (tier 2, a document from the skill's `references/` directory). Lets the agent reach expertise mid-investigation instead of being fixed to whatever routing chose from the first sentence
 - `skill_router.py` — query routing, pre-route handoff, exclusive skill enforcement, bidirectional conflict checking, multi-skill secondary selection
 - `tool_categories.py` — tool category definitions extracted from skill_loader.py
-- `mcp_client.py` — MCP server connections (SSE transport), tool/prompt discovery, registration
+- `mcp_client.py` — MCP server connections (SSE transport), tool/prompt discovery, registration (reads only)
+- `mcp_tool_policy.py` — which MCP tools may be offered: `MCP_READ_TOOLS`, `MCP_WITHHELD_TOOLS` (writes and exec, with the reason), fail-closed for unknown tools
 - `self_tools.py` — 12 self-description + 4 skill management + 3 K8s API introspection tools
 - `observability.py` — Prometheus metrics registry (tokens, cost, investigations, scanners, autofix); `/metrics` endpoint mounted in `app.py`
 - `prompt_log.py` — prompt logging (hash, sections, tokens, version tracking) for observability and debugging

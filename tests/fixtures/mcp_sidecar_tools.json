@@ -1,0 +1,713 @@
+{
+ "server_ref": "0e36b241ccf768bdc3eb64df2afcd5257c19061d",
+ "tools": [
+  {
+   "name": "nodes_debug_exec",
+   "toolset": "cluster-diagnostics",
+   "readOnlyHint": false,
+   "destructiveHint": true
+  },
+  {
+   "name": "get-conntrack",
+   "toolset": "cni-diagnostics",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "get-ip",
+   "toolset": "cni-diagnostics",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "get-iptables",
+   "toolset": "cni-diagnostics",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "get-nft",
+   "toolset": "cni-diagnostics",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "pwru",
+   "toolset": "cni-diagnostics",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "tcpdump",
+   "toolset": "cni-diagnostics",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "configuration_contexts_list",
+   "toolset": "config",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "configuration_view",
+   "toolset": "config",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "targets_list",
+   "toolset": "config",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "events_list",
+   "toolset": "core",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "namespaces_list",
+   "toolset": "core",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "nodes_log",
+   "toolset": "core",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "nodes_stats_summary",
+   "toolset": "core",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "nodes_top",
+   "toolset": "core",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "pods_delete",
+   "toolset": "core",
+   "readOnlyHint": null,
+   "destructiveHint": true
+  },
+  {
+   "name": "pods_exec",
+   "toolset": "core",
+   "readOnlyHint": null,
+   "destructiveHint": true
+  },
+  {
+   "name": "pods_get",
+   "toolset": "core",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "pods_list",
+   "toolset": "core",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "pods_list_in_namespace",
+   "toolset": "core",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "pods_log",
+   "toolset": "core",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "pods_run",
+   "toolset": "core",
+   "readOnlyHint": null,
+   "destructiveHint": false
+  },
+  {
+   "name": "pods_top",
+   "toolset": "core",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "projects_list",
+   "toolset": "core",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "resources_create_or_update",
+   "toolset": "core",
+   "readOnlyHint": null,
+   "destructiveHint": true
+  },
+  {
+   "name": "resources_delete",
+   "toolset": "core",
+   "readOnlyHint": null,
+   "destructiveHint": true
+  },
+  {
+   "name": "resources_get",
+   "toolset": "core",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "resources_list",
+   "toolset": "core",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "resources_scale",
+   "toolset": "core",
+   "readOnlyHint": null,
+   "destructiveHint": true
+  },
+  {
+   "name": "helm_install",
+   "toolset": "helm",
+   "readOnlyHint": null,
+   "destructiveHint": false
+  },
+  {
+   "name": "helm_list",
+   "toolset": "helm",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "helm_uninstall",
+   "toolset": "helm",
+   "readOnlyHint": null,
+   "destructiveHint": true
+  },
+  {
+   "name": "kcp_workspace_describe",
+   "toolset": "kcp",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "kcp_workspaces_list",
+   "toolset": "kcp",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "vm_clone",
+   "toolset": "kubevirt",
+   "readOnlyHint": false,
+   "destructiveHint": true
+  },
+  {
+   "name": "vm_console_screenshot",
+   "toolset": "kubevirt",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "vm_create",
+   "toolset": "kubevirt",
+   "readOnlyHint": false,
+   "destructiveHint": true
+  },
+  {
+   "name": "vm_create_from_template",
+   "toolset": "kubevirt",
+   "readOnlyHint": false,
+   "destructiveHint": true
+  },
+  {
+   "name": "vm_guest_info",
+   "toolset": "kubevirt",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "vm_lifecycle",
+   "toolset": "kubevirt",
+   "readOnlyHint": false,
+   "destructiveHint": true
+  },
+  {
+   "name": "vm_troubleshoot",
+   "toolset": "kubevirt",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "exec_dns_in_pod",
+   "toolset": "netedge",
+   "readOnlyHint": false,
+   "destructiveHint": false
+  },
+  {
+   "name": "get_coredns_config",
+   "toolset": "netedge",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "get_router_config",
+   "toolset": "netedge",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "get_router_info",
+   "toolset": "netedge",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "get_router_sessions",
+   "toolset": "netedge",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "get_service_endpoints",
+   "toolset": "netedge",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "inspect_route",
+   "toolset": "netedge",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "netedge_query_prometheus",
+   "toolset": "netedge",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "probe_dns_local",
+   "toolset": "netedge",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "probe_http",
+   "toolset": "netedge",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "netobserv_export_flows",
+   "toolset": "netobserv",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "netobserv_get_flow_metrics",
+   "toolset": "netobserv",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "netobserv_list_flows",
+   "toolset": "netobserv",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "loki_label_names",
+   "toolset": "observability/logs",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "loki_label_values",
+   "toolset": "observability/logs",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "loki_list_instances",
+   "toolset": "observability/logs",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "loki_query_range",
+   "toolset": "observability/logs",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "execute_instant_query",
+   "toolset": "observability/metrics",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "execute_range_query",
+   "toolset": "observability/metrics",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "get_alerts",
+   "toolset": "observability/metrics",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "get_label_names",
+   "toolset": "observability/metrics",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "get_label_values",
+   "toolset": "observability/metrics",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "get_series",
+   "toolset": "observability/metrics",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "get_silences",
+   "toolset": "observability/metrics",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "list_metrics",
+   "toolset": "observability/metrics",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "show_timeseries",
+   "toolset": "observability/metrics",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "otelcol_get_component_schema",
+   "toolset": "observability/otelcol",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "otelcol_get_versions",
+   "toolset": "observability/otelcol",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "otelcol_list_components",
+   "toolset": "observability/otelcol",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "otelcol_validate_config",
+   "toolset": "observability/otelcol",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "tempo_get_trace_by_id",
+   "toolset": "observability/traces",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "tempo_list_instances",
+   "toolset": "observability/traces",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "tempo_search_tag_values",
+   "toolset": "observability/traces",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "tempo_search_tags",
+   "toolset": "observability/traces",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "tempo_search_traces",
+   "toolset": "observability/traces",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "mustgather_etcd_health",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_etcd_object_count",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_events_by_resource",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_events_by_time",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_events_list",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_list",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_monitoring_prometheus_alerts",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_monitoring_prometheus_rules",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_monitoring_prometheus_status",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_monitoring_prometheus_targets",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_monitoring_prometheus_tsdb",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_node_diagnostics_get",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_node_kubelet_logs",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_node_kubelet_logs_grep",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_pod_logs_by_time",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_pod_logs_get",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_pod_logs_grep",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "mustgather_resources_list",
+   "toolset": "openshift/mustgather",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "ossm_get_logs",
+   "toolset": "ossm",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "ossm_get_mesh_status",
+   "toolset": "ossm",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "ossm_get_mesh_traffic_graph",
+   "toolset": "ossm",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "ossm_get_metrics",
+   "toolset": "ossm",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "ossm_get_pod_performance",
+   "toolset": "ossm",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "ossm_get_resource_details",
+   "toolset": "ossm",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "ossm_get_trace_details",
+   "toolset": "ossm",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "ossm_list_mesh_clusters",
+   "toolset": "ossm",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "ossm_list_traces",
+   "toolset": "ossm",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "ossm_manage_istio_config",
+   "toolset": "ossm",
+   "readOnlyHint": false,
+   "destructiveHint": true
+  },
+  {
+   "name": "ossm_manage_istio_config_read",
+   "toolset": "ossm",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "ovn_get",
+   "toolset": "ovn-kubernetes",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "ovn_lflow_list",
+   "toolset": "ovn-kubernetes",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "ovn_show",
+   "toolset": "ovn-kubernetes",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "ovn_trace",
+   "toolset": "ovn-kubernetes",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "ovs_appctl",
+   "toolset": "ovn-kubernetes",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "ovs_ofctl",
+   "toolset": "ovn-kubernetes",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "ovs_vsctl",
+   "toolset": "ovn-kubernetes",
+   "readOnlyHint": true,
+   "destructiveHint": null
+  },
+  {
+   "name": "tekton_pipeline_start",
+   "toolset": "tekton",
+   "readOnlyHint": false,
+   "destructiveHint": false
+  },
+  {
+   "name": "tekton_pipelinerun_lifecycle",
+   "toolset": "tekton",
+   "readOnlyHint": false,
+   "destructiveHint": true
+  },
+  {
+   "name": "tekton_pipelinerun_logs",
+   "toolset": "tekton",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "tekton_task_start",
+   "toolset": "tekton",
+   "readOnlyHint": false,
+   "destructiveHint": false
+  },
+  {
+   "name": "tekton_taskrun_logs",
+   "toolset": "tekton",
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  {
+   "name": "tekton_taskrun_restart",
+   "toolset": "tekton",
+   "readOnlyHint": false,
+   "destructiveHint": false
+  }
+ ]
+}
