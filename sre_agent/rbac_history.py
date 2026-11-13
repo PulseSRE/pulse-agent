@@ -302,6 +302,12 @@ def agent_write_target(tool: str, tool_input: dict) -> tuple[str, str, str]:
     if tool == "remove_finalizer":
         kind = str(tool_input.get("kind") or "")
     name = tool_input.get(name_key)
+    if tool == "create_network_policy" and not name:
+        from .k8s_tools.advanced import default_network_policy_name
+
+        name = default_network_policy_name(
+            str(tool_input.get("policy_type") or "deny-all-ingress"), bool(tool_input.get("strict"))
+        )
     ns = tool_input.get(ns_key) if ns_key else ""
     return kind, str(ns or "") if isinstance(ns, str) else "", str(name) if isinstance(name, str) else ""
 
