@@ -43,6 +43,7 @@ __all__ = [
     "discover_metrics",
     "drain_node",
     "exec_command",
+    "find_config_consumers",
     "get_cluster_operators",
     "get_cluster_updates",
     "get_cluster_version",
@@ -82,6 +83,7 @@ __all__ = [
     "patch_workload_container",
     "record_audit_entry",
     "remove_finalizer",
+    "restart_consumers",
     "restart_deployment",
     "restart_workload",
     "rollback_deployment",
@@ -107,6 +109,9 @@ from .advanced import (
 
 # --- Audit tools ---
 from .audit import record_audit_entry
+
+# --- ConfigMap/Secret consumers ---
+from .config_consumers import find_config_consumers, restart_consumers
 
 # --- Deployment tools ---
 from .deployments import (
@@ -238,6 +243,7 @@ WRITE_TOOLS = {
     "exec_command",
     "test_connectivity",
     "remove_finalizer",
+    "restart_consumers",
     "patch_workload_container",
     "scale_workload",
     "restart_workload",
@@ -287,9 +293,11 @@ ALL_TOOLS: list[Any] = [
     get_resource_recommendations,  # right-sizing analysis
     diagnose_stuck_deletion,  # why a deletion never completed
     get_rollout_history,  # ReplicaSet/ControllerRevision history -> rollout_history
+    find_config_consumers,  # workloads that use a ConfigMap/Secret (env, envFrom, volumes)
     # Write operations
     scale_deployment,
     restart_deployment,
+    restart_consumers,  # every consumer of a ConfigMap/Secret; one confirm
     cordon_node,
     uncordon_node,
     delete_pod,
