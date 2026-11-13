@@ -4,6 +4,8 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## Unreleased
 
+- **Chat starts from the open finding's investigation (JTBD Wave 1, item 2).** A question asked from a page that shows an open monitor finding (Cause card, Inbox drawer, home attention row) used to reach the agent with only kind/name/namespace, so it re-diagnosed from zero. The chat `context` now also accepts `findingId` and `investigationId`. Only the ids are taken from the client: `_build_context_prefix` reads the report from the agent's own `investigations` table (the given id, else the latest completed one for the finding) and adds its cause, summary, up to 5 evidence items with their call ids, ruled-out alternatives, proposed fix, age and confidence to the context header, each field sanitized (`sanitize_block`) and flattened to one line, fenced as `--- BEGIN/END CLUSTER DATA ---`, capped at 2,500 characters, with an instruction to confirm it with a quick read rather than start over. It is used only when the report is completed, under 24 hours old, belongs to the given finding, and is about the resource in the context (itself, its owner, or a workload and its pods); an unknown, stale, failed or mismatched id adds only "no Pulse investigation was found". The block stays inside the UI header, so the plan-only and denied-write checks never read cluster text as the person's words. Unknown context keys were already ignored, so older UIs and agents interoperate. No migration.
+
 ## v2.38.1 (2026-11-12)
 
 Paired with pulse-ui v2.38.1; runs on pulse-operator v0.14.0. No migrations. Pull requests #241 and #245.
