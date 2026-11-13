@@ -298,3 +298,102 @@ p code, li code { font-family: var(--mono); font-size: 0.86em; background: var(-
 .film video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: var(--paper); border: 1px solid var(--grid-major); }
 .film figcaption { margin-top: 12px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Hero with film, safety strip and the no-cluster replay (agent page). */
+.hero-split{display:grid;grid-template-columns:1.05fr 1fr;gap:clamp(24px,4vw,56px);align-items:center;padding-bottom:28px}
+
+.hero-split .display{font-size:clamp(40px,5vw,68px)}
+
+.hero-split .lede{font-size:clamp(17px,1.4vw,20px);margin-top:20px}
+
+.scope{margin-top:18px;font-size:15px;color:var(--ink-3)}
+
+.scope b{color:var(--ink);font-weight:700;margin-right:4px}
+
+.hero-film{margin:0}
+
+.hero-film video{display:block;width:100%;height:auto;aspect-ratio:16/9;background:var(--paper-2);border:1px solid var(--shot-edge)}
+
+
+
+
+
+.hero-film figcaption{font-size:14px;color:var(--ink-3);margin-top:10px}
+
+.guards{list-style:none;display:grid;grid-template-columns:repeat(3,1fr) auto;gap:0;margin:8px auto 0}
+.guards li{border-top:2px solid var(--ink);border-bottom:1px solid var(--grid-major)}
+
+.guards li{padding:16px 20px 18px 0;font-size:15px;color:var(--ink-2);line-height:1.45}
+
+.guards li b{display:block;color:var(--ink);font-size:16px;margin-bottom:4px;padding-left:14px;border-left:4px solid var(--c)}
+
+.guards li.more{display:flex;align-items:flex-end;white-space:nowrap;font-weight:700;color:var(--ink);padding-right:0}
+
+.rp{margin-top:36px;border:2px solid var(--ink);display:grid;grid-template-columns:220px 1fr;grid-template-rows:1fr auto;background:var(--paper)}
+
+.rp-rail{list-style:none;margin:0;padding:18px 0;border-right:1px solid var(--grid-major);grid-row:1/3}
+
+.rp-rail li{padding:10px 18px;color:var(--ink-3);font-weight:600;display:flex;gap:10px;align-items:center}
+
+.rp-rail li span{width:24px;height:24px;border:1.5px solid currentColor;border-radius:50%;display:grid;place-items:center;font:500 12px var(--mono)}
+
+.rp-rail li.on{color:var(--ink);background:var(--paper-2)}
+ .rp-rail li.past{color:var(--ok)}
+
+.rp-stage{padding:22px 26px;min-height:380px}
+
+.rp.js .rp-pane{display:none}
+.rp:not(.js) .rp-nav{display:none}
+.rp:not(.js) .rp-pane+.rp-pane{margin-top:28px;padding-top:20px;border-top:1px solid var(--grid-major)}
+.rp.js .rp-pane.show{display:block}
+
+.rp-alert{border-left:4px solid var(--trace);padding:10px 14px;background:var(--paper-2);font-family:var(--mono);font-size:14px;max-width:none}
+
+.rp-you,.rp-agent{margin:16px 0;max-width:none}
+
+.rp-you span,.rp-agent span{display:block;font:500 12px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);margin-bottom:4px}
+
+.rp-agent{border-left:4px solid var(--ink);padding-left:14px}
+.rp-agent p{margin:0 0 6px;max-width:none}
+
+.cite{font:500 12px var(--mono);color:var(--ink-3)}
+
+.call{border:1px solid var(--grid-major);margin:8px 0;background:var(--paper)}
+
+.call summary{cursor:pointer;padding:8px 12px;font-size:14px;display:flex;gap:8px;align-items:center}
+
+.call summary i{margin-left:auto;font:500 11px var(--mono);font-style:normal;color:var(--ok);border:1px solid currentColor;padding:0 5px}
+
+.call code{font-family:var(--mono);font-weight:500}
+
+.call pre{margin:0;padding:10px 12px;background:var(--code-bg);color:var(--code-ink);font:13px/1.5 var(--mono);overflow-x:auto}
+
+.gate{border:2px solid var(--ask);padding:16px 18px;margin-top:12px}
+
+.gate-h{color:var(--ask);font-weight:800;margin:0 0 10px}
+
+.gate dl{display:grid;grid-template-columns:90px 1fr;gap:6px 12px;margin:0;font-size:15px}
+
+.gate dt{color:var(--ink-3)}
+.gate dd{margin:0}
+
+.gate-b{display:flex;gap:10px;margin-top:14px}
+
+.gate.ok{border-color:var(--ok)}
+.gate.ok .gate-h{color:var(--ok)}
+
+.verified{color:var(--ok);font-weight:700}
+
+.rp-nav{display:flex;justify-content:flex-end;gap:10px;padding:14px 26px;border-top:1px solid var(--grid-major)}
+
+.btn[disabled]{opacity:.4;cursor:not-allowed}
+
+button.btn{font:inherit;font-weight:700;cursor:pointer;background:transparent;color:var(--ink)}
+
+button.btn.primary{background:var(--ink);color:var(--paper)}
+
+@media (max-width:860px){.hero-split{grid-template-columns:1fr}
+.guards{grid-template-columns:1fr}
+.rp{grid-template-columns:1fr}
+.rp-rail{display:flex;overflow-x:auto;border-right:0;border-bottom:1px solid var(--grid-major);padding:0;grid-row:auto}
+}

@@ -106,6 +106,9 @@ TOOL_CATEGORIES = {
             "connectivity",
             "port",
             "traffic",
+            "tls",
+            "cert",
+            "certificate",
         ],
         "tools": [
             "list_resources",
@@ -116,6 +119,10 @@ TOOL_CATEGORIES = {
             "create_network_policy",
             "scan_network_policies",
             "test_connectivity",
+            # Route, ingress and serving certs are an SRE question too (a Route
+            # failing TLS, expiries before an upgrade). In security alone, the
+            # sre skill could not reach it.
+            "get_tls_certificates",
         ],
     },
     "security": {
@@ -215,6 +222,10 @@ TOOL_CATEGORIES = {
             "list_operator_subscriptions",
             "get_cluster_updates",
             "check_upgrade_api_removals",
+            # The sre skill tells the model to call it for "what APIs are
+            # deprecated?"; as a self-describe tool alone it was offered only
+            # when the query said "deprecated".
+            "list_deprecated_apis",
             "exec_command",
             "create_inbox_task",
             "diagnose_stuck_deletion",

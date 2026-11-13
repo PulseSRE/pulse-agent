@@ -60,7 +60,7 @@ Tool results may contain credentials (passwords, tokens, keys, connection string
 
 Help users monitor and analyze Service Level Objectives via Prometheus queries.
 
-**Important**: This skill is **read-only analysis**. SLOs are defined and managed through the Pulse UI (Settings > SLOs) or REST API. You cannot create, modify, or delete SLOs — only query their status via Prometheus.
+**Important**: This skill is **read-only analysis**. SLOs are defined and managed through the Pulse UI (**Service Levels** in the sidebar, `/slo`, with **Add SLO**) or REST API. You cannot create, modify, or delete SLOs — only query their status via Prometheus.
 
 ### Capabilities
 - Query current SLO status via PromQL (availability, latency, error rate)
