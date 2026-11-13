@@ -17,14 +17,31 @@
 <a class="site" href="https://pulsesre.github.io/pulse-agent/" aria-current="page">Agent</a><a class="site" href="https://pulsesre.github.io/pulse-ui/">UI</a><a class="site" href="https://pulsesre.github.io/pulse-operator/">Operator</a><a class="site" href="https://pulsesre.github.io/sre-bench/">SRE-Bench</a><span class="ver">agent v2.38.0</span>
 </nav></header>
 <main>
-<section class="hero wrap" aria-labelledby="title">
+<section class="hero wrap hero-split" aria-labelledby="title">
+<div class="hero-copy">
 <h1 id="title" class="display"><span class="line">Finds what broke.</span> <span class="line">Verifies it with you.</span> <span class="line">Helps you fix it.</span></h1>
-<p class="lede">Pulse Agent is a team of AI agents for OpenShift, built on Claude. They watch your cluster, trace each incident to the change behind it, and build you a live view of the evidence so you can check their work. Then they work out the fix with you, and wait to see that it held.</p>
+<p class="lede">AI agents for OpenShift, built on Claude. They trace each incident to the change behind it, show you the evidence, and change nothing until you approve. Then they check the fix held.</p>
 <div class="actions">
-<a class="btn primary" href="https://github.com/PulseSRE/pulse-operator#install-via-olm">Install with the operator</a>
-<a class="btn" href="https://github.com/PulseSRE/pulse-agent">Read the source</a>
+<a class="btn primary" href="#replay">Try it without a cluster</a>
+<a class="btn" href="https://github.com/PulseSRE/pulse-operator#install-via-olm">Install with the operator</a>
 </div>
+<p class="scope"><b>Runs on</b> OpenShift 4.12+ (operator install). The developer CLI talks to any cluster your kubeconfig points at. <a href="https://github.com/PulseSRE/pulse-agent">Source on GitHub</a></p>
+</div>
+<figure class="hero-film">
+<video controls preload="none" playsinline poster="https://pulsesre.github.io/pulse-ui/screenshots/evidence.png" aria-describedby="film-cap">
+<source src="media/pulse-agent.mp4" type="video/mp4">
+<a href="media/pulse-agent.mp4">Watch the 38-second video (MP4)</a>
+</video>
+<figcaption id="film-cap"><b>38 seconds.</b> One incident, end to end: checkout crash-loops, Pulse ties it to a ConfigMap edit, you approve the exact diff, and it checks the fix held. Real Pulse screens with sample data.</figcaption>
+</figure>
 </section>
+
+<ul class="wrap guards" aria-label="Safety defaults">
+<li style="--c:var(--ask)"><b>Asks before every change</b>Read-only until the operator enables writes. Each approval names the exact target and is single-use.</li>
+<li style="--c:var(--ink)"><b>Runs with your permissions</b>Chat uses your own OpenShift token. It can't do anything you can't.</li>
+<li style="--c:var(--ok)"><b>Checks the fix held</b>Keeps a restorable copy before changing a resource. A fix counts only after 30 quiet minutes.</li>
+<li class="more"><a href="#limits">Everything it won't do on its own &darr;</a></li>
+</ul>
 
 <div class="wrap strip" role="img" aria-labelledby="trace-desc">
 <svg class="trace" viewBox="0 -10 1200 150" preserveAspectRatio="none" aria-hidden="true">
@@ -42,15 +59,60 @@
 <p class="caption">A sample incident. Times and names are illustrative; the sequence is how Pulse works.</p>
 </div>
 
-<section class="film wrap" aria-labelledby="film">
-<h2 id="film" class="visually-hidden">See it in 38 seconds</h2>
-<figure>
-<video controls preload="none" playsinline poster="media/pulse-agent-poster.jpg" aria-describedby="film-cap">
-<source src="media/pulse-agent.mp4" type="video/mp4">
-<a href="media/pulse-agent.mp4">Watch the 38-second video (MP4)</a>
-</video>
-<figcaption id="film-cap"><b>See it in 38 seconds.</b> At 3 a.m. checkout is crash-looping. Pulse ties it to a ConfigMap edit four minutes earlier, shows evidence that cites the tool call behind each claim, and measures an OOM kill against the workload's own normal. You approve the fix from its exact diff, and Pulse checks that it held. Real Pulse screens with sample data, with narration and music.</figcaption>
-</figure>
+<!-- Replay demo. Tool output is copied from sre_agent/evals/fixtures/multi_rollback_and_verify.json  ; Pulse answers are illustrative copy. -->
+<section class="block" id="replay" aria-labelledby="replay-h">
+<div class="wrap">
+<h2 id="replay-h">Try it without a cluster</h2>
+<p class="intro">A recorded incident, replayed in your browser. Every tool result below is the recorded cluster response from our eval suite. No cluster, no API key.</p>
+<div class="rp" data-step="0">
+<ol class="rp-rail" aria-label="Incident steps">
+<li data-s="0"><span>1</span>Something broke</li>
+<li data-s="1"><span>2</span>Investigate</li>
+<li data-s="2"><span>3</span>Approve the fix</li>
+<li data-s="3"><span>4</span>Verify</li>
+</ol>
+<div class="rp-stage" aria-live="polite">
+
+<div class="rp-pane" data-s="0">
+<p class="rp-alert"><b>checkout-service</b> &middot; production &middot; Ready 0/3 &middot; deployed 20 min ago</p>
+<p class="rp-you"><span>You</span>The checkout service is broken after the last deploy. What's wrong?</p>
+</div>
+
+<div class="rp-pane" data-s="1">
+<details class="call"><summary><code>list_deployments</code><i>recorded</i></summary><pre>production/checkout-service  Ready=0/3  Age=20m  Image=checkout:v5.0.0
+production/payment-gateway   Ready=2/2  Age=10d  Image=payment:v3.1.0</pre></details>
+<details class="call"><summary><code>describe_deployment</code> checkout-service<i>recorded</i></summary><pre>revision 8  image checkout:v5.0.0  ready 0/3
+history: rev 7 = checkout:v4.9.0, rev 8 = checkout:v5.0.0</pre></details>
+<details class="call" open><summary><code>get_pod_logs</code> checkout-service<i>recorded</i></summary><pre>[ERROR] Failed to connect to payments-v2 API: endpoint removed in v5.0
+[FATAL] Cannot initialize checkout pipeline without payments integration. Exiting.</pre></details>
+<div class="rp-agent"><span>Pulse</span><p><b>Likely cause: the v5.0.0 rollout.</b> All 3 pods fail at startup because v5.0.0 calls the payments-v2 endpoint, which that release removed. Revision 7 (v4.9.0) was healthy. payment-gateway is unaffected.</p><p class="cite">Cites: get_pod_logs, describe_deployment</p></div>
+</div>
+
+<div class="rp-pane" data-s="2">
+<p class="rp-you"><span>You</span>Roll it back to the previous version.</p>
+<div class="gate">
+<p class="gate-h">Approval needed</p>
+<dl><dt>Action</dt><dd><code>rollback_deployment</code></dd><dt>Target</dt><dd>production / checkout-service</dd><dt>Change</dt><dd>revision 8 &rarr; 7 &middot; checkout:v5.0.0 &rarr; v4.9.0</dd><dt>Runs as</dt><dd>you (your OpenShift token)</dd></dl>
+<div class="gate-b"><button type="button" class="btn primary" data-approve>Approve</button><button type="button" class="btn" disabled>Deny</button></div>
+</div>
+<details class="call done" hidden><summary><code>rollback_deployment</code><i>recorded</i></summary><pre>Deployment checkout-service rolled back to revision 7
+image checkout:v4.9.0  ready 3/3</pre></details>
+</div>
+
+<div class="rp-pane" data-s="3">
+<p class="rp-you"><span>You</span>Is it healthy now?</p>
+<details class="call" open><summary><code>list_pods</code><i>recorded</i></summary><pre>checkout-service-8a9b0c1d-abc  Running  Restarts=0  45s
+checkout-service-8a9b0c1d-def  Running  Restarts=0  42s
+checkout-service-8a9b0c1d-ghi  Running  Restarts=0  40s</pre></details>
+<div class="rp-agent"><span>Pulse</span><p><b>Healthy: 3/3 ready on v4.9.0, no restarts.</b> I'll keep watching. If it stays quiet for the 30-minute recurrence window, the fix is marked verified.</p></div>
+<p class="verified">&#10003; Verified &middot; replay skips ahead through the 30-minute window</p>
+</div>
+
+</div>
+<div class="rp-nav"><button type="button" class="btn" data-prev>Back</button><button type="button" class="btn primary" data-next>Next step</button></div>
+</div>
+<p class="caption">The tool output is recorded from our eval fixture <code>multi_rollback_and_verify</code>. Pulse's answers are illustrative; in a real run they cite the same calls.</p>
+</div>
 </section>
 
 <section class="block" aria-labelledby="why">
@@ -220,5 +282,15 @@
 <span>Pulse agent v2.38.0. MIT licensed.</span>
 <span><a href="https://github.com/PulseSRE/pulse-agent">Source</a> &nbsp; <a href="https://github.com/PulseSRE/pulse-agent/releases">Releases</a> &nbsp; <a href="https://github.com/PulseSRE/pulse-agent/blob/main/CHANGELOG.md">Changelog</a></span>
 </div></footer>
+<script>
+(function(){var rp=document.querySelector('.rp');if(!rp)return;rp.classList.add('js');var n=4,s=0,approved=false;
+var next=rp.querySelector('[data-next]'),prev=rp.querySelector('[data-prev]');
+function draw(){rp.querySelectorAll('.rp-pane').forEach(function(p){p.classList.toggle('show',+p.dataset.s===s)});
+rp.querySelectorAll('.rp-rail li').forEach(function(l){var i=+l.dataset.s;l.classList.toggle('on',i===s);l.classList.toggle('past',i<s)});
+prev.disabled=s===0;next.disabled=(s===n-1)||(s===2&&!approved);next.textContent=s===2&&!approved?'Approve to continue':'Next step';}
+next.onclick=function(){if(s<n-1){s++;draw()}};prev.onclick=function(){if(s>0){s--;draw()}};
+rp.querySelector('[data-approve]').onclick=function(){approved=true;var g=rp.querySelector('.gate');g.classList.add('ok');g.querySelector('.gate-h').textContent='Approved by you · one-time code used';this.disabled=true;rp.querySelector('.call.done').hidden=false;rp.querySelector('.call.done').open=true;draw()};
+draw();})();
+</script>
 </body>
 </html>
