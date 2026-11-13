@@ -114,10 +114,18 @@ class TestRegisterMCPTools:
         )
         conn.process = MagicMock()  # Fake process
 
+        conn.tool_schemas = {
+            "helm_list": {"annotations": {"readOnlyHint": True, "destructiveHint": False}},
+            "helm_install": {"annotations": {"destructiveHint": False}},
+        }
+
         with patch("sre_agent.tool_registry.register_tool") as mock_register:
             count = register_mcp_tools(conn)
-            assert count == 2
-            assert mock_register.call_count == 2
+            # helm_install runs as the MCP service account: withheld, not registered.
+            assert count == 1
+            assert mock_register.call_count == 1
+            assert conn.tools == ["helm_list"]
+            assert "helm_install" in conn.withheld_tools
 
     def test_tool_has_correct_attributes(self):
         conn = MCPConnection(
@@ -127,6 +135,7 @@ class TestRegisterMCPTools:
             toolsets=[],
             connected=True,
             tools=["my_tool"],
+            tool_schemas={"my_tool": {"annotations": {"readOnlyHint": True}}},
         )
         conn.process = MagicMock()
 

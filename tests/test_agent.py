@@ -313,6 +313,8 @@ class TestWriteToolSet:
             # Access changes: a binding diff preview, never auto-approved for a HIGH-risk grant.
             "grant_access",
             "revoke_access",
+            # Approving an InstallPlan installs an operator version; OLM cannot un-approve.
+            "approve_installplan",
             # Rolling restart of every consumer of a ConfigMap/Secret, in one confirm.
             "restart_consumers",
             # Deployment/StatefulSet/DaemonSet writes with dry-run diff previews.

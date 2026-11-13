@@ -899,6 +899,74 @@ def gen_durable_approvals() -> list[dict[str, Any]]:
     return items
 
 
+# Pending InstallPlans are acted on in Operators -> Needs approval.
+OPERATOR_APPROVALS_UI_LINK = "/operators?view=approvals"
+_MAX_APPROVAL_ITEMS = 25
+
+
+def _get_pending_installplans() -> list[Any]:
+    """Unapproved InstallPlans across namespaces, as the agent's service account.
+
+    The operator's agent ClusterRole has no rule for operators.coreos.com, so
+    on a cluster deployed by it this listing is forbidden and the generator
+    reports itself unavailable every cycle (its items are left alone) instead
+    of claiming nothing is pending.
+    """
+    from .k8s_tools.olm import OLMReadError, read_pending_installplans
+
+    try:
+        plans, _subs_error = read_pending_installplans("ALL")
+    except OLMReadError as e:
+        raise GeneratorUnavailableError(str(e)) from e
+    return plans
+
+
+def gen_operator_approvals() -> list[dict[str, Any]]:
+    """One item per operator update waiting for approval; resolved once it is approved or gone.
+
+    A plan whose Subscription points at a newer plan is superseded and gets no
+    item: approving it is not the way to update. OLM has no deny, so the item
+    says how to decline (leave it unapproved) instead of offering one.
+    """
+    from .k8s_tools.olm import csv_version
+
+    items: list[dict[str, Any]] = []
+    for plan in _get_pending_installplans():
+        if plan.current is False:
+            continue
+        to_text = ", ".join(plan.installs) or "a new version"
+        to_ver = ", ".join(csv_version(c) for c in plan.installs) or "?"
+        from_ver = ", ".join(csv_version(c) for c in plan.replaces)
+        versions = f"{from_ver} → {to_ver}" if from_ver else to_ver
+        replaces = f", replacing {', '.join(plan.replaces)}" if plan.replaces else ""
+        channel = f" on channel {plan.channel}" if plan.channel else ""
+        resources = [{"kind": "InstallPlan", "name": plan.name, "namespace": plan.namespace}]
+        if plan.subscription:
+            resources.append({"kind": "Subscription", "name": plan.subscription, "namespace": plan.namespace})
+        item = _make_assessment(
+            title=f"Operator update waiting for approval: {plan.operator} {versions}",
+            summary=(
+                f"InstallPlan {plan.namespace}/{plan.name}{channel} installs {to_text}{replaces} once someone "
+                "approves it. Review and approve it in Operators → Needs approval, or ask Pulse. To decline, "
+                "leave it unapproved: OLM has no deny, and the installed version keeps running. While it waits, "
+                "OLM holds other updates in the same namespace."
+            ),
+            severity="warning",
+            urgency_hours=72,
+            generator="operator_approvals",
+            namespace=plan.namespace,
+            resources=resources,
+            correlation_key=f"operator_approval:{plan.namespace}/{plan.name}",
+            confidence=1.0,
+            ui_link=OPERATOR_APPROVALS_UI_LINK,
+        )
+        item["metadata"].update(installplan=plan.name, installs=plan.installs, replaces=plan.replaces)
+        items.append(item)
+        if len(items) >= _MAX_APPROVAL_ITEMS:
+            break
+    return items
+
+
 # -- Registry --
 
 TASK_GENERATORS: list[tuple[str, Any]] = [
@@ -919,6 +987,7 @@ TASK_GENERATORS: list[tuple[str, Any]] = [
     ("skill_low_performers", gen_skill_low_performers),
     ("skill_curation", gen_skill_curation),
     ("durable_approvals", gen_durable_approvals),
+    ("operator_approvals", gen_operator_approvals),
 ]
 
 

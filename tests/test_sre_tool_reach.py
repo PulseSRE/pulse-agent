@@ -18,6 +18,8 @@ from sre_agent.tool_categories import MODE_CATEGORIES, TOOL_CATEGORIES
 
 CERT_QUERY = "Which route certificates are expiring soon? Check the TLS certs before they break the app."
 REMOVED_API_QUERY = "Which APIs will be removed in the next upgrade, and is anything still using them?"
+PENDING_PLANS_QUERY = "Which operator updates are waiting for approval?"
+APPROVE_PLAN_QUERY = "Approve the pending InstallPlan for the elasticsearch operator in openshift-operators"
 
 
 class _FakeTool:
@@ -51,6 +53,8 @@ def test_tools_are_in_sre_categories():
     for cat in skill.categories:
         skill_names.update(TOOL_CATEGORIES.get(cat, {}).get("tools", []))
     assert {"get_tls_certificates", "list_deprecated_apis"} <= skill_names
+    assert {"list_pending_installplans", "approve_installplan"} <= names
+    assert {"list_pending_installplans", "approve_installplan"} <= skill_names
 
 
 def test_security_still_reaches_tls_certificates():
@@ -59,7 +63,13 @@ def test_security_still_reaches_tls_certificates():
 
 @pytest.mark.parametrize(
     ("query", "tool"),
-    [(CERT_QUERY, "get_tls_certificates"), (REMOVED_API_QUERY, "list_deprecated_apis")],
+    [
+        (CERT_QUERY, "get_tls_certificates"),
+        (REMOVED_API_QUERY, "list_deprecated_apis"),
+        (PENDING_PLANS_QUERY, "list_pending_installplans"),
+        (APPROVE_PLAN_QUERY, "approve_installplan"),
+        (APPROVE_PLAN_QUERY, "list_pending_installplans"),
+    ],
 )
 def test_sre_mode_keeps_the_tool_under_the_budget_cap(query, tool):
     from sre_agent.agent import TOOL_MAP
@@ -76,7 +86,13 @@ def test_sre_mode_keeps_the_tool_under_the_budget_cap(query, tool):
 
 @pytest.mark.parametrize(
     ("query", "tool"),
-    [(CERT_QUERY, "get_tls_certificates"), (REMOVED_API_QUERY, "list_deprecated_apis")],
+    [
+        (CERT_QUERY, "get_tls_certificates"),
+        (REMOVED_API_QUERY, "list_deprecated_apis"),
+        (PENDING_PLANS_QUERY, "list_pending_installplans"),
+        (APPROVE_PLAN_QUERY, "approve_installplan"),
+        (APPROVE_PLAN_QUERY, "list_pending_installplans"),
+    ],
 )
 def test_sre_skill_config_offers_the_tool(query, tool):
     """The orchestrated /ws/agent path: the sre skill scoped to its categories."""

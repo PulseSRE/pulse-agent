@@ -23,6 +23,7 @@ PREVIEW_TIMEOUT_SECONDS = 8.0
 
 def _builders() -> dict[str, Callable[[dict], dict[str, Any]]]:
     from .k8s_tools.config_consumers import preview_restart_consumers
+    from .k8s_tools.olm import preview_approve
     from .k8s_tools.workload_writes import PREVIEW_BUILDERS
     from .rbac_writes import PREVIEW_BUILDERS as ACCESS_PREVIEWS
     from .silences import preview_create, preview_expire
@@ -30,6 +31,7 @@ def _builders() -> dict[str, Callable[[dict], dict[str, Any]]]:
     return {
         "create_silence": preview_create,
         "expire_silence": preview_expire,
+        "approve_installplan": preview_approve,
         "restart_consumers": preview_restart_consumers,
         **PREVIEW_BUILDERS,
         **ACCESS_PREVIEWS,

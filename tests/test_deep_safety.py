@@ -59,7 +59,9 @@ def test_forwarded_username_migrates_exact_token_hash():
         ({"readOnlyHint": True, "destructiveHint": True}, True),
     ],
 )
-def test_mcp_unknown_and_mutating_tools_require_gate(annotations, write):
+def test_mcp_unknown_and_mutating_tools_are_never_offered(annotations, write):
+    # MCP tools run as the MCP server's service account: a write is withheld
+    # entirely (not merely gated), and an unknown tool counts as a write.
     name = "deep_review_tool"
     conn = MCPConnection(
         name="test",
@@ -70,8 +72,10 @@ def test_mcp_unknown_and_mutating_tools_require_gate(annotations, write):
         tool_schemas={name: {"annotations": annotations}},
     )
     try:
-        assert register_mcp_tools(conn) == 1
-        assert (name in WRITE_TOOL_NAMES) is write
+        assert register_mcp_tools(conn) == (0 if write else 1)
+        assert (name in TOOL_REGISTRY) is not write
+        assert name not in WRITE_TOOL_NAMES
+        assert (name in conn.withheld_tools) is write
     finally:
         unregister_tool(name)
 
@@ -200,13 +204,17 @@ def test_reregister_same_connection_preserves_tools_and_refreshes_write_classifi
     name = "deep_reregister"
     conn = MCPConnection(name="test", url="none", transport="sse", toolsets=[], tools=[name])
     try:
-        assert register_mcp_tools(conn) == 1
-        assert name in WRITE_TOOL_NAMES
+        assert register_mcp_tools(conn) == 0
+        assert name not in TOOL_REGISTRY
         conn.tool_schemas[name] = {"annotations": {"readOnlyHint": True}}
         assert register_mcp_tools(conn) == 1
         assert conn.tools == [name]
         assert name in TOOL_REGISTRY
         assert name not in WRITE_TOOL_NAMES
+        conn.tool_schemas[name] = {"annotations": {"readOnlyHint": True, "destructiveHint": True}}
+        assert register_mcp_tools(conn) == 0
+        assert name not in TOOL_REGISTRY
+        assert name in conn.withheld_tools
     finally:
         unregister_tool(name)
 
@@ -282,7 +290,14 @@ def test_zero_match_owner_migration_releases_table_lock():
 
 def test_mcp_refresh_removes_withdrawn_tools_from_registry():
     name = "deep_withdrawn"
-    conn = MCPConnection(name="test", url="none", transport="sse", toolsets=[], tools=[name])
+    conn = MCPConnection(
+        name="test",
+        url="none",
+        transport="sse",
+        toolsets=[],
+        tools=[name],
+        tool_schemas={name: {"annotations": {"readOnlyHint": True}}},
+    )
     try:
         register_mcp_tools(conn)
         assert name in TOOL_REGISTRY
