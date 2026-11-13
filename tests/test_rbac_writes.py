@@ -307,8 +307,14 @@ def test_grant_namespace_role(cluster, as_user):
         namespace="payments",
     )
     assert cluster.writes()[0]["body"]["roleRef"]["kind"] == "Role"
+    # One keyword argument per line: gitleaks' generic-api-key rule matches a run of
+    # `*_kind="..."` arguments on one line as if it were a key assignment.
     text = _call(
-        rbac_writes.grant_access, subject_kind="User", subject_name="bob", role_kind="Role", role_name="deployer"
+        rbac_writes.grant_access,
+        subject_kind="User",
+        subject_name="bob",
+        role_kind="Role",
+        role_name="deployer",
     )
     assert text.startswith("Not granted:") and "give the namespace" in text
 
