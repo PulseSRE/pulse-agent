@@ -244,6 +244,16 @@ TOOL_CATEGORIES = {
             "terminating",
             "finalizer",
             "won't delete",
+            # grant_access / revoke_access. Single keywords match word stems.
+            "grant",
+            "give",
+            "revoke",
+            "access",
+            "admin",
+            "offboard",
+            "onboard",
+            "role binding",
+            "rolebinding",
             "installplan",
             "install plan",
             "approve",
@@ -278,6 +288,11 @@ TOOL_CATEGORIES = {
             "who_can",
             "effective_permissions",
             "get_rbac_changes",
+            # Confirm-gated access writes (rbac_writes.py). Only here, not in
+            # security: that skill has write_tools false, so a grant or revoke
+            # asked of it must reach the sre skill (trigger patterns, handoff).
+            "grant_access",
+            "revoke_access",
         ],
     },
     "gitops": {

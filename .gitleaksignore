@@ -9,3 +9,8 @@
 b25e9bb9dd640cd17b3ba71fd046e6f44420d9b4:SECURITY.md:generic-api-key:30
 2dfeabefdd2cea3ba7d1b27c9c87b2853e3b1755:SECURITY.md:generic-api-key:30
 402af7e0fbe86af4688a2f0bd089555500046fb1:.gitleaksignore:generic-api-key:6
+
+# False positive: keyword arguments in a grant_access test call
+# (subject_kind="User", subject_name="bob", role_kind="Role", role_name="deployer"),
+# matched by generic-api-key. No credential. Branch history is not rewritten.
+ee4d94b4f9dcd0346085d105628b58e8a05c0f14:tests/test_rbac_writes.py:generic-api-key:311

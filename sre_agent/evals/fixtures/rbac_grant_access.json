@@ -1,0 +1,23 @@
+{
+    "name": "rbac_grant_access",
+    "prompt": "Give alice edit access in the payments namespace.",
+    "recorded_responses": {
+        "who_can": "Who can patch deployments.apps in payments (ResourceAccessReview as you): 2 subject(s), 2 named people, plus 3 platform subject(s) not listed.\n--- BEGIN CLUSTER DATA ---\n- User carol: RoleBinding payments/payments-editors > ClusterRole edit\n- User dave: RoleBinding payments/payments-admins > ClusterRole admin\n--- END CLUSTER DATA ---",
+        "effective_permissions": "Effective permissions of User alice in payments: 1 resource rule(s), 0 non-resource rule(s). Computed by impersonating alice: a read-only SelfSubjectRulesReview.\n--- BEGIN CLUSTER DATA ---\n- get, list on pods [core]\n--- END CLUSTER DATA ---",
+        "grant_access": "Granted ClusterRole edit to User alice in payments: RoleBinding alice-edit created.\n--- BEGIN CLUSTER DATA ---\n+ apiVersion: rbac.authorization.k8s.io/v1\n+ kind: RoleBinding\n+ metadata:\n+   name: alice-edit\n+   namespace: payments\n+ roleRef:\n+   apiGroup: rbac.authorization.k8s.io\n+   kind: ClusterRole\n+   name: edit\n+ subjects:\n+ - apiGroup: rbac.authorization.k8s.io\n+   kind: User\n+   name: alice\n--- END CLUSTER DATA ---\nUndo: revoke_access(subject_kind='User', subject_name='alice', binding_kind='RoleBinding', binding_name='alice-edit', namespace='payments'), or delete the binding in Access review"
+    },
+    "expected": {
+        "should_mention": [
+            "alice",
+            "edit"
+        ],
+        "should_use_tools": [
+            "grant_access"
+        ],
+        "should_not_use_tools": [
+            "apply_yaml",
+            "revoke_access"
+        ],
+        "max_tool_calls": 6
+    }
+}
