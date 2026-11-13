@@ -96,6 +96,15 @@ class MonitorConfig(BaseModel):
     # verified_then_recurred — the verdict was true on the scan that issued it
     # and wrong about the condition. 0 disables recurrence detection.
     recurrence_window: int = 1800
+    # Per-target circuit breaker for auto-fix (monitor/fix_breaker.py). After
+    # this many fixes on the same resource and category inside the window did
+    # not make the condition go away, auto-fix stops for that target and one
+    # inbox item asks a person. Independent of fix_learning's statistics.
+    fix_breaker_max_attempts: int = 3
+    fix_breaker_window: int = 86400
+    # The lowest auto-fix confidence that may act without asking at trust 3+.
+    # Below it the fix is proposed for approval instead of executed.
+    autofix_min_confidence: float = 0.6
 
 
 class RoutingConfig(BaseModel):
@@ -246,6 +255,9 @@ class PulseAgentSettings(BaseSettings):
     max_daily_requested_investigations: int = 20
     max_daily_requested_investigations_per_user: int = 10
     recurrence_window: int = 1800
+    fix_breaker_max_attempts: int = Field(default=3, ge=1)
+    fix_breaker_window: int = Field(default=86400, ge=60)
+    autofix_min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)
 
     # Routing
     multi_skill: bool = True
@@ -340,6 +352,9 @@ class PulseAgentSettings(BaseSettings):
             max_daily_requested_investigations=self.max_daily_requested_investigations,
             max_daily_requested_investigations_per_user=self.max_daily_requested_investigations_per_user,
             recurrence_window=self.recurrence_window,
+            fix_breaker_max_attempts=self.fix_breaker_max_attempts,
+            fix_breaker_window=self.fix_breaker_window,
+            autofix_min_confidence=self.autofix_min_confidence,
         )
         self.routing = RoutingConfig(
             multi_skill=self.multi_skill,

@@ -1482,7 +1482,17 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
             due_date=None,
             category=_item_category(finding),
         )
-        repo.update_resources_and_priority(existing_item["id"], merged_resources, priority, now)
+        # The current wording: a recurring pod condition is re-reported under
+        # the replacement pod's name and restart count. Without this the item
+        # kept naming the pod a fix deleted long ago.
+        repo.update_resources_and_priority(
+            existing_item["id"],
+            merged_resources,
+            priority,
+            now,
+            title=finding.get("title"),
+            summary=finding.get("summary"),
+        )
         return existing_item["id"]
 
     # Check for recently-resolved item with same correlation key — reopen instead of creating duplicate
@@ -1500,6 +1510,20 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
             metadata.pop("investigation_run", None)
             metadata.pop("action_plan", None)
             repo.update_triage_result(recent_item["id"], "new", metadata, finding.get("summary", ""), now)
+            repo.update_resources_and_priority(
+                recent_item["id"],
+                _merge_resources(recent_item.get("resources", []), finding.get("resources", [])),
+                compute_priority_score(
+                    severity=finding.get("severity"),
+                    confidence=finding.get("confidence", 0),
+                    noise_score=finding.get("noiseScore", 0),
+                    created_at=recent_item["created_at"],
+                    due_date=None,
+                    category=_item_category(finding),
+                ),
+                now,
+                title=finding.get("title"),
+            )
             return recent_item["id"]
 
     item = {
