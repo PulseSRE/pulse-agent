@@ -161,6 +161,8 @@ TOOL_CATEGORIES = {
             "compliance",
             "policy",
             "scan",
+            "permission",
+            "who can",
         ],
         "tools": [
             "scan_pod_security",
@@ -174,6 +176,9 @@ TOOL_CATEGORIES = {
             "get_security_summary",
             "get_tls_certificates",
             "request_security_scan",
+            "who_can",
+            "effective_permissions",
+            "get_rbac_changes",
             # Secret rotation: which workloads read it (read-only; the restart
             # itself is in workloads, since this skill does not write).
             "find_config_consumers",
@@ -257,6 +262,12 @@ TOOL_CATEGORIES = {
             "create_inbox_task",
             "diagnose_stuck_deletion",
             "remove_finalizer",
+            # "Who can delete secrets in payments?" and "what changed in RBAC
+            # before this broke?" are SRE questions too. Listed after security,
+            # which stays their primary category (its keywords rank them).
+            "who_can",
+            "effective_permissions",
+            "get_rbac_changes",
         ],
     },
     "gitops": {

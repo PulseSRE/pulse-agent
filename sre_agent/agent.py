@@ -42,6 +42,7 @@ from .harness import (
 from .inbox import create_inbox_task
 from .k8s_tools import ALL_TOOLS as _K8S_TOOLS
 from .predict_tools import PREDICT_TOOLS
+from .rbac_tools import RBAC_TOOLS
 from .runbooks import ALERT_TRIAGE_CONTEXT, RUNBOOKS  # noqa: F401 — RUNBOOKS re-exported for backward compat
 from .self_tools import (
     create_skill,
@@ -73,6 +74,7 @@ ALL_TOOLS: list[Any] = (
     + GIT_TOOLS
     + PREDICT_TOOLS
     + SILENCE_TOOLS
+    + RBAC_TOOLS
     + [
         request_security_scan,
         namespace_summary,
