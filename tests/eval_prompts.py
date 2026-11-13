@@ -242,6 +242,18 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "Find the silence, then a confirm-gated expire",
     ),
     (
+        "which operator updates are waiting for approval?",
+        ["list_pending_installplans"],
+        "sre",
+        "Pending OLM InstallPlans across namespaces",
+    ),
+    (
+        "approve the pending installplan for the elasticsearch operator",
+        ["list_pending_installplans", "approve_installplan"],
+        "sre",
+        "Find the plan and its resourceVersion, then a confirm-gated approve",
+    ),
+    (
         "force the kuadrant.io/dnsrecord finalizer off dnsrecords.kuadrant.io",
         ["remove_finalizer"],
         "sre",

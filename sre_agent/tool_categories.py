@@ -212,6 +212,14 @@ TOOL_CATEGORIES = {
             "terminating",
             "finalizer",
             "won't delete",
+            "installplan",
+            "install plan",
+            "approve",
+            "approval",
+            "pending approval",
+            "olm",
+            "operator update",
+            "operator upgrade",
         ],
         "tools": [
             "cordon_node",
@@ -220,6 +228,8 @@ TOOL_CATEGORIES = {
             "apply_yaml",
             "get_configmap",
             "list_operator_subscriptions",
+            "list_pending_installplans",
+            "approve_installplan",
             "get_cluster_updates",
             "check_upgrade_api_removals",
             # The sre skill tells the model to call it for "what APIs are

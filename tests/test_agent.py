@@ -310,6 +310,8 @@ class TestWriteToolSet:
             # A silence hides alerts from the on-call; expiring one starts them paging again.
             "create_silence",
             "expire_silence",
+            # Approving an InstallPlan installs an operator version; OLM cannot un-approve.
+            "approve_installplan",
         }
         assert expected == WRITE_TOOLS
 
