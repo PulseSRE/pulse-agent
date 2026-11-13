@@ -520,6 +520,8 @@ def _populate_risk_levels() -> None:
             "rollback_workload",
             "cordon_node",
             "uncordon_node",
+            "grant_access",
+            "revoke_access",
         }
         medium_risk = {
             "scale_deployment",

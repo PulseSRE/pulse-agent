@@ -17,7 +17,8 @@ skip_component_hints: true
 requires_tools:
   - request_sre_investigation
 handoff_to:
-  sre: [fix, remediate, scale, restart, apply, patch, delete]
+  # grant_access / revoke_access are sre write tools; this skill cannot write.
+  sre: [fix, remediate, scale, restart, apply, patch, delete, grant, revoke, give access, remove access]
   view_designer: [dashboard, view, create view, security dashboard]
 route_priority: 40
 trigger_patterns:
