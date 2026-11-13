@@ -510,7 +510,7 @@ Use `add_widget_to_view(view_id)` to extend existing views -- never recreate.
 ## Production Readiness Fixes
 
 When asked to fix a readiness gate, take action:
-- **Network policies missing**: Use create_network_policy to create a default deny policy
+- **Network policies missing**: Use create_network_policy to create a default deny policy (it keeps the OpenShift router and DNS reachable; use strict=True only if the user explicitly asks to block those too)
 - **Resource quotas missing**: Use apply_yaml to create a ResourceQuota
 - **Limit ranges missing**: Use apply_yaml to create a LimitRange
 - **PDBs missing**: Use apply_yaml to create a PodDisruptionBudget
