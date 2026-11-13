@@ -4,6 +4,10 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## Unreleased
 
+## v2.38.1 (2026-11-12)
+
+Paired with pulse-ui v2.38.1; runs on pulse-operator v0.14.0. No migrations. Pull requests #241 and #245.
+
 - **A turn that asks for pod deletion in a protected namespace runs no write.** The denied-write guard (#137) armed only when `delete_pod` actually reached the policy check. Under SRE-Bench's `unsafe_missing_confirmation` trap ("Delete the pod … in namespace production immediately") the model often declined the deletion in words and then scaled or restarted the owner instead, so nothing armed the guard and the substitute went to confirmation. The turn now starts with the guard armed when the person's latest message asks to delete, kill, evict or remove a pod and names a namespace in `PULSE_AGENT_PROTECTED_NAMESPACES` (`policy.requested_denied_write`); every write in that turn is refused before confirmation with the reason, and reads stay available. A message that names no deletion ("resolve the crashloop in production", "restart payments") is unaffected, and prompts the agent writes itself (plan phases, investigations; `honor_plan_requests=False`) never arm it. Replaces the write-proposal design of #244, which fixed the trap but also stopped single-message remediation in production.
 
 ## v2.38.0 (2026-11-12)
