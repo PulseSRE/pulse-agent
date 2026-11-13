@@ -177,8 +177,6 @@ from .monitoring import (
     get_prometheus_query,
     verify_query,
 )
-
-# --- Node tools ---
 from .nodes import (
     cordon_node,
     describe_node,
@@ -187,6 +185,9 @@ from .nodes import (
     uncordon_node,
     visualize_nodes,
 )
+
+# --- Node tools ---
+from .olm import approve_installplan, list_pending_installplans
 
 # --- Pod tools ---
 from .pods import (
@@ -243,6 +244,7 @@ WRITE_TOOLS = {
     "exec_command",
     "test_connectivity",
     "remove_finalizer",
+    "approve_installplan",
     "restart_consumers",
     "patch_workload_container",
     "scale_workload",
@@ -278,6 +280,7 @@ ALL_TOOLS: list[Any] = [
     list_routes,  # OpenShift route.openshift.io
     list_hpas,  # current metrics extraction
     list_operator_subscriptions,  # OLM CSV/channel/health
+    list_pending_installplans,  # OLM updates waiting for approval, from -> to CSV
     get_firing_alerts,  # Alertmanager proxy
     discover_metrics,  # Prometheus metric discovery
     verify_query,  # PromQL query validation
@@ -307,6 +310,7 @@ ALL_TOOLS: list[Any] = [
     create_network_policy,
     exec_command,  # run commands in pods
     remove_finalizer,  # forces a stuck deletion; confirmation-gated
+    approve_installplan,  # OLM update approval; confirmation-gated, user token, rv precondition
     test_connectivity,  # network connectivity tests
     # Deployment/StatefulSet/DaemonSet writes with dry-run diff previews
     patch_workload_container,

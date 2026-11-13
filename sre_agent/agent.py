@@ -433,6 +433,9 @@ _STRICT_LAST = frozenset(
         "scale_workload",
         "restart_workload",
         "rollback_workload",
+        # k8s_tools/olm.py: namespace, name and resourceVersion are validated by the
+        # tool, and the write carries a resourceVersion precondition.
+        "approve_installplan",
     }
 )
 
