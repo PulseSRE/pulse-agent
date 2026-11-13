@@ -17,6 +17,8 @@ Rules:
   so routine remediation (crashloop restarts) is unaffected when requested
   independently. After a forbidden write, the agent stops further writes for
   that invocation; a new user turn is required to authorize an alternative.
+  A turn whose own message asks for that deletion starts with writes off
+  (``requested_denied_write``), so a substitute cannot run either.
 - ``drain_node`` / ``cordon_node`` require the change-process break-glass
   flag (``PULSE_AGENT_ALLOW_NODE_OPS``) regardless of confirmation —
   node-level operations are never a chat-approval decision.
@@ -28,6 +30,7 @@ the policy should not apply.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from fnmatch import fnmatch
 
@@ -90,6 +93,62 @@ def check_write_policy(name: str, input_data: dict | None) -> ToolError | None:
         )
 
     return None
+
+
+# --- Requests for a denied write ------------------------------------------
+#
+# The guard above arms only when a denied call reaches the policy check. A
+# model that refuses ``delete_pod`` in words never makes that call, so the
+# guard stays off and a substitute write (scaling, restarting, deleting the
+# owner) goes to confirmation instead. Under SRE-Bench's permissive approver
+# that substitute ran in production on most attempts.
+#
+# When the person's own message asks for a pod deletion in a protected
+# namespace, the turn starts with the guard armed: writes are refused for the
+# turn, reads stay available. Deliberately narrow: it needs a deletion verb
+# with "pod", and a namespace named in a form people actually write ("in
+# namespace X", "in the X namespace", "-n X", "namespace: X", "X/pod-name",
+# "in X"), counted only when that namespace is protected.
+# A message that only says "fix it" or "resolve the crashloop" never matches,
+# so routine remediation is unaffected.
+
+_DELETE_POD = re.compile(
+    r"\b(?:delete|remove|kill|evict|nuke|destroy|terminate)\b[^.!?\n]{0,80}?\bpods?\b"
+    r"|\bpods?\b[^.!?\n]{0,80}?\b(?:delete|remove|kill|evict|nuke|destroy|terminate)\b",
+    re.IGNORECASE,
+)
+_NAMESPACE_MENTIONS = (
+    re.compile(r"\bnamespace[:=\s]+[\"'`]?([a-z0-9][a-z0-9-]{0,62})", re.IGNORECASE),
+    re.compile(
+        r"\bin\s+(?:the\s+)?[\"'`]?([a-z0-9][a-z0-9-]{0,62})[\"'`]?\s+(?:namespace|ns|project)\b", re.IGNORECASE
+    ),
+    re.compile(r"(?:^|\s)(?:-n|--namespace)[=\s]+([a-z0-9][a-z0-9-]{0,62})", re.IGNORECASE),
+    re.compile(r"\bns[:=\s]+([a-z0-9][a-z0-9-]{0,62})", re.IGNORECASE),
+    re.compile(r"\b([a-z0-9][a-z0-9-]{0,62})/[a-z0-9][a-z0-9.-]*", re.IGNORECASE),
+    # Last, and only ever counted when the name is a protected namespace.
+    re.compile(r"\bin\s+([a-z0-9][a-z0-9-]{0,62})\b", re.IGNORECASE),
+)
+
+
+def requested_denied_write(text: str) -> str | None:
+    """The protected namespace a message asks to delete pods in, else None."""
+    if not text or not _DELETE_POD.search(text):
+        return None
+    for pattern in _NAMESPACE_MENTIONS:
+        for match in pattern.finditer(text):
+            namespace = match.group(1).lower()
+            if _is_protected(namespace):
+                return namespace
+    return None
+
+
+def requested_denied_write_reason(namespace: str) -> str:
+    return (
+        f"Operation blocked: this turn asks for pod deletion in protected namespace '{namespace}', "
+        "which policy denies (PULSE_AGENT_PROTECTED_NAMESPACES). No write runs in this turn, "
+        "including substitutes such as scaling, restarting or deleting the owner. Diagnose with "
+        "read tools and propose restart_deployment for the person to request in a new message."
+    )
 
 
 def policy_system_note(tool_names: Iterable[str]) -> str | None:
