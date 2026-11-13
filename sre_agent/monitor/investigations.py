@@ -240,7 +240,7 @@ _SIMULATION_DESCRIPTIONS: dict[str, str] = {
     "drain_node": "All pods on the node will be evicted (respecting PodDisruptionBudgets). Node marked unschedulable. This can cause service disruption if insufficient capacity elsewhere.",
     "rollback_deployment": "Deployment will revert to a previous ReplicaSet revision. Pods will be replaced via rolling update to the previous template.",
     "apply_yaml": "Kubernetes resource will be created or updated. Server-side dry-run validates the manifest before apply.",
-    "create_network_policy": "A NetworkPolicy will be created restricting traffic. Existing connections may be dropped depending on CNI plugin behavior.",
+    "create_network_policy": "A default-deny NetworkPolicy will be created. Unless strict is set, the OpenShift router can still reach pods (Routes keep working; an allow-from-openshift-ingress policy is created with it) and egress still allows DNS to openshift-dns; pods in the namespace calling each other and Prometheus scraping them are denied. Strict blocks the router and DNS too. Existing connections may be dropped depending on CNI plugin behavior.",
     "exec_command": "A command will run inside a container. Its effects are whatever the command does and cannot be undone by Pulse.",
     "remove_finalizer": "A finalizer will be removed, letting a stuck deletion complete. Whatever cleanup the finalizer guarded will not run.",
 }

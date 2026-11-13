@@ -4,6 +4,8 @@ All notable changes to Pulse Agent are documented in this file.
 
 ## Unreleased
 
+- **Safety: `create_network_policy` no longer cuts the OpenShift router or DNS.** Its default `deny-all-ingress` was a bare deny that also blocked the router, silently breaking every Route in the namespace, and `deny-all-egress`/`deny-all` blocked DNS, so nothing could resolve. The tool now mirrors pulse-ui's reviewed templates (`engine/createTemplates.ts`, pulse-ui#185): an ingress deny is created together with `allow-from-openshift-ingress` (namespaces labelled `policy-group.network.openshift.io/ingress` or `policy-group.network.openshift.io/host-network`), created first so a failure never leaves the deny alone, and an egress deny allows DNS to `openshift-dns` on UDP/TCP 53 and 5353. Default names follow the UI (`default-deny-ingress`, `default-deny-egress-allow-dns`, `default-deny-all-allow-dns`). Every policy is dry-run before any is created; an existing router allow policy is left unchanged. The bare deny is still available with `strict=True`, which the tool description reserves for an explicit request. The tool description, the simulation text and the result say what stays reachable. The namespace and name are now validated.
+
 ## v2.38.1 (2026-11-12)
 
 Paired with pulse-ui v2.38.1; runs on pulse-operator v0.14.0. No migrations. Pull requests #241 and #245.

@@ -215,47 +215,179 @@ def _pod_template_violation(kind: str, resource: dict) -> str:
     return ""
 
 
+# Mirrors pulse-ui `engine/createTemplates.ts` ('default-deny', 'default-deny-egress').
+# A bare deny-all-ingress also blocks the OpenShift router, which silently
+# breaks every Route in the namespace; a bare deny-all-egress breaks DNS, so
+# nothing can resolve even the hosts allowed later. The default variants keep
+# both working; `strict=True` is the bare deny for a person who asks for it.
+ROUTER_ALLOW_POLICY_NAME = "allow-from-openshift-ingress"
+
+_ROUTER_INGRESS_FROM = [
+    # The router's namespace with the default endpoint publishing strategies.
+    {"namespaceSelector": {"matchLabels": {"policy-group.network.openshift.io/ingress": ""}}},
+    # Host-network traffic: how the router arrives with the HostNetwork strategy.
+    {"namespaceSelector": {"matchLabels": {"policy-group.network.openshift.io/host-network": ""}}},
+]
+
+# Cluster DNS: the openshift-dns pods listen on 5353; 53 is the Service port.
+_DNS_EGRESS_RULE = {
+    "to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "openshift-dns"}}}],
+    "ports": [
+        {"protocol": "UDP", "port": 5353},
+        {"protocol": "TCP", "port": 5353},
+        {"protocol": "UDP", "port": 53},
+        {"protocol": "TCP", "port": 53},
+    ],
+}
+
+_NETPOL_TYPES = ("deny-all-ingress", "deny-all-egress", "deny-all")
+
+
+def default_network_policy_name(policy_type: str, strict: bool = False) -> str:
+    """The deny policy's name when the caller gives none (matches the UI templates)."""
+    if policy_type == "deny-all-egress":
+        return "default-deny-egress" if strict else "default-deny-egress-allow-dns"
+    if policy_type == "deny-all":
+        return "default-deny-all" if strict else "default-deny-all-allow-dns"
+    return "default-deny-ingress"
+
+
+def network_policy_manifests(namespace: str, name: str, policy_type: str, strict: bool = False) -> list[dict]:
+    """The NetworkPolicies `create_network_policy` creates, in creation order.
+
+    The router allow policy (when there is one) comes first, so a failure part
+    way through never leaves a deny without it.
+    """
+    denies_ingress = policy_type in ("deny-all-ingress", "deny-all")
+    denies_egress = policy_type in ("deny-all-egress", "deny-all")
+
+    deny_spec: dict = {"podSelector": {}, "policyTypes": []}
+    if denies_ingress:
+        deny_spec["policyTypes"].append("Ingress")
+    if denies_egress:
+        deny_spec["policyTypes"].append("Egress")
+        if not strict:
+            deny_spec["egress"] = [_DNS_EGRESS_RULE]
+
+    manifests: list[dict] = []
+    if denies_ingress and not strict:
+        manifests.append(
+            {
+                "apiVersion": "networking.k8s.io/v1",
+                "kind": "NetworkPolicy",
+                "metadata": {"name": ROUTER_ALLOW_POLICY_NAME, "namespace": namespace},
+                "spec": {
+                    "podSelector": {},
+                    "policyTypes": ["Ingress"],
+                    "ingress": [{"from": list(_ROUTER_INGRESS_FROM)}],
+                },
+            }
+        )
+    manifests.append(
+        {
+            "apiVersion": "networking.k8s.io/v1",
+            "kind": "NetworkPolicy",
+            "metadata": {"name": name, "namespace": namespace},
+            "spec": deny_spec,
+        }
+    )
+    return manifests
+
+
+def network_policy_reachability(policy_type: str, strict: bool = False) -> str:
+    """Plain-English summary of what still gets through, for the confirm and the result."""
+    denies_ingress = policy_type in ("deny-all-ingress", "deny-all")
+    denies_egress = policy_type in ("deny-all-egress", "deny-all")
+    parts: list[str] = []
+    if denies_ingress:
+        if strict:
+            parts.append(
+                "All ingress is denied, including the OpenShift router: every Route in the namespace stops working"
+            )
+        else:
+            parts.append(
+                "Ingress is denied except from the OpenShift router (Routes keep working); pods in the "
+                "namespace calling each other and Prometheus scraping them are denied too"
+            )
+    else:
+        parts.append("Ingress is not restricted")
+    if denies_egress:
+        if strict:
+            parts.append("All egress is denied, including DNS: no name lookups resolve")
+        else:
+            parts.append(
+                "Egress is denied except DNS to openshift-dns (UDP/TCP 53 and 5353); add policies for each "
+                "destination the pods need"
+            )
+    else:
+        parts.append("Egress is not restricted, so DNS and outbound calls keep working")
+    return ". ".join(parts) + "."
+
+
 @beta_tool
 def create_network_policy(
     namespace: str,
-    name: str = "default-deny-ingress",
+    name: str = "",
     policy_type: str = "deny-all-ingress",
+    strict: bool = False,
 ) -> str:
-    """Create a network policy in a namespace. REQUIRES USER CONFIRMATION.
+    """Create a default-deny NetworkPolicy in a namespace that keeps the OpenShift router and DNS working. REQUIRES USER CONFIRMATION.
+
+    'deny-all-ingress' also creates 'allow-from-openshift-ingress' so the router can still reach pods and Routes keep
+    working; egress variants allow DNS to openshift-dns (UDP/TCP 53 and 5353). Set strict=True only when the person
+    explicitly asks to block the router and DNS too: it breaks every Route and/or all name resolution in the namespace.
 
     Args:
         namespace: Target namespace for the network policy.
-        name: Name of the NetworkPolicy resource.
-        policy_type: Policy template: 'deny-all-ingress' (default), 'deny-all-egress', or 'deny-all'.
+        name: Name of the deny NetworkPolicy. Default: default-deny-ingress, default-deny-egress-allow-dns or default-deny-all-allow-dns.
+        policy_type: 'deny-all-ingress' (default, router allowed), 'deny-all-egress' (DNS allowed), or 'deny-all' (both).
+        strict: Bare deny with no router or DNS allowance. Only when explicitly requested. Default False.
     """
-    if policy_type == "deny-all-ingress":
-        spec = {"podSelector": {}, "policyTypes": ["Ingress"]}
-    elif policy_type == "deny-all-egress":
-        spec = {"podSelector": {}, "policyTypes": ["Egress"]}
-    elif policy_type == "deny-all":
-        spec = {"podSelector": {}, "policyTypes": ["Ingress", "Egress"]}
-    else:
+    if err := _validate_k8s_namespace(namespace):
+        return err
+    if policy_type not in _NETPOL_TYPES:
         return f"Unknown policy type: {policy_type}. Use 'deny-all-ingress', 'deny-all-egress', or 'deny-all'."
+    name = name or default_network_policy_name(policy_type, strict)
+    if err := _validate_k8s_name(name):
+        return err
+    if not strict and name == ROUTER_ALLOW_POLICY_NAME:
+        return f"Error: '{ROUTER_ALLOW_POLICY_NAME}' is the name of the router allow policy; choose another name."
 
-    body = {
-        "apiVersion": "networking.k8s.io/v1",
-        "kind": "NetworkPolicy",
-        "metadata": {"name": name, "namespace": namespace},
-        "spec": spec,
-    }
+    manifests = network_policy_manifests(namespace, name, policy_type, strict)
+    api = _kc.get_networking_client()
 
-    # Dry-run first to validate
-    dry_result = _kc.safe(
-        lambda: _kc.get_networking_client().create_namespaced_network_policy(namespace, body, dry_run="All")
+    # Dry-run every policy before creating any, so a refusal leaves nothing half-applied.
+    # An existing router allow policy is kept as it is: Routes already work.
+    existing: set[str] = set()
+    for body in manifests:
+        pname = body["metadata"]["name"]
+        dry = _kc.safe(lambda b=body: api.create_namespaced_network_policy(namespace, b, dry_run="All"))
+        if isinstance(dry, ToolError):
+            if pname == ROUTER_ALLOW_POLICY_NAME and dry.category == "conflict":
+                existing.add(pname)
+                continue
+            return f"Dry-run failed for NetworkPolicy '{pname}': {dry}. Nothing was created."
+
+    created: list[str] = []
+    for body in manifests:
+        pname = body["metadata"]["name"]
+        if pname in existing:
+            continue
+        result = _kc.safe(lambda b=body: api.create_namespaced_network_policy(namespace, b))
+        if isinstance(result, ToolError):
+            done = f" Already created: {', '.join(created)}." if created else " Nothing was created."
+            return f"Creating NetworkPolicy '{pname}' failed: {result}.{done}"
+        created.append(pname)
+
+    lines = [f"NetworkPolicy '{p}' created in namespace '{namespace}'." for p in created]
+    if existing:
+        lines.append(
+            f"NetworkPolicy '{ROUTER_ALLOW_POLICY_NAME}' already exists in '{namespace}' and was left unchanged."
+        )
+    lines.append(
+        f"Type: {policy_type}{' (strict)' if strict else ''}. {network_policy_reachability(policy_type, strict)}"
     )
-    if isinstance(dry_result, ToolError):
-        return f"Dry-run failed: {dry_result}"
-
-    # Apply for real
-    result = _kc.safe(lambda: _kc.get_networking_client().create_namespaced_network_policy(namespace, body))
-    if isinstance(result, ToolError):
-        return str(result)
-    return f"NetworkPolicy '{name}' created in namespace '{namespace}' (type={policy_type})."
+    return "\n".join(lines)
 
 
 @beta_tool
