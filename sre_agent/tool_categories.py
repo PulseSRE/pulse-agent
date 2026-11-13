@@ -78,6 +78,22 @@ TOOL_CATEGORIES = {
             "rollback",
             "restart",
             "workload",
+            # "Who uses this ConfigMap / restart what reads it" (JTBD E8, J9).
+            "configmap",
+            "config map",
+            "consumer",
+            "used by",
+            # Single keywords match on the query's word stems, so "stateful" and
+            # "daemon" never matched "statefulset"/"daemonset" for the budget ranking.
+            "statefulset",
+            "daemonset",
+            "roll back",
+            "limit",
+            "probe",
+            "readiness",
+            "liveness",
+            "pull secret",
+            "imagepullsecret",
         ],
         "tools": [
             "list_resources",
@@ -92,6 +108,14 @@ TOOL_CATEGORIES = {
             "rollback_deployment",
             "get_rollout_history",
             "delete_pod",
+            "find_config_consumers",
+            "restart_consumers",
+            # Deployment, StatefulSet and DaemonSet writes with a dry-run diff
+            # preview: the chat side of the pod page's guided fixes.
+            "patch_workload_container",
+            "scale_workload",
+            "restart_workload",
+            "rollback_workload",
         ],
     },
     "networking": {
@@ -137,6 +161,8 @@ TOOL_CATEGORIES = {
             "compliance",
             "policy",
             "scan",
+            "permission",
+            "who can",
         ],
         "tools": [
             "scan_pod_security",
@@ -150,6 +176,12 @@ TOOL_CATEGORIES = {
             "get_security_summary",
             "get_tls_certificates",
             "request_security_scan",
+            "who_can",
+            "effective_permissions",
+            "get_rbac_changes",
+            # Secret rotation: which workloads read it (read-only; the restart
+            # itself is in workloads, since this skill does not write).
+            "find_config_consumers",
         ],
     },
     "storage": {
@@ -212,6 +244,14 @@ TOOL_CATEGORIES = {
             "terminating",
             "finalizer",
             "won't delete",
+            "installplan",
+            "install plan",
+            "approve",
+            "approval",
+            "pending approval",
+            "olm",
+            "operator update",
+            "operator upgrade",
         ],
         "tools": [
             "cordon_node",
@@ -220,6 +260,8 @@ TOOL_CATEGORIES = {
             "apply_yaml",
             "get_configmap",
             "list_operator_subscriptions",
+            "list_pending_installplans",
+            "approve_installplan",
             "get_cluster_updates",
             "check_upgrade_api_removals",
             # The sre skill tells the model to call it for "what APIs are
@@ -230,6 +272,12 @@ TOOL_CATEGORIES = {
             "create_inbox_task",
             "diagnose_stuck_deletion",
             "remove_finalizer",
+            # "Who can delete secrets in payments?" and "what changed in RBAC
+            # before this broke?" are SRE questions too. Listed after security,
+            # which stays their primary category (its keywords rank them).
+            "who_can",
+            "effective_permissions",
+            "get_rbac_changes",
         ],
     },
     "gitops": {

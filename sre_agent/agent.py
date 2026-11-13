@@ -42,6 +42,7 @@ from .harness import (
 from .inbox import create_inbox_task
 from .k8s_tools import ALL_TOOLS as _K8S_TOOLS
 from .predict_tools import PREDICT_TOOLS
+from .rbac_tools import RBAC_TOOLS
 from .runbooks import ALERT_TRIAGE_CONTEXT, RUNBOOKS  # noqa: F401 — RUNBOOKS re-exported for backward compat
 from .self_tools import (
     create_skill,
@@ -73,6 +74,7 @@ ALL_TOOLS: list[Any] = (
     + GIT_TOOLS
     + PREDICT_TOOLS
     + SILENCE_TOOLS
+    + RBAC_TOOLS
     + [
         request_security_scan,
         namespace_summary,
@@ -421,7 +423,21 @@ _STRICT_MAX_OPTIONAL = 24
 # Write tools that parse and validate their own input completely, so they are
 # the ones left non-strict when a turn offers more write tools than the limits
 # allow. They stay confirmation-gated either way; strict only types arguments.
-_STRICT_LAST = frozenset({"create_silence", "expire_silence"})
+_STRICT_LAST = frozenset(
+    {
+        "create_silence",
+        "expire_silence",
+        # k8s_tools/workload_writes.py: kind, quantities, probe timings, replicas
+        # and revision are type- and range-checked by the tool itself.
+        "patch_workload_container",
+        "scale_workload",
+        "restart_workload",
+        "rollback_workload",
+        # k8s_tools/olm.py: namespace, name and resourceVersion are validated by the
+        # tool, and the write carries a resourceVersion precondition.
+        "approve_installplan",
+    }
+)
 
 
 PLAN_ONLY_SYSTEM_NOTE = (

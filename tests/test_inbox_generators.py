@@ -204,16 +204,17 @@ class TestServiceEndpointGapsGenerator:
 
 
 class TestGeneratorRegistration:
-    def test_all_17_registered(self):
+    def test_all_18_registered(self):
         from sre_agent.inbox_generators import TASK_GENERATORS
 
         # readiness_regressions was a stub that always returned [] and is gone.
-        assert len(TASK_GENERATORS) == 17
+        assert len(TASK_GENERATORS) == 18
         names = [n for n, _ in TASK_GENERATORS]
         assert "skill_gaps" in names
         assert "skill_low_performers" in names
         assert "skill_curation" in names
         assert "durable_approvals" in names
+        assert "operator_approvals" in names
 
     def test_run_all_generators_returns_list(self):
         from sre_agent.inbox_generators import run_all_generators
@@ -232,6 +233,7 @@ class TestGeneratorRegistration:
             patch("sre_agent.inbox_generators._get_network_policy_gaps", return_value=[]),
             patch("sre_agent.inbox_generators._get_route_cert_expiry", return_value=[]),
             patch("sre_agent.inbox_generators._get_service_endpoint_gaps", return_value=[]),
+            patch("sre_agent.inbox_generators._get_pending_installplans", return_value=[]),
         ):
             result = run_all_generators()
             assert isinstance(result, list)
