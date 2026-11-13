@@ -310,6 +310,8 @@ class TestWriteToolSet:
             # A silence hides alerts from the on-call; expiring one starts them paging again.
             "create_silence",
             "expire_silence",
+            # Rolling restart of every consumer of a ConfigMap/Secret, in one confirm.
+            "restart_consumers",
         }
         assert expected == WRITE_TOOLS
 

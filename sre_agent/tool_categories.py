@@ -78,6 +78,11 @@ TOOL_CATEGORIES = {
             "rollback",
             "restart",
             "workload",
+            # "Who uses this ConfigMap / restart what reads it" (JTBD E8, J9).
+            "configmap",
+            "config map",
+            "consumer",
+            "used by",
         ],
         "tools": [
             "list_resources",
@@ -92,6 +97,8 @@ TOOL_CATEGORIES = {
             "rollback_deployment",
             "get_rollout_history",
             "delete_pod",
+            "find_config_consumers",
+            "restart_consumers",
         ],
     },
     "networking": {
@@ -150,6 +157,9 @@ TOOL_CATEGORIES = {
             "get_security_summary",
             "get_tls_certificates",
             "request_security_scan",
+            # Secret rotation: which workloads read it (read-only; the restart
+            # itself is in workloads, since this skill does not write).
+            "find_config_consumers",
         ],
     },
     "storage": {

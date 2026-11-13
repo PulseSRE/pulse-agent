@@ -109,7 +109,7 @@ make release VERSION=X.Y.Z            # agent-only version/badge commit + tag; s
 - Skill routing: ALL trigger patterns in `skill.md` YAML (`trigger_patterns` + `route_priority`), zero hardcoded patterns in `skill_router.py`. `reset_hard_pre_route()` on skill reload. OOM pattern uses `\boom` (start boundary) to avoid matching "headroom".
 
 ### Tools
-- `k8s_tools/` — 12-module package with ~60 K8s tools (incl. read-only `get_cluster_updates` → `upgrade_graph` and `get_rollout_history` → `rollout_history`) (`@beta_tool` decorated). Write tools in `WRITE_TOOLS` set require confirmation. Submodules: validators, pods, nodes, deployments, workloads, monitoring, diagnostics, generic, advanced, audit, live_table, finalizers.
+- `k8s_tools/` — 13-module package with ~60 K8s tools (incl. read-only `get_cluster_updates` → `upgrade_graph` and `get_rollout_history` → `rollout_history`) (`@beta_tool` decorated). Write tools in `WRITE_TOOLS` set require confirmation. Submodules: validators, pods, nodes, deployments, workloads, monitoring, diagnostics, generic, advanced, audit, live_table, finalizers, config_consumers (`find_config_consumers` read, a port of pulse-ui's "Used by" engine; `restart_consumers` write with a `restart_consumers` confirm preview, caller's token only, dry run first).
 - `security_tools.py` — 9 security scanning tools (read-only)
 - `fleet_tools.py` — 7 multi-cluster tools (user token for managed clusters; Secret values never returned)
 - `gitops_tools.py` — 6 ArgoCD tools

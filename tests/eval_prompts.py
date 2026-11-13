@@ -218,6 +218,18 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "Restart operation",
     ),
     (
+        "which workloads use the api-config configmap in payments?",
+        ["find_config_consumers"],
+        "sre",
+        "ConfigMap consumers (env, envFrom, volumes)",
+    ),
+    (
+        "I updated the db-credentials secret in payments, restart everything that uses it",
+        ["find_config_consumers", "restart_consumers"],
+        "sre",
+        "Restart every consumer of a changed Secret in one confirm",
+    ),
+    (
         "delete pod nginx-abc-xyz in default namespace",
         ["delete_pod"],
         "sre",
