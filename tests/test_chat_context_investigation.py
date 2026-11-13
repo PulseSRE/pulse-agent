@@ -241,11 +241,8 @@ def test_reads_the_real_investigations_table():
     from sre_agent.db import get_database
     from sre_agent.repositories.monitor_repo import get_monitor_repo
 
-    try:
-        repo = get_monitor_repo()
-        repo.ensure_tables()
-    except Exception as exc:  # pragma: no cover - no test database here
-        pytest.skip(f"test database unavailable: {exc}")
+    repo = get_monitor_repo()
+    repo.ensure_tables()
     tag = uuid.uuid4().hex[:8]
     finding_id, inv_new, inv_old = f"f-ctx-{tag}", f"inv-ctx-{tag}-new", f"inv-ctx-{tag}-old"
     now = int(time.time() * 1000)
