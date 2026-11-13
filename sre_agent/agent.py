@@ -434,6 +434,12 @@ _STRICT_LAST = frozenset(
         # validated by the tool itself.
         "grant_access",
         "revoke_access",
+        # k8s_tools/workload_writes.py: kind, quantities, probe timings, replicas
+        # and revision are type- and range-checked by the tool itself.
+        "patch_workload_container",
+        "scale_workload",
+        "restart_workload",
+        "rollback_workload",
     }
 )
 

@@ -313,6 +313,13 @@ class TestWriteToolSet:
             # Access changes: a binding diff preview, never auto-approved for a HIGH-risk grant.
             "grant_access",
             "revoke_access",
+            # Rolling restart of every consumer of a ConfigMap/Secret, in one confirm.
+            "restart_consumers",
+            # Deployment/StatefulSet/DaemonSet writes with dry-run diff previews.
+            "patch_workload_container",
+            "scale_workload",
+            "restart_workload",
+            "rollback_workload",
         }
         assert expected == WRITE_TOOLS
 

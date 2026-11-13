@@ -517,12 +517,21 @@ def _populate_risk_levels() -> None:
             "drain_node",
             "delete_pod",
             "rollback_deployment",
+            "rollback_workload",
             "cordon_node",
             "uncordon_node",
             "grant_access",
             "revoke_access",
         }
-        medium_risk = {"scale_deployment", "restart_deployment", "apply_yaml", "patch_resource"}
+        medium_risk = {
+            "scale_deployment",
+            "restart_deployment",
+            "apply_yaml",
+            "patch_resource",
+            "scale_workload",
+            "restart_workload",
+            "patch_workload_container",
+        }
 
         for tool in WRITE_TOOLS:
             if tool in high_risk:

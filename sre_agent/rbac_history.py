@@ -265,6 +265,10 @@ _TOOL_TARGETS: dict[str, tuple[str, str, str]] = {
     "scale_deployment": ("Deployment", "name", "namespace"),
     "restart_deployment": ("Deployment", "name", "namespace"),
     "rollback_deployment": ("Deployment", "name", "namespace"),
+    "patch_workload_container": ("", "name", "namespace"),
+    "scale_workload": ("", "name", "namespace"),
+    "restart_workload": ("", "name", "namespace"),
+    "rollback_workload": ("", "name", "namespace"),
     "delete_pod": ("Pod", "pod_name", "namespace"),
     "exec_command": ("Pod", "pod_name", "namespace"),
     "cordon_node": ("Node", "node_name", ""),
@@ -285,6 +289,10 @@ _TOOL_TARGETS: dict[str, tuple[str, str, str]] = {
 # person): rbac_writes.py. The generic entry is written only when the tool
 # raised, since then it recorded nothing itself.
 SELF_RECORDED_TOOLS = frozenset({"grant_access", "revoke_access"})
+# Write tools whose target kind is one of their inputs.
+_KIND_INPUT_TOOLS = frozenset(
+    {"remove_finalizer", "patch_workload_container", "scale_workload", "restart_workload", "rollback_workload"}
+)
 
 
 def agent_write_target(tool: str, tool_input: dict) -> tuple[str, str, str]:
@@ -313,7 +321,7 @@ def agent_write_target(tool: str, tool_input: dict) -> tuple[str, str, str]:
             str(meta.get("name") or "") + (f" (+{len(docs) - 1} more)" if len(docs) > 1 else ""),
         )
     kind, name_key, ns_key = _TOOL_TARGETS.get(tool, ("", "name", "namespace"))
-    if tool == "remove_finalizer":
+    if tool in _KIND_INPUT_TOOLS:
         kind = str(tool_input.get("kind") or "")
     name = tool_input.get(name_key)
     if tool == "create_network_policy" and not name:
