@@ -1639,8 +1639,10 @@ def finding_for_item(item: dict[str, Any], monitor: Any = None) -> dict[str, Any
     findings when it still has it, else from what the bridge recorded. That
     keeps the cooldown key the same as the monitor's own investigation of the
     finding (``_finding_key``); keyed by the item's type ("task:...") the
-    shared cooldown never matched. Severity is one of the known values; the
-    rest is sanitized where the prompt is built.
+    shared cooldown never matched. Any other item is investigated under its
+    valid ``metadata.category_hint`` (``inbox_investigation.category_hint``),
+    else its generator or type. Severity is one of the known values; the rest
+    is sanitized where the prompt is built.
     """
     md = item.get("metadata") or {}
     original: dict[str, Any] | None = None
@@ -1656,7 +1658,11 @@ def finding_for_item(item: dict[str, Any], monitor: Any = None) -> dict[str, Any
         corr = item.get("correlation_key") or ""
         category = md.get("finding_category") or (corr.split(":", 1)[0] if ":" in corr else "") or "unknown"
     else:
-        category = md.get("generator", item.get("item_type", "unknown"))
+        # A client's category hint (page Diagnose) counts only when it is one
+        # of the known plan categories; anything else is ignored.
+        from .inbox_investigation import category_hint
+
+        category = category_hint(item) or md.get("generator", item.get("item_type", "unknown"))
     severity = item.get("severity") if item.get("severity") in _FINDING_SEVERITIES else "warning"
     return {
         "id": finding_id or item["id"],

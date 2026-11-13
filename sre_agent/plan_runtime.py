@@ -97,6 +97,32 @@ def _without_unapprovable_writes(config: dict, *, can_approve: bool) -> dict:
     }
 
 
+def _scoped_to_requested_run(config: dict) -> dict:
+    """Drop the tools a run a person started is never offered, inside such a run.
+
+    A plan started from ``POST /inbox/{id}/investigate`` (a page's Diagnose)
+    reads as that person, so its phases get what the freeform requested run
+    gets: no tools that act on their behalf (``REQUESTED_RUN_EXCLUDED_TOOLS``)
+    and no memory tools, whose past incidents were investigated as the service
+    account and can name what the person cannot read. Monitor plans keep both.
+    """
+    from .inbox_investigation import REQUESTED_RUN_EXCLUDED_TOOLS, in_requested_run
+
+    if not in_requested_run():
+        return config
+    from .skill_loader import _memory_tools
+
+    dropped = set(REQUESTED_RUN_EXCLUDED_TOOLS) | {t.name for t in _memory_tools()}
+    if not dropped & set(config["tool_map"]):
+        return config
+    return {
+        **config,
+        "tool_defs": [d for d in config["tool_defs"] if d.get("name") not in dropped],
+        "tool_map": {n: t for n, t in config["tool_map"].items() if n not in dropped},
+        "write_tools": set(config.get("write_tools") or ()) - dropped,
+    }
+
+
 class PlanRuntime:
     """Executes skill plans with phased control flow."""
 
@@ -487,8 +513,10 @@ class PlanRuntime:
                     evidence_summary=f"Unknown skill: {phase.skill_name}",
                 )
 
-            config = _without_unapprovable_writes(
-                build_config_from_skill(skill, query=prompt), can_approve=self._on_confirm is not None
+            config = _scoped_to_requested_run(
+                _without_unapprovable_writes(
+                    build_config_from_skill(skill, query=prompt), can_approve=self._on_confirm is not None
+                )
             )
 
             from .evidence import CallLedger
