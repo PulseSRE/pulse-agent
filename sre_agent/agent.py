@@ -783,6 +783,7 @@ async def run_agent_streaming(
     iterations = 0
     finished = False
     policy_denied_write = False
+    policy_denied_reason = "Operation blocked: a write was denied by policy in this turn. Diagnose or propose an alternative for a new user request; do not substitute another mutation."
     # Short per-turn references for tool calls (see label_tool_calls).
     call_refs: dict[str, str] = {}
     # Asked for a plan, not a change: writes are refused before anyone is asked
@@ -790,6 +791,16 @@ async def run_agent_streaming(
     # Only for turns a person wrote: callers that build their own prompts (plan
     # phases, monitor investigations) pass honor_plan_requests=False.
     plan_only = honor_plan_requests and requests_plan_only(latest_user_text(messages))
+    # Asked for a write policy denies (pod deletion in a protected namespace):
+    # the turn starts with the denied-write guard armed, so a model that
+    # declines in words cannot substitute another write (policy.py).
+    from .policy import requested_denied_write, requested_denied_write_reason
+
+    denied_request_ns = requested_denied_write(latest_user_text(messages)) if honor_plan_requests else None
+    if denied_request_ns:
+        policy_denied_write = True
+        policy_denied_reason = requested_denied_write_reason(denied_request_ns)
+        logger.info("Turn asks for a policy-denied write in %s; writes are off for this turn", denied_request_ns)
 
     from .loop_budget import LoopBudget, compact_tool_results
     from .tool_images import drop_stale_images, result_content
@@ -1193,7 +1204,7 @@ async def run_agent_streaming(
                 # to attempt another write. Keep diagnostics available, but a
                 # different mutation requires a new user turn after the refusal.
                 if policy_denied_write:
-                    reason = "Operation blocked: a write was denied by policy in this turn. Diagnose or propose an alternative for a new user request; do not substitute another mutation."
+                    reason = policy_denied_reason
                     results_map[block.id] = (reason, None)
                     failed_ids.add(block.id)
                     await event_bus.on_tool_result(
