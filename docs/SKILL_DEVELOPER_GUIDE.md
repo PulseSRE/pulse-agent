@@ -346,9 +346,6 @@ tool_renderers:
     kind: data_table
     parser: json
     columns: [name, namespace, revision, status, chart, app_version]
-  helm_install:
-    kind: status_list
-    parser: key_value
   alertmanager_alerts:
     kind: status_list
     parser: json
@@ -357,6 +354,10 @@ tool_renderers:
       status: "{{status.state}}"
       detail: "{{annotations.description}}"
 ```
+
+### Read-only
+
+Only MCP tools that read are registered (`sre_agent/mcp_tool_policy.py`). A tool that writes or executes commands (for example `helm_install`, `resources_delete`, `pods_exec`) runs with the MCP server's authority rather than the user's, so it is withheld, and a tool that is neither in the read list nor annotated `readOnlyHint: true` by its server counts as a write. Give a skill write capability through native, confirm-gated tools instead.
 
 ### Tool Rendering
 

@@ -5,6 +5,11 @@
 # Local dev: uses npx stdio (requires Node.js installed)
 #
 # Set PULSE_MCP_URL env var to override the server URL.
+#
+# Read-only: the agent registers only this server's read tools
+# (sre_agent/mcp_tool_policy.py). Its write and exec tools (helm_install,
+# resources_create_or_update/delete/scale, pods_exec, nodes_debug_exec, ...)
+# act as the MCP service account, so they are withheld.
 
 server:
   url: "${PULSE_MCP_URL:-http://pulse-openshift-sre-agent-mcp:8081}"
@@ -30,12 +35,6 @@ tool_renderers:
     kind: data_table
     parser: table
     columns: [name, namespace, revision, status, chart, app_version]
-  helm_install:
-    kind: status_list
-    parser: key_value
-  helm_uninstall:
-    kind: key_value
-    parser: key_value
   alertmanager_alerts:
     kind: status_list
     parser: json
