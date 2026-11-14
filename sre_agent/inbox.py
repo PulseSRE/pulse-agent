@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -9,7 +10,7 @@ import uuid
 from typing import Any
 
 from .monitor.layers import L_INFRA, L_PLATFORM, L_SIGNAL, L_WORKLOAD, LAYER_NAMES, layer_of
-from .repositories.inbox_repo import get_inbox_repo
+from .repositories.inbox_repo import NEEDS_ATTENTION_CLAUSE, get_inbox_repo
 
 logger = logging.getLogger("pulse_agent.inbox")
 _inbox_logger = logger
@@ -418,9 +419,7 @@ def list_inbox_items(
         # 'agent_review_failed' while the async triage pipeline runs — those
         # are still open issues the UI renders (spinner/badges in InboxItem),
         # so hiding them made active critical findings invisible by default.
-        exclude_clause = (
-            "status NOT IN ('archived', 'agent_cleared', 'resolved') AND (severity IS NULL OR severity != 'info')"
-        )
+        exclude_clause = NEEDS_ATTENTION_CLAUSE
         status = None
     else:
         exclude_clause = "status NOT IN ('archived', 'agent_cleared')"
@@ -503,40 +502,60 @@ def _compute_stats(items: list[dict[str, Any]]) -> dict[str, int]:
     return stats
 
 
-_NEEDS_ATTENTION_EXCLUDE = frozenset({"archived", "agent_cleared", "resolved"})
-
-
 def get_inbox_stats() -> dict[str, int]:
     now = int(time.time())
-    rows = get_inbox_repo().get_stats_rows(now)
-    return _stats_from_rows(rows)
+    repo = get_inbox_repo()
+    return _stats_from_rows(repo.get_stats_rows(now), repo.fetch_needs_attention_rows(now))
 
 
-def _stats_from_rows(rows: list[Any]) -> dict[str, int]:
-    """Compute inbox stats from status aggregation rows."""
+def _needs_attention_counts(rows: list[Any]) -> dict[str, int]:
+    """The needs-attention figures, from the same rows the Needs Attention list shows.
+
+    One definition, served here and used by every UI surface (bell, sidebar,
+    agent dock, Inbox filter pill): open items a person still has to look at
+    (``NEEDS_ATTENTION_CLAUSE``: not resolved, archived or agent-cleared, not
+    informational, not snoozed), minus the symptoms an open episode already
+    explains, which the list folds under their cause.
+
+    The count used to be a per-status sum of everything not closed. It counted
+    informational items and episode symptoms the list hides, so on the live
+    cluster the bell said 45 while the list showed 12.
+    """
+    items = [{"correlation_key": r["correlation_key"], "severity": r["severity"]} for r in rows]
+    kept, collapsed = _collapse_episode_symptoms(items)
+    keys = {i["correlation_key"] for i in kept if i["correlation_key"]}
+    unkeyed = sum(1 for i in kept if not i["correlation_key"])
+    return {
+        "needs_attention": len(kept),
+        # Severity of the items counted above, so "N need attention (M critical)"
+        # is about the same N. These keys never existed before; the UI read
+        # them and always got 0.
+        "critical": sum(1 for i in kept if i["severity"] == "critical"),
+        "warning": sum(1 for i in kept if i["severity"] == "warning"),
+        # Distinct conditions among them: items without a key are each their own.
+        "unique_issues": len(keys) + unkeyed,
+        "collapsed_into_episodes": collapsed,
+    }
+
+
+def _stats_from_rows(rows: list[Any], attention_rows: list[Any] | None = None) -> dict[str, int]:
+    """Compute inbox stats from status aggregation rows and the needs-attention rows."""
     stats: dict[str, int] = {}
     total = 0
     cleared = 0
     archived = 0
-    needs_attention = 0
-    unique_total = 0
     for row in rows:
         stats[row["status"]] = row["cnt"]
-        unique_cnt = row.get("unique_cnt", row["cnt"])
         if row["status"] == "agent_cleared":
             cleared += row["cnt"]
         elif row["status"] == "archived":
             archived += row["cnt"]
         else:
             total += row["cnt"]
-            unique_total += unique_cnt
-        if row["status"] not in _NEEDS_ATTENTION_EXCLUDE:
-            needs_attention += row["cnt"]
     stats["total"] = total
     stats["agent_cleared"] = cleared
     stats["archived"] = archived
-    stats["needs_attention"] = needs_attention
-    stats["unique_issues"] = unique_total
+    stats.update(_needs_attention_counts(attention_rows or []))
     return stats
 
 
@@ -560,9 +579,7 @@ async def async_list_inbox_items(
     elif status == "__needs_attention__":
         # See list_inbox_items() for why 'new'/'agent_reviewing'/
         # 'agent_review_failed' must stay visible in Needs Attention.
-        exclude_clause = (
-            "status NOT IN ('archived', 'agent_cleared', 'resolved') AND (severity IS NULL OR severity != 'info')"
-        )
+        exclude_clause = NEEDS_ATTENTION_CLAUSE
         status = None
     else:
         exclude_clause = "status NOT IN ('archived', 'agent_cleared')"
@@ -646,8 +663,11 @@ async def async_list_inbox_items(
 async def async_get_inbox_stats() -> dict[str, int]:
     """Async version of get_inbox_stats — uses asyncpg."""
     now = int(time.time())
-    rows = await get_inbox_repo().async_get_stats_rows(now)
-    return _stats_from_rows(rows)
+    repo = get_inbox_repo()
+    rows = await repo.async_get_stats_rows(now)
+    attention_rows = await repo.async_fetch_needs_attention_rows(now)
+    # The episode index is a synchronous database read.
+    return await asyncio.to_thread(_stats_from_rows, rows, attention_rows)
 
 
 _STALE_THRESHOLD = 300  # 5 minutes
@@ -1925,20 +1945,19 @@ def resolve_finding_inbox_item(finding_id: str, finding: dict[str, Any] | None =
     items claimed during a previous scan cycle still get resolved.
     """
     repo = get_inbox_repo()
-    row = repo.find_active_by_finding_id(finding_id)
-
-    if row is None and finding:
-        corr_key = _finding_corr_key(finding)
-        if corr_key:
-            row = repo.find_active_by_correlation_task(corr_key)
-
-    if row is None:
+    corr_key = _finding_corr_key(finding) if finding else ""
+    # Every open item for the condition, not the first one found. An item
+    # bridged under an earlier finding id and a duplicate raised for the same
+    # key (a reopen racing a new bridge) both stayed open when only one row was
+    # resolved, and kept counting in Needs Attention after the finding cleared.
+    rows = repo.find_all_active_for_finding(finding_id, corr_key)
+    if not rows:
         return False
 
-    item = _deserialize_row(row)
     now = int(time.time())
-    repo.resolve_item(item["id"], now)
-    _publish_event("inbox_item_resolved", item["id"], {"resolved_at": now})
+    for row in rows:
+        repo.resolve_item(row["id"], now)
+        _publish_event("inbox_item_resolved", row["id"], {"resolved_at": now})
     return True
 
 
@@ -2042,6 +2061,7 @@ def run_generator_cycle() -> None:
     rows = repo.fetch_generator_items()
     generator_rows = [r for r in rows if _deserialize_row(r).get("metadata", {}).get("generator")]
     now = int(time.time())
+    resolved_ids: list[str] = []
     for row in generator_rows:
         generator = _deserialize_row(row).get("metadata", {}).get("generator")
         if generator in failed_generators:
@@ -2049,8 +2069,13 @@ def run_generator_cycle() -> None:
             # 403 or timeout into "condition cleared" and hid the item for 24h.
             continue
         if row["correlation_key"] and row["correlation_key"] not in generated_keys:
+            # The generator ran and no longer reports the condition: resolve it,
+            # whatever open status it is in (see fetch_generator_items).
             repo.auto_resolve_generator_item(row["id"], now)
+            resolved_ids.append(row["id"])
     repo.commit()
+    for item_id in resolved_ids:
+        _publish_event("inbox_item_resolved", item_id, {"resolved_at": now, "reason": "condition cleared"})
 
     _prune_stale_resources()
 

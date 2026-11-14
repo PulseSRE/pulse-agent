@@ -45,14 +45,16 @@ def _agent_created_skills() -> list:
     return [s for s in list_skills() if s.generated_by == "auto"]
 
 
-def _recent_invocations(days: int) -> dict[str, int]:
-    """skill_name -> invocation count over the window; {} when no database."""
+def _recent_invocations(days: int, *, strict: bool = False) -> dict[str, int]:
+    """skill_name -> invocation count over the window; {} when no database (raises when ``strict``)."""
     try:
         from .repositories import get_skill_analytics_repo
 
         rows = get_skill_analytics_repo().fetch_skill_stats(days)
         return {str(r["skill_name"]): int(r["invocations"]) for r in rows}
     except Exception:
+        if strict:
+            raise
         logger.debug("Skill usage unavailable; curator skips staleness proposals", exc_info=True)
         return {}
 
@@ -64,14 +66,15 @@ def _skill_age_days(skill) -> float:
         return 0.0
 
 
-def find_stale_skills(days: int = STALE_AFTER_DAYS) -> list[dict[str, Any]]:
+def find_stale_skills(days: int = STALE_AFTER_DAYS, *, strict: bool = False) -> list[dict[str, Any]]:
     """Agent-created skills with zero routes in the window, old enough to matter.
 
     Gated on affirmative usage data: when analytics are unreachable this
     returns nothing, because "no recorded invocations" must never be
-    manufactured from a failed query.
+    manufactured from a failed query. With ``strict`` it raises instead, so the
+    Inbox generator leaves its open proposals alone rather than resolving them.
     """
-    usage = _recent_invocations(days)
+    usage = _recent_invocations(days, strict=strict)
     if not usage:
         return []
 
