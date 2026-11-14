@@ -701,12 +701,78 @@ def scan_degraded_operators() -> list[dict]:
                             severity=SEVERITY_CRITICAL,
                             category="operators",
                             title=f"ClusterOperator {name} degraded",
-                            summary=f"Operator degraded: {cond.get('message', cond.get('reason', 'Unknown'))}",
+                            summary=_operator_summary(name, cond),
                             resources=[{"kind": "ClusterOperator", "name": name}],
                         )
                     )
     except Exception as e:
         logger.error("Degraded operators scan failed: %s", e)
+        report_failure(e)
+    return findings
+
+
+# The degraded-operators finding for cloud-credential says where the cause is
+# explained, instead of stopping at "Degraded".
+_CLOUD_CREDENTIAL_POINTER = (
+    " The cause is outside the cluster (cloud permissions): the Cloud Credentials findings name each affected "
+    "component, the permissions it needs and the fix for this cluster's credentials mode; or ask Pulse to "
+    "explain cloud credentials."
+)
+
+
+def _operator_summary(name: str, cond: dict) -> str:
+    summary = f"Operator degraded: {cond.get('message', cond.get('reason', 'Unknown'))}"
+    return summary + _CLOUD_CREDENTIAL_POINTER if name == "cloud-credential" else summary
+
+
+def scan_cloud_credentials() -> list[dict]:
+    """One finding per CredentialsRequest the Cloud Credential Operator cannot satisfy.
+
+    Read-only. The CredentialsRequest list is the one required read: without it
+    the scanner fails (and the self-check names the missing rule) rather than
+    reporting clean. The root Secret is read metadata-only, for its mode
+    annotation; credential values are never read.
+    """
+    from ..cloud_credentials import problem_title, read_cloud_credentials, render_problem
+
+    findings: list[dict[str, Any]] = []
+    try:
+        data = read_cloud_credentials()
+        degraded = bool(data["operator"].get("degraded"))
+        for problem in data["problems"]:
+            cond = problem["condition"]
+            if cond["type"] == "MissingTargetNamespace":
+                severity = SEVERITY_INFO
+            else:
+                severity = SEVERITY_CRITICAL if degraded else SEVERITY_WARNING
+            started = None
+            if cond["since"]:
+                try:
+                    started = int(datetime.fromisoformat(cond["since"].replace("Z", "+00:00")).timestamp())
+                except ValueError:
+                    started = None
+            finding = _make_finding(
+                severity=severity,
+                category="cloud_credentials",
+                title=problem_title(problem),
+                summary=render_problem(problem, data),
+                resources=[
+                    {
+                        "kind": "CredentialsRequest",
+                        "name": problem["name"],
+                        "namespace": "openshift-cloud-credential-operator",
+                    },
+                    {"kind": "ClusterOperator", "name": "cloud-credential"},
+                ],
+                confidence=0.95,
+                started_at=started,
+            )
+            # Structured copy of the fix so a UI can render it as a checklist.
+            finding["checklist"] = list(problem["steps"])
+            finding["credentialsMode"] = (data.get("mode") or {}).get("effective", "unknown")
+            findings.append(finding)
+    except Exception as e:
+        logger.error("Cloud credentials scan failed: %s", e)
         report_failure(e)
     return findings
 
@@ -789,6 +855,7 @@ ALL_SCANNERS: list[tuple[str, Callable[..., Any]]] = [
     ("oom", scan_oom_killed_pods),
     ("image_pull", scan_image_pull_errors),
     ("operators", scan_degraded_operators),
+    ("cloud_credentials", scan_cloud_credentials),
     ("daemonsets", scan_daemonset_gaps),
     ("hpa", scan_hpa_saturation),
 ]
@@ -803,6 +870,7 @@ def _get_all_scanners() -> list[tuple[str, Callable[..., Any]]]:
         scan_recent_deployments,
         scan_warning_events,
     )
+    from .control_plane_capacity import scan_control_plane_capacity
     from .scanner_health import scan_degraded_capabilities
     from .stuck_scanners import scan_control_plane_stalls, scan_hot_reconcile_loops, scan_stuck_deletions
     from .trend_scanners import (
@@ -825,6 +893,7 @@ def _get_all_scanners() -> list[tuple[str, Callable[..., Any]]]:
         ("trend_disk", scan_disk_pressure_forecast),
         ("trend_hpa", scan_hpa_exhaustion_trend),
         ("trend_errors", scan_error_rate_acceleration),
+        ("control_plane_capacity", scan_control_plane_capacity),
         ("trend_degraded", get_trend_degraded_finding),
         ("stuck", scan_stuck_deletions),
         ("hot_loop", scan_hot_reconcile_loops),
@@ -1022,7 +1091,7 @@ class AsyncDegradedOperatorsScanner(AsyncScanner):
                                 severity=SEVERITY_CRITICAL,
                                 category="operators",
                                 title=f"ClusterOperator {name} degraded",
-                                summary=f"Operator degraded: {cond.get('message', cond.get('reason', 'Unknown'))}",
+                                summary=_operator_summary(name, cond),
                                 resources=[{"kind": "ClusterOperator", "name": name}],
                             )
                         )
@@ -1120,6 +1189,7 @@ ALL_SCANNER_INSTANCES: list = [
     FunctionScanner(_meta("oom"), scan_oom_killed_pods, accepts_pods=True),
     FunctionScanner(_meta("image_pull"), scan_image_pull_errors, accepts_pods=True),
     AsyncDegradedOperatorsScanner(),
+    FunctionScanner(_meta("cloud_credentials"), scan_cloud_credentials),
     AsyncDaemonsetGapsScanner(),
     AsyncHpaSaturationScanner(),
 ]
@@ -1134,6 +1204,7 @@ def get_all_scanner_instances() -> list[FunctionScanner]:
         scan_recent_deployments,
         scan_warning_events,
     )
+    from .control_plane_capacity import scan_control_plane_capacity
     from .scanner_health import scan_degraded_capabilities
     from .stuck_scanners import scan_control_plane_stalls, scan_hot_reconcile_loops, scan_stuck_deletions
     from .trend_scanners import (
@@ -1156,6 +1227,7 @@ def get_all_scanner_instances() -> list[FunctionScanner]:
         FunctionScanner(_meta("trend_disk"), scan_disk_pressure_forecast),
         FunctionScanner(_meta("trend_hpa"), scan_hpa_exhaustion_trend),
         FunctionScanner(_meta("trend_errors"), scan_error_rate_acceleration),
+        FunctionScanner(_meta("control_plane_capacity"), scan_control_plane_capacity),
         FunctionScanner(_meta("trend_degraded"), get_trend_degraded_finding),
         FunctionScanner(_meta("stuck"), scan_stuck_deletions, accepts_pods=True),
         FunctionScanner(_meta("anomaly"), _scan_workload_anomalies),

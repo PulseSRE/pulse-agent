@@ -33,7 +33,17 @@ def _mark(ok: bool) -> None:
 
 
 def _query_prometheus(query: str) -> list[dict]:
-    """Query Prometheus via unified client and return results."""
+    """Query Prometheus via unified client and return results ([] on failure)."""
+    return query_prometheus_checked(query) or []
+
+
+def query_prometheus_checked(query: str) -> list[dict] | None:
+    """Like ``_query_prometheus``, but None when the query failed.
+
+    For scanners that must tell "Prometheus answered with no series" apart
+    from "Prometheus did not answer" -- the failure is still reported (and
+    marked for trend_degraded) exactly as ``_query_prometheus`` does.
+    """
     global _last_prometheus_error_time
     try:
         data = get_prometheus_client().query(query, timeout=15)
@@ -42,14 +52,15 @@ def _query_prometheus(query: str) -> list[dict]:
             # Without this the scanner reported "clean" with Prometheus down.
             report_failure(f"Prometheus query failed: {data.get('error', 'unknown')}")
             _mark(False)
-            return []
+            return None
         _mark(True)
-        return data.get("data", {}).get("result", [])
+        result = data.get("data", {}).get("result", [])
+        return result if isinstance(result, list) else []
     except PrometheusConfigError as e:
         logger.warning("Prometheus config error: %s", e)
         _mark(False)
         report_failure(f"Prometheus not configured: {e}")
-        return []
+        return None
     except Exception as e:
         now = time.time()
         if now - _last_prometheus_error_time > _PROMETHEUS_ERROR_COOLDOWN:
@@ -59,7 +70,7 @@ def _query_prometheus(query: str) -> list[dict]:
             logger.debug("Prometheus query error (suppressed): %s", e)
         _mark(False)
         report_failure(f"Prometheus unreachable: {e}")
-        return []
+        return None
 
 
 def get_trend_degraded_finding() -> list[dict]:

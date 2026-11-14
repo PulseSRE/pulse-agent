@@ -105,6 +105,10 @@ def test_the_query_excludes_claimed_pinned_and_human_created_items():
 
     sql = inspect.getsource(InboxRepository.fetch_open_machine_items)
     assert "claimed_by IS NULL" in sql
-    assert "pinned_by IS NULL" in sql
+    # pinned_by is a JSON list defaulting to '[]', never NULL: "IS NULL"
+    # matched no row and the reconcile resolved nothing (see
+    # tests/test_inbox_open_count.py for the database-backed proof).
+    assert "coalesce(pinned_by, '[]') IN ('[]', '')" in sql
+    assert "pinned_by IS NULL" not in sql
     assert "created_by = 'system:monitor'" in sql
     assert "correlation_key IS NOT NULL" in sql

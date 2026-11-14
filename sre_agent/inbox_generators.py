@@ -246,8 +246,14 @@ def _get_slo_burn_rates() -> list[dict]:
     registry = get_slo_registry()
     if not registry.list_all():
         return []
+    statuses = registry.evaluate_with_prometheus()
+    if not statuses:
+        # SLOs are defined but none could be measured (Prometheus unreachable
+        # or no data): that is not "no SLO is burning", and returning [] here
+        # resolved every open SLO item on a Prometheus outage.
+        raise GeneratorUnavailableError("no SLO could be evaluated from Prometheus")
     burning = []
-    for status in registry.evaluate_with_prometheus():
+    for status in statuses:
         hours = status.budget_remaining_hours
         if status.alert_level == "ok" and (hours is None or hours >= _SLO_HORIZON_HOURS):
             continue
@@ -462,10 +468,18 @@ def gen_degraded_operator() -> list[dict[str, Any]]:
     if len(operators) > 10:
         names += f" (+{len(operators) - 10} more)"
     resources = [{"kind": "ClusterOperator", "name": op["name"], "namespace": ""} for op in operators[:20]]
+    summary = f"Degraded operators: {names}"
+    if any(op["name"] == "cloud-credential" for op in operators):
+        # Its cause is outside the cluster; say where it is explained.
+        summary += (
+            ". cloud-credential: a component lacks cloud permissions. The Cloud Credentials items name each "
+            "affected component, the permissions it needs and the fix for this cluster's credentials mode; or ask "
+            "Pulse to explain cloud credentials."
+        )
     return [
         _make_assessment(
             title=f"{len(operators)} ClusterOperators degraded",
-            summary=f"Degraded operators: {names}",
+            summary=summary,
             severity="critical",
             urgency_hours=0,
             generator="degraded_operator",
@@ -731,7 +745,7 @@ def gen_skill_curation() -> list[dict[str, Any]]:
     from .skill_curator import STALE_AFTER_DAYS, find_overlapping_skills, find_stale_skills
 
     items: list[dict[str, Any]] = []
-    for stale in find_stale_skills()[:3]:
+    for stale in find_stale_skills(strict=True)[:3]:
         name = stale["name"]
         state = "unreviewed" if not stale["reviewed"] else ("quarantined" if stale["quarantined"] else "active")
         items.append(
@@ -781,7 +795,7 @@ def gen_skill_gaps() -> list[dict[str, Any]]:
     """
     from .selector_learning import identify_skill_gaps
 
-    gaps = identify_skill_gaps(days=30)
+    gaps = identify_skill_gaps(days=30, strict=True)
     items: list[dict[str, Any]] = []
     for gap in gaps[:3]:  # top recurring patterns only — this is a suggestion queue, not a backlog
         pattern = str(gap.get("pattern", "")).strip()
@@ -818,7 +832,7 @@ def gen_skill_low_performers() -> list[dict[str, Any]]:
     """
     from .selector_learning import prune_low_performers
 
-    flagged = prune_low_performers(days=30)
+    flagged = prune_low_performers(days=30, strict=True)
     items: list[dict[str, Any]] = []
     for entry in flagged:
         skill = str(entry.get("skill", "")).strip()

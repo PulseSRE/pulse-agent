@@ -521,6 +521,22 @@ _APISERVER_LATENCY_CRITICAL = 30.0
 _CLUSTER_LIST_RATE_WARNING = 2.0
 
 
+def etcd_leader_churn_query() -> str:
+    """The leader-churn condition this scanner reports as a stall.
+
+    Public so the control-plane capacity scanner can leave exactly these hours
+    to this one instead of raising a second finding for the same elections.
+    """
+
+    def leader(window: str) -> str:
+        return f"sum(increase(etcd_server_leader_changes_seen_total[{window}]))"
+
+    return _sustained_and_current(
+        f"{leader('1h')} > {_ETCD_LEADER_CHANGES_WARNING}",
+        f"{leader(_RECENT_WINDOW)} > 0",
+    )
+
+
 def _scan_etcd_consensus() -> list[dict]:
     """etcd losing or re-running leader elections, and writes it would not accept.
 
@@ -529,15 +545,7 @@ def _scan_etcd_consensus() -> list[dict]:
     """
     findings: list[dict[str, Any]] = []
 
-    def leader(window: str) -> str:
-        return f"sum(increase(etcd_server_leader_changes_seen_total[{window}]))"
-
-    for result in _query(
-        _sustained_and_current(
-            f"{leader('1h')} > {_ETCD_LEADER_CHANGES_WARNING}",
-            f"{leader(_RECENT_WINDOW)} > 0",
-        )
-    ):
+    for result in _query(etcd_leader_churn_query()):
         rate = _rate(result)
         if rate is None:
             continue

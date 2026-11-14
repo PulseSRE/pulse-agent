@@ -77,6 +77,18 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "auto_fixable": False,
         "scan_every": 3,
     },
+    "cloud_credentials": {
+        "displayName": "Cloud Credentials",
+        "description": "Components whose CredentialsRequest the Cloud Credential Operator cannot satisfy, "
+        "with the permissions they need and the fix for the cluster's credentials mode",
+        "category": "infrastructure",
+        "checks": [
+            "CredentialsRequest condition InsufficientCloudCreds, CredentialsProvisionFailure, "
+            "MissingTargetNamespace, CredentialsDeprovisionFailure or StaleCredentials = True",
+        ],
+        "auto_fixable": False,
+        "scan_every": 3,
+    },
     "daemonsets": {
         "displayName": "DaemonSet Gaps",
         "description": "Finds DaemonSets where ready < desired",
@@ -300,6 +312,21 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "checks": ['deriv(rate(http_requests_total{code=~"5.."}[1h])[24h:]) > 0'],
         "auto_fixable": False,
         "scan_every": 1,  # Trend scanners run separately, not via unified path
+    },
+    "control_plane_capacity": {
+        "displayName": "Control-Plane Capacity",
+        "description": "Control-plane node memory and etcd headroom, reported before either breaks",
+        "category": "predictive",
+        "checks": [
+            "control-plane node memory in use / allocatable >= 80% (critical >= 90%)",
+            "predict_linear: control-plane memory reaches 90% within 24h",
+            "etcd WAL fsync p99 > 10ms (critical > 50ms)",
+            "etcd backend commit p99 > 25ms",
+            "etcd leader change in the last hour",
+            "etcd database >= 70% of its backend quota (critical >= 95%)",
+        ],
+        "auto_fixable": False,
+        "scan_every": 1,
     },
     "trend_degraded": {
         "displayName": "Trend Monitoring Degraded",

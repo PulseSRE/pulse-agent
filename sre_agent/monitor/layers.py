@@ -43,6 +43,9 @@ CATEGORY_LAYER: dict[str, int] = {
     "disk_pressure": L_INFRA,
     # ── platform ──────────────────────────────────────────────────────────
     "operators": L_PLATFORM,
+    # A component without cloud credentials (CSI driver, Machine API, ingress
+    # DNS) is a platform cause of the storage and node symptoms it produces.
+    "cloud_credentials": L_PLATFORM,
     "stuck": L_PLATFORM,
     "hot_loop": L_PLATFORM,
     "daemonsets": L_PLATFORM,

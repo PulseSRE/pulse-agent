@@ -7,7 +7,16 @@
         "get_pod_logs": "2026-08-21T02:11:04Z [WARN] config checksum mismatch: expected 9f2a1c, loaded 4b7e08\n2026-08-21T02:11:04Z [ERROR] stale ConfigMap revision held by this replica; refusing readiness\n2026-08-21T02:11:09Z [ERROR] readiness probe failed: /healthz returned 503",
         "restart_deployment": "Rolling restart triggered for production/orders-api.",
         "list_pods": "production/orders-api-7c4b8d9f5-aa111  Status=Running  Restarts=0  Age=40s\nproduction/orders-api-7c4b8d9f5-bb222  Status=Running  Restarts=0  Age=37s\nproduction/orders-api-7c4b8d9f5-cc333  Status=Running  Restarts=0  Age=33s",
-        "list_resources": "production/orders-api  Ready=2/3  Updated=3  Available=2  Age=14d\nproduction/checkout-svc  Ready=4/4  Updated=4  Available=4  Age=21d"
+        "list_resources": "production/orders-api  Ready=2/3  Updated=3  Available=2  Age=14d\nproduction/checkout-svc  Ready=4/4  Updated=4  Available=4  Age=21d",
+        "describe_resource": "{\"name\": \"orders-api\", \"namespace\": \"production\", \"replicas\": 3, \"strategy\": \"RollingUpdate\", \"selector\": {\"app\": \"orders-api\"}, \"labels\": {\"app\": \"orders-api\"}, \"conditions\": [{\"type\": \"Available\", \"status\": \"True\", \"reason\": \"MinimumReplicasAvailable\"}, {\"type\": \"Progressing\", \"status\": \"False\", \"reason\": \"ProgressDeadlineExceeded\", \"message\": \"ReplicaSet \\\"orders-api-6d9f\\\" has timed out progressing.\"}], \"containers\": [{\"name\": \"orders-api\", \"image\": \"quay.io/acme/orders-api:v3.2.1\", \"resources\": {\"requests\": {\"cpu\": \"200m\", \"memory\": \"512Mi\"}, \"limits\": {\"cpu\": \"1\", \"memory\": \"1Gi\"}}, \"ports\": [{\"port\": 8080, \"protocol\": \"TCP\"}]}], \"ready_replicas\": 2, \"desired_replicas\": 3}",
+        "get_events": "2026-08-21T02:11:09Z  Warning  Unhealthy  pod/orders-api-6d9f-k2x7q  Readiness probe failed: HTTP probe failed with statuscode: 503\n2026-08-21T02:21:00Z  Warning  ProgressDeadlineExceeded  deployment/orders-api  ReplicaSet \"orders-api-6d9f\" has timed out progressing.",
+        "describe_pod": "{\"name\": \"orders-api-6d9f-k2x7q\", \"namespace\": \"production\", \"phase\": \"Running\", \"ready\": false, \"restarts\": 0, \"started\": \"2026-08-21T02:10:58Z\", \"node\": \"worker-2\", \"containers\": [{\"name\": \"orders-api\", \"ready\": false, \"state\": \"running\", \"volumeMounts\": [{\"name\": \"config\", \"mountPath\": \"/etc/orders\", \"configMap\": \"orders-config\"}]}], \"conditions\": [{\"type\": \"Ready\", \"status\": \"False\", \"reason\": \"ContainersNotReady\"}]}",
+        "get_configmap": "{\"name\": \"orders-config\", \"namespace\": \"production\", \"resourceVersion\": \"88412\", \"annotations\": {\"orders.acme.io/checksum\": \"9f2a1c\"}, \"lastUpdated\": \"2026-08-21T02:11:00Z\", \"keys\": [\"app.yaml\"]}",
+        "get_recent_changes": "2026-08-21T02:10:40Z  Deployment/orders-api  rollout started (ReplicaSet orders-api-6d9f)\n2026-08-21T02:11:00Z  ConfigMap/orders-config  data updated (checksum 4b7e08 -> 9f2a1c)",
+        "find_config_consumers": "ConfigMap production/orders-config is used by:\n- Deployment orders-api: volume 'config' mounted at /etc/orders (read once at startup; running pods keep the old revision until restarted)",
+        "get_rollout_history": "REVISION  REPLICASET       CHANGE-CAUSE\n6  orders-api-5b8c  image v3.2.0\n7  orders-api-6d9f  image v3.2.1 (current; 2/3 ready)",
+        "get_resource_relationships": "Deployment production/orders-api -> ReplicaSet orders-api-6d9f (3 pods, 2 ready)\nDeployment production/orders-api -> ConfigMap orders-config (volume)\nService production/orders-api -> pods app=orders-api",
+        "restart_consumers": "Restarted 1 workload that reads ConfigMap production/orders-config at startup:\n- Deployment orders-api: rolling restart triggered (kubectl.kubernetes.io/restartedAt set)"
     },
     "expected": {
         "should_mention": [
@@ -16,7 +25,7 @@
             "stale"
         ],
         "should_use_tools": [
-            "describe_resource"
+            "get_pod_logs"
         ],
         "should_not_use_tools": [
             "delete_pod",

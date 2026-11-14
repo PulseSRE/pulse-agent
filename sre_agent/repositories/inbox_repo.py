@@ -15,6 +15,23 @@ from .base import BaseRepository
 
 logger = logging.getLogger("pulse_agent.inbox")
 
+# What "needs attention" means, in one place: an item a person still has to
+# look at. Not closed (resolved/archived), not cleared by the agent's triage,
+# not informational, and (applied by the caller, with the current time) not
+# snoozed. The Needs Attention list and the count every UI surface shows
+# (``/inbox/stats`` ``needs_attention``) both filter on exactly this, so the
+# number on the bell is the number of rows the list shows. They used to apply
+# different filters and the bell said 45 while the list showed 12.
+NEEDS_ATTENTION_CLAUSE = (
+    "status NOT IN ('archived', 'agent_cleared', 'resolved') AND (severity IS NULL OR severity != 'info')"
+)
+
+# Statuses an item can be open in. A generator or monitor condition that has
+# cleared resolves the item from any of these. 'agent_reviewing' is left out:
+# the triage pipeline is writing to the item right now, and
+# ``sweep_stale_items`` returns it to 'new' within minutes if that stalls.
+OPEN_STATUSES = ("new", "triaged", "agent_review_failed", "claimed", "in_progress", "agent_cleared")
+
 
 class InboxRepository(BaseRepository):
     """Database operations for the ops inbox."""
@@ -89,6 +106,22 @@ class InboxRepository(BaseRepository):
         return await db.fetchall(
             f"SELECT * FROM inbox_items WHERE {where} ORDER BY priority_score DESC LIMIT ? OFFSET ?",
             *params,
+        )
+
+    def fetch_needs_attention_rows(self, now: int) -> list[Any]:
+        """Every item that needs attention, unpaginated: the rows behind the count."""
+        return self.db.fetchall(
+            f"""SELECT correlation_key, severity FROM inbox_items
+            WHERE (snoozed_until IS NULL OR snoozed_until <= ?) AND {NEEDS_ATTENTION_CLAUSE}""",
+            (now,),
+        )
+
+    async def async_fetch_needs_attention_rows(self, now: int) -> list[Any]:
+        db = await self.get_async_db()
+        return await db.fetchall(
+            f"""SELECT correlation_key, severity FROM inbox_items
+            WHERE (snoozed_until IS NULL OR snoozed_until <= ?) AND {NEEDS_ATTENTION_CLAUSE}""",
+            now,
         )
 
     def get_stats_rows(self, now: int) -> list[Any]:
@@ -415,6 +448,23 @@ class InboxRepository(BaseRepository):
             (finding_id,),
         )
 
+    def find_all_active_for_finding(self, finding_id: str, corr_key: str = "") -> list[Any]:
+        """Open items for a finding: by its id, and by its correlation key (tasks)."""
+        clauses = []
+        params: list[Any] = []
+        if finding_id:
+            clauses.append("finding_id = ?")
+            params.append(finding_id)
+        if corr_key:
+            clauses.append("(correlation_key = ? AND item_type = 'task')")
+            params.append(corr_key)
+        if not clauses:
+            return []
+        return self.db.fetchall(
+            f"SELECT id FROM inbox_items WHERE ({' OR '.join(clauses)}) AND status NOT IN ('resolved', 'archived')",
+            tuple(params),
+        )
+
     # -- Bridge (monitor integration) ----------------------------------------
 
     def find_active_by_correlation_task(self, corr_key: str) -> Any | None:
@@ -540,16 +590,31 @@ class InboxRepository(BaseRepository):
     # -- Generator cycle -----------------------------------------------------
 
     def fetch_generator_items(self) -> list[Any]:
+        """Open generator items, in any open status.
+
+        This used to read only 'new' and 'triaged'. Triage moves items on to
+        'agent_review_failed' or 'agent_cleared', and a person moves them to
+        'claimed'/'in_progress', and from any of those an item whose condition
+        had cleared was never revisited: it stayed open (and counted) forever.
+        """
+        placeholders = ", ".join("?" for _ in OPEN_STATUSES)
         return self.db.fetchall(
-            """SELECT id, correlation_key, metadata FROM inbox_items
+            f"""SELECT id, correlation_key, metadata FROM inbox_items
             WHERE item_type = 'task'
-            AND status IN ('new', 'triaged')""",
+            AND status IN ({placeholders})""",
+            OPEN_STATUSES,
         )
 
     def auto_resolve_generator_item(self, item_id: str, now: int) -> None:
+        # The reason goes into metadata (merged, not replaced) so the item says
+        # why it closed. Only an open row is touched: a person may have resolved
+        # or archived it between the read and this write.
+        placeholders = ", ".join("?" for _ in OPEN_STATUSES)
         self.db.execute(
-            "UPDATE inbox_items SET status = 'resolved', resolved_at = ?, updated_at = ? WHERE id = ?",
-            (now, now, item_id),
+            f"""UPDATE inbox_items SET status = 'resolved', resolved_at = ?, updated_at = ?,
+            metadata = (COALESCE(NULLIF(metadata, ''), '{{}}')::jsonb || ?::jsonb)::text
+            WHERE id = ? AND status IN ({placeholders})""",
+            (now, now, json.dumps({"resolved_reason": "condition cleared"}), item_id, *OPEN_STATUSES),
         )
 
     # -- Mutes ---------------------------------------------------------------
@@ -601,7 +666,10 @@ class InboxRepository(BaseRepository):
                WHERE status NOT IN ('resolved', 'archived', 'agent_cleared')
                  AND correlation_key IS NOT NULL AND correlation_key != ''
                  AND claimed_by IS NULL
-                 AND pinned_by IS NULL
+                 -- pinned_by is a JSON list that defaults to '[]', never NULL
+                 -- (see fetch_untouched_open_items). A NULL test on it matched
+                 -- no row, so the restart reconcile never resolved anything.
+                 AND coalesce(pinned_by, '[]') IN ('[]', '')
                  AND created_by = 'system:monitor'""",
         )
 

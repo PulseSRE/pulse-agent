@@ -41,6 +41,31 @@ class TestFindingToInbox:
         assert item["finding_id"] == "f-test-001"
         assert item["severity"] == "critical"
 
+    def test_finding_checklist_is_kept_as_steps(self):
+        """Cloud-credential findings carry their fix as steps; the item keeps them separate."""
+        from sre_agent.inbox import bridge_finding_to_inbox, get_inbox_item
+
+        finding = {
+            "id": "f-cco-001",
+            "title": "AWS EBS CSI driver cannot get its cloud credentials (InsufficientCloudCreds)",
+            "summary": "explanation",
+            "severity": "critical",
+            "category": "cloud_credentials",
+            "confidence": 0.95,
+            "noiseScore": 0.0,
+            "resources": [
+                {
+                    "kind": "CredentialsRequest",
+                    "name": "aws-ebs-csi-driver-operator",
+                    "namespace": "openshift-cloud-credential-operator",
+                }
+            ],
+            "checklist": ["Add the permissions", "Do not delete the Secret"],
+        }
+        item = get_inbox_item(bridge_finding_to_inbox(finding))
+        assert item["metadata"]["checklist"] == ["Add the permissions", "Do not delete the Secret"]
+        assert item["metadata"]["finding_category"] == "cloud_credentials"
+
     def test_duplicate_finding_updates_existing(self):
         from sre_agent.inbox import bridge_finding_to_inbox, get_inbox_item
 
