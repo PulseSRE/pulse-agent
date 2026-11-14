@@ -164,16 +164,19 @@ def plan_fix(investigation: dict, finding: dict) -> FixPlan | None:
         return None
 
     return _steer(
-        FixPlan(
-            strategy=strategy,
-            cause_category=cause_category,
-            confidence=confidence,
-            description=f"{strategy}: {recommended_fix[:200]}",
-            params={
-                "suspected_cause": suspected_cause,
-                "recommended_fix": recommended_fix,
-                "resources": finding.get("resources", []),
-            },
+        gate_by_cause(
+            FixPlan(
+                strategy=strategy,
+                cause_category=cause_category,
+                confidence=confidence,
+                description=f"{strategy}: {recommended_fix[:200]}",
+                params={
+                    "suspected_cause": suspected_cause,
+                    "recommended_fix": recommended_fix,
+                    "resources": finding.get("resources", []),
+                },
+            ),
+            finding,
         )
     )
 
@@ -194,7 +197,10 @@ def _steer(plan: FixPlan) -> FixPlan:
 _FAST_PATH_STRATEGIES: dict[str, tuple[str, str]] = {
     "crashloop": ("restart_controller", "Delete crashlooping pod — controller recreates"),
     "image_pull": ("patch_image", "Rollback deployment to previous working image"),
-    "workloads": ("restart_controller", "Rolling restart of failed deployment"),
+    # The workloads scanner reports the Deployment, not a pod. This used to be
+    # restart_controller, which reads the resource as a pod: every attempt
+    # 404'd (140 of 140 failed on one cluster) and was retried each scan.
+    "workloads": ("rollout_restart", "Rolling restart of the degraded Deployment"),
 }
 
 
@@ -265,18 +271,211 @@ def default_fix_plan(category: str, finding: dict) -> FixPlan | None:
 
     strategy, description = entry
     return _steer(
-        FixPlan(
-            strategy=strategy,
-            cause_category=category,
-            confidence=0.6,  # lower than investigation-backed plans
-            description=description,
-            params={
-                "suspected_cause": f"Fast-path: {category} detected by scanner",
-                "recommended_fix": description,
-                "resources": finding.get("resources", []),
-            },
+        gate_by_cause(
+            FixPlan(
+                strategy=strategy,
+                cause_category=category,
+                confidence=0.6,  # lower than investigation-backed plans
+                description=description,
+                params={
+                    "suspected_cause": f"Fast-path: {category} detected by scanner",
+                    "recommended_fix": description,
+                    "resources": finding.get("resources", []),
+                },
+            ),
+            finding,
         )
     )
+
+
+# ── Can this fix work at all? ────────────────────────────────────────────
+#
+# Deleting a pod re-pulls the same image reference with the same credentials.
+# That fixes a pull that failed because the registry timed out or rate-limited
+# us, and nothing else: a wrong tag, a missing repository or a missing pull
+# secret fails identically on the new pod. Measured on one cluster: 143 pod
+# deletions for one bad image, each recorded "completed". Likewise a rolling
+# restart of a Deployment whose pods cannot pull, cannot find their config or
+# crash on start recreates the same failure.
+
+_PULL_WAITING_REASONS = frozenset({"ErrImagePull", "ImagePullBackOff", "InvalidImageName", "ErrImageNeverPull"})
+
+# Checked first: when both appear (an old timeout, then "not found"), the
+# permanent cause wins — acting on the wrong reading repeats a useless write.
+_PERMANENT_PULL_PATTERNS = [
+    r"not found",
+    r"manifest unknown",
+    r"unauthori[sz]ed",
+    r"authentication required",
+    r"denied",
+    r"forbidden",
+    r"invalidimagename",
+    r"invalid reference format",
+    r"errimageneverpull",
+    r"does not exist",
+    r"no such image",
+]
+_TRANSIENT_PULL_PATTERNS = [
+    r"i/o timeout",
+    r"timed? ?out",
+    r"deadline exceeded",
+    r"tls handshake",
+    r"toomanyrequests",
+    r"too many requests",
+    r"rate limit",
+    r"\b429\b",
+    r"\b50[234]\b",
+    r"service unavailable",
+    r"bad gateway",
+    r"connection reset",
+    r"connection refused",
+    r"unexpected eof",
+    r"temporary failure",
+    r"server misbehaving",
+]
+
+TRANSIENT = "transient"
+PERMANENT = "permanent"
+UNKNOWN = "unknown"
+
+
+def classify_pull_error(text: str) -> str:
+    """``transient`` only when the pull error reads as a passing registry problem."""
+    lower = (text or "").lower()
+    if any(re.search(p, lower) for p in _PERMANENT_PULL_PATTERNS):
+        return PERMANENT
+    if any(re.search(p, lower) for p in _TRANSIENT_PULL_PATTERNS):
+        return TRANSIENT
+    return UNKNOWN
+
+
+def image_pull_cause(resource: dict) -> tuple[str, str]:
+    """Why this pod cannot pull: ``(transient|permanent|unknown, evidence)``.
+
+    The waiting message of an ``ImagePullBackOff`` container says only
+    "Back-off pulling image"; the reason is in the ``ErrImagePull`` message
+    and the pod's ``Failed`` events, so both are read.
+    """
+    if resource.get("kind") != "Pod" or not resource.get("name"):
+        return UNKNOWN, "the finding does not name a pod"
+    name, ns = resource["name"], resource.get("namespace", "default")
+    texts: list[str] = []
+    try:
+        core = get_core_client()
+        pod = core.read_namespaced_pod(name, ns)
+        status = getattr(pod, "status", None)
+        statuses = list(getattr(status, "init_container_statuses", None) or []) + list(
+            getattr(status, "container_statuses", None) or []
+        )
+        for cs in statuses:
+            waiting = getattr(getattr(cs, "state", None), "waiting", None)
+            reason = getattr(waiting, "reason", "") or ""
+            if reason in _PULL_WAITING_REASONS:
+                texts.append(f"{reason}: {getattr(waiting, 'message', '') or ''}".strip())
+        try:
+            events = core.list_namespaced_event(ns, field_selector=f"involvedObject.name={name}")
+            for ev in (getattr(events, "items", None) or [])[-10:]:
+                message = getattr(ev, "message", "") or ""
+                if getattr(ev, "reason", "") in ("Failed", "ErrImagePull", "InspectFailed") and message:
+                    texts.append(message)
+        except Exception:
+            logger.debug("Could not read pull events for %s/%s", ns, name, exc_info=True)
+    except Exception as e:
+        return UNKNOWN, f"could not read the pod's pull error ({type(e).__name__})"
+    evidence = " | ".join(t for t in texts if t)
+    if not evidence:
+        return UNKNOWN, "no pull error message on the pod"
+    return classify_pull_error(evidence), evidence[:400]
+
+
+_UNRESTARTABLE_REASONS = frozenset(
+    {
+        "ErrImagePull",
+        "ImagePullBackOff",
+        "InvalidImageName",
+        "CreateContainerConfigError",
+        "CreateContainerError",
+        "CrashLoopBackOff",
+        "RunContainerError",
+    }
+)
+
+
+def deployment_restart_blocker(resource: dict) -> str:
+    """Why a rolling restart cannot help this Deployment, or "" if it might."""
+    if resource.get("kind") != "Deployment" or not resource.get("name"):
+        return f"a rolling restart applies to Deployments, not {resource.get('kind') or 'this resource'}"
+    name, ns = resource["name"], resource.get("namespace", "default")
+    try:
+        apps = get_apps_client()
+        dep = apps.read_namespaced_deployment(name, ns)
+        labels = (dep.spec.selector.match_labels or {}) if dep.spec and dep.spec.selector else {}
+        if not labels:
+            return "the Deployment's pods could not be identified (no matchLabels)"
+        pods = get_core_client().list_namespaced_pod(ns, label_selector=",".join(f"{k}={v}" for k, v in labels.items()))
+    except Exception as e:
+        return f"the Deployment's pods could not be inspected ({type(e).__name__})"
+    for pod in getattr(pods, "items", None) or []:
+        pod_name = getattr(pod.metadata, "name", "?")
+        status = pod.status
+        for cs in list(getattr(status, "init_container_statuses", None) or []) + list(
+            getattr(status, "container_statuses", None) or []
+        ):
+            waiting = getattr(getattr(cs, "state", None), "waiting", None)
+            reason = getattr(waiting, "reason", "") or ""
+            if reason in _UNRESTARTABLE_REASONS:
+                message = (getattr(waiting, "message", "") or "")[:200]
+                return f"pod {pod_name} is {reason}{': ' + message if message else ''}"
+        for cond in getattr(status, "conditions", None) or []:
+            if getattr(cond, "type", "") == "PodScheduled" and getattr(cond, "status", "") == "False":
+                return f"pod {pod_name} cannot be scheduled: {(getattr(cond, 'message', '') or '')[:200]}"
+    return ""
+
+
+def _to_human_review(plan: FixPlan, why: str) -> FixPlan:
+    plan.strategy = "require_human_review"
+    plan.description = why
+    plan.params["recommended_fix"] = why
+    return plan
+
+
+def gate_by_cause(plan: FixPlan, finding: dict) -> FixPlan:
+    """Turn a plan that cannot work for this finding into a request for a person.
+
+    Runs inside planning, so the auto-fix loop and an approval re-deriving the
+    plan reach the same strategy.
+    """
+    if plan.strategy == "require_human_review":
+        return plan
+    category = finding.get("category", "")
+    resources = finding.get("resources") or []
+    r0 = resources[0] if resources else {}
+    if category == "image_pull":
+        verdict, evidence = image_pull_cause(r0)
+        plan.params["pull_error"] = evidence
+        if verdict == TRANSIENT:
+            # A passing registry problem: retrying the pull now is the fix. A
+            # rollback would revert a good image over a timeout.
+            plan.strategy = "restart_controller"
+            plan.description = (
+                f"Delete the pod so the pull is retried now — the failure looks transient: {evidence[:200]}"
+            )
+            plan.params["recommended_fix"] = plan.description
+            return plan
+        return _to_human_review(
+            plan,
+            "The image cannot be pulled and retrying will not change that "
+            f"({'not a transient registry error' if verdict == PERMANENT else 'cause could not be confirmed as transient'}): "
+            f"{evidence[:240]}. Fix the image reference or the pull secret.",
+        )
+    if plan.strategy == "rollout_restart":
+        blocker = deployment_restart_blocker(r0)
+        if blocker:
+            return _to_human_review(
+                plan,
+                f"A rolling restart would recreate the same failure: {blocker}. Fix the cause, not the pods.",
+            )
+    return plan
 
 
 # The tool each mutating strategy is equivalent to, for deny-policy purposes.
@@ -286,6 +485,7 @@ def default_fix_plan(category: str, finding: dict) -> FixPlan | None:
 # *unsupervised* one wide open, which is the wrong way round.
 _STRATEGY_POLICY_TOOLS: dict[str, str] = {
     "restart_controller": "delete_pod",
+    "rollout_restart": "restart_deployment",
     "patch_image": "restart_deployment",
     "patch_resources": "restart_deployment",
 }
@@ -345,7 +545,7 @@ _expected_deployment_uid: ContextVar[str | None] = ContextVar("fix_deployment_ui
 _verify_resources: ContextVar[list[dict] | None] = ContextVar("fix_verify_resources", default=None)
 
 
-_APPLIED_TOOLS = frozenset({"delete_pod", "rollback_deployment", "patch_resources"})
+_APPLIED_TOOLS = frozenset({"delete_pod", "rollback_deployment", "patch_resources", "rollout_restart"})
 
 
 @dataclass(frozen=True)
@@ -529,14 +729,13 @@ def _execute_patch_image(plan: FixPlan) -> tuple[str, str, str]:
     dep_name = _find_owning_deployment(r["name"], ns, pod)
 
     if not dep_name:
-        # Fallback: delete the pod
-        refused = _delete_observed_pod(pod, r["name"], ns)
-        if refused:
-            return (refused.split(":", 1)[0], "", refused)
+        # Deleting the pod is not a fallback for a bad image: the replacement
+        # pulls the same reference and fails the same way.
         return (
-            "delete_pod",
+            "skip",
             f"Pod {r['name']} in {ns}: image={bad_image}",
-            f"Pod {r['name']} deleted — could not find owning Deployment",
+            "Not changed: no owning Deployment to roll back, and deleting the pod would pull the same image — "
+            "needs a person.",
         )
 
     dep = apps.read_namespaced_deployment(dep_name, ns)
@@ -578,11 +777,15 @@ def _execute_patch_image(plan: FixPlan) -> tuple[str, str, str]:
                 f"Deployment {dep_name} patched: image={good_image} (rolled back from rev {revision})",
             )
 
-    # Fallback: delete pod if previous revision not found
-    refused = _delete_observed_pod(pod, r["name"], ns)
-    if refused:
-        return (refused.split(":", 1)[0], before, refused)
-    return ("delete_pod", before, f"Pod {r['name']} deleted — previous revision not found")
+    # No previous revision to return to. Deleting the pod used to be the
+    # fallback here and was recorded "completed" every time, though the new pod
+    # pulls the same image and fails the same way.
+    return (
+        "skip",
+        before,
+        "Not changed: no previous revision to roll back to, and deleting the pod would pull the same image — "
+        "needs a person.",
+    )
 
 
 def _execute_patch_resources(plan: FixPlan) -> tuple[str, str, str]:
@@ -726,7 +929,36 @@ def _execute_restart_controller(plan: FixPlan) -> tuple[str, str, str]:
     )
 
 
+def _execute_rollout_restart(plan: FixPlan) -> tuple[str, str, str]:
+    """Rolling restart of a Deployment (what ``oc rollout restart`` does)."""
+    r, ns = _get_first_resource(plan)
+    name = r.get("name", "")
+    if r.get("kind") != "Deployment" or not name:
+        raise FixPreconditionError(f"rollout_restart needs a Deployment, got {r.get('kind') or 'nothing'}")
+    apps = get_apps_client()
+    dep = apps.read_namespaced_deployment(name, ns)
+    desired = dep.spec.replicas if dep.spec and dep.spec.replicas is not None else 0
+    available = (dep.status.available_replicas or 0) if dep.status else 0
+    before = f"Deployment {name} in {ns}: available={available}/{desired}"
+    _check_deployment_identity(dep)
+    _snapshot_before("Deployment", name, ns, dep)
+    from datetime import UTC, datetime
+
+    template_meta = dep.spec.template.metadata
+    annotations = dict((template_meta.annotations or {}) if template_meta else {})
+    annotations["kubectl.kubernetes.io/restartedAt"] = datetime.now(UTC).isoformat()
+    if template_meta is None:
+        op = {"op": "add", "path": "/spec/template/metadata", "value": {"annotations": annotations}}
+    else:
+        op = {"op": "add", "path": "/spec/template/metadata/annotations", "value": annotations}
+    apps.patch_namespaced_deployment(
+        name, ns, body=_patch_tests(dep) + [op], _content_type="application/json-patch+json"
+    )
+    return ("rollout_restart", before, f"Deployment {name} rolling restart triggered")
+
+
 _EXECUTORS: dict[str, Callable] = {
+    "rollout_restart": _execute_rollout_restart,
     "patch_image": _execute_patch_image,
     "patch_resources": _execute_patch_resources,
     "restart_controller": _execute_restart_controller,

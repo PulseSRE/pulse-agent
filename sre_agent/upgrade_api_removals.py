@@ -176,6 +176,17 @@ def resolve_target(cv: dict, target_version: str = "") -> dict[str, Any]:
         "problem": "",
         "cause": None,
     }
+    if cur_minor and not cur_kube:
+        # OpenShift 5 and later: the 4.N -> Kubernetes 1.(N+13) mapping is the
+        # only one known here, and guessing another would name the wrong
+        # removals. Said as unsupported, not as an unreadable version, so the
+        # Inbox generator resolves a 4.x "upgrade blocked" item left over from
+        # before the cluster upgraded instead of keeping it open forever.
+        out["problem"] = (
+            f"the API-removal check knows Kubernetes versions for OpenShift 4 only; this cluster runs {cur_version}"
+        )
+        out["cause"] = "unsupported_version"
+        return out
     if not cur_minor or not cur_kube:
         out["problem"] = (
             f"the current OpenShift version could not be determined from ClusterVersion "
@@ -270,7 +281,7 @@ def compute_upgrade_api_removals(
     result: dict[str, Any] = {
         "status": "unknown",
         "reason": "",
-        # Why the status is unknown: not_openshift | read_failed | no_current |
+        # Why the status is unknown: not_openshift | read_failed | no_current | unsupported_version |
         # bad_target. None when the status is go or no_go.
         "cause": None,
         "current": {"ocp": None, "kubernetes": None},

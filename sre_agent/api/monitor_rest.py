@@ -1108,82 +1108,117 @@ async def plan_analytics(
         return {"templates": [], "total_executions": 0, "days": days}
 
 
+_VERIFICATION_EVENTS = {
+    # verdict -> (event type, how to say it)
+    "verified": ("fix_verified", "held (verified healthy afterwards)"),
+    "improved": ("fix_improved", "improved things without clearing them"),
+    "still_failing": ("fix_not_held", "did not hold (still failing)"),
+    "verified_then_recurred": ("fix_not_held", "held, then the problem came back"),
+    "unverifiable": ("fix_unverifiable", "could not be verified"),
+}
+
+
+def _plural(n: int, word: str, plural: str = "") -> str:
+    return f"{n} {word if n == 1 else (plural or word + 's')}"
+
+
+def _activity_source(name: str, fetch) -> list:
+    """One source of the feed. A broken source drops itself, not the whole feed.
+
+    The feed used to run every query in one try block, so one bad query (four
+    of them named columns that do not exist) returned no events at all.
+    """
+    try:
+        return list(fetch() or [])
+    except Exception:
+        logger.warning("Activity feed: %s could not be read", name, exc_info=True)
+        return []
+
+
 def _build_activity_events(repo, days: int = 7) -> list[dict]:
     """Aggregate recent agent activity into plain-English events.
 
     Every event links to the Inbox's Activity tab, where the UI lists actions,
     investigations and postmortems. Links must be pulse-ui routes
     (``sre_agent/ui_routes.py``); the old ``/incidents`` page no longer exists.
+
+    A fix that ran is reported as applied, not as fixed: ``completed`` means
+    the write went through. Whether it held is what verification says, and
+    that is reported separately.
     """
-    try:
-        events: list[dict] = []
+    events: list[dict] = []
+    link = "/inbox?tab=activity"
 
-        actions = repo.fetch_activity_actions(days)
-        for row in actions or []:
-            cat = row["category"].replace("_", " ")
-            ns = row["namespace"] or "cluster-wide"
-            status = row["status"]
-            verb = "Auto-fixed" if status == "completed" else "Failed to fix" if status == "failed" else "Rolled back"
-            events.append(
-                {
-                    "type": "auto_fix" if status == "completed" else "fix_failed" if status == "failed" else "rollback",
-                    "description": f"{verb} {row['cnt']} {cat} issue{'s' if row['cnt'] != 1 else ''} in {ns}",
-                    "link": "/inbox?tab=activity",
-                    "count": row["cnt"],
-                    "category": row["category"],
-                    "namespace": row["namespace"],
-                }
-            )
+    for row in _activity_source("fix actions", lambda: repo.fetch_activity_actions(days)):
+        cat = (row["category"] or "unknown").replace("_", " ")
+        ns = row["namespace"] or "cluster-wide"
+        status = row["status"]
+        n = int(row["cnt"] or 0)
+        if status == "completed":
+            kind, text = "auto_fix", f"Applied {_plural(n, f'{cat} fix', f'{cat} fixes')} in {ns}"
+        elif status == "failed":
+            kind, text = "fix_failed", f"{_plural(n, f'{cat} fix', f'{cat} fixes')} failed to apply in {ns}"
+        else:
+            kind, text = "rollback", f"Rolled back {_plural(n, f'{cat} fix', f'{cat} fixes')} in {ns}"
+        events.append(
+            {
+                "type": kind,
+                "description": text,
+                "link": link,
+                "count": n,
+                "category": row["category"],
+                "namespace": row["namespace"],
+                "status": status,
+            }
+        )
 
-        healed = repo.fetch_self_healed_count(days)
-        healed_count = healed[0]["cnt"] if healed and healed[0]["cnt"] else 0
-        if healed_count > 0:
-            events.append(
-                {
-                    "type": "self_healed",
-                    "description": f"{healed_count} finding{'s' if healed_count != 1 else ''} resolved without intervention",
-                    "link": "/inbox?tab=activity",
-                    "count": healed_count,
-                }
-            )
+    for row in _activity_source("fix verification", lambda: repo.fetch_activity_verifications(days)):
+        verdict = row["verification_status"]
+        kind, said = _VERIFICATION_EVENTS.get(verdict, ("fix_verification", f"verification: {verdict}"))
+        n = int(row["cnt"] or 0)
+        cat = (row["category"] or "unknown").replace("_", " ")
+        events.append(
+            {
+                "type": kind,
+                "description": f"{_plural(n, f'{cat} fix', f'{cat} fixes')} {said}",
+                "link": link,
+                "count": n,
+                "category": row["category"],
+                "verification": verdict,
+            }
+        )
 
-        postmortems = repo.fetch_postmortem_activity(days)
-        pm_count = postmortems[0]["cnt"] if postmortems and postmortems[0]["cnt"] else 0
-        if pm_count > 0:
-            summary = postmortems[0].get("latest_summary", "")
-            desc = f"Generated {pm_count} postmortem{'s' if pm_count != 1 else ''}"
-            if summary:
-                desc += f" \u2014 latest: {summary[:60]}"
-            events.append(
-                {
-                    "type": "postmortem",
-                    "description": desc,
-                    "link": "/inbox?tab=activity",
-                    "count": pm_count,
-                }
-            )
+    healed = _activity_source("self-healed findings", lambda: repo.fetch_self_healed_count(days))
+    healed_count = int(healed[0]["cnt"] or 0) if healed else 0
+    if healed_count > 0:
+        events.append(
+            {
+                "type": "self_healed",
+                "description": f"{_plural(healed_count, 'finding')} resolved without a Pulse fix",
+                "link": link,
+                "count": healed_count,
+            }
+        )
 
-        investigations = repo.fetch_investigated_findings(days, 5)
-        for row in investigations or []:
-            ft = (row["finding_type"] or "issue").replace("_", " ")
-            target = row["target"] or ""
-            desc = f"Investigated {ft}"
-            if target:
-                desc += f" on {target}"
-            events.append(
-                {
-                    "type": "investigation",
-                    "description": desc,
-                    "link": "/inbox?tab=activity",
-                    "count": row["cnt"],
-                }
-            )
+    postmortems = _activity_source("postmortems", lambda: repo.fetch_postmortem_activity(days))
+    pm_count = int(postmortems[0]["cnt"] or 0) if postmortems else 0
+    if pm_count > 0:
+        summary = postmortems[0].get("latest_summary", "") or ""
+        desc = f"Generated {_plural(pm_count, 'postmortem')}"
+        if summary:
+            desc += f" \u2014 latest: {summary[:60]}"
+        events.append({"type": "postmortem", "description": desc, "link": link, "count": pm_count})
 
-        return events
+    for row in _activity_source("investigations", lambda: repo.fetch_investigated_findings(days, 5)):
+        ft = (row["finding_type"] or "issue").replace("_", " ")
+        target = row.get("target") or ""
+        n = int(row["cnt"] or 0)
+        desc = f"Investigated {_plural(n, f'{ft} finding')}"
+        if target:
+            desc += f" on {target}"
+        events.append({"type": "investigation", "description": desc, "link": link, "count": n})
 
-    except Exception:
-        logger.debug("Activity event aggregation failed", exc_info=True)
-        return []
+    return events
 
 
 def _get_agent_activity_sync(days: int) -> dict:
