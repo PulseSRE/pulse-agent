@@ -1,12 +1,12 @@
 # Release process
 
-Agent and [pulse-ui](https://github.com/PulseSRE/pulse-ui) are released as a matched version pair. The [operator](https://github.com/PulseSRE/pulse-operator) has its own version and controls the deployed image references. There is no Helm chart or `deploy/deploy.sh` in this repository.
+Agent, [pulse-ui](https://github.com/PulseSRE/pulse-ui) and the [operator](https://github.com/PulseSRE/pulse-operator) share one version number from v2.39.0: a release is `vX.Y.Z` in all three repositories (the operator went from v0.14.1 to v2.39.0). The operator controls the deployed image references, so its release commit pins the agent/UI images of the same version. There is no Helm chart or `deploy/deploy.sh` in this repository.
 
 ## Prepare and validate
 
 1. Run the checks in [TESTING](TESTING.md), including the actual provider-backed gate when releasing model/prompt changes.
 2. Review changes and update `CHANGELOG.md`, API/security documentation, and affected operational guides. Test counts and benchmark scores are results of a specific run, not permanent release guarantees.
-3. Choose the same agent/UI version and prepare each repository independently. `scripts/bump-version.sh X.Y.Z` updates **only** this repository's `pyproject.toml` and README badge; it does not edit the UI.
+3. Use the same version in all three repositories and prepare each one independently. `scripts/bump-version.sh X.Y.Z` updates **only** this repository's `pyproject.toml` and README badge; it does not edit the UI.
 4. Review the final diff, clean worktree, and corresponding UI version before committing and tagging.
 
 ```bash
@@ -48,14 +48,14 @@ The UI's Helm install, upgrade, rollback and uninstall Jobs (and the preview Job
 
 ## Every release covers all three repositories
 
-A release of the agent/UI pair also checks the operator: what shipped in it since its last tag, and whether its docs name the new pair. When pulse-operator `main` has commits since its last tag, it is released in the same pass (it was not, from v0.11.0 to v0.12.0, so the self-heal fix sat merged and unshipped while v2.36.0 went out).
+A release of the agent/UI pair also checks the operator: what shipped in it since its last tag, and whether its docs name the new pair. pulse-operator is tagged in every release, with the same version, even when only its operand pins and docs change (a skipped operator release once left the self-heal fix merged and unshipped while v2.36.0 went out). Its release commit needs the agent and UI image digests, so it is prepared after their tags have built: tag agent and UI, resolve the digests from their `build-push.yml` run summaries, then commit and tag the operator.
 
-For pulse-operator (its own version line, e.g. v0.12.0):
+For pulse-operator (the same `vX.Y.Z` as the agent and UI; its line before v2.39.0 was v0.x):
 
 1. Bump `OperatorVersion` in `internal/controller/compat.go` to the tag without `v`. `release.yml` refuses a tag that does not match.
 2. Cut a `## vX.Y.Z (date)` section in its `CHANGELOG.md` from `Unreleased`, saying which agent/UI pair it pairs with and any behaviour change on upgrade, and add the release to Pages (`docs/index.html`: header version, "What's new", footer, example CR images).
 3. Tag it. `release.yml` builds the operator, bundle and catalog images (the CSV version and `replaces` are set from the tag in CI) and `github-release.yml` publishes the GitHub Release from the changelog section.
-4. When the operator does not change, still update its docs to say which agent/UI versions run on the current operator unchanged, and note any agent migrations that run on start.
+4. When the operator's own code does not change, its release is still cut: the version, operand pins, changelog and Pages say which agent/UI images it runs, and note any agent migrations that run on start.
 
 Also check sre-bench: its README and Pages cite Pulse's simulation scores by version.
 
