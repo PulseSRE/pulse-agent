@@ -60,8 +60,21 @@ def plan_category_for(finding: dict) -> str:
     ``title=alertname``); for everything else the category stands as-is.
     """
     category = str(finding.get("category", ""))
+    if category == "control_plane" and _is_etcd_finding(finding):
+        # control-plane-pressure-v1 is a memory playbook: find the consumers on
+        # the masters, move what can move. A slow etcd disk, an election or a
+        # database near its quota is not that, and running it would propose
+        # rescheduling pods for an IOPS problem. No plan: the freeform
+        # investigation reads the etcd evidence (and the control-plane-stall
+        # runbook) instead. Memory findings on masters keep the plan.
+        return ""
     if category == "alerts":
         mapped = _ALERT_TEMPLATE.get(str(finding.get("title", "")))
         if mapped:
             return mapped
     return _CATEGORY_TEMPLATE.get(category, category)
+
+
+def _is_etcd_finding(finding: dict) -> bool:
+    resources = finding.get("resources") or []
+    return bool(resources) and isinstance(resources[0], dict) and resources[0].get("kind") == "Etcd"
