@@ -14,3 +14,8 @@ b25e9bb9dd640cd17b3ba71fd046e6f44420d9b4:SECURITY.md:generic-api-key:30
 # (subject_kind="User", subject_name="bob", role_kind="Role", role_name="deployer"),
 # matched by generic-api-key. No credential. Branch history is not rewritten.
 ee4d94b4f9dcd0346085d105628b58e8a05c0f14:tests/test_rbac_writes.py:generic-api-key:311
+# Fake test values in the credential-redaction tests (low-entropy placeholders
+# since the next commit); pinned to the commit that had them, since gitleaks
+# scans branch history and it is not rewritten.
+2b12b54ebac1327da400da61c73598daf70de47f:tests/test_credential_redaction.py:generic-api-key:27
+2b12b54ebac1327da400da61c73598daf70de47f:tests/test_credential_redaction.py:generic-api-key:28
