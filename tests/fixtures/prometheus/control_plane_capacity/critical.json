@@ -1,0 +1,384 @@
+{
+ "cp_nodes": {
+  "status": "success",
+  "data": {
+   "resultType": "vector",
+   "result": [
+    {
+     "metric": {
+      "node": "ip-10-0-14-31.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "1"
+     ]
+    },
+    {
+     "metric": {
+      "node": "ip-10-0-55-120.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "1"
+     ]
+    },
+    {
+     "metric": {
+      "node": "ip-10-0-90-7.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "1"
+     ]
+    }
+   ]
+  }
+ },
+ "memory_used": {
+  "status": "success",
+  "data": {
+   "resultType": "vector",
+   "result": [
+    {
+     "metric": {
+      "node": "ip-10-0-14-31.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "11130407747.584"
+     ]
+    },
+    {
+     "metric": {
+      "node": "ip-10-0-55-120.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "10973641441.279999"
+     ]
+    },
+    {
+     "metric": {
+      "node": "ip-10-0-90-7.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "14579266486.272001"
+     ]
+    }
+   ]
+  }
+ },
+ "memory_allocatable": {
+  "status": "success",
+  "data": {
+   "resultType": "vector",
+   "result": [
+    {
+     "metric": {
+      "node": "ip-10-0-14-31.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "15676630630.4"
+     ]
+    },
+    {
+     "metric": {
+      "node": "ip-10-0-55-120.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "15676630630.4"
+     ]
+    },
+    {
+     "metric": {
+      "node": "ip-10-0-90-7.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "15676630630.4"
+     ]
+    }
+   ]
+  }
+ },
+ "memory_forecast": {
+  "status": "success",
+  "data": {
+   "resultType": "vector",
+   "result": [
+    {
+     "metric": {
+      "node": "ip-10-0-14-31.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "0.72"
+     ]
+    },
+    {
+     "metric": {
+      "node": "ip-10-0-55-120.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "0.71"
+     ]
+    },
+    {
+     "metric": {
+      "node": "ip-10-0-90-7.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "0.97"
+     ]
+    }
+   ]
+  }
+ },
+ "etcd_fsync": {
+  "status": "success",
+  "data": {
+   "resultType": "vector",
+   "result": [
+    {
+     "metric": {
+      "instance": "10.0.14.31:9979",
+      "pod": "etcd-ip-10-0-14-31.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "0.0071"
+     ]
+    },
+    {
+     "metric": {
+      "instance": "10.0.55.120:9979",
+      "pod": "etcd-ip-10-0-55-120.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "0.0064"
+     ]
+    },
+    {
+     "metric": {
+      "instance": "10.0.90.7:9979",
+      "pod": "etcd-ip-10-0-90-7.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "0.0712"
+     ]
+    }
+   ]
+  }
+ },
+ "etcd_commit": {
+  "status": "success",
+  "data": {
+   "resultType": "vector",
+   "result": [
+    {
+     "metric": {
+      "instance": "10.0.14.31:9979",
+      "pod": "etcd-ip-10-0-14-31.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "0.019"
+     ]
+    },
+    {
+     "metric": {
+      "instance": "10.0.55.120:9979",
+      "pod": "etcd-ip-10-0-55-120.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "0.018"
+     ]
+    },
+    {
+     "metric": {
+      "instance": "10.0.90.7:9979",
+      "pod": "etcd-ip-10-0-90-7.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "0.088"
+     ]
+    }
+   ]
+  }
+ },
+ "etcd_leader_changes": {
+  "status": "success",
+  "data": {
+   "resultType": "vector",
+   "result": [
+    {
+     "metric": {},
+     "value": [
+      1794580800.0,
+      "0"
+     ]
+    }
+   ]
+  }
+ },
+ "etcd_leader_churn_stall": {
+  "status": "success",
+  "data": {
+   "resultType": "vector",
+   "result": []
+  }
+ },
+ "etcd_db_total": {
+  "status": "success",
+  "data": {
+   "resultType": "vector",
+   "result": [
+    {
+     "metric": {
+      "instance": "10.0.14.31:9979",
+      "pod": "etcd-ip-10-0-14-31.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "8267812044.8"
+     ]
+    },
+    {
+     "metric": {
+      "instance": "10.0.55.120:9979",
+      "pod": "etcd-ip-10-0-55-120.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "8267812044.8"
+     ]
+    },
+    {
+     "metric": {
+      "instance": "10.0.90.7:9979",
+      "pod": "etcd-ip-10-0-90-7.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "8267812044.8"
+     ]
+    }
+   ]
+  }
+ },
+ "etcd_db_in_use": {
+  "status": "success",
+  "data": {
+   "resultType": "vector",
+   "result": [
+    {
+     "metric": {
+      "instance": "10.0.14.31:9979",
+      "pod": "etcd-ip-10-0-14-31.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "7623566950.4"
+     ]
+    },
+    {
+     "metric": {
+      "instance": "10.0.55.120:9979",
+      "pod": "etcd-ip-10-0-55-120.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "7623566950.4"
+     ]
+    },
+    {
+     "metric": {
+      "instance": "10.0.90.7:9979",
+      "pod": "etcd-ip-10-0-90-7.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "7623566950.4"
+     ]
+    }
+   ]
+  }
+ },
+ "etcd_db_quota": {
+  "status": "success",
+  "data": {
+   "resultType": "vector",
+   "result": [
+    {
+     "metric": {
+      "instance": "10.0.14.31:9979",
+      "pod": "etcd-ip-10-0-14-31.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "8589934592"
+     ]
+    },
+    {
+     "metric": {
+      "instance": "10.0.55.120:9979",
+      "pod": "etcd-ip-10-0-55-120.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "8589934592"
+     ]
+    },
+    {
+     "metric": {
+      "instance": "10.0.90.7:9979",
+      "pod": "etcd-ip-10-0-90-7.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "8589934592"
+     ]
+    }
+   ]
+  }
+ },
+ "related_alerts": {
+  "status": "success",
+  "data": {
+   "resultType": "vector",
+   "result": [
+    {
+     "metric": {
+      "__name__": "ALERTS",
+      "alertname": "ExtremelyHighIndividualControlPlaneMemory",
+      "alertstate": "firing",
+      "severity": "critical",
+      "instance": "ip-10-0-90-7.ec2.internal"
+     },
+     "value": [
+      1794580800.0,
+      "1"
+     ]
+    }
+   ]
+  }
+ },
+ "top_pods": {
+  "ip-10-0-90-7.ec2.internal": {
+   "status": "success",
+   "data": {
+    "resultType": "vector",
+    "result": []
+   }
+  }
+ }
+}
