@@ -310,6 +310,9 @@ class TestWriteToolSet:
             # A silence hides alerts from the on-call; expiring one starts them paging again.
             "create_silence",
             "expire_silence",
+            # Access changes: a binding diff preview, never auto-approved for a HIGH-risk grant.
+            "grant_access",
+            "revoke_access",
             # Approving an InstallPlan installs an operator version; OLM cannot un-approve.
             "approve_installplan",
             # Rolling restart of every consumer of a ConfigMap/Secret, in one confirm.

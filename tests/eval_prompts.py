@@ -574,6 +574,30 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "RBAC change history and the Pulse write ledger",
     ),
     (
+        "give alice edit on payments",
+        ["grant_access"],
+        "sre",
+        "Grant a role in a namespace (RoleBinding, confirm-gated binding diff)",
+    ),
+    (
+        "grant the ci/builder service account view access cluster-wide",
+        ["grant_access"],
+        "sre",
+        "Grant a ClusterRole cluster-wide to a service account (ClusterRoleBinding)",
+    ),
+    (
+        "remove bob from the payments-editors rolebinding",
+        ["revoke_access"],
+        "sre",
+        "Revoke: remove one subject from one binding (JSON patch with test ops)",
+    ),
+    (
+        "offboard bob: remove his access to the payments namespace",
+        ["revoke_access", "who_can", "effective_permissions"],
+        "sre",
+        "Offboarding finds the bindings, then revokes each (W1)",
+    ),
+    (
         "check pod security across the cluster",
         ["scan_pod_security"],
         "security",

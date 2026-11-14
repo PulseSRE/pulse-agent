@@ -284,6 +284,11 @@ _TOOL_TARGETS: dict[str, tuple[str, str, str]] = {
 }
 
 
+# Write tools that put their own, more exact entry in the ledger (with the
+# resourceVersion they produced, so the observed change is credited to the
+# person): rbac_writes.py. The generic entry is written only when the tool
+# raised, since then it recorded nothing itself.
+SELF_RECORDED_TOOLS = frozenset({"grant_access", "revoke_access"})
 # Write tools whose target kind is one of their inputs.
 _KIND_INPUT_TOOLS = frozenset(
     {"remove_finalizer", "patch_workload_container", "scale_workload", "restart_workload", "rollback_workload"}
@@ -292,6 +297,13 @@ _KIND_INPUT_TOOLS = frozenset(
 
 def agent_write_target(tool: str, tool_input: dict) -> tuple[str, str, str]:
     """(kind, namespace, name) a write tool acts on, from its inputs; '' where unknown."""
+    if tool == "grant_access":
+        grant_ns = str(tool_input.get("namespace") or "")
+        return ("RoleBinding" if grant_ns else "ClusterRoleBinding"), grant_ns, ""
+    if tool == "revoke_access":
+        binding_kind = str(tool_input.get("binding_kind") or "")
+        binding_ns = str(tool_input.get("namespace") or "") if binding_kind != "ClusterRoleBinding" else ""
+        return binding_kind, binding_ns, str(tool_input.get("binding_name") or "")
     if tool == "apply_yaml":
         # The manifest itself is never stored: only the first object's identity.
         try:
@@ -325,6 +337,8 @@ def agent_write_target(tool: str, tool_input: dict) -> tuple[str, str, str]:
 def record_agent_write(tool: str, tool_input: dict, status_: str, error: str | None = None) -> None:
     """Record a write tool the agent ran: who, which tool, the target object and the
     outcome. Nothing else from the input is kept. Best effort: never raises."""
+    if tool in SELF_RECORDED_TOOLS and status_ == "success":
+        return
     try:
         from .repositories import get_rbac_history_repo
         from .request_context import get_current_user

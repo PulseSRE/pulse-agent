@@ -25,6 +25,7 @@ _TOOL_MODULES = [
     "sre_agent.timeline_tools",
     "sre_agent.silence_tools",
     "sre_agent.rbac_tools",
+    "sre_agent.rbac_writes",
     "sre_agent.predict_tools",
     "sre_agent.handoff_tools",
     "sre_agent.inbox",

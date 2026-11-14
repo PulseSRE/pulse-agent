@@ -20,6 +20,7 @@ import anthropic
 
 from .action_policy import (
     PLAN_ONLY_REFUSAL,
+    access_change_not_requested,
     effective_write_tools,
     is_explicit_approval,
     latest_user_text,
@@ -43,6 +44,7 @@ from .inbox import create_inbox_task
 from .k8s_tools import ALL_TOOLS as _K8S_TOOLS
 from .predict_tools import PREDICT_TOOLS
 from .rbac_tools import RBAC_TOOLS
+from .rbac_writes import RBAC_WRITE_TOOLS
 from .runbooks import ALERT_TRIAGE_CONTEXT, RUNBOOKS  # noqa: F401 — RUNBOOKS re-exported for backward compat
 from .self_tools import (
     create_skill,
@@ -75,6 +77,7 @@ ALL_TOOLS: list[Any] = (
     + PREDICT_TOOLS
     + SILENCE_TOOLS
     + RBAC_TOOLS
+    + RBAC_WRITE_TOOLS
     + [
         request_security_scan,
         namespace_summary,
@@ -427,6 +430,10 @@ _STRICT_LAST = frozenset(
     {
         "create_silence",
         "expire_silence",
+        # rbac_writes.py: subject, role and binding kinds and names are parsed and
+        # validated by the tool itself.
+        "grant_access",
+        "revoke_access",
         # k8s_tools/workload_writes.py: kind, quantities, probe timings, replicas
         # and revision are type- and range-checked by the tool itself.
         "patch_workload_container",
@@ -818,6 +825,7 @@ async def run_agent_streaming(
         policy_denied_reason = requested_denied_write_reason(denied_request_ns)
         logger.info("Turn asks for a policy-denied write in %s; writes are off for this turn", denied_request_ns)
 
+    from .credential_redaction import redact_credentials
     from .loop_budget import LoopBudget, compact_tool_results
     from .tool_images import drop_stale_images, result_content
 
@@ -1239,6 +1247,32 @@ async def run_agent_streaming(
                         },
                     )
                     continue
+                # Access changes only for a subject the person named (action_policy).
+                # Unconditional: callers that build their own prompts have no person
+                # whose words could ask for one.
+                not_requested = access_change_not_requested(block.name, block.input, messages)
+                if not_requested:
+                    results_map[block.id] = (not_requested, None)
+                    failed_ids.add(block.id)
+                    # As after a policy denial: no substitute write in this turn.
+                    policy_denied_write = True
+                    policy_denied_reason = not_requested
+                    await event_bus.on_tool_result(
+                        {
+                            "tool_name": block.name,
+                            "tool_use_id": block.id,
+                            "call_ref": call_refs.get(block.id, ""),
+                            "input": block.input,
+                            "status": "denied",
+                            "error_message": not_requested,
+                            "error_category": "forbidden",
+                            "duration_ms": 0,
+                            "result_bytes": len(not_requested),
+                            "was_confirmed": False,
+                            "turn_number": iterations,
+                        },
+                    )
+                    continue
                 if plan_only:
                     results_map[block.id] = (PLAN_ONLY_REFUSAL, None)
                     failed_ids.add(block.id)
@@ -1317,7 +1351,8 @@ async def run_agent_streaming(
                 if block.id not in results_map:
                     failed_ids.add(block.id)
                 text, component = results_map.get(block.id, (f"Error: no result for {block.name}", None))
-                content = result_content(text)
+                # Credential values are masked in code, not only by the prompt rule.
+                content = result_content(redact_credentials(text))
                 if label_tool_calls:
                     content = _label_result(content, call_refs.get(block.id, ""), block.name)
                 result_block: dict[str, Any] = {
