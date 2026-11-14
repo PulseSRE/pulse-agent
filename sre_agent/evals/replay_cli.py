@@ -24,6 +24,18 @@ def describe_exception(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
+MAX_PROVIDER_AUTH_RETRIES = 1
+
+
+def is_provider_auth_error(exc: BaseException) -> bool:
+    """A 401 from the model provider: the request was refused before the agent answered."""
+    try:
+        import anthropic
+    except ImportError:  # pragma: no cover - anthropic is a hard dependency
+        return False
+    return isinstance(exc, anthropic.AuthenticationError)
+
+
 def _make_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="pulse-eval replay",
@@ -549,31 +561,49 @@ def main() -> None:
     fixtures = list_fixtures() if args.all else [args.fixture]
 
     def _run_one(name: str) -> dict:
-        try:
-            return _run_fixture(
-                name,
-                use_judge=args.judge,
-                model=args.model,
-                dry_run=args.dry_run,
-                judge_min=args.judge_min,
-                stub_config=args.stub_config,
-                mode=args.mode,
-                judge_samples=args.judge_samples,
-            )
-        except Exception as e:
-            # str() of a TimeoutError or CancelledError is empty, which left the
-            # artifact saying only that a fixture errored, with no clue why.
-            # Record the exception type, and the traceback on stderr (CI step log;
-            # stdout is the JSON artifact).
-            print(f"Fixture {name} raised:\n{traceback.format_exc()}", file=sys.stderr)
-            return {
-                "fixture": name,
-                "dry_run": args.dry_run,
-                "error": describe_exception(e),
-                "score": {"passed": False, "score": 0, "checks": [], "tool_calls": []},
-                "response_preview": "",
-                "duration_ms": 0,
-            }
+        provider_retries = 0
+        while True:
+            try:
+                row = _run_fixture(
+                    name,
+                    use_judge=args.judge,
+                    model=args.model,
+                    dry_run=args.dry_run,
+                    judge_min=args.judge_min,
+                    stub_config=args.stub_config,
+                    mode=args.mode,
+                    judge_samples=args.judge_samples,
+                )
+                if provider_retries:
+                    row["provider_retries"] = provider_retries
+                return row
+            except Exception as e:
+                print(f"Fixture {name} raised:\n{traceback.format_exc()}", file=sys.stderr)
+                # The model provider refusing the request's credentials says
+                # nothing about the agent: no answer was produced to judge. Two
+                # merge-queue runs lost fixtures to a sporadic Vertex 401
+                # ("missing required authentication credential") that the next
+                # request did not repeat. Run the fixture again, once, with a
+                # fresh client; a second refusal is recorded as the error.
+                if provider_retries < MAX_PROVIDER_AUTH_RETRIES and is_provider_auth_error(e):
+                    provider_retries += 1
+                    print(f"Fixture {name}: provider rejected the credentials; retrying once", file=sys.stderr)
+                    continue
+                # str() of a TimeoutError or CancelledError is empty, which left the
+                # artifact saying only that a fixture errored, with no clue why.
+                # Record the exception type, and the traceback on stderr (CI step log;
+                # stdout is the JSON artifact).
+                row = {
+                    "fixture": name,
+                    "dry_run": args.dry_run,
+                    "error": describe_exception(e),
+                    "score": {"passed": False, "score": 0, "checks": [], "tool_calls": []},
+                    "response_preview": "",
+                    "duration_ms": 0,
+                }
+                if provider_retries:
+                    row["provider_retries"] = provider_retries
+                return row
 
     # Hold isolation open for the whole run. Each fixture still enters it, but
     # refcounting means the patches are applied once here and removed once at the

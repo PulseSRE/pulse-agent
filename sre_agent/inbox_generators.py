@@ -219,7 +219,9 @@ def _get_upgrade_api_removals() -> dict | None:
         return _upgrade_api_cache[1]
     data = read_upgrade_api_removals()
     if data["status"] == "unknown":
-        if data["cause"] != "not_openshift":
+        # Nothing to say (not OpenShift, or a major the check has no version
+        # map for, e.g. after an upgrade to OpenShift 5): open items resolve.
+        if data["cause"] not in ("not_openshift", "unsupported_version"):
             raise GeneratorUnavailableError(f"upgrade API removals: {data['reason']}")
         result = None
     else:
@@ -244,8 +246,14 @@ def _get_slo_burn_rates() -> list[dict]:
     registry = get_slo_registry()
     if not registry.list_all():
         return []
+    statuses = registry.evaluate_with_prometheus()
+    if not statuses:
+        # SLOs are defined but none could be measured (Prometheus unreachable
+        # or no data): that is not "no SLO is burning", and returning [] here
+        # resolved every open SLO item on a Prometheus outage.
+        raise GeneratorUnavailableError("no SLO could be evaluated from Prometheus")
     burning = []
-    for status in registry.evaluate_with_prometheus():
+    for status in statuses:
         hours = status.budget_remaining_hours
         if status.alert_level == "ok" and (hours is None or hours >= _SLO_HORIZON_HOURS):
             continue
@@ -737,7 +745,7 @@ def gen_skill_curation() -> list[dict[str, Any]]:
     from .skill_curator import STALE_AFTER_DAYS, find_overlapping_skills, find_stale_skills
 
     items: list[dict[str, Any]] = []
-    for stale in find_stale_skills()[:3]:
+    for stale in find_stale_skills(strict=True)[:3]:
         name = stale["name"]
         state = "unreviewed" if not stale["reviewed"] else ("quarantined" if stale["quarantined"] else "active")
         items.append(
@@ -787,7 +795,7 @@ def gen_skill_gaps() -> list[dict[str, Any]]:
     """
     from .selector_learning import identify_skill_gaps
 
-    gaps = identify_skill_gaps(days=30)
+    gaps = identify_skill_gaps(days=30, strict=True)
     items: list[dict[str, Any]] = []
     for gap in gaps[:3]:  # top recurring patterns only — this is a suggestion queue, not a backlog
         pattern = str(gap.get("pattern", "")).strip()
@@ -824,7 +832,7 @@ def gen_skill_low_performers() -> list[dict[str, Any]]:
     """
     from .selector_learning import prune_low_performers
 
-    flagged = prune_low_performers(days=30)
+    flagged = prune_low_performers(days=30, strict=True)
     items: list[dict[str, Any]] = []
     for entry in flagged:
         skill = str(entry.get("skill", "")).strip()

@@ -213,6 +213,18 @@ async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -
             )
         )
 
+        # An auto-fixed finding's inbox item waits for this verdict (see
+        # ClusterMonitor resolution): only a healthy owner resolves it. Any
+        # other verdict leaves it open, so a recurrence lands on the same item.
+        deferred = payload.get("deferred_inbox_finding")
+        if deferred and status == "verified":
+            try:
+                from ..inbox import resolve_finding_inbox_item
+
+                await asyncio.to_thread(resolve_finding_inbox_item, str(payload.get("finding_id", "")), deferred)
+            except Exception:
+                logger.debug("Deferred inbox resolution failed", exc_info=True)
+
         # What this verdict says about the strategy, for the next plan with the
         # same cause.
         if payload.get("strategy") and payload.get("cause"):

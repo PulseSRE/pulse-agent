@@ -18,6 +18,7 @@ from ..config import get_settings
 from ..errors import ToolError
 from ..k8s_client import get_core_client
 from ..repositories.monitor_repo import get_monitor_repo
+from . import fix_breaker
 from .actions import mark_finding_actions_resolved, save_action
 from .approvals import expire_orphaned_proposals
 from .autofix import is_autofix_paused
@@ -523,6 +524,17 @@ class ClusterMonitor:
                     name = _strip_pod_hash(name)
                 resource_key = f"{kind}:{r.get('namespace', '')}:{name}"
 
+            # The hard stop under every other guard (fix_breaker.py): after
+            # repeated fixes on this same resource and category did not make
+            # the condition go away, stop acting on it and ask a person once.
+            target_key = _finding_corr_key(finding)
+            breaker = await asyncio.to_thread(fix_breaker.check, target_key)
+            if breaker.tripped:
+                logger.info("Auto-fix skipped for %s: %s", target_key, breaker.reason)
+                if breaker.should_escalate:
+                    await asyncio.to_thread(fix_breaker.escalate, target_key, finding, breaker)
+                continue
+
             from .fix_planner import (
                 default_fix_plan,
                 get_investigation_for_finding,
@@ -688,11 +700,17 @@ class ClusterMonitor:
                 save_action(action_report, category=category, resources=resources, finding=finding)
                 continue
 
+            # Acting without asking needs enough confidence that the fix fits.
+            # Below the floor, trust 3+ proposes instead, exactly as trust 2
+            # does with nobody connected: recorded, announced, approvable.
+            floor = fix_breaker.min_confidence()
+            below_floor = trust_level >= 3 and confidence < floor
+
             action_report = _make_action_report(
                 finding_id=finding["id"],
                 tool="",
                 inp={"category": category, "resources": resources},
-                status="proposed" if trust_level == 2 else "executing",
+                status="proposed" if trust_level == 2 or below_floor else "executing",
                 reasoning=f"Auto-fix for {category}: {finding.get('title', '')} (confidence={confidence:.2f})",
                 confidence=confidence,
             )
@@ -730,6 +748,28 @@ class ClusterMonitor:
                     action_report["explainedBy"] = cause_title
             except Exception:
                 logger.debug("Could not resolve the explaining cause for a proposal", exc_info=True)
+
+            if below_floor:
+                corr_key = _finding_corr_key(finding)
+                try:
+                    if get_monitor_repo().check_pending_proposal(corr_key):
+                        continue
+                except Exception:
+                    logger.debug("Could not check for a pending proposal", exc_info=True)
+                    continue
+                action_report["reasoning"] += (
+                    f" — confidence {confidence:.2f} is below the {floor:.2f} needed to act without asking; proposed"
+                )
+                await self._broadcast_raw(action_report)
+                save_action(action_report, category=category, resources=resources, finding=finding)
+                await notify_fix_proposed(action_report, finding)
+                logger.info(
+                    "Auto-fix proposed instead of executed (confidence %.2f < %.2f): %s",
+                    confidence,
+                    floor,
+                    resource_key,
+                )
+                continue
 
             # Ask-first mode: broadcast proposal and wait for first approval from ANY subscriber
             if trust_level == 2:
@@ -1004,6 +1044,16 @@ class ClusterMonitor:
         logger.info("Auto-fix dispatched durably: %s", started["workflow_id"])
         return True
 
+    def _start_cooldown(self, resource_key: str) -> None:
+        if resource_key:
+            self._recent_fixes[resource_key] = time.time()
+
+    def _note_fix_attempt(self, resource_key: str) -> None:
+        """Start the cooldown and count the attempt, whatever its outcome."""
+        if resource_key:
+            self._recent_fixes[resource_key] = time.time()
+            self._fix_attempt_counts[resource_key] = self._fix_attempt_counts.get(resource_key, 0) + 1
+
     async def _execute_fix(
         self,
         *,
@@ -1040,9 +1090,7 @@ class ClusterMonitor:
             # Same cooldown and attempt accounting as the inline path. Without
             # it every scan re-dispatched for a finding still firing while its
             # workflow ran.
-            if resource_key:
-                self._recent_fixes[resource_key] = time.time()
-                self._fix_attempt_counts[resource_key] = self._fix_attempt_counts.get(resource_key, 0) + 1
+            self._note_fix_attempt(resource_key)
             return True
 
         succeeded = False
@@ -1054,6 +1102,10 @@ class ClusterMonitor:
             tool, before_state, after_state = execution.result
             _snapshot = execution.snapshot
             if not execution.applied:
+                # Nothing changed, so it is not a fix attempt — but without a
+                # cooldown it was retried on the very next scan. The failed row
+                # saved below still counts for the durable cap and the breaker.
+                self._start_cooldown(resource_key)
                 action_report.update(
                     tool=tool,
                     status="failed",
@@ -1084,9 +1136,7 @@ class ClusterMonitor:
             succeeded = True
             self._recent_fix_ids.add(finding["id"])
 
-            if resource_key:
-                self._recent_fixes[resource_key] = time.time()
-                self._fix_attempt_counts[resource_key] = self._fix_attempt_counts.get(resource_key, 0) + 1
+            self._note_fix_attempt(resource_key)
             self._pending_verifications[action_report["id"]] = {
                 "action_id": action_report["id"],
                 "finding_id": finding["id"],
@@ -1124,6 +1174,9 @@ class ClusterMonitor:
             )
         except Exception as e:
             duration_ms = _ts() - start_ms
+            # Same as a fix that did not apply: cool down, so a fix that fails
+            # every time (workloads: 140 of 140) is not retried every scan.
+            self._start_cooldown(resource_key)
 
             from ..errors import classify_exception
 
@@ -1481,7 +1534,21 @@ class ClusterMonitor:
             episodes_to_close.append(resolved_finding)
             if finding_id:
                 asyncio.get_running_loop().run_in_executor(None, mark_finding_actions_resolved, finding_id)
-                asyncio.get_running_loop().run_in_executor(None, _resolve_finding_inbox, finding_id, resolved_finding)
+                pending = [p for p in self._pending_verifications.values() if p.get("finding_id") == finding_id]
+                if resolved_by == "auto-fix" and pending:
+                    # The finding vanished because the fix deleted its pod, not
+                    # because the problem went away. Resolving the inbox item
+                    # here closed it every time; the replacement pod crashed
+                    # again under a new item, and the condition never stayed
+                    # open long enough for anyone to see it recur. Leave it to
+                    # verification: it resolves the item only when the owner
+                    # (Deployment/StatefulSet) is affirmatively healthy.
+                    for p in pending:
+                        p["deferred_inbox_finding"] = resolved_finding
+                else:
+                    asyncio.get_running_loop().run_in_executor(
+                        None, _resolve_finding_inbox, finding_id, resolved_finding
+                    )
 
         # An episode is keyed on its cause's resource, and one resource can
         # carry several conditions (a node with MemoryPressure and NotReady).
@@ -1505,7 +1572,13 @@ class ClusterMonitor:
         # item stays open, critical, and wrong until it is archived 48 hours
         # later. Same reasoning as seeding _known_episodes above: restarting
         # the agent is not news, and it is not amnesia either.
-        if not self._inbox_reconciled:
+        #
+        # Only on a scan every enabled scanner ran and reported: a scanner that
+        # failed, or was not scheduled this cycle, reported nothing, and its
+        # items must not be read as "no longer reported" (only the owning
+        # scanner resolves a finding). Until such a scan, reconciling waits.
+        scan_complete = all(name in scanners_reporting for name in scheduled if name not in globally_disabled)
+        if not self._inbox_reconciled and scan_complete:
             self._inbox_reconciled = True
             try:
                 from ..inbox import _finding_corr_key, reconcile_open_items

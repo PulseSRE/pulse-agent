@@ -870,6 +870,7 @@ def _get_all_scanners() -> list[tuple[str, Callable[..., Any]]]:
         scan_recent_deployments,
         scan_warning_events,
     )
+    from .control_plane_capacity import scan_control_plane_capacity
     from .scanner_health import scan_degraded_capabilities
     from .stuck_scanners import scan_control_plane_stalls, scan_hot_reconcile_loops, scan_stuck_deletions
     from .trend_scanners import (
@@ -892,6 +893,7 @@ def _get_all_scanners() -> list[tuple[str, Callable[..., Any]]]:
         ("trend_disk", scan_disk_pressure_forecast),
         ("trend_hpa", scan_hpa_exhaustion_trend),
         ("trend_errors", scan_error_rate_acceleration),
+        ("control_plane_capacity", scan_control_plane_capacity),
         ("trend_degraded", get_trend_degraded_finding),
         ("stuck", scan_stuck_deletions),
         ("hot_loop", scan_hot_reconcile_loops),
@@ -1202,6 +1204,7 @@ def get_all_scanner_instances() -> list[FunctionScanner]:
         scan_recent_deployments,
         scan_warning_events,
     )
+    from .control_plane_capacity import scan_control_plane_capacity
     from .scanner_health import scan_degraded_capabilities
     from .stuck_scanners import scan_control_plane_stalls, scan_hot_reconcile_loops, scan_stuck_deletions
     from .trend_scanners import (
@@ -1224,6 +1227,7 @@ def get_all_scanner_instances() -> list[FunctionScanner]:
         FunctionScanner(_meta("trend_disk"), scan_disk_pressure_forecast),
         FunctionScanner(_meta("trend_hpa"), scan_hpa_exhaustion_trend),
         FunctionScanner(_meta("trend_errors"), scan_error_rate_acceleration),
+        FunctionScanner(_meta("control_plane_capacity"), scan_control_plane_capacity),
         FunctionScanner(_meta("trend_degraded"), get_trend_degraded_finding),
         FunctionScanner(_meta("stuck"), scan_stuck_deletions, accepts_pods=True),
         FunctionScanner(_meta("anomaly"), _scan_workload_anomalies),

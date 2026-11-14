@@ -58,18 +58,25 @@ def get_fix_history_summary(days: int = 7) -> dict:
                 categories[cat] = {
                     "category": cat,
                     "count": 0,
+                    # Fixes verification confirmed held. It used to count
+                    # every "completed" action, and completed only means the
+                    # write was accepted: one cluster showed 143/143 "fixed"
+                    # for pod deletions that could never fix a bad image.
                     "success_count": 0,
+                    # Fixes applied (the write went through), held or not.
+                    "applied_count": 0,
                     "auto_fixed": 0,
                     "confirmation_required": 0,
                 }
             categories[cat]["count"] += 1
             if status == "completed":
-                categories[cat]["success_count"] += 1
+                categories[cat]["applied_count"] += 1
                 categories[cat]["auto_fixed"] += 1
 
             vs = action.get("verification_status")
             if vs == "verified":
                 resolved += 1
+                categories[cat]["success_count"] += 1
             elif vs == "still_failing":
                 still_failing += 1
             elif vs == "improved":
@@ -77,7 +84,10 @@ def get_fix_history_summary(days: int = 7) -> dict:
             elif vs == "unverifiable":
                 unverifiable += 1
 
-        success_rate = completed / total_actions if total_actions > 0 else 0.0
+        # Success is a fix that verification saw hold, not a write that went
+        # through; "applied_rate" keeps the latter for whoever wants it.
+        success_rate = resolved / total_actions if total_actions > 0 else 0.0
+        applied_rate = completed / total_actions if total_actions > 0 else 0.0
         rollback_rate = rolled_back / total_actions if total_actions > 0 else 0.0
         avg_resolution_ms = int(sum(durations) / len(durations)) if durations else 0
         by_category = sorted(categories.values(), key=lambda x: x["count"], reverse=True)
@@ -113,6 +123,7 @@ def get_fix_history_summary(days: int = 7) -> dict:
             "failed": failed,
             "rolled_back": rolled_back,
             "success_rate": round(success_rate, 2),
+            "applied_rate": round(applied_rate, 2),
             "rollback_rate": round(rollback_rate, 2),
             "avg_resolution_ms": avg_resolution_ms,
             "by_category": by_category,

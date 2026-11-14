@@ -23,8 +23,8 @@ logger = logging.getLogger("pulse_agent.monitor")
 # Strategies absent here (noops, require_human_review) write nothing.
 _STRATEGY_WRITES: dict[str, list[tuple[str, str, str]]] = {
     "restart_controller": [("", "pods", "delete")],
-    # patch_image patches the owning Deployment, with a pod-delete fallback
-    "patch_image": [("apps", "deployments", "patch"), ("", "pods", "delete")],
+    "rollout_restart": [("apps", "deployments", "patch")],
+    "patch_image": [("apps", "deployments", "patch")],
     "patch_resources": [("apps", "deployments", "patch")],
 }
 

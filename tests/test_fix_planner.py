@@ -67,6 +67,25 @@ class TestClassifyRootCause:
 
 class TestPlanFix:
     def test_bad_image_returns_patch_strategy(self):
+        """Outside the image_pull category (no pull error to read), a diagnosed
+        bad image still plans the rollback."""
+        investigation = {
+            "suspectedCause": "Image app:v999 does not exist in the registry",
+            "recommendedFix": "Update the image to app:v2.1.0",
+            "confidence": 0.95,
+        }
+        finding = {
+            "category": "crashloop",
+            "resources": [{"kind": "Pod", "name": "app-abc", "namespace": "prod"}],
+        }
+        plan = plan_fix(investigation, finding)
+        assert plan is not None
+        assert plan.strategy == "patch_image"
+        assert plan.confidence >= 0.5
+
+    def test_bad_image_on_an_image_pull_finding_goes_to_a_person(self):
+        """A pull that fails for good (tag not found) is not retried or rolled
+        back automatically: the plan asks a person, with the pull error."""
         investigation = {
             "suspectedCause": "Image app:v999 does not exist in the registry",
             "recommendedFix": "Update the image to app:v2.1.0",
@@ -76,10 +95,14 @@ class TestPlanFix:
             "category": "image_pull",
             "resources": [{"kind": "Pod", "name": "app-abc", "namespace": "prod"}],
         }
-        plan = plan_fix(investigation, finding)
+        with patch(
+            "sre_agent.monitor.fix_planner.image_pull_cause",
+            return_value=("permanent", "manifest for app:v999 not found: manifest unknown"),
+        ):
+            plan = plan_fix(investigation, finding)
         assert plan is not None
-        assert plan.strategy == "patch_image"
-        assert plan.confidence >= 0.5
+        assert plan.strategy == "require_human_review"
+        assert "manifest unknown" in plan.description
 
     def test_oom_returns_patch_resources(self):
         investigation = {

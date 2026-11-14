@@ -203,3 +203,65 @@ def test_an_exception_with_no_message_is_recorded_by_type(capsys, tmp_path):
 def test_describe_exception():
     assert replay_cli.describe_exception(AssertionError()) == "AssertionError"
     assert replay_cli.describe_exception(KeyError("x")) == "KeyError: 'x'"
+
+
+def _auth_error():
+    import anthropic
+    import httpx2
+
+    request = httpx2.Request("POST", "https://us-east5-aiplatform.googleapis.com/v1/x:streamRawPredict")
+    response = httpx2.Response(401, request=request)
+    return anthropic.AuthenticationError("missing required authentication credential", response=response, body=None)
+
+
+def _drive_raising(capsys, behaviours: dict):
+    calls: dict[str, int] = {}
+
+    def run_fixture(name: str, **_kwargs) -> dict:
+        i = calls.get(name, 0)
+        calls[name] = i + 1
+        outcome = behaviours[name][min(i, len(behaviours[name]) - 1)]
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return _attempt(name, True, [])
+
+    with (
+        patch.object(sys, "argv", ["replay_cli", "--all", "--format", "json"]),
+        patch.object(replay_cli, "list_fixtures", return_value=list(behaviours)),
+        patch.object(replay_cli, "_run_fixture", side_effect=run_fixture),
+        patch("sre_agent.evals.replay_config.offline_context"),
+    ):
+        try:
+            replay_cli.main()
+        except SystemExit:
+            pass
+    captured = capsys.readouterr()
+    return {row["fixture"]: row for row in json.loads(captured.out)}, calls, captured.err
+
+
+def test_a_provider_401_is_retried_once_and_recorded(capsys):
+    """Two merge-queue runs lost fixtures to a sporadic Vertex 401 that the next
+    request did not repeat. No answer was produced, so there is nothing to judge:
+    the fixture runs again once, and the row says it needed to."""
+    rows, calls, err = _drive_raising(capsys, {"flaky_auth": [_auth_error(), None]})
+    assert calls["flaky_auth"] == 2
+    assert "error" not in rows["flaky_auth"]
+    assert rows["flaky_auth"]["provider_retries"] == 1
+    assert "provider rejected the credentials; retrying once" in err
+
+
+def test_a_persistent_provider_401_still_fails(capsys):
+    rows, calls, _err = _drive_raising(capsys, {"bad_creds": [_auth_error(), _auth_error(), _auth_error()]})
+    assert calls["bad_creds"] == 2, "one retry, not more"
+    assert rows["bad_creds"]["error"].startswith("AuthenticationError")
+    assert rows["bad_creds"]["provider_retries"] == 1
+    from sre_agent.evals.acceptance_cli import _check_replay_attempt
+
+    assert any("reported an error" in e for e in _check_replay_attempt("bad_creds", rows["bad_creds"], None))
+
+
+def test_other_exceptions_are_not_retried(capsys):
+    rows, calls, _err = _drive_raising(capsys, {"broken": [ValueError("bad fixture"), None]})
+    assert calls["broken"] == 1
+    assert rows["broken"]["error"] == "ValueError: bad fixture"
+    assert "provider_retries" not in rows["broken"]
