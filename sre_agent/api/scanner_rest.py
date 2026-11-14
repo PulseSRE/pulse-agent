@@ -24,7 +24,7 @@ _SCANNER_CATEGORIES = {
     "certificate_expiry": ["cert_expiry"],
     "alerts": ["alerts"],
     "deployment_audit": ["audit_deployment", "audit_events"],
-    "operator_health": ["operators"],
+    "operator_health": ["operators", "cloud_credentials"],
     "slo_burn": ["slo_burn"],
     "security_posture": ["security"],
     "predictive_trends": [

@@ -468,10 +468,18 @@ def gen_degraded_operator() -> list[dict[str, Any]]:
     if len(operators) > 10:
         names += f" (+{len(operators) - 10} more)"
     resources = [{"kind": "ClusterOperator", "name": op["name"], "namespace": ""} for op in operators[:20]]
+    summary = f"Degraded operators: {names}"
+    if any(op["name"] == "cloud-credential" for op in operators):
+        # Its cause is outside the cluster; say where it is explained.
+        summary += (
+            ". cloud-credential: a component lacks cloud permissions. The Cloud Credentials items name each "
+            "affected component, the permissions it needs and the fix for this cluster's credentials mode; or ask "
+            "Pulse to explain cloud credentials."
+        )
     return [
         _make_assessment(
             title=f"{len(operators)} ClusterOperators degraded",
-            summary=f"Degraded operators: {names}",
+            summary=summary,
             severity="critical",
             urgency_hours=0,
             generator="degraded_operator",

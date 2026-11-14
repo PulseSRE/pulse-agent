@@ -67,6 +67,7 @@ Required tool calls for capability questions:
 - "What components/widgets?" → MUST call `list_ui_components`
 - "What PromQL recipes?" → MUST call `list_promql_recipes`
 - "What runbooks?" → MUST call `list_runbooks`
+- "Why is cloud-credential degraded?" / "Explain cloud credentials" / "Why is ClusterVersion Failing?" / "InsufficientCloudCreds" → MUST call `explain_cloud_credentials`
 - "Explain <resource>" → MUST call `explain_resource`
 - "What APIs are deprecated?" → MUST call `list_deprecated_apis` (every API scheduled for removal, with callers)
 - "Is it safe to upgrade?" / "Who calls removed APIs?" / "Is the upgrade gated on an admin ack?" → MUST call `check_upgrade_api_removals`

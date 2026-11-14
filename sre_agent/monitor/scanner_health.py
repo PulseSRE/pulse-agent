@@ -238,6 +238,16 @@ _OPT_IN_ACCESS = {
     "(read-only access to Secrets)",
 }
 
+# Resources a scanner reads that pulse-operator's agent role does not grant yet.
+# Saying "upgrade pulse-operator" for these would send people to an upgrade that
+# does not help.
+_NOT_IN_OPERATOR_ROLE = {
+    ("cloudcredential.openshift.io", "credentialsrequests"): "pulse-operator's agent role does not grant "
+    "read-only get/list on credentialsrequests.cloudcredential.openshift.io yet (a rule added to the agent's "
+    "ClusterRole by hand is reverted by the operator); until it does, ask Pulse to explain cloud credentials, "
+    "which reads them with your own access",
+}
+
 
 def explain_failure(scanner: str, error: str) -> dict[str, Any]:
     """Say, in plain words, what a failing scanner cannot see and how to fix it.
@@ -259,11 +269,15 @@ def explain_failure(scanner: str, error: str) -> dict[str, Any]:
         verb, resource, group = (m.group(1), m.group(2), m.group(3)) if m else ("read", "", "")
         what = f"{group}/{resource}" if group else resource
         reason = f"Pulse is not allowed to {verb} {what or 'what this scanner reads'}"
-        fix = _OPT_IN_ACCESS.get((group, resource)) or (
-            f"grant Pulse read-only get/list on {what} — upgrade pulse-operator, whose agent role includes it, "
-            "or add the rule to the agent's ClusterRole"
-            if what
-            else "check the agent ServiceAccount's ClusterRole"
+        fix = (
+            _OPT_IN_ACCESS.get((group, resource))
+            or _NOT_IN_OPERATOR_ROLE.get((group, resource))
+            or (
+                f"grant Pulse read-only get/list on {what} — upgrade pulse-operator, whose agent role includes it, "
+                "or add the rule to the agent's ClusterRole"
+                if what
+                else "check the agent ServiceAccount's ClusterRole"
+            )
         )
     elif lower.startswith("unauthorized"):
         reason = "the API server rejected Pulse's credentials"

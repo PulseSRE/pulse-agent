@@ -77,6 +77,18 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "auto_fixable": False,
         "scan_every": 3,
     },
+    "cloud_credentials": {
+        "displayName": "Cloud Credentials",
+        "description": "Components whose CredentialsRequest the Cloud Credential Operator cannot satisfy, "
+        "with the permissions they need and the fix for the cluster's credentials mode",
+        "category": "infrastructure",
+        "checks": [
+            "CredentialsRequest condition InsufficientCloudCreds, CredentialsProvisionFailure, "
+            "MissingTargetNamespace, CredentialsDeprovisionFailure or StaleCredentials = True",
+        ],
+        "auto_fixable": False,
+        "scan_every": 3,
+    },
     "daemonsets": {
         "displayName": "DaemonSet Gaps",
         "description": "Finds DaemonSets where ready < desired",

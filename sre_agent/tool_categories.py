@@ -262,6 +262,13 @@ TOOL_CATEGORIES = {
             "olm",
             "operator update",
             "operator upgrade",
+            # explain_cloud_credentials
+            "cloud credential",
+            "cloud-credential",
+            "credentialsrequest",
+            "credentials request",
+            "insufficientcloudcreds",
+            "iam",
         ],
         "tools": [
             "cordon_node",
@@ -274,6 +281,9 @@ TOOL_CATEGORIES = {
             "approve_installplan",
             "get_cluster_updates",
             "check_upgrade_api_removals",
+            # cloud-credential Degraded: the cause is cloud permissions outside
+            # the cluster, so the explanation is all Pulse can offer.
+            "explain_cloud_credentials",
             # The sre skill tells the model to call it for "what APIs are
             # deprecated?"; as a self-describe tool alone it was offered only
             # when the query said "deprecated".

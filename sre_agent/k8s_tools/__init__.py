@@ -43,6 +43,7 @@ __all__ = [
     "discover_metrics",
     "drain_node",
     "exec_command",
+    "explain_cloud_credentials",
     "find_config_consumers",
     "get_cluster_operators",
     "get_cluster_updates",
@@ -128,6 +129,7 @@ from .deployments import (
 from .diagnostics import (
     check_upgrade_api_removals,
     describe_service,
+    explain_cloud_credentials,
     get_cluster_operators,
     get_cluster_updates,
     get_cluster_version,
@@ -271,6 +273,7 @@ ALL_TOOLS: list[Any] = [
     get_cluster_operators,  # OpenShift condition->status mapping
     get_cluster_updates,  # ClusterVersion updates/risks/progress -> upgrade_graph
     check_upgrade_api_removals,  # removed APIs in use + admin-ack gates -> go/no-go
+    explain_cloud_credentials,  # cloud-credential Degraded -> component, permissions, fix for the mode
     get_configmap,
     get_node_metrics,  # metrics API + unit parsing
     get_pod_metrics,  # metrics API + sort by cpu/memory
