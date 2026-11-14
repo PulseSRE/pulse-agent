@@ -209,6 +209,25 @@ def _isolate_noise_memory(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_fix_escalation_reads(monkeypatch):
+    """Keep fix escalations from reading a real cluster.
+
+    Verification and recurrence tests now raise an escalation, which reads the
+    workload, its pods and its namespace. Without this, a test run on a
+    machine with a kubeconfig would read that cluster. Tests of the escalation
+    patch these getters with their own mocks.
+    """
+    from sre_agent.monitor import fix_escalation
+
+    def _no_cluster():
+        raise RuntimeError("no cluster in tests")
+
+    monkeypatch.setattr(fix_escalation, "get_core_client", _no_cluster)
+    monkeypatch.setattr(fix_escalation, "get_apps_client", _no_cluster)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_rbac_history(request, monkeypatch):
     """Keep the RBAC version history and write ledger out of unrelated tests.
 

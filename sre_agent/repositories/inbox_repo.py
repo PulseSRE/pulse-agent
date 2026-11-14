@@ -605,6 +605,15 @@ class InboxRepository(BaseRepository):
                  AND created_by = 'system:monitor'""",
         )
 
+    def fetch_open_by_creator(self, created_by: str) -> list[dict[str, Any]]:
+        """Open items one system writer raised (``monitor/fix_escalation.resolve_held``)."""
+        rows = self.db.fetchall(
+            "SELECT id, correlation_key, metadata FROM inbox_items "
+            "WHERE status NOT IN ('resolved', 'archived') AND created_by = ?",
+            (created_by,),
+        )
+        return [dict(r) for r in rows or []]
+
     def fetch_open_items_with_resources(self) -> list[Any]:
         return self.db.fetchall(
             "SELECT id, resources FROM inbox_items WHERE status NOT IN ('resolved', 'archived')",
