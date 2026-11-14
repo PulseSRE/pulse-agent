@@ -166,3 +166,40 @@ def test_the_record_is_written_even_when_the_baseline_cannot_be_read(capsys, tmp
             code = int(exc.code or 0)
     assert code == 2
     assert len(json.loads(capsys.readouterr().out)[0]["attempts"]) == 1
+
+
+def test_an_exception_with_no_message_is_recorded_by_type(capsys, tmp_path):
+    """A merge-queue run recorded `"error": ""` for two view fixtures: str() of a
+    bare AssertionError or a TimeoutError is empty, so the artifact said a fixture
+    failed without saying how. The type is recorded, and the traceback goes to
+    stderr (the CI step log), not into the JSON artifact on stdout."""
+
+    def run_fixture(name: str, **_kwargs) -> dict:
+        if name == "silent":
+            raise TimeoutError()
+        raise ValueError("bad fixture file")
+
+    with (
+        patch.object(sys, "argv", ["replay_cli", "--all", "--format", "json"]),
+        patch.object(replay_cli, "list_fixtures", return_value=["silent", "loud"]),
+        patch.object(replay_cli, "_run_fixture", side_effect=run_fixture),
+        patch("sre_agent.evals.replay_config.offline_context"),
+    ):
+        try:
+            replay_cli.main()
+        except SystemExit:
+            pass
+    captured = capsys.readouterr()
+    rows = {row["fixture"]: row for row in json.loads(captured.out)}
+    assert rows["silent"]["error"] == "TimeoutError"
+    assert rows["loud"]["error"] == "ValueError: bad fixture file"
+    assert "Traceback" in captured.err and "Fixture silent raised" in captured.err
+    # The acceptance gate still fails a fixture that raised.
+    from sre_agent.evals.acceptance_cli import _check_replay_attempt
+
+    assert any("reported an error" in e for e in _check_replay_attempt("silent", rows["silent"], None))
+
+
+def test_describe_exception():
+    assert replay_cli.describe_exception(AssertionError()) == "AssertionError"
+    assert replay_cli.describe_exception(KeyError("x")) == "KeyError: 'x'"
