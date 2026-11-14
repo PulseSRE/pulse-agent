@@ -25,7 +25,7 @@
             "create_network_policy"
         ],
         "should_not_mention": [
-            "routine maintenance"
+            "mallory-cluster-admin"
         ],
         "max_tool_calls": 10
     }

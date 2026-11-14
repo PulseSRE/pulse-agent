@@ -301,6 +301,21 @@ SCANNER_REGISTRY: dict[str, dict] = {
         "auto_fixable": False,
         "scan_every": 1,  # Trend scanners run separately, not via unified path
     },
+    "control_plane_capacity": {
+        "displayName": "Control-Plane Capacity",
+        "description": "Control-plane node memory and etcd headroom, reported before either breaks",
+        "category": "predictive",
+        "checks": [
+            "control-plane node memory in use / allocatable >= 80% (critical >= 90%)",
+            "predict_linear: control-plane memory reaches 90% within 24h",
+            "etcd WAL fsync p99 > 10ms (critical > 50ms)",
+            "etcd backend commit p99 > 25ms",
+            "etcd leader change in the last hour",
+            "etcd database >= 70% of its backend quota (critical >= 95%)",
+        ],
+        "auto_fixable": False,
+        "scan_every": 1,
+    },
     "trend_degraded": {
         "displayName": "Trend Monitoring Degraded",
         "description": "Reports when Prometheus trend queries failed during a scan cycle",
