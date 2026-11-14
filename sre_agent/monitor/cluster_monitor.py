@@ -1746,10 +1746,30 @@ class ClusterMonitor:
 
         await self.run_investigations(all_findings)
 
+        # The last fix's verdict before the next fix: a fix that did not hold
+        # is escalated (and the breaker holds) before auto-fix looks at the
+        # same target again. With auto-fix first, a scan interval longer than
+        # the fix cooldown let it repeat the fix the verdict was about to
+        # reject.
+        await self.process_verifications(all_findings)
+
         if self.remediation_enabled:
             await self.auto_fix(all_findings)
 
-        await self.process_verifications(all_findings)
+        # Escalations for fixes that did not hold resolve once their condition
+        # has stayed gone for the recurrence window. _last_findings keeps the
+        # standing findings of scanners that skipped or failed this scan, so a
+        # key missing from it was resolved by its own scanner.
+        try:
+            from ..inbox import _finding_corr_key
+            from .fix_escalation import resolve_held
+
+            live_keys = {_finding_corr_key(f) for f in self._last_findings.values()}
+            held = await asyncio.to_thread(resolve_held, live_keys)
+            if held:
+                logger.info("Resolved %d fix escalation(s) whose condition stayed gone", held)
+        except Exception:
+            logger.exception("Resolving held fix escalations failed")
 
         await self.process_handoffs()
 

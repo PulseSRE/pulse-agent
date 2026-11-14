@@ -22,7 +22,9 @@ happens:
 - the memory's confirmed incident is walked back and a low-score anti-pattern
   recorded in its place;
 - if a scaffolded skill was deepened on that case, an inbox item asks a person
-  to review it.
+  to review it;
+- the condition is escalated to a person (``fix_escalation``) instead of being
+  fixed again, and auto-fix stays off it while that item is open.
 
 Beyond the window, a returning condition is treated as a new incident: every
 fix would eventually "recur" on a long enough horizon, and a verdict that can
@@ -178,3 +180,18 @@ async def process_recurrences(monitor: ClusterMonitor, new_findings: list[dict])
         # One retraction per condition, keyed off the most recent verdict —
         # the learning layers stored one lesson, not one per action row.
         await asyncio.to_thread(_feed_learning, finding, recurred_tool, minutes)
+
+        # A fix that held for minutes did not hold. Ask a person rather than
+        # spend another attempt on it (fix_escalation.py).
+        try:
+            from .fix_escalation import escalate
+
+            await asyncio.to_thread(
+                escalate,
+                corr_key,
+                finding,
+                None,
+                f"{recurred_tool or 'the fix'} looked healthy, then the condition came back {minutes} min later",
+            )
+        except Exception:
+            logger.debug("Escalation on recurrence failed", exc_info=True)

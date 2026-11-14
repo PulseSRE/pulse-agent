@@ -72,6 +72,23 @@ def mature_verified(now: float | None = None) -> int:
     return len(matured)
 
 
+def escalate_not_held(payload: dict, findings: list[dict], evidence: str) -> str:
+    """Raise the escalation for an applied fix whose verdict is "did not hold". Sync."""
+    from ..inbox import _finding_corr_key
+    from .fix_escalation import escalate
+
+    base = payload.get("deferred_inbox_finding") or {
+        "id": payload.get("finding_id", ""),
+        "category": payload.get("category", ""),
+        "resources": payload.get("resources", []),
+    }
+    key = _finding_corr_key(base)
+    # The finding as this scan reports it (current pod name, title, severity).
+    live = next((f for f in findings if _finding_corr_key(f) == key), None)
+    tool = payload.get("strategy") or payload.get("tool") or "the fix"
+    return escalate(key, dict(live or base), None, f"{tool} did not hold — {evidence[:200]}")
+
+
 async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -> None:
     """Verify whether previously applied fixes remained healthy on next scan."""
     if not monitor._pending_verifications:
@@ -239,6 +256,13 @@ async def process_verifications(monitor: ClusterMonitor, findings: list[dict]) -
         if not payload.get("finding_id"):
             completed_ids.append(action_id)
             continue
+
+        # A fix that did not hold is not tried again: the same restart on the
+        # same cause fails the same way. One inbox item tells a person what was
+        # tried, why it cannot work and who owns the workload; while it is open
+        # the breaker keeps auto-fix off this target (fix_escalation.py).
+        if status == "still_failing":
+            await asyncio.to_thread(escalate_not_held, payload, findings, evidence)
 
         if status == "verified" and get_settings().agent.memory:
             try:
