@@ -12,9 +12,16 @@ import argparse
 import asyncio
 import json
 import sys
+import traceback
 from pathlib import Path
 
 from .replay import ReplayHarness, list_fixtures, load_fixture, score_multi_turn, score_replay
+
+
+def describe_exception(exc: BaseException) -> str:
+    """``Type: message``, or just the type when the message is empty (a timeout or cancellation)."""
+    message = str(exc).strip()
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
 def _make_parser() -> argparse.ArgumentParser:
@@ -554,10 +561,15 @@ def main() -> None:
                 judge_samples=args.judge_samples,
             )
         except Exception as e:
+            # str() of a TimeoutError or CancelledError is empty, which left the
+            # artifact saying only that a fixture errored, with no clue why.
+            # Record the exception type, and the traceback on stderr (CI step log;
+            # stdout is the JSON artifact).
+            print(f"Fixture {name} raised:\n{traceback.format_exc()}", file=sys.stderr)
             return {
                 "fixture": name,
                 "dry_run": args.dry_run,
-                "error": str(e),
+                "error": describe_exception(e),
                 "score": {"passed": False, "score": 0, "checks": [], "tool_calls": []},
                 "response_preview": "",
                 "duration_ms": 0,
