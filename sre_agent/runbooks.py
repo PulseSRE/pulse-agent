@@ -96,7 +96,12 @@ RUNBOOK_CHUNKS: dict[str, str] = {
         "2. `get_events(namespace='openshift-*')` — check operator namespace events\n"
         "3. `list_pods` in the operator's namespace — check for crash loops\n"
         "4. `get_pod_logs` for the operator pod — look for error messages\n"
-        "5. Common: cert expiry, etcd issues, API server connectivity"
+        "5. Common: cert expiry, etcd issues, API server connectivity\n"
+        "6. `cloud-credential` Degraded (often with ClusterVersion Failing): call\n"
+        "   `explain_cloud_credentials()` — it names the component whose CredentialsRequest\n"
+        "   fails, the cloud permissions it needs and the fix for the cluster's credentials\n"
+        "   mode. The fix is in the cloud account; deleting the Secret or CredentialsRequest\n"
+        "   does not help"
     ),
     "stuck_deletion": (
         "### Stuck Deletion (finalizer never clears)\n"
@@ -176,7 +181,7 @@ _RUNBOOK_KEYWORDS: dict[str, list[str]] = {
     "dns": ["dns", "resolution", "coredns", "nslookup"],
     "high_restarts": ["restart", "high restart", "container restart"],
     "deployment_stuck": ["deployment", "progressing", "rollout", "stuck", "not progressing"],
-    "operator_degraded": ["operator", "degraded", "clusteroperator"],
+    "operator_degraded": ["operator", "degraded", "clusteroperator", "cloud-credential", "credentialsrequest"],
     "quota": ["quota", "limit", "limitrange", "resourcequota", "exceeded"],
     "stuck_deletion": [
         "stuck",

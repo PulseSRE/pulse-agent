@@ -825,6 +825,12 @@ EVAL_PROMPTS: list[tuple[str, list[str], str, str]] = [
         "Upgrade go/no-go on API removals",
     ),
     (
+        "why is the cloud-credential operator degraded and ClusterVersion failing?",
+        ["explain_cloud_credentials"],
+        "sre",
+        "Cloud credentials explanation",
+    ),
+    (
         "create a skill for database troubleshooting",
         ["create_skill"],
         "sre",

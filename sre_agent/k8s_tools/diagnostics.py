@@ -643,6 +643,29 @@ def check_upgrade_api_removals(target_version: str = ""):
 
 
 @beta_tool
+def explain_cloud_credentials():
+    """Explain why cloud-credential is Degraded: which component lacks cloud permissions, and the fix.
+
+    Reads the cloud-credential ClusterOperator, the CredentialsRequests in
+    openshift-cloud-credential-operator, the credentials mode (CloudCredential
+    cluster spec.credentialsMode and the mode annotation on the root Secret,
+    read metadata-only), the OIDC issuer (STS) and ClusterVersion. For each
+    failing CredentialsRequest (InsufficientCloudCreds, CredentialsProvisionFailure,
+    MissingTargetNamespace, ...) returns: the component and what breaks without
+    it, the target Secret, the condition reason and message, the exact cloud
+    permissions it needs (AWS actions and resources, GCP roles, Azure roles), a
+    fix checklist for the cluster's mode (Mint, Passthrough, Manual, STS), and
+    whether ClusterVersion reports Failing because of it. Never reads credential
+    values. Read-only. Use for "why is cloud-credential degraded", "why is
+    ClusterVersion Failing after the update", "InsufficientCloudCreds", "what
+    IAM permissions does the EBS CSI driver need".
+    """
+    from ..cloud_credentials import read_cloud_credentials, render_cloud_credentials
+
+    return render_cloud_credentials(read_cloud_credentials())
+
+
+@beta_tool
 def get_configmap(namespace: str, name: str):
     """Get the contents of a ConfigMap.
 

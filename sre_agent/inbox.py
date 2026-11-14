@@ -1499,6 +1499,8 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
             # report as this occurrence's.
             metadata.pop("investigation_run", None)
             metadata.pop("action_plan", None)
+            if isinstance(finding.get("checklist"), list):
+                metadata["checklist"] = [str(step) for step in finding["checklist"]]
             repo.update_triage_result(recent_item["id"], "new", metadata, finding.get("summary", ""), now)
             return recent_item["id"]
 
@@ -1526,6 +1528,10 @@ def bridge_finding_to_inbox(finding: dict[str, Any]) -> str:
         # (cooldown) like the monitor's investigation of the finding.
         "metadata": {"finding_category": finding.get("category", "")},
     }
+    if isinstance(finding.get("checklist"), list):
+        # The fix as separate steps (cloud credentials), so the item can show
+        # a checklist rather than one paragraph.
+        item["metadata"]["checklist"] = [str(step) for step in finding["checklist"]]
     return create_inbox_item(item)
 
 
