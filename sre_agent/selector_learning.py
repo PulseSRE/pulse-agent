@@ -116,8 +116,13 @@ def load_learned_weights() -> dict[str, float] | None:
         return None
 
 
-def identify_skill_gaps(days: int = 30) -> list[dict]:
-    """Find recurring query patterns with no good skill match."""
+def identify_skill_gaps(days: int = 30, *, strict: bool = False) -> list[dict]:
+    """Find recurring query patterns with no good skill match.
+
+    ``strict`` re-raises a failed read instead of answering "no gaps": the
+    Inbox generator must not resolve its open proposals because the database
+    could not be read.
+    """
     try:
         from .repositories.selector_learning_repo import get_selector_learning_repo
 
@@ -144,12 +149,16 @@ def identify_skill_gaps(days: int = 30) -> list[dict]:
         return gaps
 
     except Exception:
+        if strict:
+            raise
         logger.debug("Skill gap identification failed", exc_info=True)
         return []
 
 
-def prune_low_performers(days: int = 30, min_invocations: int = 10) -> list[dict]:
+def prune_low_performers(days: int = 30, min_invocations: int = 10, *, strict: bool = False) -> list[dict]:
     """Identify skills with high override rate.
+
+    ``strict`` re-raises a failed read (see ``identify_skill_gaps``).
 
     Returns dicts with the evidence (``skill``, ``override_rate``, ``overrides``,
     ``total``) so the caller can show a person *why* a skill was flagged rather
@@ -183,5 +192,7 @@ def prune_low_performers(days: int = 30, min_invocations: int = 10) -> list[dict
         return flagged
 
     except Exception:
+        if strict:
+            raise
         logger.debug("Skill pruning failed", exc_info=True)
         return []

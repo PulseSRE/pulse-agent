@@ -1572,7 +1572,13 @@ class ClusterMonitor:
         # item stays open, critical, and wrong until it is archived 48 hours
         # later. Same reasoning as seeding _known_episodes above: restarting
         # the agent is not news, and it is not amnesia either.
-        if not self._inbox_reconciled:
+        #
+        # Only on a scan every enabled scanner ran and reported: a scanner that
+        # failed, or was not scheduled this cycle, reported nothing, and its
+        # items must not be read as "no longer reported" (only the owning
+        # scanner resolves a finding). Until such a scan, reconciling waits.
+        scan_complete = all(name in scanners_reporting for name in scheduled if name not in globally_disabled)
+        if not self._inbox_reconciled and scan_complete:
             self._inbox_reconciled = True
             try:
                 from ..inbox import _finding_corr_key, reconcile_open_items
