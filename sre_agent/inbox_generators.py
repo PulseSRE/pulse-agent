@@ -219,7 +219,9 @@ def _get_upgrade_api_removals() -> dict | None:
         return _upgrade_api_cache[1]
     data = read_upgrade_api_removals()
     if data["status"] == "unknown":
-        if data["cause"] != "not_openshift":
+        # Nothing to say (not OpenShift, or a major the check has no version
+        # map for, e.g. after an upgrade to OpenShift 5): open items resolve.
+        if data["cause"] not in ("not_openshift", "unsupported_version"):
             raise GeneratorUnavailableError(f"upgrade API removals: {data['reason']}")
         result = None
     else:

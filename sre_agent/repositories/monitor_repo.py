@@ -326,23 +326,49 @@ class MonitorRepository(BaseRepository):
             (correlation_key, since_ms),
         )
 
+    # Statuses of an action that actually tried to change the cluster. A failed
+    # attempt is an attempt: counting only 'completed' let a fix that failed on
+    # every try (140 of 140 on one cluster) be retried every scan forever.
+    EXECUTED_FIX_STATUSES = ("completed", "failed", "dispatched", "rolled_back")
+
     def count_recent_fix_attempts(self, correlation_key: str, since_ms: int) -> int:
-        """Completed fixes for this condition on record, regardless of process.
+        """Fix attempts for this condition on record, regardless of process.
 
         The in-memory attempt counter dies with the pod, so alone it lets a
         restart hand a stuck workload a fresh set of attempts. The actions
         table is the durable record of what actually ran; counting it makes
-        the cap hold across restarts.
+        the cap hold across restarts. Failed attempts count too.
         """
         if not correlation_key:
             return 0
         self.ensure_tables()
+        placeholders = ", ".join("?" for _ in self.EXECUTED_FIX_STATUSES)
         row = self.db.fetchone(
             "SELECT COUNT(*) AS cnt FROM actions WHERE correlation_key = ? "
-            "AND status = 'completed' AND tool != 'require_human_review' AND timestamp >= ?",
-            (correlation_key, since_ms),
+            f"AND status IN ({placeholders}) AND tool != 'require_human_review' AND timestamp >= ?",
+            (correlation_key, *self.EXECUTED_FIX_STATUSES, since_ms),
         )
         return int(row["cnt"]) if row else 0
+
+    def recent_fix_attempts(self, correlation_key: str, since_ms: int, limit: int = 20) -> list[dict]:
+        """The fix attempts on one condition since ``since_ms``, newest first.
+
+        What the per-target circuit breaker (``monitor/fix_breaker.py``) counts
+        and what its escalation shows a person: each attempt with how it ended
+        and what verification concluded.
+        """
+        if not correlation_key:
+            return []
+        self.ensure_tables()
+        placeholders = ", ".join("?" for _ in self.EXECUTED_FIX_STATUSES)
+        rows = self.db.fetchall(
+            "SELECT id, timestamp, tool, status, error, verification_status, verification_evidence, outcome "
+            "FROM actions WHERE correlation_key = ? "
+            f"AND status IN ({placeholders}) AND tool != 'require_human_review' AND timestamp >= ? "
+            "ORDER BY timestamp DESC LIMIT ?",
+            (correlation_key, *self.EXECUTED_FIX_STATUSES, since_ms, limit),
+        )
+        return [dict(r) for r in rows or []]
 
     # ── Briefing queries ─────────────────────────────────────────────────
 

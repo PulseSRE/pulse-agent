@@ -178,7 +178,9 @@ def test_protected_namespace_image_fallback_cannot_bypass_delete_policy():
     ):
         execution = fix_planner.execute_fix_with_snapshot(plan("patch_image", "pod", "Pod", "production"))
     assert not execution.applied
-    assert execution.result[0] == "blocked"
+    # The pod-delete fallback is gone (a new pod pulls the same image), so
+    # nothing reaches the delete policy: the fix is skipped for a person.
+    assert execution.result[0] == "skip"
     core.delete_namespaced_pod.assert_not_called()
     apps.patch_namespaced_deployment.assert_not_called()
 
