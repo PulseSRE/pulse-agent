@@ -104,7 +104,12 @@ def _estimate_auto_fix_confidence(finding: dict, recent_fixes: dict[str, float] 
         resources = finding.get("resources", [])
         if resources:
             r = resources[0]
-            resource_key = f"{r.get('kind', '')}:{r.get('namespace', '')}:{r.get('name', '')}"
+            name = r.get("name", "")
+            # Same key the monitor records fixes under. With the raw pod name
+            # it never matched: the pod the last fix deleted has a new name.
+            if r.get("kind") == "Pod":
+                name = _strip_pod_hash(name)
+            resource_key = f"{r.get('kind', '')}:{r.get('namespace', '')}:{name}"
             if resource_key in recent_fixes:
                 base *= 0.7  # 30% reduction for recurring issues
 

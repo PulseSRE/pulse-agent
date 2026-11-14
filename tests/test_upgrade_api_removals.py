@@ -550,6 +550,23 @@ class TestInboxGenerator:
         _wire(mock_k8s, cv=ApiException(status=404, reason="Not Found"))
         assert gen_upgrade_api_removals() == []
 
+    def test_after_an_upgrade_to_openshift_5_the_4x_item_resolves(self, mock_k8s):
+        """Live: "Upgrade to 4.23 blocked" stayed open on a cluster upgraded to
+        5.0.1. The 4.N -> 1.(N+13) map has no 5.x entry, the verdict was
+        "unknown" and the generator raised, so the cycle left the item alone
+        forever. Returning nothing lets the cycle resolve it."""
+        from sre_agent.inbox_generators import gen_upgrade_api_removals
+
+        cv = _upgradeable_false(_cv(version="5.0.1", updates=()), "MultipleReasons", "x")
+        _wire(mock_k8s, cv=cv)
+        assert gen_upgrade_api_removals() == []
+
+    def test_openshift_5_is_unsupported_not_unreadable(self):
+        data = _compute(cv=_cv(version="5.0.1", updates=()))
+        assert data["status"] == "unknown"
+        assert data["cause"] == "unsupported_version"
+        assert "5.0.1" in data["reason"]
+
     def test_verdict_is_cached_but_failures_are_not(self, mock_k8s):
         from sre_agent.inbox_generators import GeneratorUnavailableError, gen_upgrade_api_removals
 

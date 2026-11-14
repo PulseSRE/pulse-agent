@@ -86,7 +86,8 @@ make release VERSION=X.Y.Z            # agent-only version/badge commit + tag; s
 - Finding identity: `_finding_key` masks measurements in titles and strips generated pod suffixes; only the owning scanner resolves a finding; a skipped or failed scanner resolves nothing
 - Scanner health (`scanner_health.py`): `safe()` reports API errors inside a scan, `optional_access()` for permitted-to-fail sub-checks, `explain_failure()` gives `remedy`/`unwatched`; blind scanners become `degraded` findings
 - `monitor/baselines.py` (7-day per-workload p50/p95, 6h refresh), `monitor/change_correlation.py` (rollouts, ConfigMap edits, Argo, ClusterVersion → `episodes.changes_around`), `monitor/blind_spot_scanners.py` (storage, ingress, webhooks, maintenance)
-- Auto-fix at trust level 3+: deletes crashlooping pods, restarts failed deployments
+- Auto-fix at trust level 3+: deletes crashlooping pods, rolling-restarts degraded deployments (not when their pods fail to pull, start or schedule), retries an image pull only for a transient registry error (a bad tag or missing credentials goes to a person); below `PULSE_AGENT_AUTOFIX_MIN_CONFIDENCE` it proposes instead
+- Per-target fix breaker (`monitor/fix_breaker.py`): after `PULSE_AGENT_FIX_BREAKER_MAX_ATTEMPTS` fix attempts (completed or failed) on the same correlation key within the window, auto-fix stops for that target and raises one inbox task (`fix-breaker:<key>`, created by `system:fix-breaker`) with the attempt history; tripped while that task is open; fails closed. Independent of `fix_learning`
 - Confidence scores on all findings, investigations, and action proposals
 - `resolution` events emitted when findings resolve (auto-fix or self-healed)
 - Reasoning chains: investigation prompt requests evidence + alternatives_considered
@@ -278,6 +279,9 @@ Repository agent definitions with hooks in `.claude/settings.json`:
 | `PULSE_AGENT_MULTI_SKILL_THRESHOLD` | ORCA score gap for multi-skill activation | `0.15` |
 | `PULSE_AGENT_NOISE_THRESHOLD` | Noise score threshold for suppressing findings | `0.7` |
 | `PULSE_AGENT_RECURRENCE_WINDOW` | How long a "verified" verdict stays answerable (seconds, 0=off) | `1800` |
+| `PULSE_AGENT_FIX_BREAKER_MAX_ATTEMPTS` | Fixes per resource+category in the window before auto-fix stops for it and escalates once (min 1) | `3` |
+| `PULSE_AGENT_FIX_BREAKER_WINDOW` | Fix breaker window (seconds) | `86400` |
+| `PULSE_AGENT_AUTOFIX_MIN_CONFIDENCE` | Below this, trust 3+ proposes instead of executing | `0.6` |
 | `PULSE_AGENT_ALERTMANAGER_URL` | Alertmanager v2 base URL for silences | `https://alertmanager-main.openshift-monitoring.svc:9094` |
 | `PULSE_AGENT_SCAN_INTERVAL` | Monitor scan interval (seconds) | `60` |
 | `PULSE_AGENT_TEMPORAL_CACHE_TTL` | Temporal signal cache TTL (seconds) | `60` |

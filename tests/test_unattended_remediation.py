@@ -96,7 +96,7 @@ def monitor():
     m = ClusterMonitor()
     m._subscribers = []
     m._broadcast_raw = AsyncMock()
-    m._recent_fixes = []
+    m._recent_fixes = {}
     return m
 
 
