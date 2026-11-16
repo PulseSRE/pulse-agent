@@ -31,6 +31,11 @@ env:
   # deliberately (RELEASE.md, "MCP server"); 0e36b24 is what v2.36.0 shipped.
   MCP_SERVER_REF: 0e36b241ccf768bdc3eb64df2afcd5257c19061d
 
+# The built-in GITHUB_TOKEN only reads the repository. A job that needs more
+# says so in its own permissions block.
+permissions:
+  contents: read
+
 jobs:
   build-push:
     runs-on: ubuntu-latest
@@ -90,14 +95,14 @@ jobs:
           fi
 
       - name: Log in to Quay.io
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_PASSWORD }}
 
       - name: Build and push agent image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: Dockerfile
@@ -144,14 +149,14 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Log in to Quay.io
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_PASSWORD }}
 
       - name: Build and push MCP server image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: openshift-mcp-server
           file: openshift-mcp-server/Dockerfile
