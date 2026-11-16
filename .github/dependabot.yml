@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # Third-party actions are pinned to commit SHAs (with the version in a
+  # comment); Dependabot moves the SHA and the comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

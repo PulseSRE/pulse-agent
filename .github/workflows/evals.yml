@@ -28,6 +28,11 @@ concurrency:
   group: evals-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The built-in GITHUB_TOKEN only reads the repository. A job that needs more
+# says so in its own permissions block.
+permissions:
+  contents: read
+
 jobs:
   evals:
     runs-on: ubuntu-latest
